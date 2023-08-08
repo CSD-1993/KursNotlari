@@ -1,10 +1,16 @@
 /*--------------------------------------------------------------------------------------------------------------------------
 
-                                            C ve Sistem Programcıları Derneği
+                                                 C ve Sistem Programcıları Derneği
 
-                            UNIX/Linux Sistem Programlama Kursunda Yapılan Örnekler ve Özet Notlar
+                                                  UNIX/Linux Sistem Programalama Kursu
+
+                                                 Sınıfta Yapılan Örnekler ve Özet Notlar
         
-                                                Eğitmen: Kaan ASLAN
+                                                         Eğitmen: Kaan ASLAN
+                                                    
+                    Bu notlar Kaan ASLAN tarafından oluşturulmuştur. Kaynak belirtmek koşulu İle her türlü alıntı yapılabilir.
+
+                              (Notları okurken editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
  
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -28202,198 +28208,6 @@ int main(void)
     dokümanlardan öğrenebilirsiniz. Biz burada yalnızca birkaç fonksiyonu açıkladık.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-
-/*--------------------------------------------------------------------------------------------------------------------------
-    Bazen bir thread akışının aynı yerden geçtiği halde bir işlemi yalnızca bir kez yapması istenebilir. Bunun için pthread_once
-    isimli bir fonksiyon bulundurulmuştur. Fonksiyonun prototipi şöyledir:
-
-    #include <pthread.h>
-
-    int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
-       
-    Fnksiyon pthread_once_t türünden bir nesnesnin adresini ve bir de çağrılacak fonksiyonun adresini alır. Fonksiyonun birinci 
-    parametresine geçirilecek olan pthread_once_t nesnesine aşağıdaki gibi ilkdeğer verilmiş olması gerekmektedir:
-
-    pthread_once_t tonce = PTHREAD_ONCE_INIT;
-
-    Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda errno değerine geri dönmektedir. Thread akışı bu fonksiyona 
-    kaç kere girerse girsin yalnızca burada verilen fonksiyon ik girişte bir kez çağrılmaktadır. Fonksiyonun birinci parametresindeki
-    nesne bu bir kez çağırmayı sağlamaktadır. 
-
-    pthread_once fonksiyyonundan asıl amaç birden fazla thread'in bir işi toplamda bir kez yapmasını sağlamaktır. Tabii aslında 
-    bu işlem ileride görecek olduğumuz mutex nesneleriyle de basit bir biçimde yapılabiliriz.
----------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <unistd.h>
-
-void *thread_proc1(void *param);
-void *thread_proc2(void *param);
-void init_proc(void);
-
-void exit_sys_errno(const char *msg, int eno);
-
-pthread_once_t g_tonce = PTHREAD_ONCE_INIT;
-
-int main(void)
-{
-    pthread_t tid1, tid2;
-    int result;
-
-    if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
-        exit_sys_errno("pthread_create", result);
-
-    if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
-        exit_sys_errno("pthread_create", result);
-
-    if ((result = pthread_join(tid1, NULL)) != 0)
-        exit_sys_errno("pthread_join", result);
-
-    if ((result = pthread_join(tid2, NULL)) != 0)
-        exit_sys_errno("pthread_join", result);
-
-    return 0;
-}
-
-void *thread_proc1(void *param)
-{
-    int result;
-
-    if ((result = pthread_once(&g_tonce, init_proc)) != 0)
-        exit_sys_errno("pthread_once", result);
-
-    printf("Thread-1\n");
-
-    return NULL;
-}
-
-void *thread_proc2(void *param)
-{
-    int result;
-
-    if ((result = pthread_once(&g_tonce, init_proc)) != 0)
-        exit_sys_errno("pthread_once", result);
-
-    printf("Thread-2\n");
-  
-    return NULL;
-}
-
-void init_proc(void)
-{
-    printf("init proc\n");
-}
-
-void exit_sys_errno(const char *msg, int eno)
-{
-    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
-
-    exit(EXIT_FAILURE);
-}
-
-/*--------------------------------------------------------------------------------------------------------------------------
-    Tabii aslında pthread_once fonksiyonunu oluşturmak oldukça kolaydır. Bir static mutex nesnesi alınır. pthread_once_t 
-    bir bayrak olarak kullanılır. mutex kontrolü içerisinde bu bayrak set edilir. 
-
-    Aşağıda buna ilişkin bir örnek verilmiştir.
----------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <unistd.h>
-
-void *thread_proc1(void *param);
-void *thread_proc2(void *param);
-void init_proc(void);
-
-void exit_sys_errno(const char *msg, int eno);
-
-#define MYPTHREAD_ONCE_INIT     0
-
-pthread_once_t g_tonce = MYPTHREAD_ONCE_INIT;
-
-int mypthread_once(pthread_once_t *once_control, void (*init_routine)(void))
-{
-    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-    int result;
-
-    if ((result = pthread_mutex_lock(&mutex)) != 0)
-        return result;
-
-    if (*once_control == 0) {
-        init_routine();
-        *once_control = 1;
-    }
-
-    if ((result = pthread_mutex_unlock(&mutex)) != 0)
-        return result;
-
-    return 0;
-}
-
-int main(void)
-{
-    pthread_t tid1, tid2;
-    int result;
-
-    if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
-        exit_sys_errno("pthread_create", result);
-
-    if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
-        exit_sys_errno("pthread_create", result);
-
-    if ((result = pthread_join(tid1, NULL)) != 0)
-        exit_sys_errno("pthread_join", result);
-
-    if ((result = pthread_join(tid2, NULL)) != 0)
-        exit_sys_errno("pthread_join", result);
-
-    return 0;
-}
-
-void *thread_proc1(void *param)
-{
-    int result;
-
-    if ((result = mypthread_once(&g_tonce, init_proc)) != 0)
-        exit_sys_errno("pthread_once", result);
-
-    printf("Thread-1\n");
-
-    return NULL;
-}
-
-void *thread_proc2(void *param)
-{
-    int result;
-
-    if ((result = mypthread_once(&g_tonce, init_proc)) != 0)
-        exit_sys_errno("pthread_once", result);
-
-    printf("Thread-2\n");
-  
-    return NULL;
-}
-
-void init_proc(void)
-{
-    printf("init proc\n");
-}
-
-void exit_sys_errno(const char *msg, int eno)
-{
-    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
-
-    exit(EXIT_FAILURE);
-}
-
 /*--------------------------------------------------------------------------------------------------------------------------
     Global nesneler ve heap'te yaratılan nesneler thread'ler arasında ortak bir biçimde kullanılıyordu. Ancak thread'lerin 
     stack'leri birbirinden ayrılmıştı. Pekiyi thread'e özgü global değişken gibi bir kavram olabilir mi? Örneğin aşağıdaki gibi 
@@ -28633,6 +28447,201 @@ void exit_sys_errno(const char *msg, int eno)
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
+                                                71. Ders 05/08/2023 - Cumartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Bazen bir thread akışının aynı yerden geçtiği halde bir işlemi yalnızca bir kez yapması istenebilir. Bunun için pthread_once
+    isimli bir fonksiyon bulundurulmuştur. Fonksiyonun prototipi şöyledir:
+
+    #include <pthread.h>
+
+    int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+       
+    Fnksiyon pthread_once_t türünden bir nesnesnin adresini ve bir de çağrılacak fonksiyonun adresini alır. Fonksiyonun birinci 
+    parametresine geçirilecek olan pthread_once_t nesnesine aşağıdaki gibi ilkdeğer verilmiş olması gerekmektedir:
+
+    pthread_once_t tonce = PTHREAD_ONCE_INIT;
+
+    Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda errno değerine geri dönmektedir. Thread akışı bu fonksiyona 
+    kaç kere girerse girsin yalnızca burada verilen fonksiyon ik girişte bir kez çağrılmaktadır. Fonksiyonun birinci parametresindeki
+    nesne bu bir kez çağırmayı sağlamaktadır. 
+
+    pthread_once fonksiyyonundan asıl amaç birden fazla thread'in bir işi toplamda bir kez yapmasını sağlamaktır. Tabii aslında 
+    bu işlem ileride görecek olduğumuz mutex nesneleriyle de basit bir biçimde yapılabiliriz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <unistd.h>
+
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void init_proc(void);
+
+void exit_sys_errno(const char *msg, int eno);
+
+pthread_once_t g_tonce = PTHREAD_ONCE_INIT;
+
+int main(void)
+{
+    pthread_t tid1, tid2;
+    int result;
+
+    if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_join(tid1, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    if ((result = pthread_join(tid2, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    return 0;
+}
+
+void *thread_proc1(void *param)
+{
+    int result;
+
+    if ((result = pthread_once(&g_tonce, init_proc)) != 0)
+        exit_sys_errno("pthread_once", result);
+
+    printf("Thread-1\n");
+
+    return NULL;
+}
+
+void *thread_proc2(void *param)
+{
+    int result;
+
+    if ((result = pthread_once(&g_tonce, init_proc)) != 0)
+        exit_sys_errno("pthread_once", result);
+
+    printf("Thread-2\n");
+  
+    return NULL;
+}
+
+void init_proc(void)
+{
+    printf("init proc\n");
+}
+
+void exit_sys_errno(const char *msg, int eno)
+{
+    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
+
+    exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Tabii aslında pthread_once fonksiyonunu oluşturmak oldukça kolaydır. Bir static mutex nesnesi alınır. pthread_once_t 
+    bir bayrak olarak kullanılır. mutex kontrolü içerisinde bu bayrak set edilir. 
+
+    Aşağıda buna ilişkin bir örnek verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <unistd.h>
+
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void init_proc(void);
+
+void exit_sys_errno(const char *msg, int eno);
+
+#define MYPTHREAD_ONCE_INIT     0
+
+pthread_once_t g_tonce = MYPTHREAD_ONCE_INIT;
+
+int mypthread_once(pthread_once_t *once_control, void (*init_routine)(void))
+{
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    int result;
+
+    if ((result = pthread_mutex_lock(&mutex)) != 0)
+        return result;
+
+    if (*once_control == 0) {
+        init_routine();
+        *once_control = 1;
+    }
+
+    if ((result = pthread_mutex_unlock(&mutex)) != 0)
+        return result;
+
+    return 0;
+}
+
+int main(void)
+{
+    pthread_t tid1, tid2;
+    int result;
+
+    if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_join(tid1, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    if ((result = pthread_join(tid2, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    return 0;
+}
+
+void *thread_proc1(void *param)
+{
+    int result;
+
+    if ((result = mypthread_once(&g_tonce, init_proc)) != 0)
+        exit_sys_errno("pthread_once", result);
+
+    printf("Thread-1\n");
+
+    return NULL;
+}
+
+void *thread_proc2(void *param)
+{
+    int result;
+
+    if ((result = mypthread_once(&g_tonce, init_proc)) != 0)
+        exit_sys_errno("pthread_once", result);
+
+    printf("Thread-2\n");
+  
+    return NULL;
+}
+
+void init_proc(void)
+{
+    printf("init proc\n");
+}
+
+void exit_sys_errno(const char *msg, int eno)
+{
+    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
+
+    exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
     TSD kullanan fonksiyhonları biz yazıyorsak bu durumda TSD anahtarını (yani slotunu) daha thread'leri yaratmadan pthread_key_create
     fonksiyonu ile yaratabiliriz. Böylece thread'lerimiz zaten yaratılmış olan TSD slotlarını kullanabilir. Zaten biz yukarıdaki 
     örnekte böyle yaptık. Pekiyi TSD kullanan fonksiyonları biz yazmamışsak örneğin bunlar bir kütüphanede bulunuyorsa ve bu 
@@ -28669,79 +28678,836 @@ void exit_sys_errno(const char *msg, int eno)
 
 /*--------------------------------------------------------------------------------------------------------------------------
     TSD kullanımı ile aslında thread güvenli olmayan fonksiyonlar hiç parametre değişikliği yapılmadan thread 
-    güvenli hale getirilebilir. Örneğin Windows sistemlerinde bu biçimde bir işlem uygulanmıştır.                             
+    güvenli hale getirilebilir. Örneğin Windows sistemlerinde bu biçimde bir işlem uygulanmıştır.
+
+    Aşağıdaki örnekte srand ve rand fonksiyonları hiç parametre değişikliği yapılmadan thread güvenli hale getirilmiştir. 
+    Bu örnekte bir thread'te ilk kez srand ya da rand fonksiyonu çağrıldığında TSD slotu yaratılmıştır. Sonraki çağırmalarda
+    zaten var olan slot kullanılmıştır. Yalnızca ilk çağırmada pthread_setspecific fonksiyonu ile slota yerleştirme yapılmıştır. 
+    Tabii büyük kütüphanelerde her fonksiyon için ayrı bir TSD slotunun tahsis edilmesine gerek yoktur. Kütüphanenin tamamı için 
+    bir slot yeterlidir. Kütüphanedeki tüm fonkssiyonlar aslında aynı slottaki TSD alanını kullanabilirler. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* rand.h */
+
+#ifndef RAND_H_
+#define RAND_H_
+
+void my_srand(unsigned seed);
+int my_rand(void);
+
+#endif
+
+/* rand.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include "rand.h"
+
+#define SEED_INIT       12345
+
+typedef struct tagTSD_RAND {
+    unsigned seed;
+    /* ... */
+} TSD_RAND;
+
+static void destructor(void *ptr);
+static void rand_init_once(void);
+static TSD_RAND *rand_init(void);
+static void exit_sys_errno(const char *msg, int eno);
+
+pthread_once_t g_rand_once;
+pthread_key_t g_rand_key;
+
+static void destructor(void *ptr)
+{
+    free(ptr);
+}
+
+static void rand_init_once(void)
+{
+    int result;
+
+    if ((result = pthread_key_create(&g_rand_key, destructor)) != 0) 
+        exit_sys_errno("Fatal error pthread_key_create", result); 
+}
+
+static TSD_RAND *rand_init(void)
+{
+    int result;
+    TSD_RAND *tsdrand;
+
+    if ((result = pthread_once(&g_rand_once, rand_init_once)) != 0)  
+        exit_sys_errno("Fatal error pthread_once", result);
+
+    if ((tsdrand = pthread_getspecific(g_rand_key)) == NULL) {
+        if ((tsdrand = (TSD_RAND *)malloc(sizeof(TSD_RAND))) == NULL) {
+            fprintf(stderr, "Fatal error: cannot allocate memory!..\n");
+            exit(EXIT_FAILURE);
+        }
+        if ((result = pthread_setspecific(g_rand_key, tsdrand)) != 0)
+            exit_sys_errno("Fatal error pthread_setspecific", result);
+
+        tsdrand->seed = SEED_INIT;
+    }
+
+    return tsdrand;
+}
+
+static void exit_sys_errno(const char *msg, int eno)
+{
+    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
+
+    exit(EXIT_FAILURE);
+}
+
+void my_srand(unsigned seed)
+{
+    int result;
+    TSD_RAND *tsdrand;
+
+    tsdrand = rand_init();
+
+    tsdrand->seed = seed;
+}
+
+int my_rand(void)
+{
+    TSD_RAND *tsdrand;
+
+    tsdrand = rand_init();
+
+    tsdrand->seed = tsdrand->seed * 1103515245 + 12345;
+    
+    return (unsigned int)(tsdrand->seed / 65536) % 32768;
+}
+
+/* sample.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <unistd.h>
+#include "rand.h"
+
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+
+void exit_sys_errno(const char *msg, int eno);
+
+int main(void)
+{
+    pthread_t tid1, tid2;
+    int result;
+
+    if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_join(tid1, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    if ((result = pthread_join(tid2, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    return 0;
+}
+
+void *thread_proc1(void *param)
+{
+    int val;
+
+    for (int i = 0; i < 10; ++i) {
+        val = my_rand() % 100;
+        printf("Thread-1: %d\n", val);
+        sleep(1);
+    }
+
+    return NULL;
+}
+
+void *thread_proc2(void *param)
+{
+    int result;
+    int val;
+
+    for (int i = 0; i < 10; ++i) {
+        val = my_rand() % 100;
+        printf("Thread-1: %d\n", val);
+        sleep(1);
+    }
+  
+    return NULL;
+}
+
+void exit_sys_errno(const char *msg, int eno)
+{
+    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
+
+    exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Biz thread örneklerimizde exit_sys_errno fonksiyonunda strerror fonksiyonunu kullanmıştık. Anımsanacağı gibi strerror 
+    fonksiyonunun prototipi şöyleydi:
+
+    #include <string.h>
+
+    char *strerror(int errnum); 
+
+    Görüldüğü gibi fonksiyon statik alanın adresiyle geri dönmektedir. O halde bu fonksiyonun aynı anda farklı thread'lerden 
+    çağrılması uygun değldir. Çünkü bu fonksiyon thread güvenli değildir. O halde aslında strerror yerine bizim strerror_t
+    fonksiyonunu kullanmamız gerekir. Ancak strerror yerine strerror_r fonksiyonun kullanılması da biraz zahmetlidir. Bu nedenle
+    UNIX/Linux sistemlerinde standart C kütüphanelerinin bir bölümü zaten kendi içerisinde TSD kullanarak yukarıdaki yaptığımız gibi 
+    yöntemlerle bu strerror fonksiyonunu thread güvenli hale getirmiştir. Örneğin GNU'nun glibc kütüphanesinde bu fonksiyon belli 
+    bir versiyondan sonra thread güvenlidir. Yani bu fonksiyonu biz iki farklı thread'ten çağırıyor olsak da aslında fonsiyon 
+    bize farklı adresler vermektedir. 
+
+    strerror_r fonksiyonun prototipi şöyledir:
+
+    #include <string.h>
+
+    int strerror_r(int errnum, char *buf, size_t buflen);
+
+    Burada fonksiyon static bir alanın adresi ile geri dönmze. Bizzat verilen adrese yazıyı yerleştirir. Bu durumda yukarıda yazdığımız
+    sys_exit_errno fonksiyonunun thread güvenli versiyonu şöyle oluşturulabilir:
+
+    int strerror_r(int errnum, char buf[.buflen], size_t buflen);
+            
+    void exit_sys_errno(const char *msg, int eno) 
+    {
+        char buf[256];
+
+        strerror_r(eno, buf, 256);
+
+        fprintf(stderr, "%s:%s\n", msg, buf);
+
+        exit(EXIT_FAILURE);
+    }
+
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Bazı C derleycicilerinde bir "uzantı (extension)" olarak ismine "thread local storage" denilen bir özellik de bulundurulmaktadır. 
+    Örneğin gcc derleyicilerinde ve clang derleyicilerinde bu özellik vardır. Ancak bu özellik UNIX/Linux genelinde tüm 
+    platformlarda ve derleyicilerde bulunmamaktadır. Bu özelliğe göre statik yerel ya da global bir değişken __thread belirleyicisi 
+    kullanılarak bildirilirse bu nesneler thread'e özgü hale gelmektedir. 
+
+    __thread int g_x;
+
+    Burada __thread bir yer belirleyicisi (storage class specifier) gibi işlem görmektedir. Dolayısıyla tür belirten sözcükle (type specifier) 
+    yerleri değiştirilebilir. Örneğin:
+
+    int __thread g_x;
+
+    Gramer olarak __thread tıpkı const ve volatile gibi bir yer belirleyicisi biçimindedir. 
+
+    Burada __thread belirleyicisini gören derleyici zaten start-up code içerisinde ayırdığı TSD alanına bu değişkeni yereştirmektedir. 
+    Programcı değişkeni normak bir değişken gibi kullanır. 
+
+    gcc derleyicileri __thread ile tanımlanan nesneleri "thread local storage" biçiminde isimlendirilen bir teknikle thread'lerin 
+    stack alanlarının biz uzantısında saklamaktadır. Bu konudaki dokümanlar aşağıdaki bağlantıdan incelenebilir:
+
+    https://gcc.gnu.org/onlinedocs/gcc/Thread-Local.html
+
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Anımsanacağı gibi fopen fonksiyonunun bize verdiği FILE adresi FILE türünden bir yapı nesnesini gösteriyordu ve o FILE 
+    nesnesinin içerisinde o doysanın kullandığı tamponun adresi vardı. Pekiyi biz global bir FILE türünden gösterici alıp 
+    bu göstericiyle iki farklı thread'te dosya işlemi yaparsak bu işlemler thread güvenli midir? Örneğin:
+
+    FILE *g_f;
+
+    int main(void)
+    {
+        g_f = fopen(...);
+        ...
+        return 0;
+    }
+
+    Burada g_f dosya bilgi göstericisini (stream) farklı thread'lerden aynı anda kullanırsak bir sorun çıkar mı? İşte POSIX
+    standartlarına göre stream işlemleri thread güvenlidir. Yani programcının özel olarak bu konuda bir şey yapmasına gerek kalmaz. 
+    Bir dosya işlemi bitmeden diğeri devreye girip iç içe geçme olmamaktadır. Ancak C standartlarında böyle bir thread güvenlilik 
+    garanti edilmemiştir. Benzer biçimde Windows sistemlerinde de stream işlemleri thread güvenlidir. Örneğin biz iki thread'te
+    fprintf fonksiyonu ile aynı dosyaya bir şeyler yazmak isteyelim. Bu fonksiyonlarda iç içe geçme olmayacaktır. Yani birinin 
+    yazdığı şeyler ile diğerinin yazdığı şeyler sanki atomik işlemlermiş gibi ele alınacaktır. 
+
+    Aşağıdaki örnekte global bir dosya bilgi gösterici yoluyla fprintf fonksiyonu kullanılarak farklı thread'lerden aynı dosyaya 
+    bir şeyle yazılmıştır. Dosyanın içeriğini incelediğinizde iç içe geçmelerin olmadığını göreceksiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+
+void exit_sys_errno(const char *msg, int eno);
+
+FILE *g_f;
+
+int main(void)
+{
+    pthread_t tid1, tid2;
+    int result;
+
+    if ((g_f = fopen("test.txt", "w")) == NULL) {
+        fprintf(stderr, "cannot open file!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
+        exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_join(tid1, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    if ((result = pthread_join(tid2, NULL)) != 0)
+        exit_sys_errno("pthread_join", result);
+
+    fclose(g_f);
+
+    return 0;
+}
+
+void *thread_proc1(void *param)
+{
+    for (int i = 0; i < 10000; ++i)
+        fprintf(g_f, "thread-1: %d\n", i);
+    
+    return NULL;
+}
+
+void *thread_proc2(void *param)
+{
+    for (int i = 0; i < 10000; ++i)
+        fprintf(g_f, "thread-2: %d\n", i);
+    
+    return NULL;
+}
+
+void exit_sys_errno(const char *msg, int eno)
+{
+    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
+
+    exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+                                                72. Ders 06/08/2023 - Pazar
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Server uygulamalarında server programın çok sayıda client'tan gelen mesajları işlemesi gerekebilmektedir. Bu tür uygulamalarda
+    server program client'tan bilgiyi alır, onu işler, işlemlerin sonuçlarını client'a gönderir ve sonra yeniden aynı işlemleri yapar. 
+    Yani bu tür programlardaki tipik döngü aşağıdaki gibidir:
+
+    for (;;) {
+        msg = get_msg();
+        process_msg(msg);
+    }
+
+    Burada get_msg client'tan mesajı alan fonksiyonu process_msg ise o mesjı işleyen fonksiyonu temsil ediyor olsun. Server programın
+    amacı client'ları bekletmeden onların talep hizmetleri hızlıca yapmaktır. Bu tür client-server uygulamalar genellikle TCP/IP 
+    soket programlamada karşımıza çıkmaktadır. TCP/IP soket programlama izleyen bölğmlerde ele alınacaktır. Pekiyi buradaki döngü 
+    nasıl hızlandırılabilir? İlk akla gelen process_msg fonksiyonunun başka bir thread'e yaptırılması ve server'ın hemen dönerek 
+    bir sonraki client'ın isteklerini işlemeye çalışmasıdır. Ancak burada önemli bir sıkıntı şudur: Biz her client mesajı için 
+    bir thread yaratmak durumundayız. Ancak bu thread'lerin yaratılması ve yok edilmesi de önemli bir zaman almaktadır. Yani bir 
+    client'ın isteğini yerine getirmek için o anda bir thread'in yaratılmasının ve sonra da o thread'in yok edilmesinin de bir 
+    zaman maliyeti vardır. İşte bu tür durumlarda iki yöntem uygulanabilmektedir:
+
+    1) Yukarıdaki döngüyü çalıştıran thread'in client'tan aldığı mesajları bir kuyruk sistemine yazması ve üretici-tüketici 
+    problemi biçiminde n tane client thread'in aynı kuyruktan istekleri alıp işlemesi yöntemi. Bu yöntemde işin başında n tane 
+    threda yaratılır. Bu n tane thread senkronize edilmiş bir kuyruktan client isteklerini alıp onları bağımsız bir biçimde işler. 
+    Böylece thread'lerin her client istedğinde yeniden yaratılıp yok edilmesi gerekmeyecektir. 
+
+    2) Thread Havuzu (Thread Pool) yöntemi. Bu yöntemde n tane thread yaratılmış bir biçimde suspend durumda bekletilir. Yeni bir 
+    client isteği geldiğinde bekleyen thread uyandırılarak client isteği bu thread'e yaptırılır. Burada thread'ler işin başında 
+    yaratılmaktadır. Client isteği bu thread'ler tarafından işlendikten sonra thread'ler yok edilmemekte ve yeniden suspend durumda 
+    yeni client isteğinin gelmesini beklemektedir. 
+
+    Yukarıdaki iki yöntem de aslında birbirine benzer yöntemlerdir. Birinci yöntemdeki üretici-tüketici problemi için bir 
+    kuyruk sisteminin oluşturulması ve bu kuyruk sisteminin enkronize edilmesi gerekir. Client isteklerinin kuyruk sistemine 
+    yazılması ve oradan alınması da belli bir zaman kaybına yol açmaktadır. Thread havuzu yönteminde daha doğrudan bir işlem 
+    söz konusudur. Çünkü burada araya bir kuyuk sistemi sokulmamaktadır. Bu tür durumlarda her iki yöntem de kullanılabiliyor 
+    olsa da thread havuzları daha fazla tercih edilmektedir. Pekiyi yukarıdaki her iki yöntemde de n tane thread'in işin 
+    başında yaratılacağını belirtmiştik. Bu n sayısı ne olmalıdır?
+    
+    Tek işlemcili ya da çekirdekli sistemlerde bu n sayısının büyütülmesi bir fayda sağlayabilir mi? Aslında genel olarak bu 
+    yöntemler tek işlemcili ya da çekirdekli sistemlerde önemli bir hız kanacı sağlamayacaktır. Tabii eğer bu sistemlerde 
+    bu proses ile rekabet eden başka prosesler varsa bu prosesin fazla thread yaratması bu rekabette bu prosesin öne geçmesine
+    yol açabilecektir. Ancak ilgili makinede bu server programın dışında onunla rekabet edebilecek başka programların olmadığını
+    varsaydığımızda buradaki hız kazancı sanıldığı kadar fazla olmayabilecektir. Tabii yukarıdaki döngünün tek thread yerine 
+    birden fazla thread tarafından işletilmesi bloke konusunda bir avantaj sağlayacaktır. Eğer döngü tek thread tarafından
+    işletilirse process_msg içerisindeki blokeden tüm client'lar etkilenir. Ancak process_msg fonksiyonu farklı thread'ler 
+    tarafından işletilirse bu fonksiyondaki blokeden tüm client'lar etkilenmez. 
+
+    Bu tür uygulamalarda thread sayısını belirten n değeri aslında mesaj işlenirken önemli blokeler oluşmuyorsa işlemci ya da 
+    çekirdek sayısı kadar olması uygundur. Hatta programcı bu thread'leri "processor affinty" işlemleriyle farklı işlemci ya da
+    çekirdeklere de bağlayabilir. Tabii mesaj işlenirken (process_msg'yi kastediyoruz) blokeler oluşacaksa bu n değeri yükseltilebilir. 
+    (Tabii bu tür durumlarda Linux sistemlerinde "processor affinity" uygulanmadığı durumda çizelgeleyicinin CFS algoritması 
+    işlemcilerin çalışma kuyruklarını (run queue) toplam fayda çerçevesinde dengelemeye çalışmaktadır.)
+
+    Yukarıdaki açıklamalarımızdan çıkan sonuçları özetleyelim. Aşağıdaki gibi bir server döngüsü söz konusu olsun:
+
+    for (;;) {
+        msg = get_msg();
+        process_msg(msg);
+    }
+
+    1) Burada tek işlemcili ve tek çekirdekli sistemlerde process_msg fonksiyonlarının n tane thread'e yaptırılması eğer bu 
+    fonksiyon içerisinde blokeler söz konusu ise fayda sağlar. Ancak bu fonksiyon CPU yoğun ise ve sistemde bu proses etme iddiasında
+    olan başka prosesler yoksa bu durum sanıldığı kadar fayda sağlamayabilir. 
+
+    2) Çok işlemcili ve çok çekirdekli sistemlerde eğer process_msg CPU yoğun ise n değeri tipik olarak işlemci ya da çekirdek 
+    sayısı kadar olabilir. Ancak process_msg blokelere yol açabiliyorsa n değeri büyütülebilir. 
+
+    Thread havuzu yönteminde n tane thread'in baştan yaratılarak havuzda bekletilmesi ve onların gerektiğinde uyandırılarak 
+    belli bir fonksiyonu çalıştırması sağlanmaktadır. Thread havuzunda  baştan yaratılacak thread sayısı önceden belirlenmekte 
+    ancak dinamik biçimde artırılıp azaltılabilmektedir. Yani client istekleri artıp havuzda bunları işleyecek thread'ler 
+    kalmadıysa bu thread havuzu sistemi yeni thread'ler yaratarak onları havuza ekler. Client istekleri azaldığında havuzdaki 
+    thread'lerin bir bölümünü sisteme iade eder. Tabii çok değişik thread havuzu gerçekleştirimleri vardır. Her birinin özellikleri
+    diğerlerinden farklı olabilmektedir. 
+
+    Thread havuzları C'nin ve C++'ın standart kütüphanesinde yer almamaktadır. gcc ve clang derleyicilerinin kullandığı glibc 
+    kütüphanesinde de thread havuzları için fonksiyonlar yoktur. Ancak Qt gibi, Java ve .NET gibi platformlarda o platformların
+    sınıf kütüphanelerinde therad havuzları hazır bir biçimde bulunmaktadır. Therad havuzları Windows sistemlerinde Windows API
+    fonksiyonları tarafından desteklenmektedir. (Windows API fonksiyonları POSIX kütüphanesine benzer bir düzeydedir.)
+
+    C için başkaları tarafından yazılmış thread havuzu kütüphaneleri kullanılabilmektedir. Bunun için çeşitli seçenekler bulunmaktadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Çeşitli kereler belirttiğimiz gibi POSIX'teki pthread kütüphanesi taban bir kütüphanedir. Diğer platformlardaki thread
+    işlemleri aslında UNIX/Linux sistemlerinde bu pthread kütüphanesi kullnılarak gerçeklştirilmektedir. Yani örneğin biz Java'da
+    C#'ta, C++'ta onların sağladığı kütüphaneler yoluyla thread işlemleri yaptığımızda alsında bu kütüphaneler UNIX/linux sistemlerinde
+    pthread fonksiyonlarıyla Windows sistemlerinde Windows API fonksiyonlarıyla gerçekleştirmektedir. macOS sistemlerinde de 
+    yine pthread kütüphanesi kullanılmaktadır. Ancak bu dillerin ve platformların asıl sağladığı fayda taşınabilirliktir. 
+    Örneğin biz C++'ın thread kütüphanesini kullandığımızda o programı Windows'ta da Linux'ta da aynı kodlarla yeniden derleyerek
+    çalıştırabilmekteyiz. Oysa pthread kütüphanesini kullanarak yazdığımız bir programı Windows sistemlerine götürdüğümüzde 
+    derlenemeyecektir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    C Programala Diline 2011 versiyonuyla (ISO/IEC 9899:2011 ya da kısaca C11) isteğe bağlı mini bir thread kütüphanesi 
+    eklenmiştir. Bu thread kütüphanesi henüz Microsoft derleyicileri tarafından desteklenmemektedir. gcc ve clang derleyicilerinin
+    kullandığı glibc kütüphanesinin son versiyonları bu thread kütüphanesini destekler hale gelmiştir. Biz de burada kısaca bu
+    kütüphane hakkında temel bilgiler vereceğiz. Kütüphanedeki tüm fonksiyonların prototipleri, sembolik sabitler ve typedef
+    isimleri <threads.h> dosyası içerisindedir. Dolayısıyla bu dosyanın include edilmesi gerekmektedir. Bu dosyanın kendi içerisinde
+    <time.h> dosyasını include etmesi garanti edilmiştir.  
+
+    gcc ve clang derleyicilerinde C11 threda kütüphanesini kullanan programları derlerken -pthread seçeneğinin kullanılması
+    gerekmekteydir. Örneğin:
+
+    gcc -o sample sample.c -pthread
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    - Kütüphanedeki fonksiyonların geri dönüş değerleri genellikle int türdendir. Bu fonksiyonlar başarı durumunda thrd_success
+    başarısılık durumunda thrd_error ya da thrd_nomem değerlerine geri dönerler. Başarı kontrolü şöyle yapılabilir:
+
+    if (thrd_xxx(...) != thrd_success) {
+        ....
+    }
+    
+    - C11'de yaratmak için thrd_create fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <threads.h>
+
+    int thrd_create(thrd_t *thr, thrd_start_t func, void *arg);
+
+    Fonksiyonun birinci parametresi thread'i temsil eden id değerinin yerleştirileceği thrd_t türünden nesnesini adresini 
+    ikinci parametresi thread akışının başlatılacağı fonksiyonun adresini ve üçünzü parametresi de thread fonksiyonuna geçirilecek 
+    argümanı beelirtir. thrd_start_t türü şöyle typedef edilmiştir:
+
+    typedef int (*thrd_start_t)(void *);
+
+    - Thread yine yaratıldıktan sonra thrd_join fonksiyonu ile beklenebilir:
+
+    include <threads.h>
+    
+    int thrd_join(thrd_t thr, int *res);
+
+    Thread'in exit kodunun int türden olduğuna dikkat ediniz. 
+
+    - Thread thrd_detach fonksiyonu ile detached duruma sokulabilmektedir:
+
+    #include <threads.h>
+
+    int thrd_detach(thrd_t thr);
+
+    - Thread'i belli bir süre blokede bekletmek için thrd_sleep fonksiyonu kullanılmaktadır:
+
+    #include <threads.h>
+    
+    int thrd_sleep(const struct timespec *duration, struct timespec *remaining);
+
+    Aşağıda bu fonksiyonların kullanılmasına yönelik bir örnek verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <threads.h>
+
+int thread_proc(void *param);
+
+int main(void)
+{
+    thrd_t tid;
+
+    if (thrd_create(&tid, thread_proc, "other thread") != thrd_success) {
+        fprintf(stderr, "cannot create thread!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    struct timespec ts;
+
+    ts.tv_sec = 1;
+    ts.tv_nsec = 0;
+
+    for (int i = 0; i < 10; ++i) {
+        printf("Main thread %d\n", i);
+        thrd_sleep(&ts, NULL);
+    }
+
+    if (thrd_join(tid, NULL) != thrd_success) {
+        fprintf(stderr, "cannot join thread!..\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    return 0;
+}
+
+int thread_proc(void *param)
+{
+    char *name = (char *)param;
+    struct timespec ts;
+
+    ts.tv_sec = 1;
+    ts.tv_nsec = 0;
+
+    for (int i = 0; i < 10; ++i) {
+        printf("%s: %d\n", name, i);
+        thrd_sleep(&ts, NULL);
+    }
+
+    return 0;
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    C11'de senkronizasyon için yalnızca mutex ve durum değişkenleri nesneleri bulundurulmuştur. Bu mtx_t türü ile temsil 
+    edilmektedir. Nesnenin kullanılması aşağıdaki fonksiyonlarla yapılmaktadır:
+
+    #include <threads.h>
+
+    int mtx_init(mtx_t *mtx, int type);
+    void mtx_destroy(mtx_t *mtx);
+    int mtx_lock(mtx_t *mtx);
+    int mtx_unlock(mtx_t *mtx);
+    int mtx_timedlock(mtx_t *restrict mtx, const struct timespec *restrict ts);
+    int mtx_trylock(mtx_t *mtx);
+
+    Aşağıdaki mutex nesnelerinin kullanılmasına bir örnek verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <threads.h>
+
+int thread_proc1(void *param);
+int thread_proc2(void *param);
+
+int g_count;
+mtx_t g_mutex;
+
+int main(void)
+{
+    thrd_t tid1, tid2;
+
+    if (mtx_init(&g_mutex, mtx_plain) != thrd_success) {
+        fprintf(stderr, "cannot initialize mutex!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (thrd_create(&tid1, thread_proc1, NULL) != thrd_success) {
+        fprintf(stderr, "cannot create thread!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (thrd_create(&tid2, thread_proc1, NULL) != thrd_success) {
+        fprintf(stderr, "cannot create thread!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (thrd_join(tid1, NULL) != thrd_success) {
+        fprintf(stderr, "cannot join thread!..\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (thrd_join(tid2, NULL) != thrd_success) {
+        fprintf(stderr, "cannot join thread!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("%d\n", g_count);
+
+    return 0;
+}
+
+int thread_proc1(void *param)
+{
+    for (int i = 0; i < 1000000; ++i) {
+        mtx_lock(&g_mutex);
+        ++g_count;
+        mtx_unlock(&g_mutex);
+    }
+
+    return 0;
+}
+
+int thread_proc2(void *param)
+{
+    for (int i = 0; i < 1000000; ++i) {
+        mtx_lock(&g_mutex);
+        ++g_count;
+        mtx_unlock(&g_mutex);
+    }
+    
+    return 0;
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    C11'deki diğer thread fonksiyonları için C standartlarını inceleyebilirsiniz. C11'in thread fonksiyonları oldukça 
+    minimalist tasarlanmıştır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    C++'a da C++11 (ISO/IEC 14882: 2011 ya da kısaca C++11) ile birlikte şablon temelli bir thread kütüphanesi eklenmiştir. 
+    C++'ın kütüphanesi C'nin kütüphanesinden daha ayrıntıldır. Tabii C++'daki thread kütüphanesi sınıfsal bir tasarıma sahiptir.   
+    Yine derleme işlemi sırasında Linux sistemlerinde -pthread seçeneğinin bulundurulması gerekmektedir.                          
+
+    C++'ta thread işlemleri için thread isimli bir sınıf bulundurulmuştur. Bu sınıf şablon tabanlı olduğu için thread fonksiyonu 
+    herhangi bir parametreye sahip biçimde sınıfın yapıcı fonksiyonuna verilebilmektedir. Thread nesneleri kesinlikle join 
+    üye fonksiyonuyla beklenmeli ya da detach üye fonksiyonuyla detach duruma sokulmalıdır. 
+
+    Aşağıda C++'ta bir thread yaratımı örneği verilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <iostream>
+#include <thread>
+#include <chrono>
+
+using namespace std;
+
+void thread_proc(int count);
+
+int main()
+{
+    thread t(thread_proc, 5);
+
+    for (int i = 0; i < 10; ++i) {
+        this_thread::sleep_for(chrono::milliseconds(1000));
+        cout << "main thread: " << i << endl;
+    }
+
+    t.join();
+
+    return 0;
+}
+
+void thread_proc(int count)
+{
+    for (int i = 0; i < count; ++i) {
+        this_thread::sleep_for(chrono::milliseconds(1000));
+        cout << "other thread: " << i << endl;
+    }
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    C++'ın standart kütüphensinde de çeşitli senkronizasyon nesneleri bulunmaktadır. Örneğin mutex nesnesi yine bir sınıf 
+    biçiminde bulundurulmuştur. lock ve unlock işlemleri mutex sınıfının üye fonksiyonlarıyla yapılmaktadır.                         
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <mutex>
+
+using namespace std;
+
+int g_count;
+mutex g_mutex;
+
+void thread_proc1();
+void thread_proc2();
+
+int main()
+{
+    thread t1(thread_proc1);
+    thread t2(thread_proc2);
+        
+    t1.join();
+    t2.join();
+
+    cout << g_count << endl;
+
+    return 0;
+}
+
+void thread_proc1()
+{
+    for (int i = 0; i < 1000000; ++i) {
+        g_mutex.lock();
+        ++g_count;
+        g_mutex.unlock();
+    }
+}
+
+void thread_proc2()
+{
+    for (int i = 0; i < 1000000; ++i) {
+        g_mutex.lock();
+        ++g_count;
+        g_mutex.unlock();
+    }
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    C++'ın threda kütüphanesi C'nin thread kütüphanesinden daha geniştir. Kütüphane şablon tabanlı olduğu için kullanımı konusunda
+    dikkatli olmak gerekir. Tabii C++'ın bu kütüphanesi UNIX/Linux ve macOS sistemlerinde pthread kütüphanesi kullanılarak 
+    Windows sistemlerinde ise Windows API fonksiyonları kullanılarak gerçekleştirilmiştir.                          
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Sinyal (signal) işlemleri UNIX/Linux sistemlerinde sistem programlama etkinliklerinde yoğun bir biçimde kullanılmaktadır. 
+    Bu nedenle bu sistemlerde programala yapan programcıların sinyal işlemleri konusunda bilgi sahibi olması gerekmektedir. 
+    Sinyal işlemleri kapsamlı bir konudur. Biz kursumuzun bu bölümünde bu işlemlerin temelleri ve ayrıntıları üzerinde duracağız.                                  
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Sinyal mekanizması kesme (interrupt) mekanizmasına benzetilebilir. Sinyaller UNIX/Linux sistemlerinde asenkron işlem yapılmasına
+    olanak sağlayan bir mekanizmadır. Sinyaller normal olarak proseslere göndirilmketedir. Ancak thread konusunun işletim sistemlerinde 
+    eklenmesiyle thread'lere de sinyal gönderilmesi mümkün hale getirilmiştir. (Ancak thread'lerin ilgili proses içerisinde erişilebilen 
+    bir kaynak olduğunu anımsayınız. Thread'lerin id değerleri ilgili proseste anlamlı değerlerdir.) Bir sinyal prosese gönderildiğinde 
+    prosesin akışı kesilir, ismine sinyal fonksiyonu (signal handler) bir fonksiyon çalıştırılır. Sinyal fonksiyonu bitince akış
+    kalınan devam eder. Bu mekanizma kod çalışırken araya asenkron biçimde başka işlemlerin girebilmesine olanak sağlamaktadır. 
+
+    Sinyalin oluşmasına yol açan çeşitli durumlar söz konusu olabilmektedir. Örneğin sinyal işletim sistemi tarafından prosese
+    belli koşullar altında gönderiliyor olabilir. Programcının yaptığı çeşitli ihlallerde de işletim sistemi tarafından prosese
+    sinyaller gönderilebilmektedir. Bazı sinyaller bazı aygıt sürücüleri tarafından prosese gönderilebilmektedir. Örneğin terminal 
+    aygıt sürücüsü prosesin ilişkin olduğu terminalde kullanıcı Ctrl+C gibi Ctrl+Backpace gibi tuşlara bastığında oturumun ön plan 
+    proses grubuna bazı sinyalleri gönderebilmektedir. Sinyaller programlama yoluyla da bir prosesten diğerine gönderilebilmektedir. 
+    Bazı POSIX fonksiyonları da kendi içlerinde bazı koşullarda ilgili proseslere sinyaller gönderebilmektedir. 
+
+    Bir sinyal bir prosese gönderildiğinde prosesin hangi thread'inin çalışmasına ara verilip sinyal fonksiyonunu çalıştıracağı 
+    POSIX standartlarında işletim sisteminin isteğine bırakılmıştır. Yani örneğn bizim toplamda beş thread'imiz varsa prosese 
+    bir sinyal gönderildiğinde bu beş thread'ten herhangi biri çalışmasına ara verip sinyal fonksiyonunu çalıştırabilir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Her sinyalin bir numarası vardır. Sinyallere ilişkin numaralar POSIX sistemlerinde işletim sistemini yazanların isteğine 
+    bırakılmıştır. Ancak taşınabilirlik sağlamak için sinyal numaraları <signal.h> dosyası içerisinde SIGXXX biçiminde sembolik 
+    sabitlerle define edilmiştir. Konuurken ve program yazarken sinyallerin numaraları değil (çünkü taşınabilir değiller) bu 
+    sembolik sabit isimleri kullanılmaktadır. UNIX/Linux sistemlerinde kullanılan tipik sinyaller şunlardır:
+
+    SIGABRT 
+    SIGALRM 
+    SIGBUS 
+    SIGCANCEL
+    SIGCHLD 
+    SIGCONT 
+    SIGEMT 
+    SIGFPE 
+    SIGFREEZE 
+    SIGHUP 
+    SIGILL
+    SIGINFO 
+    SIGINT 
+    SIGIO 
+    SIGIOT 
+    SIGJVM1 
+    SIGJVM2 
+    SIGKILL 
+    SIGLOST 
+    SIGLWP 
+    SIGPIPE 
+    SIGPOLL 
+    SIGPROF 
+    SIGPWR 
+    SIGQUIT 
+    SIGSEGV 
+    SIGSTKFLT 
+    SIGSTOP 
+    SIGSYS 
+    SIGTERM 
+    SIGTHAW 
+    SIGTHR 
+    SIGTRAP 
+    SIGTSTP 
+    SIGTTIN 
+    SIGTTOU 
+    SIGURG 
+    SIGUSR1 
+    SIGUSR2 
+    SIGVTALRM 
+    SIGWAITING
+    SIGWINCH 
+    SIGXCPU 
+    SIGXFSZ 
+    SIGXRES 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Bir sinyal oluştuğunda eğer programcı o sinyal için bir "sinyal fonksiyonu (signal handler)" set etmişse bu sinyal fonksiyonu 
+    çağrılmaktadır. Eğer programcı sinyal için bir sinyal fonksiyonu set etmemişse bu durumda "default eylem (default action)" 
+    uygulanmaktadır. Default eylem sinyalden sinyala değişebilmektedir. Bazı sinyallerde default eylem "sinyalin görmezlikten 
+    gelinmesi (ignore)" iken, bazı sinyallerde "prosesin sonlandırılması (terminate)" biçimindedir. Bazı sinyallerde default eylem
+    "prosesin sonladılması ve bir core dosyaı oluşturulması" biçimindedir. Core dosyaları "teşhis amacıyla" oluşturulan ve debugger
+    altında incelenebilen özel dosyalardır. Tabii bu default eylemleri programcı sinyal temelinde öğrenmelidir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+    Bir sinyal oluşturulduğunda önce sinyal prosese teslim edilir ("deliver" işlemi). Proses kendine gelen sinyali mümkün olduğu
+    kadar çabuk işlemek ister. Eğer ilgili sinyal için bir sinyal fonksiyonu set edilmişse proses çok gecikmeden bu sinyal 
+    fonksiyonunu çağırmak isteyecektir. Sinyal prosese teslim edildikten sonra sinyal fonksiyonu çağrılana kadarki sürece
+    "sinyalin (pending) askıda olması" denilmektedir. Eğer akış o anda bir sistem fonksiyonunun içerisindeyse ve o sistem fonksiyonu 
+    uzun sürecek bir eylem başlatmışsa ya da açıkça bloke olmuşsa bu durumda işletim sistemi ilgili sistem fonksiyonunu başarısızlıkla
+    sonuçlandırır ve bir an evvel sinyal fonksiyonunu çalıştırır. Tabii biz sistem fonksiyonlarını doğrudan değil POSIX fonksiyonları
+    yoluyla kullanmaktayız. Böylece bu tür durumlarda çağırdığımız POSIX fonksiyonları sinyal dolayısıyla başarısız olabilmektedir. 
+    Eğer bir POSIX fonksiyonu sinyal dolayısıyla başarısız olursa errno değişkeni EINTR özel değeriyle set edilmektedir. 
+    Örneğin biz bir borudan read fonksiyonuyla okuma yapmak isteyelim. Ancak boruda okunacak hiç byte olmasın. Bu durumda 
+    read fonksiyonu blokeye yol açacaktır. İşte bu sırada prosese bir sinyal gelirse read fonksiyonu başarısızlıkla (yani -1 değeriyle)
+    geri döner ve errno değişkeni EINTR değeriyle set edilir. Bu tür durumlarda biz fonksiyonun sinyal dolayısıyla başarısız 
+    olduğunu anlayıp onu yeniden çağrımamız gerekir. Örneğin:
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+    while ((result = read(...)) == -1 && errno == EINTR)
+        ;
+    if (result == -1) 
+        exit_sys("read");
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+    Ancak prrogramcı isterse bu tür POSIX fonksiyonlarınının "otomatik biçimde yeniden çağrılmasını (automatic restart)" da 
+    sağlayabilmektedir. Eğer programcı bunu sağlamışsa bu durumda fonksiyon hiç geri dönmez ancak sinyal fonksiyonu çalıştırılır. 
+    Bu otomatik çalıştırma işlemi kütüphane tarafından değil çekirdek tarafından sağlanmaktadır. 
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+    Tabii bir sistem fonksionunun ya da onu çağıram POSIX fonksiyonunun sinyal nedeniyle başarısız olması için o fonksiyonun 
+    "yavaş bir fonksiyon" olması gerekir. Programcı çağırdığı sistem fonksiyonlarının ya da onu çağıran POSIX fonksiyonlarının 
+    sinyal karşısındaki davranışını bilmek zroundadır. Tabii bir sinyal için sinyal fonksiyonu set edilmemişse ve default eylem 
+    prosesin sonlanmasıysa zaten bu durumda ilgili sistem fonksiyonunun ya da onu çağıran POSIX fonksiyonunun başarısızlığının
+    bir önemi de kalmamaktadır. 
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    <BURADA KALDIK>
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
