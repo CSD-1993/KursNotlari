@@ -29585,7 +29585,6 @@ except OSError as oserr:
     Anımsanacağı gibi "exception güvenli" bir kodlama için genellikle nesneler üzerindeki sonlandırma ve kapatma işlemleri try bloğunun 
     finally kısmında yapılıyordu. Ancak henüz açılmamış bir soketin kapatılması da bir exception oluşmasına yol açmaktadır. Bu nedenle
     socket değişkenlerine başlangıçta None değeri yerleştirip duruma göre bunların shutdown ve close edilmesi uygun olur. Örneğin:
-
     
     PORT_NO = 55555
 
@@ -29606,7 +29605,6 @@ except OSError as oserr:
         if server_sock:
             server_sock.close()
     
- 
 #------------------------------------------------------------------------------------------------------------------------------------
 
 import socket
@@ -29804,9 +29802,14 @@ except OSError as oserr:
     5 byte gelmiş olsun. Bu durumda recv bu 5 byte'ı okur. 5 byte'tan oluşan bir bytes nesnesi ile geri döner. Yani recv metodunun parametresinde belirttiğimiz
     byte sayısı en fazla okunacak byte'ı belirtmektedir. 
 
-    TCP/IP'de önemli bir noktayı vurgulamak istiyoruz: Bir tarafın tek bir sebd ile gönderdiği bilgiyi karşı taraf tek bir recv ile 
+    TCP/IP'de önemli bir noktayı vurgulamak istiyoruz: Bir tarafın tek bir send ile gönderdiği bilgiyi karşı taraf tek bir recv ile 
     okumak zorunda değildir. Biz tek bir send ile 1000 byte bilgi göndermiş olabiliriz. Bu bilgi network tamponunda iki ayrı IP paketi olarak 
     gönderilmiş olabilir. Bu paketlerden biri hedefe geldiğinde recv hemen bunu okuyup 1000 byte'ın bir kısmını elde etmiş olabilir. 
+    
+    Aşağıdaki örnekte client program server'a bağlanıp ve ona çeşitli yazılar göndermektedir. Tabii soketten bir yazı gönderilmek istenirse 
+    yazının önce bytes nesnesine dönüştürülmesi gerekir. Benzer biçimde elde edilen bytes nesnesi de yeniden yazıya dönüştürülebilir. Bir 
+    string'in bytes nesnesine dönüştürülmesi için str sınıfının encode metodu, bytes nesnesinin string'e dönüştürülmesi için ise bytes 
+    sınıfının decode metodu kullanılabilir. 
 #------------------------------------------------------------------------------------------------------------------------------------
 
 # server.py
@@ -29858,81 +29861,11 @@ try:
         client_sock.shutdown(socket.SHUT_RDWR)
 except OSError as e:
     print(e)
-    
-<BURADA KALDIK>
-
+ 
 #------------------------------------------------------------------------------------------------------------------------------------
-    Soketten bir yazı gönderilmek istenirse yazının önce bytes nesnesine dönüştürülmesi gerekir. Benzer biçimde elde edilen bytes nesnesi 
-    de yeniden yazıya dönüştürülebilir. 
-
-    Aşağıdaki örnekte client klavyeden okuduğu yazıları bytes nesnesine dönüştürüp server programa yollamaktadır. Server program da recv metoduyla
-    bytes nesnesi biçiminde aldığuı bilgiye yeniden string'e dönüştürmüştür. 
+                                                        64. Ders 09/08/2023 - Çarşamba
 #------------------------------------------------------------------------------------------------------------------------------------
 
-# server.py 
-
-import socket
-
-PORT_NO = 50500
-
-server_sock = None
-client_sock = None
-
-try:
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    server_sock.bind(('', PORT_NO))
-    server_sock.listen(8)
-    
-    print('waiting for connection...')
-    (client_sock, (client_addr, client_port)) = server_sock.accept()
-    print(f'connected with client {client_addr}:{client_port}...')
-      
-    while True:
-        buf = client_sock.recv(1000)
-        if not buf:
-            break
-        s = buf.decode()
-        if s == 'quit':
-            break
-        print(s)
-        
-    client_sock.shutdown(socket.SHUT_RDWR)
-
-except OSError as oserr:
-    print(oserr)
-finally:
-    if client_sock:
-        client_sock.close()
-    if server_sock:
-        server_sock.close()
-
-# client.py
-
-import socket
-
-PORT_NO = 50500
-
-client_sock = None
-try:
-    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    client_sock.connect(('127.0.0.1', PORT_NO))
-    print('connected...')
-    
-    while True:
-        s = input('Text:')
-        buf = s.encode()
-        client_sock.send(buf)
-        if s == 'quit':
-            break
-    
-    client_sock.shutdown(socket.SHUT_RDWR)
-    
-except OSError as oserr:
-    print(oserr)
-finally:
-    if client_sock:
-        client_sock.close()
-    
 #------------------------------------------------------------------------------------------------------------------------------------
     Tabii client ile server programların aslında aynı dilde yazılması da gerekmez. Çünkü dil ne olursa olsun aslında arka planda aynı
     protokol aynı kurallara göre işletilmektedir. 
@@ -29944,39 +29877,30 @@ finally:
 
 import socket
 
-PORT_NO = 50500
-
-server_sock = None
-client_sock = None
+PORT_NO = 55555
 
 try:
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    server_sock.bind(('', PORT_NO))
-    server_sock.listen(8)
-    
-    print('waiting for connection...')
-    client_sock, (client_addr, client_port) = server_sock.accept()
-    print(f'connected with client {client_addr}:{client_port}...')
-      
-    while True:
-        buf = client_sock.recv(1000)
-        if not buf:
-            break
-        s = buf.decode()
-        if s == 'quit':
-            break
-        print(s)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+        server_sock.bind(('', PORT_NO))
+        server_sock.listen(8)
         
-    client_sock.shutdown(socket.SHUT_RDWR)
+        print('waiting for client...')
+        client_sock, (client_addr, client_port) = server_sock.accept()
+        with client_sock:
+            print(f'connected with client {client_addr}:{client_port}')
+            
+            while True:
+                b = client_sock.recv(4096)
+                s = b.decode()
+                if s == 'quit':
+                    break
+                print(f'{len(b)} btes received: {s}')
 
-except OSError as oserr:
-    print(oserr)
-finally:
-    if client_sock:
-        client_sock.close()
-    if server_sock:
-        server_sock.close()
-
+                
+            client_sock.shutdown(socket.SHUT_RDWR)
+except OSError as e:
+    print(e)
+    
 // Client.cs 
 
 using System;
@@ -29988,58 +29912,79 @@ namespace CSD
 {
     class App
     {
-        const int PortNo = 50500;
+        public const string SERVER_NAME = "31.220.81.76";
+        public const int PORT = 55555;
 
         public static void Main()
         {
-            Socket clientSock = null;
-            string msg;
-            byte[] bytes;
+            Socket clientSock;
+            string text;
+            byte[] buf;
 
             try
             {
-                clientSock = new Socket(SocketType.Stream, ProtocolType.Tcp);
-                clientSock.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.1"), PortNo));
-                Console.WriteLine("Connected");
-
-                for (; ;)
+                using (clientSock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
                 {
-                    Console.Write("Text:");
-                    msg = Console.ReadLine();
-                    bytes = Encoding.UTF8.GetBytes(msg);
-                    clientSock.Send(bytes);
-                    if (msg == "quit")
-                        break;
+                    clientSock.Connect(new IPEndPoint(IPAddress.Parse(SERVER_NAME), PORT));
+                    Console.WriteLine("connected");
+
+                    for (; ; )
+                    {
+                        Console.Write("Bir yazı giriniz:");
+                        text = Console.ReadLine();
+                        buf = Encoding.UTF8.GetBytes(text);
+                        clientSock.Send(buf);
+                        if (text == "quit")
+                            break;
+                    }
+                    clientSock.Shutdown(SocketShutdown.Both);
                 }
-                clientSock.Shutdown(SocketShutdown.Both);
             }
-            catch (Exception ex)
+            catch (Exception e)
             {
-                Console.WriteLine(ex.Message);
-            }
-            finally
-            {
-                if (clientSock != null)
-                    clientSock.Close();
+                Console.WriteLine(e.Message);
             }
         }
     }
 }
 
 #------------------------------------------------------------------------------------------------------------------------------------
-    Çok client'lı server uygulamalarında server her client için döngü içerisinde accept uygulamalıdır. Burada önemli problem şudur:
-    Server bir client ile bağlandığı zaman onunla nasıl konuşacaktır? Tek bir akış söz konusu olduğunda server yeniden accept metodunda
-    beklerken bloke oluşacağından dolayı daha önce bağlanmış olduğu client'lar ile konuşamaz. Benzer biçimde tek bir akış söz konusu olduğunda
-    bir client için recv yapıldığında eğer o client bir bilgi göndermemişse akış bu sefer de recv metodunda bloke olur. Sonuç olarak tek bir 
-    akış ile birden fazla client ile konuşmak mümkün olmaz. O zaman ilk akla gelecek yöntem her client için bağlantı yapıldıktan sonra yeni bir thread 
-    yaratmak o client ile o thread'in konuşmasını sağlamaktır. Böylece bir thread bloke olsa bile diğer thread'ler bundan etkilenmezler. 
+    Yerel makinede deneyerek çalıştırdığımız client ve server programları Internet ağında da aynı biçimde çalıştırabiliriz. Eğer evinizde
+    bir server program bulundurmak istiyorsanız bazı bilgilere sahip olmasınız:
 
-    Çok client'lı server uygulamalarında çeşitli modeller kullanılabilmektedir. Thread modeli basitliği nedeniyle bazı uygulamalarda tercih edilir. 
-    Ancak thread modelinin de önemli dezavantajları söz konusu olabilmektyedir. 
+    - Biz evimizde bir yerel ağa (Local Area Network (LAN)) sahbiz. Evimiz içindeki yerel ağı ayrı bir network olarak düşünebiliriz. 
+    Evimizdeki bilgisayarların IP numaraları "yerel IP (local IP)" numarasına sahiptir. Biz evimizdeki yerel ağı Internet'e tek bir
+    router ile bağlamaktayız. Bizim evimizin Internet'teki adresi bu router'ımızın IP adresidir. Yani evimizde birkaç bilgisayarımız 
+    olsa da biz Internet ortamında sanki tek host gibi görünmekteyiz. Router'ımızın Internet'teki IP adresi çeşitli biçimlerde elde edilebilir. 
+    Bunun basit bir yolu tarayıcan "whatismyip.com" sitesine girip bakmaktır. Ancak maalesef servis sağlayıcılar  bize hep aynı IP 
+    adresini atamamaktadır. Dolayısıyla "whatismyip.com" sitesinden elde edeceğiniz IP adresleri zamanla değişebilecektir. Bu tür IP 
+    adreslerine "dinamik ip adresleri" denilmektedir. Servis sağlayıcının bize hep aynı ip adresine vermesini istiyorsanız servis 
+    sağlayıcınızla görüşmelisiniz. Ancak servis sağlayıcılar bu işlemi aylık ücret karşılığında yapmaktadır. Statik IP'nin en önemli
+    faydası client programların hep IP adresi ile server'larınıza erişebilmesidir. Internet hizmeti veren hosting firmaları zaten 
+    hep statik ip vermektedir. 
+
+    - Evimizde bir server oluştururken dikkat edeceğimiz bir nokta da "port yönlendirmesi (port forwarding)" yapmaktır. Dış dünyadan 
+    bizim evimizdeki server'a bağlanmak isteyen kişiler bizim rouer IP adresini kullanacaklardır. Oysa server'ımız yerel ağdadır ve onun
+    yerel IP'si vardır. İşte bu durumda router'a gelen bağlantı isteklerinin router tarafından yerel ağdaki bilgisayarımıza yönlendirilmesi
+    gerekir. Buna port yönlendirmesi denilmektedir. Poer yönlendirmesi yapabilmek için tarayıcıdan router'a erişmek gerekir. Genellikle 
+    router adresi yerel ağda "192.168.1.1" biçimindedir. Ancak artık servis sağlayıcılar port yönlendirmesi için statik IP'yi zorunlu
+    tutmaktadır. Tabii bir hosting şirketinden VPS ya da "dedicated server" kiralamışsanız böyle port yönlendirmesini yapmanıza gerek 
+    kalmayacaktır. Zaten bu tür hosting hizmeti veren şirketler VPS ve "dedicated server'lar" için statik IP adresleri vermektedir.                                          
+#------------------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------------------
+    Çok client'lı server uygulamalarında server her client için döngü içerisinde accept uygulamalıdır. Ancak çok client'lı server 
+    uygulamalarında önemli problem şudur: Server bir client ile bağlandığı zaman onunla nasıl konuşacaktır? Tek bir akış söz konusu 
+    olduğunda server yeniden accept metodunda beklerken bloke oluşacağından dolayı daha önce bağlanmış olduğu client'lar ile konuşamaz. 
+    Benzer biçimde tek bir akış söz konusu olduğunda bir client için recv yapıldığında eğer o client bir bilgi göndermemişse akış 
+    bu sefer de recv metodunda bloke olur. Sonuç olarak tek bir akış ile birden fazla client ile konuşmak mümkün olmaz. O zaman 
+    ilk akla gelecek yöntem her client için bağlantı yapıldıktan sonra yeni bir thread yaratmak ve o client ile o thread'in konuşmasını 
+    sağlamaktır. Böylece bir thread bloke olsa bile diğer thread'ler bundan etkilenmezler. Çok client'lı server uygulamalarında çeşitli 
+    modeller kullanılabilmektedir. Thread modeli basitliği nedeniyle bazı uygulamalarda tercih edilir. Ancak thread modelinin de önemli 
+    dezavantajları söz konusu olabilmektedir. 
 
     Aşağıdaki programda server için thread modeli uygulanmıştır. Bağlantı sağlandığında yeni bir thread yaratılmış ve soket bilgileri bu yeni thread'e
     parametre yoluyla aktarılmıştır. 
-
 #------------------------------------------------------------------------------------------------------------------------------------
 
 # server.py 
@@ -30047,79 +29992,66 @@ namespace CSD
 import socket
 import threading
 
-PORT_NO = 50500
+PORT_NO = 55555
 
 def main():
-    server_sock = None
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+            server_sock.bind(('', PORT_NO))
+            server_sock.listen(8)
+            
+            while True:
+                print('waiting for client...')
+                client_sock, (client_addr, client_port) = server_sock.accept()
+                print(f'connected with client {client_addr}:{client_port}')
+                thread = threading.Thread(target=client_proc, args=(client_sock, client_addr, client_port))
+                thread.start()
+                
+                            
+    except OSError as e:
+        print(e)
 
+def client_proc(sock, addr, port):
     try:
-        server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-        server_sock.bind(('', PORT_NO))
-        server_sock.listen(8)
-    
-        print('waiting for connection...')
-        while True:
-            client_sock, (client_addr, client_port) = server_sock.accept()
-            print(f'connected with client {client_addr}:{client_port}...')
-            
-            client_thread = threading.Thread(target=client_thread_proc,  args=(client_sock, client_addr, client_port))
-            client_thread.start()
-            
-    except OSError as oserr:
-        print(oserr)
-    finally:
-        if server_sock:
-            server_sock.close()
-            
-def client_thread_proc(client_sock, client_addr, client_port):
-    try:
-        while True:
-            buf = client_sock.recv(1000)
-            if not buf:
-                break
-            s = buf.decode()
-            if s == 'quit':
-                break
-            print(f'{s} ({client_addr}:{client_port})')
-            
-        client_sock.shutdown(socket.SHUT_RDWR)
-        client_sock.close()
-    
-        print(f'{client_addr}:{client_port} disconnected...')
-    except OSError as oserr:
-        print(oserr)
-    finally:
-        if client_sock:
-            client_sock.close()
-    
+        with sock:
+            while True:
+                b = sock.recv(4096)
+                s = b.decode()
+                print(f'recieved message from client {addr}:{port} ==> "{s}" ')
+                if s == 'quit':
+                    break
+                sock.send(s[::-1].encode())
+            sock.shutdown(socket.SHUT_RDWR)
+    except OSError as e:
+        print(e)
+        
 main()
 
-# client.py 
+# client.py
 
 import socket
 
-PORT_NO = 50500
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
 
-client_sock = None
 try:
-    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    client_sock.connect(('localhost', PORT_NO))
-    print('connected...')
-    
-    while True:
-        s = input('Text:')
-        buf = s.encode()
-        client_sock.send(buf)
-        if s == 'quit':
-            break
-    
-    client_sock.shutdown(socket.SHUT_RDWR)
-    
-except OSError as oserr:
-    print(oserr)
-finally:
-    if client_sock:
-        client_sock.close()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
+        client_sock.connect((SERVER_NAME, SERVER_PORT))
+        print('connected...')
+        
+        while True:
+            text = input('Bir yazı giriniz:')
+            result = client_sock.send(text.encode())
+            if text == 'quit':
+                break
+            buf = client_sock.recv(4096)
+            rev_text = buf.decode()
+            print(rev_text)
+        client_sock.shutdown(socket.SHUT_RDWR)
+except OSError as e:
+    print(e)
+
+<BURADA KALDIK>
 
 #------------------------------------------------------------------------------------------------------------------------------------
     Yukarıdaki programı with deyimi ile aşağıdaki gibi yazabiliriz. with deyiminde ilgili ifadeye ilişkin nesne bağlam yönetim protokolünü
