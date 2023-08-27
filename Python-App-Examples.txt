@@ -28740,11 +28740,18 @@ for i in range(10):
 #------------------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------------------
-    Standart kütüphanedeki multiprocessing modülünde bulunan Process sınıfı genel kullanım itibari ile threading modülündeki 
-    Thread sınıfına benzemektedir. Programcı Process sınıfı türünden bir nesne yaratır. Nesneyi yaratırken yine yeni proses akışının 
-    başlatılacağı fonksiyonu target parametresiyle belirtir. Yine args parametresi ile parametre aktarımı yapılır. Proses nesnesine 
-    yine bir name parametresi ile isim verilebilir. Prosesi çalıştırmak için yine start metodu, sonlanmasını beklemek için join metodu 
-    kullanışmaktadır. Görüldüğü gibi genel çalışma biçimi daha önce görmüş olduğumuz thread'lere benzemektedir. 
+    Standart kütüphanedeki multiprocessing modülünde bulunan Process sınıfı genel kullanım itibari ile threading modülündeki Thread 
+    sınıfına benzemektedir. Programcı Process sınıfı türünden bir nesne yaratır. Nesneyi yaratırken yine yeni proses akışının başlatılacağı 
+    fonksiyonu target parametresiyle belirtir. Yine args parametresi ile parametre aktarımı yapılır. Proses nesnesine yine bir name 
+    parametresi ile isim verilebilir. Prosesi çalıştırmak için yine start metodu, sonlanmasını beklemek için join metodu kullanılmaktadır. 
+    join metodu alt processin kaynaklarını da boşaltmaktadır. Yani join metodu çağrıldığında üst proses alt proses eğer sonlanmamışsa sonlana 
+    kadar bekler ve onun kaynaklarını boşaltır. Bir alt proses yaratılıp join ile beklenmezse bu tür durumlara UNIX/Linux dünyasında 
+    "hortlak proses (zombie process)" denilmektedir. Ancak bazen bir alt proses yaratılıp  onun sonlanmasını beklemek istemeyebiliriz. Bu tür durumlarda
+    proses yaratılırken beklemenin yapılmayacağı belirtilmelidir. Bunu Python'da sağlamanın iki yolu vardır. Birinci process sınıfında proses 
+    yaratılırken daemon parametresini True geçmektir. İkincisi proses yaratıldıktan sonra daemon örnek özniteliğine False yerleştirmektir. 
+        
+    Görüldüğü gibi genel çalışma biçimi daha önce görmüş olduğumuz thread'lere benzemektedir. 
+
     Ancak burada target parametresi ile belirtilen fonksiyonun başka bir Python yorumlayıcısı tarafından tamamen başka bir proses gibi çalıştırıldığına
     dikkat ediniz. Process sınıfı ile işlemler yapılırken __name__ == '__main__' kontrolünün bazı nedenlerden dolayı yapılması gerekmektedir. 
     Biz burada neden programın başlatılacağı yerde bu kontrolün yapılması gerektiğini açıklamayacağız. 
@@ -30051,98 +30058,100 @@ try:
 except OSError as e:
     print(e)
 
-<BURADA KALDIK>
-
 #------------------------------------------------------------------------------------------------------------------------------------
-    Yukarıdaki programı with deyimi ile aşağıdaki gibi yazabiliriz. with deyiminde ilgili ifadeye ilişkin nesne bağlam yönetim protokolünü
-    destekliyorsa o nesne için __exit__ metodunun çağrıldığını anımsayınız. İşte socket için de __exit__ metodu soketi close ile kapatmaktadır. 
+                                                65 .Ders 25/08/2023 - Cuma
 #------------------------------------------------------------------------------------------------------------------------------------
 
-#server.py 
+#------------------------------------------------------------------------------------------------------------------------------------
+    Client'larla konuşmak için thread'ler yerine proseslerden de faydalanabiliriz. Daha önceki konularda da bahsettiğimiz gibi genel 
+    olarak prosesler GIL yüzünden thread'lere göre daha iyi performans gösterebilmektedir. Aşağıda çok client'lı uygulama için proses
+    modeline bir örnek verilmiştir. Anımsanacağı gibi zaten multiprocessing modülünün kullanımı threading modülüne oldukça benzemektedir. 
+    Dolayısıyla biz thread örneğinde küçük değişikliklerle aşağıdaki proses örneğini oluşturduk. 
+#------------------------------------------------------------------------------------------------------------------------------------
+
+# server.py
 
 import socket
-import threading
+import multiprocessing
 
-PORT_NO = 50500
+PORT_NO = 55555
 
 def main():
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as server_sock:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
             server_sock.bind(('', PORT_NO))
             server_sock.listen(8)
-        
-            print('waiting for connection...')
-            while True:
-                (client_sock, (client_addr, client_port)) = server_sock.accept()
-                print(f'connected with client {client_addr}:{client_port}...')
-                
-                client_thread = threading.Thread(target=client_thread_proc,  args=(client_sock, client_addr, client_port))
-                client_thread.start()
-                
-    except OSError as oserr:
-        print(oserr)
             
-def client_thread_proc(client_sock, client_addr, client_port):
-    try:
-        with client_sock:
             while True:
-                buf = client_sock.recv(1000)
-                if not buf:
-                    break
-                s = buf.decode()
+                print('waiting for client...')
+                client_sock, (client_addr, client_port) = server_sock.accept()
+                print(f'connected with client {client_addr}:{client_port}')
+                process= multiprocessing.Process(target=client_proc, args=(client_sock, client_addr, client_port), daemon=True)
+                process.start()
+               
+    except OSError as e:
+        print(e)
+
+def client_proc(sock, addr, port):
+    try:
+        with sock:
+            while True:
+                b = sock.recv(4096)
+                s = b.decode()
+                print(f'recieved message from client {addr}:{port} ==> "{s}" ')
                 if s == 'quit':
                     break
-                print(f'{s} ({client_addr}:{client_port})')
-                    
-            client_sock.shutdown(socket.SHUT_RDWR)
-            
-        print(f'{client_addr}:{client_port} disconnected...')
-    except OSError as oserr:
-        print(oserr)
-
-main()
-
-# client.py
+                sock.send(s[::-1].encode())
+            sock.shutdown(socket.SHUT_RDWR)
+    except OSError as e:
+        print(e)
+       
+if __name__ == '__main__':
+    main()
+ 
+#client.py
 
 import socket
 
-PORT_NO = 50500
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
 
 try:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as client_sock:
-        client_sock.connect(('localhost', PORT_NO))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
+        client_sock.connect((SERVER_NAME, SERVER_PORT))
         print('connected...')
         
         while True:
-            s = input('Text:')
-            buf = s.encode()
-            client_sock.send(buf)
-            if s == 'quit':
+            text = input('Bir yazı giriniz:')
+            result = client_sock.send(text.encode())
+            if text == 'quit':
                 break
-        
+            buf = client_sock.recv(4096)
+            rev_text = buf.decode()
+            print(rev_text)
         client_sock.shutdown(socket.SHUT_RDWR)
+except OSError as e:
+    print(e)
     
-except OSError as oserr:
-    print(oserr)
-  
 #------------------------------------------------------------------------------------------------------------------------------------
-    Bir soket nesnesinden o soketi gören bir dosya nesnesi elde edilebilir. Burada "o soketi gören" demekle o dosys nesnesi ile 
-    işlem yaptığımızda aslında ilgili soketle işlem yapılacağını" anlatmak istiyoruz. Soketten dosya nesnesi elde etmek için socket 
-    sınıfının makefile isimli metodu kullanılmaktadır. makefile metodunun ilgili parametreleri built-in opeb fonksiyonun parametreleri gibidir. 
+    Bir soket nesnesinden o soketi gören bir dosya nesnesi elde edilebilir. Burada "o soketi gören" demekle o dosya nesnesi ile işlem 
+    yaptığımızda aslında ilgili soketle işlem yapılacağını" anlatmak istiyoruz. Soketten dosya nesnesi elde etmek için socket sınıfının 
+    makefile isimli metodu kullanılmaktadır. makefile metodunun ilgili parametreleri built-in open fonksiyonun parametreleri gibidir. 
     makefile metodu tek parametreyle çağrılabilir. Bu durumda bu paramere dosyanın açış modunu belirtir. Ancak buradaki açış mode yalnızca
     şu modlardan biri olabilir: 'r', 'w', 'rb', 'wb'. Bu dosya nesnesi yine close edilmelidir. Ancak bu nesnenin close edilmesi socket nesnesinin
     close edilmesi anlamına gelmez. socket nesnesi ayrıca close edilmelidir. Benzer biçimde socket nesnesinin close edilmesi de bu dosya nesnesinin
     close edileceği anlamına gelmemektedir. 
 
     Pekiyi soket için makefile ile dosya nesnesi oluşturmanın ne faydası vardır? İşte normal soket ile send ve recv metotlarını kullanabiliriz. Bu
-    metotlar da byte nesneleriyle çalılmaktadır. Halbuki dosya nesnelerinin kullanımı daha esnektir. Ancak Python'da text dosyalar (yani 'b' belirtilmeden 
+    metotlar da byte nesneleriyle çalışmaktadır. Halbuki dosya nesnelerinin kullanımı daha esnektir. Ancak Python'da text dosyalar (yani 'b' belirtilmeden 
     oluşturulan dosyaların) tamponlu çalışmaktadır. Bunun için dosya nesnesinin üzerinde flush uygulanması gerekebilmektedir. 
 
-    Aslında dosyalarda biz dosyaya birşeyler yazdığımızda bu yazılanlar önce bir tamponda biriktirilip tampon dolduğunda asıl hedefe aktarılmaktadır. Bunun nedeni
-    gerçek disk işlemlerinin azaltılmak istenmesidir. İşte makefile ile sokete ilişkin bir dosya nesnesi elde ettiğimizde bu dosya nesnesi ile write
-    yapıldığında yazılmak istenenler arka planda hemen send işlemi ile soketten gönderilmemektedir. Bunlar önce bir tamponda biriktirilip tampon dolduğunda
-    gönderilmektedir. Biz yazılanların hemen gönderilmesini istiyorsak write işleminden sonra flush metodunu çağırmalıyız. flush işlemi tamponda birikenleri
-    o anda hedefe aktarmaktadır. Tabii dosya nesnesi kapatıldığında kapatma sırasında da flush işlemi yapılmaktadır. 
+    Aslında dosyalarda biz dosyaya birşeyler yazdığımızda bu yazılanlar önce bir tamponda biriktirilip tampon dolduğunda asıl hedefe aktarılmaktadır. 
+    Bunun nedeni gerçek disk işlemlerinin azaltılmak istenmesidir. İşte makefile ile sokete ilişkin bir dosya nesnesi elde ettiğimizde bu dosya 
+    nesnesi ile write yapıldığında yazılmak istenenler arka planda hemen send işlemi ile soketten gönderilmemektedir. Bunlar önce bir tamponda 
+    biriktirilip tampon dolduğunda gönderilmektedir. Biz yazılanların hemen gönderilmesini istiyorsak write işleminden sonra flush metodunu 
+    çağırmalıyız. flush işlemi tamponda birikenleri o anda hedefe aktarmaktadır. Tabii dosya nesnesi kapatıldığında kapatma sırasında da flush 
+    işlemi yapılmaktadır. 
 
     Aşağıdaki örnekte makefile metodu ile dosya işlemleri yolu ile bir client/server örneği verilmiştir. 
 #------------------------------------------------------------------------------------------------------------------------------------
@@ -30152,78 +30161,77 @@ except OSError as oserr:
 import socket
 import threading
 
-PORT_NO = 50500
+PORT_NO = 55555
 
 def main():
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as server_sock:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
             server_sock.bind(('', PORT_NO))
             server_sock.listen(8)
-        
-            print('waiting for connection...')
+            
             while True:
-                (client_sock, (client_addr, client_port)) = server_sock.accept()
-                print(f'connected with client {client_addr}:{client_port}...')
-                
-                client_thread = threading.Thread(target=client_thread_proc,  args=(client_sock, client_addr, client_port))
-                client_thread.start()
-                
-    except OSError as oserr:
-        print(oserr)
-            
-def client_thread_proc(client_sock, client_addr, client_port):
-    try:
-        with client_sock:
-            with client_sock.makefile('r') as fr:
-                while True:
-                    s = fr.readline()[:-1]
-                    if s == '':
-                        break
-                    if s == 'quit':
-                        break
-                    print(f'{s} ({client_addr}:{client_port})')
-                        
-            client_sock.shutdown(socket.SHUT_RDWR)
-            
-        print(f'{client_addr}:{client_port} disconnected...')
-    except OSError as oserr:
-        print(oserr)
+                print('waiting for client...')
+                client_sock, (client_addr, client_port) = server_sock.accept()
+                print(f'connected with client {client_addr}:{client_port}')
+                thread = threading.Thread(target=client_proc, args=(client_sock, client_addr, client_port))
+                thread.start()           
+                            
+    except OSError as e:
+        print(e)
 
+def client_proc(sock, addr, port):
+    try:
+        with sock:
+            with sock.makefile('w') as fw, sock.makefile('r') as fr:
+                while True:
+                    text = fr.readline()[:-1]
+                    print(f'recieved message from client {addr}:{port} ==> "{text}"')
+                    if text == 'quit':
+                        break
+                    fw.write(text[::-1] + '\n')
+                    fw.flush()
+                sock.shutdown(socket.SHUT_RDWR)
+    except OSError as e:
+        print(e)
+        
 main()
 
 # client.py
 
 import socket
 
-PORT_NO = 50500
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
 
 try:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as client_sock:
-        client_sock.connect(('localhost', PORT_NO))
-        print('connected...')
-        with client_sock.makefile('w') as fw:
-            while True:
-                s = input('Text:')
-                fw.write(s + '\n')
-                fw.flush()
-                if s == 'quit':
-                    break
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
         
-        client_sock.shutdown(socket.SHUT_RDWR)
-    
-except OSError as oserr:
-    print(oserr)
-    
+            client_sock.connect((SERVER_NAME, SERVER_PORT))
+            print('connected...')
+            with client_sock.makefile('w') as fw, client_sock.makefile('r') as fr:
+                while True:
+                    text = input('Bir yazı giriniz:')
+                    fw.write(text + '\n')
+                    fw.flush()
+                    if text == 'quit':
+                        break
+                    response = fr.readline()
+                    print(response, end='')
+                client_sock.shutdown(socket.SHUT_RDWR)
+except OSError as e:
+    print(e)   
+        
 #------------------------------------------------------------------------------------------------------------------------------------
     Bir soketten bir satır (yani '\n' görene kadar) bilgi okumak sanıldığı kadar kolay değildir. Çünkü TCP protokolünde bir tarafın 
     send ile gönderdiği bilgileri diğer tarafın tek bir recv ile okuması garanti değildir. Bunlar karşı tarafa farklı TCP paketleri ile
-    iletilebilir. Dolayısıyla okuyan taraf bir staırlık bilgiyi birden fazlarecv ile okumak zorunda kalabilir. Aynı zamanda gönderen taraf birden fazla
-    satırı peş peşe gönderdiğinde alan taraf da bunu tek bir recv ile alabilir. Yani TCP'de birden fazla send işlemi tek bir recv ile de alınabilir. 
-    İşte bu nedenlerden dolayı bir satırlık bilginin etkin bir biçimde okunması o kadar kolay değildir. recv metodu ile her defasında birer karakter soketten
-    okunarak bir satır bilgi okunabilir. Ancak bu da yavaş bir yöntemdir dolayısıyla etkin değildir. 
+    iletilebilir. Dolayısıyla okuyan taraf bir satırlık bilgiyi birden fazla recv ile okumak zorunda kalabilir. Aynı zamanda gönderen 
+    taraf da birden fazla  satırı peş peşe gönderdiğinde alan taraf da bunu tek bir recv ile alabilir. Yani TCP'de birden fazla send 
+    işlemi tek bir recv ile de alınabilmektedir. İşte bu nedenlerden dolayı bir satırlık bilginin etkin bir biçimde okunması o kadar 
+    kolay değildir. recv metodu ile her defasında birer karakter soketten okunarak bir satır bilgi okunabilir. Ancak bu da yavaş 
+    bir yöntemdir dolayısıyla etkin değildir. 
     
-    İşte makefile metodu sayesinde soketten bir satır okumak oldukça kolaydır. Çünkü makefile bize bir dosya nesnesi verir. O dosya nesnesi üzerinde
-    readline uyguladığımızda zaten bu okuma işlemi readline tarafından etkin bir biçimde yapılmaktadır. 
+    İşte makefile metodu sayesinde soketten bir satır okumak oldukça kolaydır. Çünkü makefile bize bir dosya nesnesi verir. O dosya 
+    nesnesi üzerinde readline metodunu uyguladığımızda zaten bu okuma işlemi readline tarafından etkin bir biçimde yapılmaktadır. 
 #------------------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------------------
@@ -30234,20 +30242,20 @@ except OSError as oserr:
     2) Binary biçimde (yani byte düzeyinde)
 
     Byte düzeyinde (binary) mesajlaşma daha hızlıdır. Ancak daha zordur ve manuel işlemler için (örneğin telnet gibi bir ortam) uygun olmayabilir. 
-    Bu nedenle metinsel mesajlaşmalar daha çok tercih edilmektedir. Gerçekten de IP ailesinin uygulama katmanındaki POP3, SMTP, FTP, TELNET, HTTP gibi 
-    protokoller hep metinsel biçimde mesajlaşma uygularlar. Biz de kursumuzda metinsel mesajlaşmalara ilişkin örnekler vereceğiz. Metinselsel mesajlaşmalarda
-    client ve server birbirlerine "bir satırlık" yazılar göndererek mesajlaşmayı sağlarlar. Gerçekten de IP ailesinin uygulama katmanındaki protokoller bölebirer satırlık
-    bilgilerin gönderilip alınması biçiminde mesajlaşmaktadır. 
-
+    Bu nedenle yazısal mesajlaşmalar daha çok tercih edilmektedir. Gerçekten de IP ailesinin uygulama katmanındaki POP3, SMTP, FTP, TELNET, HTTP gibi 
+    protokolleri hep metinsel biçimde mesajlaşma uygulamaktadır. Biz de kursumuzda metinsel mesajlaşmalara ilişkin örnekler vereceğiz. Metinselsel 
+    mesajlaşmalarda client ve server birbirlerine "bir satırlık" yazılar göndererek mesajlaşmayı sağlarlar. Gerçekten de IP ailesinin uygulama 
+    katmanındaki protokoller böyle birer satırlık bilgilerin gönderilip alınması biçiminde mesajlaşma uygulamaktadır. 
 #------------------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------------------
     Dört işlem yapan çok client'lı bir client/server uygulama yazmak isteyelim. Bu tür uygulamalar yazılırken önce bir "uygualama katmanı 
-    protokolün tasarlanması" gerekir. Yani client server'a nasıl istekte bulunacak server bunu nasıl yanıtlayacak? Burada mesajlaşmalar nasıl olacak?
-    Bunların belirlenmesi gerekir. Server'lardan herkesin hizme alamaması için bir user name/password mekanizmasının oluşturulması ve login işleminin
-    yapılması gerekebilir. TCP/IP'de conenct ve accept işlemleriyle fiziksel bağlantı sağlanmaktadır. Client'ın server'a fiziksel biçimde bağlanması ondan
-    hizmet alabileceği anlamına gelmez. Server'ın hizmet vermesi için bir "login" mekanizmasının mantıksal biçimde oluşturulması gerekebilir. Bu login mekanizmasına
-    "mantıksal bağlanma" da diyebiliriz. Böyle bir uygulamanın protokolü aşağıdaki gibi olabilir:
+    protokolünün tasarlanması" gerekir. Yani client server'a nasıl istekte bulunacak, server bunu nasıl yanıtlayacak? Burada mesajlaşmalar 
+    nasıl olacak? Bunların belirlenmesi gerekir. Server'lardan herkesin hizmet alamaması için bir user name/password mekanizmasının oluşturulması 
+    ve login işleminin yapılması gerekebilir. TCP/IP'de connect ve accept işlemleriyle fiziksel bağlantı sağlanmaktadır. Client'ın server'a 
+    fiziksel biçimde bağlanması ondan hizmet alabileceği anlamına gelmez. Server'ın hizmet vermesi için bir "login" mekanizmasının mantıksal 
+    biçimde oluşturulması gerekebilir. Bu login mekanizmasına "mantıksal bağlanma" da diyebiliriz. Böyle bir uygulamanın protokolü aşağıdaki 
+    gibi olabilir:
 
     Client'tan Server'a Gönderilen Mesajlar:
 
@@ -30264,6 +30272,38 @@ except OSError as oserr:
     "ERROR <text>\n
     "RESULT <value>\n"
     "LOGOUT_ACCEPTED\n"
+
+    Genel olarak bu tür protokollerde client'ın her mesajına karşılık server da client'a bir mesaj yollamaktadır. Eğer client geçersiz bir 
+    mesaj yollarsa ya da client'ın isteği yerine getirilemezse bizim bu örneğimizde server client'a "ERROR hama mesajı\n" biçiminde yazı 
+    gönderecwktir. Bu tür protokollerde mesajlaşmalar yazısal düzeyde yapılıyor olsa da gönderilen bu yazılar parse edilerek istenen bilgi
+    yazıların içerisinden alınmaktadır. 
+
+    Aşağıda böyle bir program örneği verilmiştir. Örneğimizde client'lara ilişkin "user name ve password" bilgileri "credentials.csv"
+    dosyası içerisinde tutulmaktadır. Örnek bir "credentials.csv" dosyası şöyle olabilir:
+
+    kaan,maviay
+    ali,ankara
+    ahmet,istanbul
+
+    Bu CSV dosyasında her satırda ilgili kullanıcının kullanıcı adı ve parolası bulunmaktadır. Tabii uygulamada aslında kullanıcıların 
+    parolalarının kendisi doğrudan dosyalarda bu biçimde saklanmamaktadır. Kullanıcıların parolaları şifrelendikten sonra onların şifrelenmiş
+    halleri dosyalarda saklanmaktadır. Kullanıcı login olurken kullanıcının parolası yeniden şifrelenir ve iki şifrelenmiş parolanın eşitliğine
+    bakılır. Yani normal olarak aslında server'larda bizim parolalarımızın tutulmaması gerekir. 
+
+    Client program çalıştırıldığında önce klavyeden kullanıcı adı ve parola bilgisini alır. Sonra bunu doğrularsa client server'a mantıksal 
+    olarak bağlanmış olur. Bundan sonra artık client bir komut satırında "3 + 4" gini "5 - 3" gibi dörtişelmli bir yazı yazar. Client
+    program bu yazıyı uygun bir mesaja dönüştürerek server programa yollar. Server program da client programa sonucu yollar. Client program
+    bu sonuç mesajını parse ederek sonucu ekrana yazdırır. Örneğin:
+
+    User name:kaan
+    Password:maviay
+    Logged in...
+    Calc>3 + 2
+    5.0
+    Calc>5 * 3
+    15.0
+    Calc>logout
+    Logged out
 
 #------------------------------------------------------------------------------------------------------------------------------------
 
@@ -30345,7 +30385,7 @@ def login_proc(fr, fw):
     password = users.get(params[1])
     if  password and password == params[2]:
         fwrite(fw, 'LOGIN_ACCEPTED\n')
-        print('{params[0]} logged in...')
+        print(f'{params[0]} logged in...')
         return True
     else:
         fwrite(fw, 'ERROR Invalid user name or password\n')
@@ -30566,63 +30606,75 @@ main()
 
 #------------------------------------------------------------------------------------------------------------------------------------
     Çok client'lı server uygulamalarında aynı anda birden fazla client ile konuşabilmek için thread modelinin dışında çeşitli modeller
-    kullanılabilmektedir. Bu tür modeller şüphesiz işletim sisteminin detseği ile sağlanmaktadır. Genel olarak işletim sistemlerinde buna 
-    benzer IO modellerine "asenkron IO (asynchronous IO) modelleri" denilmektedir. Asenkron IO modelleri işletim sisteminden işletim sistemine değişebilmektedir. Çünkü bu konu işletim sisteminin çekirdek gerçekleştirimi ile
-    ilgilidir. Bazı modeller birden fazla işletim sisteminde onların çekirdekleri tarafından gerçekleştirilmiş durumdadır.
+    kullanılabilmektedir. Biz yukarıdaki çok client'lı server örneklerimizde thread modelini ya da benzer proses modelini kullandık. 
+    Ancak thread ya da proses modelleri basit olmasına karşın bazı handikapları olan modellerdir. Çok sayıda client söz konusu olduğunda 
+    çok fazla sayıda threda ya da prosesin yaratılması ciddi bir sistem kaynağının harcanmasına yol açmaktadır. Bu nedenle client sayısının
+    fazla olduğu durumlarda thread ve proses modelleri uygun model olmaktan çıkmaktadır.  
+    
+    Bu tür modeller şüphesiz işletim sisteminin desteği ile sağlanmaktadır. Genel olarak işletim sistemlerinde buna benzer IO modellerine 
+    "asenkron IO (asynchronous IO) ve multiplexed IO modelleri" denilmektedir. Asenkron IO modelleri işletim sisteminden işletim sistemine 
+    değişebilmektedir. Çünkü bu konu işletim sisteminin çekirdek gerçekleştirimi ile ilgilidir. Bazı modeller birden fazla işletim sisteminde 
+    onların çekirdekleri tarafından gerçekleştirilmiş durumdadır.
 
     - Windows işletim sisteminde asenkron IO işlemleri için "Overlapped IO", "IO Completion Port" ve "select" modelleri kullanılabilmektedir. 
     Bunlar arasında Windows için en uygun ve en etkin model "IO Completion Port" denilen modeldir. 
 
-    - Linux sistemlerinde "select" modeli, "poll" modeli, "epoll" ve "asyncio" IO modelleri kullanılabilmektedir. Ancak en yüksek performans
-    "epoll" modelinde elde edilmektedir. 
+    - Linux sistemlerinde "select" modeli, "poll" modeli, "epoll"  modeli ve "asyncio" IO modeli kullanılabilmektedir. Ancak en yüksek performans
+    "epoll" modelinden elde edilmektedir. 
 
     - FreeBSD sistemlerinde "select", "poll" ve "asyncio" modellerinin yanı sıra "kqueue" modeli de kullanılmaktadır. 
 
-    - Mac OS X sistemlerinde de "select" modeli, "poll" modeli ve "kqueue" modelleri kullanılabilmektedir. 
+    - macOS sistemlerinde de "select" modeli, "poll" modeli ve "kqueue" modelleri kullanılabilmektedir. 
 
-    Python stnadart kütüphanesinde "select" isimli modülde yukarıdaki asenkron IO modellerinin hepsi bulunmaktadır. Ancak bu modller
+    Python standart kütüphanesinde "select" isimli modülde yukarıdaki asenkron IO modellerinin hepsi bulunmaktadır. Ancak bu modeller
     işletim sisteminin çekirdeğine bağlı olduğu için her işletim sisteminde kullanılamamaktadır. Örneğin epoll modeli Linux için uygun bir
-    model olmasına karşın bu model Windows sistemlerinde ya da Mac OS X sistemlerinde bulunmamktadır. Bu bakımdan nispeten en taşınabilir olan
+    model olmasına karşın bu model Windows sistemlerinde ya da macOS sistemlerinde bulunmamaktadır. Bu bakımdan nispeten en taşınabilir olan
     model "select" modelidir. Ancak Python standart kütüphanesinde bu aşağı seviyeli asenkron IO modellerini kullanan daha yüksek seviyeli
-    "selectors" denilen bir modül de vardır. Biz kursumuzda önce aşağı seviyeli "select" modeli hakkında bilgi vereceğiz. Sonra da yüksek seviyeli
-    "selector" modelini tanıtacağız. En sonunda da aynı işlemlerin Python diline eklenen "coroutine" mekanizmasıyla gerçekleştirilmesini göreceğiz. 
+    "selectors" denilen bir modül de vardır. Biz kursumuzda önce aşağı seviyeli "select" modeli hakkında bilgi vereceğiz. Sonra da yüksek 
+    seviyeli "selectors" modelini tanıtacağız. En sonunda da aynı işlemlerin Python diline eklenen "coroutine" mekanizmasıyla gerçekleştirilmesini 
+    göreceğiz. 
+#------------------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------------------
+                                                66. Ders 26/08/2023 - Cumartesi
 #------------------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------------------
     select modelinde işletim sisteminin "select" isimli bir sistem fonksiyonu bulunur. Programcı bu select fonksiyonuna birden fazla
     soketi verir. (Tabii aslında select fonksiyonu yalnızca soketlerle değil pek çok aygıtla çalışabilmektedir.) select fonksiyonu 
-    bu soketleri izler. eğer soketlerde hiçbir IO olayı yoksa select thread'i blokede bekletir. Ancak soketlerden en az birinde bir olay 
-    olmuşsa (buradaki olay tipik olarak sokete okunacak bilgi gelmesidir) select blokeyi çözer. Böylece select fonksiyonu geri döner. 
-    Programcı da hangi soketlerde hangi olayların olduğunu sorgular ve artık bloke oluşmadan işlemlerini yapar. Sonra yeniden select
-    fonksiyonu çağırır. Yani select fonksiyonu bir döngü içerisinde çağrılmaktadır. Buradaki olay "okuma", "yazma" ya da "exception"
-    işlemleri olabilir. 
+    bu soketleri izler. Eğer soketlerde hiçbir IO olayı yoksa select fonksiyonu thread'i blokede bekletir. Ancak soketlerden en az 
+    birinde bir olay olmuşsa (buradaki olay tipik olarak sokete okunacak bilgi gelmesidir) select blokeyi çözer. Böylece select 
+    fonksiyonu geri döner. Programcı da hangi soketlerde hangi olayların olduğunu sorgular ve artık bloke oluşmadan işlemlerini yapar. 
+    Sonra yeniden select fonksiyonunu çağırır. Yani select fonksiyonu bir döngü içerisinde çağrılmaktadır. Buradaki olay "okuma", 
+    "yazma" ya da "exception" işlemleri olabilir. 
 
     Python'da select modeli şöyle kullanılır:
 
     1) Bir döngü içerisinde select modülündeki select fonksiyonu çağrılır. Bu fonksiyon tipik olarak üç parametre almaktadır. 
-    Fonksiyonun birinci parametresi okuma olayı için izlenecek soket listesini, ikinci parametresi olayı için izlenecek soket listesini, 
+    Fonksiyonun birinci parametresi okuma olayı için izlenecek soket listesini, ikinci parametresi yazma olayı için izlenecek soket listesini, 
     üçüncü parametre ise exception oluşturan eylemler için izlenecek soket listesini belirtir. Genellikle programcılar yalnızca okuma işlemiyle
-    ilgilenirler. Dolayısıyla yalnızca fonksiyonun birinci parametresi için liste oluştururlar. İkinci ve üçüncü parametreye
-    boş liste girerler. (Tabii burada liste demekle herhangi dolaşılabilir bir nesneyi kastediyoruz.) Fonksiyona isteğe bağlı olarak
-    bir zamanaşımı değeri de son parametrede girilebilmektedir. Bu durumda fonksiyon soketlerin hiçbirinde bir olay gerçekleşmemişse en kötü 
-    olasılıkla burada belirtilen saniye kadar sonra blokeyi çözer. Bu parametrenin girilmemesi zaman aşımı uygulanmayacağı anlamına gelmektedir. 
-    Fonksiyonun birinci parametresindeki listeye dinleme soketi (pasif soket) de eklenebilir. Bu durumda bu sokete bir bağlantı isteği 
-    geldiğinde bu sankşi bir okuma olayı gibi değerlendirilmektedir. Programcılar işin başında bu okuma listesine dinleme soketini 
-    yerleşltirmektedir. select fonksiyonu üçlü bir demete geri dönmektedir. Demetin birinci elemanı okuma olayı gerçekleşen soketlerin 
-    listesini bize verir. Örneğin biz select fonksiyonun birinci parametresine 50 tane soket vermiş olalım. Bunların iki tanesine bilgi gemiş olsun.
-    Şimdi select geri döndürdüğü demetin ilk elemanında bu iki soketi bulunduracaktır. Yani biz bunlardan okuma yaparsak bloke oluşmayacaktır.
-    Demetin ikinci elemanı yazma olayı gerçekleşen soketleri, üçüncü elemanı ise exception olayı gerçekleşen soketleri belirten listelerdir. 
-    Tabii programcı yazma ve exception için zaten boş liste vermişse demetin bu elemanları da boş liste olacaktır. 
+    ilgilenirler. Dolayısıyla yalnızca fonksiyonun birinci parametresi için liste oluştururlar. İkinci ve üçüncü parametreye boş liste girerler. 
+    (Biz burada liste demekle herhangi dolaşılabilir bir nesneyi kastediyoruz. Fonksiyonun bu üç parametresine askında herhangi bir) dolaşılabilir 
+    nesne girilebilmektedir.) Fonksiyona isteğe bağlı olarak bir zaman aşımı değeri de son parametrede girilebilmektedir.  Bu durumda fonksiyon 
+    soketlerin hiçbirinde bir olay gerçekleşmemişse en kötü olasılıkla burada belirtilen saniye kadar sonra blokeyi çözer. Bu parametrenin 
+    girilmemesi zaman aşımı uygulanmayacağı anlamına gelmektedir. Fonksiyonun birinci parametresindeki listeye dinleme soketi (pasif soket) de 
+    eklenebilir. Bu durumda bu sokete bir bağlantı isteği geldiğinde bu istek sanki bir okuma olayı gibi değerlendirilmektedir. Programcılar 
+    genellikle işin başında bu okuma listesine dinleme soketini yerleştirmektedir. select fonksiyonu üçlü bir demete geri dönmektedir. 
+    Demetin birinci elemanı okuma olayı gerçekleşen soketlerin listesini bize verir. Örneğin biz select fonksiyonun birinci parametresine 
+    50 tane soket vermiş olalım. Bunların iki tanesine bilgi gemiş olsun. Şimdi select fonksiyonunun geri döndürdüğü demetin ilk elemanında 
+    bu iki soketi bulunacaktır. Yani biz bunlardan okuma yapmak istersek artık bloke oluşmayacaktır. Demetin ikinci elemanı yazma olayı 
+    gerçekleşen soketleri, üçüncü elemanı ise exception olayı gerçekleşen soketleri belirten listelerdir. Tabii programcı yazma ve exception 
+    için zaten boş liste vermişse demetin bu elemanları da boş liste olacaktır. 
 
-    2) select fonksiyonu geri döndüğünde programcı olaya yol açan soketleri gözden geçirerek uygun işlemleri yapmalıdır. Örbneğin tipik olarak
-    biz soketleri okuma amaçlı izletiyorsak bilgi gelen soketler üzerinde recv fonksiyonunu uygulamalıyız. Burada önemli bir nokta dinleme soketi üzerinde 
-    okuma olayının gerçekleşip gerçekleşmediğinin sorgulanmasıdır. Eğer dinleme soketi üzerinde okuma olayı gerçekleşmişse bu durum
-    yeni bir client'ın bağlanma isteğini belirtmektedir. Bu durumda bizim dinleme soketi ile accept işlemini yapmamız ve bağlantıdan 
+    2) select fonksiyonu geri döndüğünde programcı olaya yol açan soketleri gözden geçirerek uygun işlemleri yapmalıdır. Örneğin tipik olarak
+    biz soketleri okuma amaçlı izliyorsak bilgi gelen soketler üzerinde recv fonksiyonunu uygulamalıyız. Burada önemli bir nokta dinleme 
+    soketi üzerinde okuma olayının gerçekleşip gerçekleşmediğinin sorgulanmasıdır. Eğer dinleme soketi üzerinde okuma olayı gerçekleşmişse 
+    bu durum yeni bir client'ın bağlanma isteğini belirtmektedir. Bu durumda bizim dinleme soketi ile accept işlemini yapmamız ve bağlantıdan 
     elde ettiğimiz soketi yeniden okuma olay listesine dahil etmemiz gerekir. 
 
-    3) Bir client soketi kapattığında bu durum select fonksiyonunda sanki okuma olayı gibi ele alınmaktadır. 
-    Tabii bu soketten okuma yapıldığında artık 0 byte okunacak yani recv metodu boş bytes nesnesi ile geri dönecektir. Programcının da 
-    bu durumda artık o soketi okuma listesinden çıkarması gerekir.  
+    3) Bir client soketi kapattığında bu durum select fonksiyonunda sanki okuma olayı gibi ele alınmaktadır. Tabii bu soketten okuma 
+    yapıldığında artık 0 byte okunacak yani recv metodu boş bytes nesnesi ile geri dönecektir. Programcının da bu durumda artık o soketi 
+    okuma listesinden çıkarması gerekir.  
 
     Aşağıdaki örnekte aşağı seviyeli select modelinin örnek uygulaması görülmektedir. 
 #------------------------------------------------------------------------------------------------------------------------------------
@@ -30632,83 +30684,152 @@ main()
 import socket
 import select
 
-PORT_NO = 50500
+PORT_NO = 55555
 
 def main():
-
-    read_list = []
+    read_socks = []
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as server_sock:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
             server_sock.bind(('', PORT_NO))
             server_sock.listen(8)
-            read_list.append(server_sock)
-        
-            print('waiting for connection...')
-            while True:
-               read_occured_list, _, _  = select.select(read_list, [], [])
-               for sock in read_occured_list:
-                   if sock == server_sock:
-                       client_sock, (client_addr, client_port) = sock.accept()
-                       read_list.append(client_sock)
-                   else:
-                       b = sock.recv(1000)
-                       if b:
-                           s = b.decode()
-                           print(s)  
-                       else:
-                           sock.close()
-                           read_list.remove(sock)
-        
-    except OSError as oserr:
-        print(oserr)
             
-
+            read_socks.append(server_sock)
+            
+            print('waiting for client...')
+            while True:
+                rsocks, _, _ = select.select(read_socks, [], [])
+                
+                for sock in rsocks:
+                    if sock == server_sock:
+                         client_sock, (client_addr, client_port) = server_sock.accept()
+                         print(f'connected with client {client_addr}:{client_port}')
+                         read_socks.append(client_sock)
+                    else:
+                        text = sock.recv(1024).decode()
+                        if len(text):
+                            print(text)
+                        else:
+                            read_socks.remove(sock)
+                            sock.close()
+    except OSError as e:
+        print(e)
+        
 main()
 
 # client.py 
 
 import socket
 
-PORT_NO = 50500
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
 
 try:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as client_sock:
-        client_sock.connect(('localhost', PORT_NO))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
+        client_sock.connect((SERVER_NAME, SERVER_PORT))
         print('connected...')
         while True:
-            s = input('Text:')
-            if s == 'quit':
+            text = input('Enter text:')
+            client_sock.send(text.encode())
+            if text == 'quit':
                 break
-            b = s.encode()
-            client_sock.send(b)
         client_sock.shutdown(socket.SHUT_RDWR)
+        
+except OSError as e:
+    print(e)
     
-except OSError as oserr:
-    print(oserr)
+#------------------------------------------------------------------------------------------------------------------------------------
+    Yukarıda verdiğimiz örnekte recv işlemi uyguladığımızda okunan byte'ların hangi client'a ilişkin olduğunu bilmemekteyiz. Bu tür 
+    durumlarda bağlanana her client için bir veri yapısı oluşturulup onun bilgileri o veri yapısında saklanabilir. Burada bilgilerin 
+    bir sözlük içerisinde bulundurulması uygun olacaktır. Sözlüğün anahtarı soket nesnesinden oluşturulur. (Sokey nesneleri hashable 
+    nesnelerdir.) Bunların değerleri de client bilgilerinden oluşturulabilir. 
+
+    Aşağıdaki örnekte bir client bağlantısı sağlandığında client'ın bilgileri sözlüğe ikili demet biçiminde yerleştirilmiş ve sonra
+    sözlükten alınarak kullanılmıştır.
+#------------------------------------------------------------------------------------------------------------------------------------
+
+# server
+
+import socket
+import select
+
+PORT_NO = 55555
+
+def main():
+    read_socks = {}
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+            server_sock.bind(('', PORT_NO))
+            server_sock.listen(8)
+            
+            read_socks[server_sock] = (None, None)
+            
+            print('waiting for client...')
+            while True:
+                rsocks, _, _ = select.select(read_socks, [], [])
+                
+                for sock in rsocks:
+                    if sock == server_sock:
+                         client_sock, (client_addr, client_port) = server_sock.accept()
+                         print(f'connected with client {client_addr}:{client_port}')
+                         read_socks[client_sock] = (client_addr, client_port)
+                    else:
+                        text = sock.recv(1024).decode()
+                        if len(text):
+                            client_addr, client_port = read_socks[sock]
+                            print(f'"{text}" read from client {client_addr}:{client_port}')
+                        else:
+                            read_socks.pop(sock)
+                            sock.close()
+    except OSError as e:
+        print(e)
+        
+main()
+
+# client.py
+
+import socket
+
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
+
+try:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
+        client_sock.connect((SERVER_NAME, SERVER_PORT))
+        print('connected...')
+        while True:
+            text = input('Enter text:')
+            client_sock.send(text.encode())
+            if text == 'quit':
+                break
+        client_sock.shutdown(socket.SHUT_RDWR)
+        
+except OSError as e:
+    print(e)
 
 #------------------------------------------------------------------------------------------------------------------------------------
-    Python'da asenkron sokegt işlemlerini kolaylaştırmak için  kendi içlerinde "select", "poll", "epoll", "kqueue" gibi asenkron
-    IO modellerini kullanan ancak ilgili olay gerçekleştiğinde programcının belirlediği fonksiyonu çağıran daha yüksek sevityeli ismine "selectors" 
-    denilen bir modül de bulundurulmuştur. Bu modüldeki SelectSelector arka planda "select" modelini, EPollSelector arka planda "epoll" 
-    modelini, PollSelector arka planda "poll" modelini ve KqueueSelector ise arka planda "kqueue" modelini kullanmaktadır. Bir de modülde 
-    DefaultSelector isimli sınıf vardır. Bu sınıf ilgili sistemdeki en uygun selektör nesnesini seçip kullanmaktadır. Bütün Selector 
-    sınıflarının kullanım biçimleri aynıdır. Biz burada en uygun seçenek olan DefaultSelctor nesnesini kullanacağız. 
-    Selector nesnelerinin kullanımı oldukça şöyledir:
+    Python'da asenkron soket işlemlerini kolaylaştırmak için  kendi içlerinde "select", "poll", "epoll", "kqueue" gibi asenkron IO 
+    modellerini kullanan ancak ilgili olay gerçekleştiğinde programcının belirlediği fonksiyonu çağıran daha yüksek seviyeli ismine 
+    "selectors" denilen bir modül de bulundurulmuştur. Bu modüldeki SelectSelector arka planda "select" modelini, EPollSelector arka planda 
+    "epoll" modelini, PollSelector arka planda "poll" modelini ve KqueueSelector ise arka planda "kqueue" modelini kullanmaktadır. Ayrıca 
+    bir de modülde DefaultSelector isimli bir sınıf da vardır. Bu sınıf ilgili sistemdeki en uygun selektör nesnesini seçip kullanmaktadır. 
+    Bütün Selector sınıflarının kullanım biçimleri aynıdır. Biz burada en uygun seçenek olan DefaultSelctor nesnesini kullanacağız. 
+    Selector nesnelerinin kullanımı şöyledir:
 
     1) Programcı önce selector nesnesini yaratır. Yukarıda da belirttiğimiz gibi bu nesne tipik olarak DefaultSelector sınıfıyla yaratılmalıdır.
     
     2) Programcı bir soket üzerinde olay gerçekleştiğinde çağrılmasını istediği fonksiyonu selector sınıflarının register metotları ile register ettirir.
     Selector sınıflarının register metotları üç parametreden oluşmaktadır. Birinci parametre izlenecek soketi belirtir. İkinci parametre izlenecek 
-    olayı belirtmektedir. Bu olay selectors.EVET_READ, selectors.EVENT_WRITE ya da selectors.EVENT_READ|EVENT_WRITE biçiminde girilebilir. 
-    Yine dinleme soketi üzerinde okuma olayının takip edilmesi aslında yeni bağlantı isteklerinin takip edilmesi anlamına gelmektedir. register metodunun son parametresi
-    üçüncü maddede açıklanacak olan select metodunun geri dönmesiyle elde edilecek bilgiyi belirtmektedir. Bu bilgi bir fonksiyon olabilir ya da
-    başka bir nesne olabilir. 
+    olayı belirtmektedir. Bu olay selectors.EVENT_READ, selectors.EVENT_WRITE ya da selectors.EVENT_READ|selectors.EVENT_WRITE biçiminde girilebilir. 
+    Yine dinleme soketi üzerinde okuma olayının takip edilmesi aslında yeni bağlantı isteklerinin takip edilmesi anlamına gelmektedir. register 
+    metodunun üçüncü parametresi sonraki maddede açıklanacak olan Selector nesnesiyle çağrılan select metodunun geri döndürdüğü SelectorKey isimli sınıf 
+    nesnesinin data örnek özniteliğinden elde edeilecek olan bilgiyi belirtir. Bu üçüncü parametre bir fonksiyon olarak da girilebilir. Bu parametre default 
+    olarak None değerini almaktadır. 
     
-    3) Programcının bir döngü içerisinde selector nesnesinin select metodunu çağırması gerekir. Bu metot yine eğer register ettirilen soketlerin hiçbirinde
-    bir olay gerçekleşmemişse blokede thread'i bekletir. Ancak bu soketlerden en az birinde bir olay gerçekleşmişse geri dönmektedir. 
+    3) Programcının bir döngü içerisinde selector nesnesinin select metodunu çağırması gerekir. Bu metot yine eğer register ettirilen soketlerin 
+    hiçbirinde bir olay gerçekleşmemişse blokede thread'i bekletir. Ancak bu soketlerden en az birinde bir olay gerçekleşmişse geri dönmektedir. 
     select metodunun geri dönüş değeri iki elemanlı demetlerden oluşan bir listedir. Bu listede gerçekleşen olaylara ilişkin bilgiler bulunmaktadır.
-    Listeyi oluşturan demetlerin birinci elemanı SelectorKey isimli bir sınıf türünden bir nesnesidir. Bu demetin ikinci elemanı ise mask elemanıdır. Bu mask elemanı 
-    bize olayın türünü vermektedir. Bu olay selectors.EVENT_READ, selectors.EVENT_WRITE ya da bunların her ikisi olabilir. 
+    Listeyi oluşturan demetlerin birinci elemanı SelectorKey isimli bir sınıf türünden bir nesnesidir. Bu demetin ikinci elemanı ise mask elemanıdır. 
+    Bu mask elemanı bize olayın türünü vermektedir. Bu olay selectors.EVENT_READ, selectors.EVENT_WRITE ya da bunların her ikisi olabilir. 
     Programcı bu listeyi dolaşıp SelectorKey nesnelerinin içerisinden şu bilgileri alabilir:
 
     fileobj: Bu örnek özniteliği register fonksiyonuna girilen izlenecek soketi belirtmektedir.
@@ -30718,11 +30839,13 @@ except OSError as oserr:
     Programcı accept işleminden elde ettiği soketi de yine register ettirerek izlemeye dahil etmelidir.
 
     4) Bir client soketin kapatılması yine bir okuma işlemi gibi değerlendirilmektedir. Bu durumda programcının client soketi kapatıp
-    onu izlemeden çıkartması gerekir. İzlemeden çıkartma işlemi için unregister metodu kullanılmaktadır. Bu metodun parametresi izlemeden 
-    çıkartılacak soketi belirtir. 
+    onu izlemeden çıkartması gerekir. İzlemeden çıkartma işlemi için Selector sınıflarının unregister metotlareı kullanılmaktadır. 
+    Bu metodun parametresi izlemeden çıkartılacak soketi belirtir. 
 
     5) İşlem bitince selector nesnesi sınıfın close metoduyla kapatılır. Selector sınıfları da bağlam yönetim protokolünü desteklemektedir.
 
+    Aşağıdaki Selector sınıflarının kullanımına bir örnek verilmiştir. Burada register fonksiyonun üçüncü parametresini hiç kullanmadık.
+    İzleyen paragrafta bu üçüncü parametrenin naısl kullanılacağına yönelik bir örnek de verilmektedir. 
 #------------------------------------------------------------------------------------------------------------------------------------
 
 # server.py 
@@ -30730,64 +30853,132 @@ except OSError as oserr:
 import socket
 import selectors
 
-PORT_NO = 50500
+PORT_NO = 55555
 
-selector = selectors.DefaultSelector()
-    
 def main():
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as server_sock:
-            server_sock.bind(('', PORT_NO))
-            server_sock.listen(8)
-            selector.register(server_sock, selectors.EVENT_READ, accept_proc)
-
-            with selector:
-                print('waiting for connection...')
+        with selectors.DefaultSelector() as selector:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+                server_sock.bind(('', PORT_NO))
+                server_sock.listen(8)
+                
+                selector.register(server_sock, selectors.EVENT_READ)
+                  
+                print('waiting for client...')
                 while True:
                     result = selector.select()
                     for key, mask in result:
-                        key.data(key)
-                     
-    except OSError as oserr:
-        print(oserr)
+                        if key.fileobj == server_sock:
+                            client_sock, (client_addr, client_port) = server_sock.accept()
+                            print(f'connected with client {client_addr}:{client_port}')
+                            selector.register(client_sock, selectors.EVENT_READ)
+                        else:
+                            text = key.fileobj.recv(1024).decode()
+                            if text:
+                                print(text)
+                            else:               
+                                key.fileobj.close()
+                                selector.unregister(key.fileobj)
+                                       
+    except OSError as e:
+        print(e)
         
-def accept_proc(key):
-    client_sock, (client_addr, client_port) = key.fileobj.accept()
-    print(f'Connected client: {client_addr} at port {client_port}')
-    selector.register(client_sock, selectors.EVENT_READ, recv_proc)
-    
-def recv_proc(key):
-    b = key.fileobj.recv(1000)
-    if b:
-        s = b.decode()
-        print(s)
-    else:
-        selector.unregister(key.fileobj)
-        key.fileobj.close()
+def accept_proc():
+    pass
+        
+main()
 
+# client.py 
+
+import socket
+
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
+
+try:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
+        client_sock.connect((SERVER_NAME, SERVER_PORT))
+        print('connected...')
+        while True:
+            text = input('Enter text:')
+            client_sock.send(text.encode())
+            if text == 'quit':
+                break
+        client_sock.shutdown(socket.SHUT_RDWR)
+        
+except OSError as e:
+    print(e)
+    
+#------------------------------------------------------------------------------------------------------------------------------------
+    Aşağıda Selector sınıfının register metodunda üçüncü parametre olarak fonksiyon kullanılmasına örnek verilmiştir. Tabii bu fonksiyonların
+    Selector nesnelerine erişmesi gerekmektedir. Bunun bir yolu Selector nesnesini global düzeyde oluşturmak olabilir. Diğer bir yolu ise 
+    Selector nesnelerini de bu fonksiyonlara parametre olarak aktarmaktır. Biz aşağıdaki örnekte Selecor nesnelerini ve SelectorKey nesnelerini
+    bu fonksiyonlara parametre olarak geçirdik.
+#------------------------------------------------------------------------------------------------------------------------------------
+
+# server.py 
+import socket
+import selectors
+
+PORT_NO = 55555
+
+def main():
+    try:
+        with selectors.DefaultSelector() as selector:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+                server_sock.bind(('', PORT_NO))
+                server_sock.listen(8)
+                
+                selector.register(server_sock, selectors.EVENT_READ, accept_proc)
+                  
+                print('waiting for client...')
+                while True:
+                    result = selector.select()
+                    for key, mask in result:
+                        key.data(selector, key)
+                            
+    except OSError as e:
+        print(e)
+        
+def accept_proc(selector, key):
+        client_sock, (client_addr, client_port) = key.fileobj.accept()
+        print(f'connected with client {client_addr}:{client_port}')
+        selector.register(client_sock, selectors.EVENT_READ, read_proc)
+                        
+def read_proc(selector, key):
+    text = key.fileobj.recv(1024).decode()
+    if text:
+        print(text)
+    else:
+        print('closed')
+        key.fileobj.close()
+        selector.unregister(key.fileobj)
+        
 main()
 
 # client.py
 
-import socket
+iimport socket
 
-PORT_NO = 50500
+SERVER_NAME = 'localhost'
+SERVER_PORT = 55555
 
 try:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP) as client_sock:
-        client_sock.connect(('localhost', PORT_NO))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_sock:
+        client_sock.connect((SERVER_NAME, SERVER_PORT))
         print('connected...')
         while True:
-            s = input('Text:')
-            if s == 'quit':
+            text = input('Enter text:')
+            client_sock.send(text.encode())
+            if text == 'quit':
                 break
-            b = s.encode()
-            client_sock.send(b)
         client_sock.shutdown(socket.SHUT_RDWR)
+        
+except OSError as e:
+    print(e)
+
+<BURADA KALDIK>
     
-except OSError as oserr:
-    print(oserr)
- 
 #------------------------------------------------------------------------------------------------------------------------------------
     POP3 (Post Office Protocol Version 3) IP protokol ailesinin uygulama katmanındaki en eski protokollerinden biridir. Protocol 
     RFC-1939 dokğmanında açıklanmıştır. Biz bir adrese e-posta gönderdiğimizde o e-postanın içeriği e-posta sunucunun bir posta kutusunda (yani veritabanında) 
