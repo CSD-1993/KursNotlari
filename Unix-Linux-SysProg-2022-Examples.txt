@@ -16433,7 +16433,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                                46.Ders 16/04/2023 - Cumartesi
+                                                    46.Ders 16/04/2023 - Cumartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -30332,10 +30332,12 @@ void exit_sys(const char *msg)
     tutmamaktadır. Daha önceden de belirttiğimiz gibi default durumda zaten bir sinyal oluştuğunda sinyal fonksiyonu çalıştığı 
     sürece aynı numaralı sinyal otomatik bloke edilmekte sinyal fonksiyonu sonlandığında blokesi açılmaktaydı. 
 
-    UNIX türevi işletim sistemleri her proses için bir "signal mask" kümesi tutmaktadır. Prosesin "signal mask" kümesi prosesin
-    o anda hangi sinyallere bloke edilmiş olduğunu belirtmektedir. Thread'ler konusu UNIX sistemlerine sokulduğunda ayrıca 
-    her thread için de bir "signal mask" kümesi söz konusu olmuştur. Yani bir sinyalin preosesin "signal mask" kümesine eklenmesi 
-    o sinyalin o proseste bloke edilmesi anlamına gelmektedir. 
+    Thread'ler öncesinde UNIX türevi işletim sistemleri her proses için bir "signal mask" kümesi tutuluyordu. Prosesin 
+    "signal mask" kümesi prosesin o anda hangi sinyallere bloke edilmiş olduğunu belirtmekteydi. Thread'ler konusu UNIX sistemlerine 
+    sokulduğunda ayrıca  her thread için de bir "signal mask" kümesi söz konusu olmuştur. Maalesef sigprocmask fonksiyonunun 
+    çok thread'li uygulamalardaki dazvranışı tenımlanmamıştır. POSIX standartları fonksiyonun çok thread'li uygulamalardaki davranışını 
+    "unspecified" olarak belirtmektedir. Linux sistemlerinde sigprocmask yalnızca fonksiyonun çağrıldığı thread'in signal mask kümesini 
+    değiştirmektedir. 
 
     Prosesin "signal mask" kümesini değiştirmek için yani onu belli sinyallere bloke etmek ya da blokesini açmak için sigprocmask
     isimli POSIX fonksiyonu kullanılmamktadır. Fonksiyonun prototipi şöyledir:
@@ -30528,10 +30530,10 @@ void exit_sys(const char *msg)
 /*--------------------------------------------------------------------------------------------------------------------------
     Sinyaller ilk UNIX sistemlerinden beri var olan bir kavramdır. Ancak Thread'ler 90'ların ortalarında işletim sistemlerinde
     yaygınlaşmaya başlamıştır. Dolayısıyla sinyaller eskiden yalnızca proseslerle ilgili bir kavramdı. Yani sinyaller proseslere
-    gönderiliyordu. Zaten eskiden proseslerin tek bir akışı vardı. Ancak 90'lı yılların ortaalarına doğru thread'ler işletim 
-    sistemlerine eklenince sinyaller konusu üzerinde therad'lere yönelik bazı revizyonlar yapılmıştır. 
+    gönderiliyordu. Zaten eskiden proseslerin tek bir akışı (yani thread'i) vardı. Ancak 90'lı yılların ortaalarına doğru thread'ler 
+    işletim sistemlerine eklenince sinyaller konusu üzerinde therad'lere yönelik bazı revizyonlar yapılmıştır. 
     
-    Daha önceden de belirttiğimiz gibi sinyaller kill fonksiyonu ile ya da diğer kanaklar yolu ile proseslere gönderilmektedir. 
+    Daha önceden de belirttiğimiz gibi sinyaller kill fonksiyonu ile ya da diğer kaynaklar yolu ile proseslere gönderilmektedir. 
     Prosesin hangi thread'inin sinyal fonksiyonunu çaıştıracağı POSIX standartlarında işletim sisteminin isteğine bırakılmıştır. 
 
     Prosesin bir thread'i kendi prosesinin başka bir thread'ine sinyal gönderebilir. (Tabii bir proses başka bir prosesin 
@@ -30622,9 +30624,9 @@ void exit_sys_errno(const char *msg, int eno)
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Belli bir thread de sinyallere bloke edilebilir. Yani UNIX/Linux sistemlerinde prosesin signal mask kümesiin yanı sıra
-    her thread'in de signal mask kümesi vardır. Belli bir thread'i belli sinyallere bloke etmek için tamamen sigprocmask 
-    fonksiyonunun benzeri olan pthread_sigmask fonksiyonu kullanılmaktadır:
+    Belli bir thread de sinyallere bloke edilebilir. UNIX türevi sistemlerde her thread'in de ayrıca bir signal mask kümesi 
+    vardır. Belli bir thread'i belli sinyallere bloke etmek için tamamen sigprocmask fonksiyonunun benzeri olan pthread_sigmask 
+    fonksiyonu kullanılmaktadır:
 
     #include <signal.h>
 
@@ -30635,12 +30637,17 @@ void exit_sys_errno(const char *msg, int eno)
     değerine geri dönmektedir. 
 
     Belli bir thread'in belli sinyallere bloke edilmesinin bazı gerekçeleri söz konusu olabilmektedir. Örneğin thread kesilmemesi
-    gereken işlemler yapıyor olabilir. Bu durumda thread sinyallere bloke edilebilir. Tabii bir therad bir sinyale bloke edildiğinde 
-    artık o sinyal oluştuğunda sinyal fonksiyonu prosesin diğer thread'lerindne biri tarafındna çalıştırılacaktır. Bazen programcılar
+    gereken işlemler yapıyor olabilir. Bu durumda thread sinyallere bloke edilebilir. Tabii bir thread bir sinyale bloke edildiğinde 
+    artık o sinyal oluştuğunda sinyal fonksiyonu prosesin diğer thread'lerindne biri tarafından çalıştırılacaktır. Bazen programcılar
     ilgili sinyalin prosesin belli bir thread'i tarafından işlenmesini sağlamak için diğer thread'leri ilgili sinyale bloke edip
     yalnızca tek bir thread bloke eişlemini yapmazlar. Sinyal oluştuğunda mecburen işletim sistemi de sinyal fonksiyonunu o thread 
     ile çağırır. Tabii prosesin tüm thread'leri ilgili sinyale bloke edilirse bu durum sanki prosesin o sinyale bloke edilmesi 
     gibi bir etki oluşturacaktır. 
+
+    UNIX/Linux sistemlerinde bir thread yaratıldığında thread'in signal mask kümesi onu yaratan thread'ten (üst thread'ten) 
+    aktarılmaktadır. Yani örneğin bu sistemlerde biz prosesin ana thread'inde bir sinyali bloke edersek bu durumda bu sinyal
+    ana thread tarafından yaratılan tüm thread'lerde bloke edilmiş olacaktır. Benzer biçimde fork işlemi sırasında da yaratılan 
+    alt prosesin thread'inin signal mask kümesi onu yaratan üst prosesten aktarılacaktır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -30776,12 +30783,27 @@ void exit_sys(const char *msg)
     fonksiyonlar (async-signal-safe functions)" ismiyle belirtmektedir. POSIX standartlarında tüm asenkron sinyal güvenli 
     fonksiyonların listesi "System Interfaces/General Information/Signal Concepts" başlığında listelenmektedir. Bu listede 
     belirtilen asenkron sinyal güvenli fonksiyonlar gönül rahatlığı ile sinyal fonksiyonlarında ve dışarıda aynı anda kullanılabilirler. 
-    Pekiyi daha önce görmüş olduğumuz thread güvenli sonu _r ile biten fonksiyonlar da sinyal güvenli midir? Evet her thread 
-    güvenli fonksiyon aynı zamanda asenkron sinyal güvenlidir. Ancak bunun tersi geçerli değildir. Yani her asenkron sinyal 
-    güvenli fonksiyon aynı zamanda thread güvenli değildir. Anımsanacağı gibi POSIX standartlarında _r'li versyonu olmayan bütün
-    POSIX fonksiyonlarının hemen hepsi zaten thread güvenlidir. Örneğin bu listeye bakıldığında printf ve benzeri fonksiyonların
-    asenkron sinyal güvenli olmadığı görülmektedir. Ancak biz prgramlarımızda hem sinyal fonksiyonlarının ieçrisinde hem de dışarıda 
-    bu fonksiyonları kullanmıştık. Aslında böyle bir kullanım tanımsız davranışa yol açabilmektedir. 
+    Pekiyi daha önce görmüş olduğumuz thread güvenli sonu _r ile biten fonksiyonlar da sinyal güvenli midir? Genel olarak asenkron sinyal 
+    güvenli fonksiyonlar thread güvenli fonksiyonlardan biraz daha katı bir güvenliliğe sahiptir. Çünkü asenkron sinyal güvenli
+    fonksiyonlar aynı thread akışı tarafından iç içe çağrılabilecek fonksiyonlardır. Bu nedenle genel olarak asenkron sinyal güvenli
+    fonksiyonlar thread güvenli olma eğilimindeyken asenkron thread güvenli fonksiyonlar asenkron sinyal güvenli olmayabilmektedir.
+
+    Aslında bir fonksiyon thread güvenli olduğu halde sinyal güvenli olmayabilir, sinyal güvenli olduğu halde thread güvenli 
+    olmayabilir. Örneğin bir fonksiyon TSD (Thread Specific Data) kullanılarak thread güvenli hale getirilmiş olabilir. Ancak
+    sinyaller iç içe aynı thread tarafından işletilebileceği için bu fonksiyon sinyal güvenli olmayabilir. Yukarıda da belirttiğimiz 
+    gibi her zaman olmasa da çoğu zaman sinyal güvenli fonksiyonlar aynı zamanda thread güvenli olma eğilimindedir. 
+
+    Fonksiyonun asenkron sinyal güvenli (async-signal-safe) olması genel olarak "reentrant" olması anlamına gelmektedir. Reentrant
+    terimi sinyal yoluyla ya da başka yolla (örneğin kesme yoluyla) bir fonksiyonunun iç içe çalışabilirliği anlamına gelmektedir. 
+    Dolayısıyla reentrant fonksiyonlar aynı zamanda asenkron sinyal güvenli fonksiyonlardır. Ancak POSIX standartlarında "reentrant" 
+    terimi kullanılmamıştır. Reentrant ve thread safe kavramları arasındaki benzerlikler ve farklılıklar için Wikipedia'daki 
+    aşağıdaki sayfayı gözden geçirebilirsiniz:
+
+    https://en.wikipedia.org/wiki/Reentrancy_(computing)
+    
+    Biz örneklerimizde sinyal fonksiyonu içerisinde printf fonksiyonunu kullanmıştık. POSIX standartlarına göre C'nin tüm dosya 
+    fonksiyonları thread güvenli olduğu halde sinyal güvenli değildir. Biz örneklerimizde kullanmış olsak da printf gibi <stdio.h>
+    fonksiyonlarını sşinyal fonksiyonlarından kullanmayınız.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -30895,9 +30917,48 @@ void exit_sys(const char *msg)
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
+    Bir sinyal fonksiyonu yazılırken global bir değişkenin kullanılması gerekebilmektedir. Bu durumda tıpkı çok thread'li 
+    uygulamalarda olduğu gibi bu global değişkenin kararsız durumda kalması engellenmelidir. Tabii bu tür durumlarda nesneyi
+    mutex gibi mekanizmalarla korumak uygun değildir. Çünkü bu mekanizmalar farklı thread'ler tarafından erişimde koruma 
+    amaçlı oluşturulmuştur. Eğer bir sinyal fonksiyonu global bir değişkeni kullanacaksa onu atomik bir biriçimde kullanmalıdır.
+    Örneğin:
+
+    int g_count;
+    ....
+
+    void signal_handler(int sig)
+    {
+        ...
+        ++g_count;      ---> Bu artırma tek bir makine komutu ile yapılmak zorunda dğeil
+        ...
+    }
+
+    Bu örnekte akış ++g_count işleminde kesilip yeniden aynı fonksiyon çalıştırılırsa g_count değeri uygun biçimde artırılamayabilcektir.
+    İşte bu tür durumlarda mutex gibi nesneler bize bir koruma sağlamamaktadır. Burada yapılması gereken bu artırımın atomik bir 
+    biçimde yani tek bir makine komutuyla yapılmasıdır. İşte C99 ile birlikte C'ye sig_atomic_t türü de eklenmiştir. Bu türden 
+    global bir nesne tanımlandığında bu nesne üzerinde atama işlemleri atomik bir biçimde yapılmaktadır. Ancak ++, -- gibi 
+    operatör işlemlerinin atomik yapılmasının bir garantisi yoktur. 
+    
+    Thread'ler konusunda gördüğümüz gcc ve clang derleyicilerinin built-in fonksiyonlarını bu amaçla kullanabilirsiniz. 
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
     Bir prosese SIGSTOP isimli gönderilirse proses durdurulur ve SIGCONT sinyali gönderilene kadar suspend biçimde kalır. 
     SIGSTOP sinyali tıpkı SIGKILL sinyalinde olduğu gibi bloke edilememekte ve ignore edilememektedir. Ayrıca SIGSTOP sinyali
-    için sinyal fonksiyonu da set edilememektedir. 
+    için sinyal fonksiyonu da set edilememektedir. SIGCONT sinyali için ise sinyal fonksiyonu set edilebilir ve bu sinyal bloke 
+    edilebilir. SIGCONT sinyali bloke edilşmiş olsa bile ya da SIGCONT sintali için sinyal fonksiyonu set edilmiş olsa bile durdurulmuş
+    proses yine çalışmaya devam ettrilmektedir. 
+
+    Aslında prosesi durduran tek sinyal SIGSTOP sinyali değildir. Terminal ile ilgili SIGTTIN ve SIGTTOU sinyalleri de prosesin 
+    durdurulmasına yol açabilmektedir. Biz bunlara "stop sinyalleri (stop signals)" diyeceğiz. 
+
+    Stop sinyalleriyle durdurulmuş bir prosese başka bir sinyal gönderilse bile proses bunu işlemez. Bu durumda sinyal askıda 
+    (pending durumda) kalır. Askıdaki sinyaller prosese SIGCONT sinyali gönderilip proses yeniden çalıştırıldıktan sonra (resume 
+    edildikten sonra) prosese teslim edilmektedir. Ancak SIGCONT sinyali sonrasında askında stop sinyalleri prosese teslim
+    edilmez, doğrudan atılır. Benzer biçimde prosese bir stop sinyali teslim edildiğinde eğer o anda askıda olan SIGCONT sinyali 
+    varsa bu sinyal doğrudan atılmaktadır. Durdurulmuş bir proses her zaman SIGKILL sinyali ile sonlandırılabilmektedir. SIGKILL 
+    sinyali ile sonlandırma için prosesin SIGCONT sinyali ile çalışmaya devam ettirilmesine gerek yoktur.
 
     Aşağıdaki programı bir terminalden çalıştırıp diğer bir terminalden ona kill komutuyla SIGSTOP ve SIGCONT sinyallerini 
     göndererek durumu gözlemleyiniz.
@@ -31017,7 +31078,7 @@ void exit_sys(const char *msg)
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    wait fonksiyonu ile alt proses beeklenirken wait fonksiyonu bu beklemeden ancak alt proses sonlandığında çıkabilmektedir. 
+    wait fonksiyonu ile alt proses beklenirken wait fonksiyonu bu beklemeden ancak alt proses sonlandığında çıkabilmektedir. 
     Alt prosesin sonlanması da iki biçimde olabilmektedir: Normal olarak exit ya da _exit fonksiyonlarının çağrılmasıyla ve 
     bir sinyal dolayısıyla. Anımsanacağı gibi biz wait fonksiyonunun status parametresini WIFEXITED ve WIFSIGNALED makrolarına 
     sokarak bu durumu anlayabiliyorduk. Zaten anımasanacağı gibi prosesin exit kodunun olulabilmesi için onun normal biçimde
@@ -31032,64 +31093,771 @@ void exit_sys(const char *msg)
     bunun yerine Ctrl+Bacspace tuşları da kullanılabilmektedir) kullanmaktır. Bu durumda terminal aygıt sürücüsü oturumun ön plan 
     proses grubuna SIGQUIT isimli bir sinyal göndermektedir. SIGUIT sinyali prosese gönderildiğinde eğer proses bu sinyali ele 
     almamışsa proses sonlandırılır ve bir core dosyası oluşturulur. 
-
-    <BURADA KALDIK>                                 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+                                                77. Ders 02/09/2023 - Cumartesi                          
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    abort aynı zamanda bir standart C fonksiyonudur. abort fonksiyonu "abnormal" bir sonlandırma için kullanılmaktadır. Pekiyi 
+    programcı exit yerine neden programını abort fonksiyonuyla sonlandırmak istesin? İşte bazen içinde bulunulan duruma bağlı
+    olarak normal sonlandırma bile yapılamayabilir. Yani exit fonksiyonunun başarılı bir biçimde işlem yapması bile içinde 
+    bulunulan duruma göre mümkün olmayabilir. abort fonksiyonu UNIX/Linux sistemlerinde aslında kendi prosesi üzerinde SIGABRT 
+    sinyalinin oluşmasına yol açmaktadır. SIGABRT sinyalinin default eylemi de prosesin sonlandırılması ve core dosyasının 
+    oluşturulmasıdır. Yani abort fonksiyonu bir core dosyasının oluşumuna yol açtığı için abnormal sonlanmanın debugger altında 
+    incelenmesine de olanak sağlamaktadır. SIGABRT sinyali için sinyal fonksiyonu set edilmiş olsa bile sinyal fonksiyonunun çalışması
+    bittikten sonra yine de proses sonlandırılmaktadır. SIGABRT sinyali bloke edilmişse ve ignore edilmişse bile proses yine de
+    sonlandırılmaktadır. SIGABRT sinyali ile prosesin sonlandırılmasının engellenmesinin tek yolu sinyal fonksiyonu içerisinde 
+    "long jump" işlemi uygulamaktır. "long jump" konusu izleyen paragraflarda ele alınacaktır. abort fonksiyonunun prototipi şöyledir:
+
+    #include <stdlib.h>
+
+    void abort(void);
+
+    Aşağıdaki örnekte SIGABRT sinyali için bir sinyal fonksiyonu set edilmiştir. Ancak proses yine de sonlanacak ve core dosyası 
+    oluşturulacaktır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+
+void sigabrt_handler(int sig);
+void exit_sys(const char *msg);
+
+int main(void)
+{
+	struct sigaction sa;
+		
+	sa.sa_handler = sigabrt_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+
+	if (sigaction(SIGABRT, &sa, NULL) == -1)
+		exit_sys("sigaction");
+
+	for (int i = 0; i < 60; ++i) {
+		printf("%d\n", i);
+		sleep(1);
+		if (i == 5)
+			abort();
+	}
+
+    return 0;    
+}
+
+void sigabrt_handler(int sig)
+{
+	printf("SIGABRT handler\n");
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    UNIX/Linux sistemlerinde birkaç sinyal işlemci tarafından oluşturulan içsel kesmelerle işletim sistemi tarafından prosese
+    gönderilmektedir. Bunların en çok karşılaşılanı SIGSEGV isimli sinyaldir. Bu sinyal tahsis edilmemiş bir bellek bölgesine 
+    erişildiğinde işletim sistemi tarafından prosese gönderilmektedir. Bu sinyalin default eylemi prosesin sonlandırılmasıdır. 
+    Bu sinyal bloke edilemez ve ignore edilemez. Programcı nadiren bu sinyalde prosesinin sonlandırılmasını istemeyebilir. 
+    Bunun tek yolu "long jump" uygulamaktır. 
+
+    Linux sistemlerinde SIGSEGV sinyali için bir sinyal fonksiyonu set edildiyse sinyal fonksiyonu sinyal oluştuğunda bu sinyal
+    fonksiyonu çalıştırılır ancak sinyal fonksiyonunda proses exit ya da _exit fonksiyonuyla sonlandırılmamışsa aynı sinyal yeniden 
+    oluşturulmaktadır. Bazı UNIX türevi sistemlerde sinyal fonksiyonu sonlandığında proses işletim sistemi tarafından sonlandırılmaktadır.
+
+    Aşağıdaki örnekte tahsis edilmemiş bir bellek alanına erişilmesinden dolayı SIGSEGV sinyali oluşturulmuştur. Bu sinyal için 
+    sinyal fonksiyonu set edişmiş ancak sinyal fonksiyonuı içerisinde exit fonksiyonuyla proses sonlandırılmıştır. (Proses exit 
+    fonksiyonu ile sonlandırılmasaydı aynı sinyal oluşturulmaya devam edecekti.)
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+
+void sigsegv_handler(int sig);
+void exit_sys(const char *msg);
+
+int main(void)
+{
+	struct sigaction sa;
+	char *str = (char *)0x12345678;
+		
+	sa.sa_handler = sigsegv_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+
+	if (sigaction(SIGSEGV, &sa, NULL) == -1)
+		exit_sys("sigaction");
+
+	*str = 'x';
+
+	printf("unreachable code!..\n");
+
+    return 0;    
+}
+
+void sigsegv_handler(int sig)
+{
+	printf("SIGSEGV handler\n");
+
+	exit(EXIT_FAILURE);
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    SIGSEGV sinyali ile aynı biçimde ele alınan diğer sinyaller SIGBUS, SIGEMT, SIGFPE, SIGILL, SIGTRAP sinyalleridir. SIGFPE 
+    sinyali "floating point birimi (FPU)" tarafından oluşturulmaktadır. SIGILL sinyali user modda çalışan prosesin özel makine 
+    komutlarını kullanmasından dolayı oluşmaktadır (illegal instruction). Bu sinyallerin davranışı SIGSEGV sinyalinde olduğu 
+    gibidir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Diğer önemli bir sinyal de SIGCHLD isimli sinyaldir. Aslında biz bu sinyalden proses yaratımı kısmında bahsetmiştik. 
+    UNIX/Linux sistemlerinde bişr alt proses sonlanırken üst prosese SIGCHLD sinyalini göndermektedir. Eskiden bu sinyalin 
+    ismi SIGCLD biçimindeydi. Linux sistemlerinde her iki sinyal eşdeğerdir ve aynı numaraya sahiptir. Ancak POSIX standartlarında
+    SIGCLD sinyali yoktur. 
+
+    Anımsanacağı gibi wait fonksiyonları alt prosesi bekleyerek onu zombie olmaktan kurtarıyordu. İşte zombie proses oluşturmanın 
+    engellenmesinin bir yolu da SIGCHLD sinyalini kullanmaktır. Bu yöntemde üst proses alt prosesleri yaratmadan önce SIGCHLD 
+    sinyalini set eder. Böylece alt prosesler sonlandığında programcının set etmiş olduğu sinyal fonksiyonu çalışır. İşte bu 
+    sinyal fonksiyonu ieçrisinde programcı wait fonksiyonlarını uygular. SIGCHLD sinyalinin default eylemi sinyalin "ignore" 
+    edilmesidir. Yani biz bu sinyal için herhangi bir şey yapmamışsak alt proses bittiğinde yine bu sinyal oluşur. Ancak 
+    işletim sistemi tarafından sinyal "ignore" edilir. 
+
+    Zombie proses oluşumunun wait fonksiyonlarıyla beklemeden engellenmesi için yukarıda da belirttiğimiz gibi wait fonksiyonlarının
+    SIGCHLD sinyalinde uygulanması gerekmektedir. Ancak bu uygulama sırasında dikkat edilmesi gereken bir nokta verdır. SIGCHLD
+    sinyali geldiğinde sinyal fonksiyonu çalıştırılırken birden fazla alt proses de o sırada sonlanmış olabilir. Sinyaller 
+    biriktirilmediği için SIGCHLD için set edilen sinyal fonksiyonundan çıkıldığında askıda (pending) olan SIGCHLD sinyali 
+    prosese yalnızca bir kez gönderilecektir. Halbuki birden fazla alt proses o sırada sonlanmış olabilmektedir. İşte bu nedenle 
+    SIGCHLD sinyal fonksiyonunda wait işlemi bir kez değil bir döngü içerisinde uygulanmalıdır. Tabii wait işleminin blokeye 
+    yol açmaması için waitpid fonksiyonu son parametresinde WNOHANG değeriyle çağrılmalıdır. Örneğin:
+
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
+
+    Anımsanacağı gibi waitpid fonksiyonu eğer beklenecek hiç alt proses yoksa -1 değerine, WNOHANG değeri geçildiğinde ancak 
+    henüz bir alt proses sonlanmamışsa 0 değerine geri dönmektedir. Yukarıdaki döngüde sonlanan bütün altprosesler beklenmiş 
+    olacaktır. Tabii bu sırada errno değişkeni değer değiştirebileceği için fonksiyonun başında alınıp çıkışta yeniden set edilmesi 
+    uygun olur. Örneğin:
+    
+    void sigchld_handler(int sig)
+    {
+        int errno_temp = errno;
+
+        while (waitpid(-1, NULL, WNOHANG) > 0)
+            ;
+
+        errno = errno_temp;
+    }
+
+    waitpid fonksiyonu aslında başka nedenlerle de başarısız olabilir. Gerçi bu durumlar programcı her şeyi doğru yapmışsa 
+    söz konusu olmamaktadır. Ancak bazı programcılar waitpid başarısız olmuşsa ve başarısılık nedeni beklenecek alt prosesin 
+    olmayışından dolayı değilse bir hata rapor edebilmektedir. Bu durumda sinyal fonksiyonu şöle de oluşturulabilmektedir:
+
+    void sigchld_handler(int sig)
+    {
+        int errno_temp = errno;
+        int result;
+
+        while ((result = waitpid(-1, NULL, WNOHANG)) > 0)
+            ;
+
+        if (result  == -1 && errno != ECHILD)
+            exit_sys("waitpid");
+
+        errno = errno_temp;
+    }
+
+    Aşağıdaki örnekte üst proses 10 tane alt proses yaratmıştır. Bu alt proseslerin zombie oluşturmasını SIGCHLD sinyal 
+    fonksiyonunda yukarıda belirtildiği gibi engellemiştir. Bu programı çalıştırıp başka bir terminalden "ps -u" komutu 
+    ile zombie prosesin oluşmadığını gözlemleyiniz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+void sigchld_handler(int sig);
+void exit_sys(const char *msg);
+
+int main(void)
+{
+	struct sigaction sa;
+	pid_t pid;
+		
+	sa.sa_handler = sigchld_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+
+	if (sigaction(SIGCHLD, &sa, NULL) == -1)
+		exit_sys("sigaction");
+
+	for (int i = 0; i < 10; ++i) {
+
+		if ((pid = fork()) == -1)
+			exit_sys("fork");
+
+		if (pid == 0) {
+			printf("child process\n");
+			usleep(rand() % 500000);
+			_exit(EXIT_SUCCESS);
+		}
+	}
+
+	printf("Press ENTER to continue...\n");
+	getchar();
+
+    return 0;    
+}
+
+void sigchld_handler(int sig)
+{
+	int errno_temp = errno;
+	int result;
+
+	while ((result = waitpid(-1, NULL, WNOHANG)) > 0)
+		;
+
+	if (result == -1 && errno != ECHILD)
+		exit_sys("waitpid");
+
+	errno = errno_temp;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Zombie proses oluşumunun otomatik engellenmesinin bir yolu da SIGCHLD sinyalini "ignore" etmektedir. Her ne kadar bu sinyalin
+    default eylemi zaten "ignore" ise de bu sinyali açıkça "ignore" etmek başka bir anlama gelmektedir. SIGCHLD sinyali signal 
+    fonksiyonu ile ya da sigaction fonksiyonu ile ignore edilirse bu durumda işletim sistemi alt proses bittiğinde onun kaynaklarını
+    hemen boşaltır. Böylece zombie oluşumu engellenmiş olur. Tabii biz SIGCHLD sinyalini açıkça ignore edersek artık wait fonksiyonlarını
+    uygulayamayız. Ancak bu sinyalin ignore işlemi bazı alt proseslerin yaratılmasından sonra yapılırsa bu durumda bu alt proseslerin
+    otomatik kaynak boşaltımının yapılıp yapılmayacağı işletim sisteminden işletim sistemine farklılık gösterebilmektedir. Linux 
+    sistemlerinde daha önce yaratılmış olan alt prosesler için otomatik boşaltım yapılmamaktadır. Ayrıca POSIX standartlarında sigaction 
+    fonksiyonunda SA_NOCLDWAIT bayrağı bulundurulmuştur. Bu bayrak yalnızca SIGCHLD sinyali için kullanılabilir. Programcı isterse 
+    bu bayrak yoluyla da aynı şeyi yapabilir. Ancak  bu bayrak kullanıldığında hala SIGCHLD sinyali için set edilmiş olan sinyal 
+    fonksiyonunun çalıştırılıp çalıştırılmayacağı işletim sisteminden işletim sistemine farklılık gösterebilmektedir. Linux sistemlerinde
+    bu durumda sinyal fonksiyonu çalıştırılmaktadır. 
+
+    Aşağıdaki örnekte yine üst proses 10 tane alt proses yaratmıştır. Ancak üst proses bu işlemlerdne önce SIGCHLD sinyalini
+    sigaction fonksiyonu ile "ignore" etmiştir. Bu örneği çalıştırıp diğer bir terminalden alt zombie proses oluşmadığını 
+    gözlemleyiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+void sigchld_handler(int sig);
+void exit_sys(const char *msg);
+
+int main(void)
+{
+	struct sigaction sa;
+	pid_t pid;
+		
+	sa.sa_handler = SIG_IGN;
+	sigemptyset(&sa.sa_mask);		/* zaten bu elemana bakılmayacak */
+	sa.sa_flags = SA_RESTART;
+
+	if (sigaction(SIGCHLD, &sa, NULL) == -1)
+		exit_sys("sigaction");
+
+	for (int i = 0; i < 10; ++i) {
+
+		if ((pid = fork()) == -1)
+			exit_sys("fork");
+
+		if (pid == 0) {
+			printf("child process\n");
+			usleep(rand() % 500000);
+			_exit(EXIT_SUCCESS);
+		}
+	}
+
+	printf("Press ENTER to continue...\n");
+	getchar();
+
+    return 0;    
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    SIGUSR1 ve SIGUSR2 sinyalleri tamamen programcılar kendi uygulamalarında kullansınlar diye bulundurulmuştur. Örneğin bu 
+    sinyalleri biz proseslerarası haberleşme amacıyla kullanabiliriz. Bu sinyallerin default eylemi prosesin sonlandırılmasıdır.                                  
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+     POSIX'e 90 yılların ortalarında "realtime extensions" başlığı altında "gerçek zamanlı (realtime)" sinyal kavramı da eklenmiştir.
+    Gerçek zamanlı siya ayrı isimler verilmemiştir. Gerçek zamanlı sinyallarin numaraları [SIGRTMIN, SIGRTMAX] değerleri arasındadır.  
+    Gerçek zamanlı sinyallerin normal sinyallerden (ilk 32 sinyal numarası normal sinyaller için ayrılmıştır) farkları şunlardır:
+
+    1) Gerçek zamanlı sinyaller kuyruklanmaktadır. Yani birden fazla gerçek zamanlı aynı sinyal oluştuğunda kaç tane oluşmuş olduğu tutulur
+    ve o sayıda sinyal prosese teslim edilir. Halbuki normal sinyallerde bir sayaç (biriktirme) mekazizması yoktur. Örneğin biz bir 
+    sinyali bloke etmiş olalım. Bu arada o sinyale 10 kere oluşmuş olsun. Sinyalin blokesini açtığımızda bu askıdaki sinyalden 
+    yalnızca bir tane prosese teslim edilecektir. Halbuki gerçek zamanlı sinyallerde bu 10 kez oluşmuş sinyal için prosese 10 
+    sinyal teslim edilecektir.
+
+    2) Gerçek zamanlı sinyallerde bir bilgi de sinyale iliştirilebilmektedir. Bu bilgi ya int bir değer ya da bir gösterici olur.
+    Gösterici kullanıldığında bu göstericinin gösterdiği yerin hedef proseste anlamlı olması gerekmektedir. Yani bu adresin tipik olarak
+    paylaşılan bir bellek alanındaki (shared memory) bir adres olması gerekir. (Tabii paylaşılan bellek alanları farklı proseslerde 
+    farklı adreslere map (ya da attach) edilmiş olabilir. Bu durumda bu tür adreslerin göreli bir biçimde oluşturulması uygun olur.)
+
+    3) Gerçek zamanlı sinyallerde bir öncelik ilişkisi (priority) vardır. Birden fazla farklı numaralı gerçek zamanlı sinyal 
+    bloke edildiği durumda bloke açılınca bunların oluşma sırası küçük numaradan büyük numaraya göredir. Yani gerçek zamanlı sinyallerde
+    küçük numara yüksek öncelik belirtmektedir. Gerçi Linux kernel kodları incelendiğinde Linux'un da bu tür durumlarda düşük 
+    numaralı sinyali önce prosese teslim ettiği görülmektedir. Ancak ne olursa olsun bu UNIX türevi sistemlerde standart bir 
+    özellik değildir. 
+
+    Gerçek zamanlı sinyaller kill fonksiyonu ile değil sigqueue isimli fonksiyonla gönderilmektedir. Eğer bu sinyaller kill ile
+    gönderilirse kuyruklama yapılıp yapılmayacağı sistemden işletim sisteme değişebilmektedir. Linux gerçek zamanlı sinyaller için 
+    bu kuyruklamayı yapmaktadır. Ancak gerçek sinyaller kill POSIX fonksiyonu ile değil sigqueue POSIX fonksiyonuyla gönderilmelidir. 
+
+    Gerçek zamanlı sinyaller set edlirken sigaction fonksiyonu kullanılmak zorundadır. Gerçek zamanlı sinyaller dignal fonksiyonu ile 
+    set edilememktedir. Bu fonksiyonda sinyal fonksiyonunun adresi artık sigaction yapısının sa_handler elemanına değil sa_sigaction 
+    elemanına yerleştirilmelidir. Tabii fonksiyonun bunu anlaması için flags parametresine de ayrıca SA_SIGINFO eklenmelidir. 
+    (Yani başka bir deyişle fonkisyon sa_flags parametresinde SA_SIGINFO değerini gördüğünde artık sinyal fonksiyonu için 
+    yapının sa_sigaction elemanı bakar.) Örneğin:
+
+   	struct sigaction sa;
+    ...
+	sa.sa_sigaction = signal_handler; 
+	sigemptyset(&sa.sa_mask);		
+	sa.sa_flags = SA_RESTART|SA_SIGINFO;
+
+    sigaction yapısının sa_sigaction elemanına girilecek fonksiyonun parametrik yapısı aşağıdaki gibi olmak zorundadır:
+
+    void signal_handler(int signo, siginfo_t *info, void *context);
+
+    Aşağıdaki örnekte proc1 programı n tane gerçek zamanlı sinyal gönderir. proc2 ise bunları almaktadır. Programlaro çalıştırarak
+    kuyruklamanın yapıldığına dikkat ediniz. sigqueue fonksiyonunda iliştirilen sinyal bilgisi siginfo_t yapısının si_value
+    elemanından alınmaktadır. 
+
+    sigqueue fonksiyonuyla set edilen inyal fonksiyonundaki siginfo_t yapısının diğer elemanlarını ilgili dokimanlardan inceleyniz.
+    (Örneğin burada sinyali gönderen proses id'si, gerçek kullanıcı id'si, sinyalin neden gönderildiği gibi bilgiler vardır.)
+---------------------------------------------------------------------------------------------------------------------------*/
+                                                 
+/*--------------------------------------------------------------------------------------------------------------------------
+                                            78. Ders 03/09/2023 - Pazar
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Yukarıda da belirttiğimiz gibi gerçek zamanlı sinyallere farklı isimler karşı getirilmemiştir. Gerçek zamanlı sinyallerin
+    minimum numaraları SIGRTMIN ve maksimum numaraları SIGRTMAX sembolik sabitleriyle <signal.h> içerisinde define edilmiştir. 
+    Kursun yapıldığı Linux sistemlerinde SIGRTMIN değeri 34, SIGRTMAX değeri 64'tür. Aslında Linux'ta gerçek zamanlı sinyallerin 
+    numaraları 32'den başlamaktadır. Ancak pthread kütüphanesi bunların ilk iki tanesini kullandığı için SIGRTMIN değeri 34'tür. 
+    POSIX standartlarında bir sistemin minimum destekleyeceği gerçek zamanlı sinyal sayısı _POSIX_RTSIG_MAX sembolik sabitiyle 
+    belirtilmiştir. Bu sembolik sabit 8'dir. Yani UNIX türevi bir sistem en azından 8 gerçek zamanlı sinyali desteklemelidir. 
+    Tabii aslında bu minimum değerdir. Pek çok UNIX türevi sistem bundan daha fazla sayıda gerçek zamanlı sinyali desteklemektedir. 
+    Bir sistemdeki o sistem tarafından desteklenen gerçek zamanlı sinyallerin sayısı ayrıca <limits.h> içerisinde RTSIG_MAX sembolik 
+    sabitiyle belirtilmiştir. Yani RTSIG_MAX aslında _POSIX_RTSIG_MAX sembolik sabitinin ilgili sistemdeki gerçek değerini belirtmektediir. 
+    Ancak bu RTSIG_MAX sembolik sabiti aslında define edilmek zorunda değildir. Bu durumda bu değer sysconf fonksiyonuyla 	
+    argüman olarak _SC_RTSIG_MAX değeri geçirilmek suretiyle elde edilmektedir. (Sistem limitleri biraz karmaşık bir konudur.
+    Zaten bu konu ayrı bir başlık altında ileride ele alınacaktır.) Linux sistemlerinde <limits.h> dosyası içerisinde RTSIG_MAX değeri 
+    32 olarak define edilmiştir. 
+
+    Yukarıda da belirttiğimiz gibi gerçek zamanlı sinyaller kuyruklanmaktadır. Yani bir sinyal birden fazla kez oluştuğunda 
+    bunlar işletim sistemi tarafından bir kuyruk sisteminde saklanmaktadır. İşte bu kuyruğun uzunluğu da sistemden sisteme 
+    değişebilmektedir. POSIX standartları bir sistemin desteklemesi gereken en az kuyruk uzunluğunu _POSIX_SIGQUEUE_MAX
+    sembolik sabitiyle <limits.h> dosyası içerisinde belirtmiştir. Bu sembolik sabitin değeri 32'dir. Ancak buradaki kuyruk 
+    uzunluğu toplam kuyruk uzunluğudur. Yani her sinyal için ayrı bir kuyruk düşünülmemelidir. Belli bir sistemdeki gerçek değer 
+    SIGQUEUE_MAX sembolik sabitiyle <limits.h> içerisinde belirtilmektedir. Ancak bu sembolik sabit de define edilmek zorunda 
+    değildir. Linux sistemlerinde SIGQUEUE_MAX sembolik sabiti define edilmemiştir. Linux'ta bu değer eskiden 1024'tü. 
+    Sonra NPROC sayısına hizalnmıştır. Programcı bunu Linux sistemlerinde en az 1024 olarak düşünebilir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Gerçek zamanlı sinyalleri gönderebilmek için sigqueue isimli bir POSIX fonksiyonu kullanılmaktadır. Fonksiyonun prototipi
+    şöyledir:
+
+     #include <signal.h>
+
+    int sigqueue(pid_t pid, int signo, union sigval value);     
+
+    Fonksiyonun birinci parametresi sinyalin gönderileceği prosesin id değerini almaktadır. İkinci parametre gönderilecek sinyalin
+    numarasını belirtmektedir. Üçüncü parametre ise sinyale iliştirilecek ekstra bilgiyi belirtmektedir. sigval isimli 
+    birlik şöyle bildirilmiştir:
+
+    union sigval {
+        int   sival_int;
+        void *sival_ptr;
+    };    
+
+    Görüldüğü gibi sinyale int bir bilgi de bir adres bilgisi de iliştirilebilmektedir. Tabii sinyale adres bilgisi iliştirilecekse
+    bu adresin hedef proseste anlamlı olması gerekmektedir. Fonksiyon başarı durumunda 0 başarısızlık -1 değerine geri dönmektedir. 
+    Bir fonksiyona sigqueue fonksiyonuyla sinyal gönderebilmek için tıpkı kill fonksiyonunda olduğu gibi sinyal gönderen prosesin 
+    gerçek ya da etkin kullanıcı id'sinin hedef prosesin gerçek ya da saklı kullanıcı id'si aynı olması ya da prosesin uygun 
+    önceliğe sahip olması gerekmektedir.
+
+    sigqueue fonksiyonu ile gerçek zamanlı sinyallerin dışında normal sinyaller de gönderilebilmektedir. Ancak normal sinyaller
+    sigqueue fonksiyonu ile gönderilse bile kuyruklanmayacaktır. Benzer biçimde kill fonksiyonu ile gerçek zamanlı sinyaller de 
+    gönderilebilmektedir. Ancak kill fonksiyonunun bu kuyruklamaya yol açıp açmayacağı sistemden sisteme değişebilmektedir. 
+
+    sigqueue fonksiyonunda kill fonksiyonunda olduğu gibi "proses grubuna" sinyal gönderebilme gibi bir özellik yoktur. 
+
+    sigqueue fonksiyonu ile gönderilen sinyalin sigaction fonksiyonunda SA_SIGINFO bayrağı ile üç parametreli fonksiyon 
+    tarafından alınması da zorunlu değildir. Yani sigqueue fonksiyonu ile gönderilen sinyal normal sinyal fonksiyonu ile 
+    de elde edilebilir. Ancak bu durumda sinyale iliştirilen bilgi elde edilemecektir. Özetle:
+
+    1) sigqueue ile gerçek zamanlı sinyal gödnermek zorunda değiliz. Ancak gerçek zamanlı olmayan sinyaller kuyruklanmaz.
+    2) sigqueue ile gönderilen sinyalin üç parametreli sinyal fonksiyonuyla ele alınması da zorunlu değildir. Ancak bu 
+    durumda sinyale iliştirilen bilgi elde edilemektedir. 
+    3) Ters bir biçimde kill fonksiyonuyla gönderilen sinyal üç parametreli sinyal fonksiyonu ile de ele alınabilir. Tabii 
+    bu durumda bir değer elde edilmeyecektir.
+    4) kill fonksiyonuyla gerçek zamanlı sinyal gönderilebilir. Ancak bunun semantiği açıkça belirtilmemiştir. Yani gönderilen 
+    sinyal kuyrukllanmayabilir. kill fonksiyonuyla gerçek zamanlı sinyal gönderme çalışmayınız. 
+
+    kill kabuk komutu default durumda kill fonksiyonu kullanılarak yazılmıştır. Ancak kill kabuk komutunda -q <değer> seçeneği
+    kullanılırsa bu durumda kill kabuk komutu sigqueue fonksiyonunu kullanacaktır. 
+
+    Aşağıda bir prosese sigqueue fonksiyonu ile sinyal gönderen bir örnek program verilmiştir. Program üç komut satırı argümanı
+    almaktadır. Kullanımı şöyledir:
+
+    ./sq <process id> <sig> <value> 
+
+    Linux'ta ilk gerçek zamanlı sinyalin 34 numara olduğunu anımsayınız. Normal olarak gerçek zamanlı sinyaller sigqueue 
+    fonksiyonu ile gönderilirken numara SIGRTMIN + n biçiminde belirtilmektedir. Örneğin:
+
+    if (sigqueue(atoi(argv[1]), SIGRTMIN + 1, sv) == -1)
+        exit_sys("sigqueue");
+
+    Normal sinyallerin Linux'taki numaraları için signal(7) man sayfasına başvurabilirsiniz. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+/* sq.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+
+/* ./sq <process id> <sig> <value> */
+
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+    union sigval sv;
+
+	if (argc != 4) {
+        fprintf(stderr, "wrong number of arguments!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    sv.sival_int = atoi(argv[3]);
+    if (sigqueue(atoi(argv[1]), atoi(argv[2]), sv) == -1)
+        exit_sys("sigqueue");
+		
+    return 0;    
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    sigqueue fonksiyonu ile gönderilen sinyalin üç parametreli sinyal fonksiyonu ile alınması uygundur. Anımsanacağı gibi üç
+    parametreli sinyal fonksiyonunun parametrik yapısı şöyleydi:
+
+    void signal_handler(int signo, siginfo_t *info, void *context);
+
+    Burada fonksiyonun birinci parametresi yine sinyalin numarasını belirtir. İkinci parametresi ise oluşan sinyal hakkındaki
+    ayrıntılı bilgilerin bulunduğu siginfo_t türünden bir yapı nesnesinin adresini belirtir. Bu yapının pek çok elemanı vardır:
+
+    siginfo_t {
+        int      si_signo;     /* Signal number */
+        int      si_errno;     /* An errno value */
+        int      si_code;      /* Signal code */
+        int      si_trapno;    /* Trap number that caused
+                                    hardware-generated signal
+                                    (unused on most architectures) */
+        pid_t    si_pid;       /* Sending process ID */
+        uid_t    si_uid;       /* Real user ID of sending process */
+        int      si_status;    /* Exit value or signal */
+        clock_t  si_utime;     /* User time consumed */
+        clock_t  si_stime;     /* System time consumed */
+        union sigval si_value; /* Signal value */
+        int      si_int;       /* POSIX.1b signal */
+        void    *si_ptr;       /* POSIX.1b signal */
+        int      si_overrun;   /* Timer overrun count;
+                                    POSIX.1b timers */
+        int      si_timerid;   /* Timer ID; POSIX.1b timers */
+        void    *si_addr;      /* Memory location which caused fault */
+        long     si_band;      /* Band event (was int in
+                                    glibc 2.3.2 and earlier) */
+        int      si_fd;        /* File descriptor */
+        short    si_addr_lsb;  /* Least significant bit of address
+                                    (since Linux 2.6.32) */
+        void    *si_lower;     /* Lower bound when address violation
+                                    occurred (since Linux 3.19) */
+        void    *si_upper;     /* Upper bound when address violation
+                                    occurred (since Linux 3.19) */
+        int      si_pkey;      /* Protection key on PTE that caused
+                                    fault (since Linux 4.6) */
+        void    *si_call_addr; /* Address of system call instruction
+                                    (since Linux 3.5) */
+        int      si_syscall;   /* Number of attempted system call
+                                    (since Linux 3.5) */
+        unsigned int si_arch;  /* Architecture of attempted system call
+                                    (since Linux 3.5) */
+    }
+
+    Bu yapının önemli elemanları ve anlamları şunlardır:
+
+    int si_signo: Oluşan sinyalin numarası.
+    int si_errno: O andaki errno değeri (saklayıp geri yüklemek için gerekebilmektedir).
+    pid_t si_pid: Sinyali gönderen prosesin proses id'sini beelirtmektedir.
+    uid_t si_uid: Sinyali gönderen prosesin gerçek kullanıcı id'sini belirtir. 
+    int si_int: sigqueue fonksiyonundaki sinyale iliştirilen int değer.
+    void *si_ptr: sigqueue fonksiyonundaki sinyale iliştirilen adres bilgisi.
+
+    Aşağıdaki örnekte "sample" programı üç parametreli sinyal fonksiyonunu kullanmaktadır. Program hangi sinyal için  sinyal 
+    fonksiyonunu set edeceğini belirten bir komut satırı argümanı almaktadır. Program sonsuz bir döngüde pause çağrılarıyla 
+    beklemektedir. Dolayısıyla programı Ctrl+C tuşları ile sonlandırabilirsiniz. Programın kullanımı şöyledir:
+
+    ./sample 34
+
+    Bu örnekte 34 Linux'taki ilk gerçek zamanlı sinyal numarasıdır. Bu programa yukarıdaki programı kullanarak sigqueue fonksiyonu 
+    ile sinyal gönderebilirsiniz. Örneğin:
+
+    ./sq 34183 34 123
+
+    sample programı ona iliştirilen int bilgiyi de sinyal geldiğinde ekrana yazdırmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <signal.h>
+#include <unistd.h>
+
+void signal_handler(int signo, siginfo_t *info, void *context);
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+	struct sigaction sa;
+		
+	if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+	printf("Process id: %jd\n", (intmax_t)getpid());
+
+	sa.sa_sigaction = signal_handler; 
+	sigemptyset(&sa.sa_mask);		
+	sa.sa_flags = SA_RESTART|SA_SIGINFO;
+
+	if (sigaction(atoi(argv[1]), &sa, NULL) == -1)
+		exit_sys("sigaction");
+
+	printf("waiting for signals...\n");
+
+	for (;;)
+		pause();
+	
+    return 0;    
+}
+
+void signal_handler(int signo, siginfo_t *info, void *context)
+{
+	printf("#%d signal handler: %d\n", signo, info->si_int);
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
+   Aşağıdaki örnekle gerçek zamanlı sinyallerin kuyruklandığını ancak gerçek zamanlı olmayan sinyallerin kuyruklanmadığını 
+   gözlemleyebilirsiniz. Buradaki "sample" programını önce 10 numaralı sinyal ile (SIGUSR1) sonra da 34 numaralı sinyal ile (SIGRTMIN + 0)
+   çalıştırınız. Diğer bir terminalden "sample" programı 30 saniye beklerken birkaç sinyal gönderiniz. "sample" programı 30 saniye 
+   sonra blokeyi açtığında gerçek zamanlı olmayan sinyaller için bunlardan bir tanesinin teslim edildiğini, gerçek zamanlı sinyaller için 
+   hepsinin teslim edildiğini göreceksiniz. Örneğin 10 numaralı sinyal ile (SIGUSR1) şöyle bir durum oluşmuştur:
+
+    Birinci terminal 
+
+   $ ./sample 10
+    Process id: 46480
+    sleep 30 seconds...
+    #10 signal handler: 12
+    ^C
+
+    İkinci Terminal
+
+    $ ./sq 46480 10 12
+    $ ./sq 46480 10 13
+    $ ./sq 46480 10 14
+    $ ./sq 46480 10 15
+    $ ./sq 46480 10 16
+    $ ./sq 46480 10 17
+
+    Örneğin 34 numaralı sinyal ile (SIGRTMIN + 0) şöyle bir durum oluşmuştur:
+
+    Birinci Terminal
+
+    $./sample 34
+    Process id: 46528
+    sleep 30 seconds...
+    #34 signal handler: 17
+    #34 signal handler: 18
+    #34 signal handler: 100
+    #34 signal handler: 120
+    #34 signal handler: 60
+    #34 signal handler: 10
+
+    İkinci Terminal
+
+    $./sq 46528 34 17
+    $./sq 46528 34 18
+    $./sq 46528 34 100
+    $./sq 46528 34 120
+    $./sq 46528 34 60
+    $./sq 46528 34 10
+
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+/* sample.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <signal.h>
+#include <unistd.h>
+
+void signal_handler(int signo, siginfo_t *info, void *context);
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+	struct sigaction sa;
+	sigset_t ss;
+
+		
+	if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+	printf("Process id: %jd\n", (intmax_t)getpid());
+
+	sa.sa_sigaction = signal_handler; 
+	sigemptyset(&sa.sa_mask);		
+	sa.sa_flags = SA_RESTART|SA_SIGINFO;
+
+	if (sigaction(atoi(argv[1]), &sa, NULL) == -1)
+		exit_sys("sigaction");
+
+	sigfillset(&ss);
+	sigdelset(&ss, SIGINT);
+	if (sigprocmask(SIG_BLOCK, &ss, NULL) == -1)
+		exit_sys("sigprocmask");
+	
+	printf("sleep 30 seconds...\n");
+	sleep(30);
+
+	if (sigprocmask(SIG_UNBLOCK, &ss, NULL) == -1)
+		exit_sys("sigprocmask");
+	
+	for (;;)
+		pause();
+	
+    return 0;    
+}
+
+void signal_handler(int signo, siginfo_t *info, void *context)
+{
+	printf("#%d signal handler: %d\n", signo, info->si_int);
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/* sq.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+    union sigval sv;
+
+	if (argc != 4) {
+        fprintf(stderr, "wrong number of arguments!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    sv.sival_int = atoi(argv[3]);
+    if (sigqueue(atoi(argv[1]), atoi(argv[2]), sv) == -1)
+        exit_sys("sigqueue");
+		
+    return 0;    
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+    Senkron biçimde sinyal oluşmasını bekleyen iki ilginç fonksiyon vardır: sigwait ve sigwaitinfo. sigwaitinfo fonksiyonu 
+    POSIX'e "Realtime Extensions" eklemeleri sırasında eklenmiştir. sigwait fonksiyonu uzun süredir bulunmaktadır. Fonksiyonların
+    prototipleri şöyledir:
+    
+    #include <signal.h>
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
----------------------------------------------------------------------------------------------------------------------------*/
+    int sigwait(const sigset_t *set, int *sig);
+    int sigwaitinfo(const sigset_t *set, siginfo_t *info);
 
-/*--------------------------------------------------------------------------------------------------------------------------
-                                 
+    Bu fonksiyonlar birinci parametresiyle belirtilmiş olan sinyal kümesindeki herhangi bir sinyal oluşana kadar thread'i blokede 
+    bekletmektedir. 
+
+    <BURADA KALDIK>
+                                
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
