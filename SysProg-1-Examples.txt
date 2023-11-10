@@ -11854,21 +11854,115 @@ int main(int argc, char *argv[])
 	bu nesnelrin de 8'in katlarında olması en iyi durumdur. Şimdi yapı elemanları arasında derleyicinin nedne ne nasıl boşluk bıraktığı artık
 	anlaşılabilir. 
 
-
-	<BURADA KALDIk>
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	31.  Ders - 30/09/2023 - Cumartesi 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi hizalama yalnızca yapı elemanları için mi önemlidir. Yerel değişkenler de benzer biçimde hizalanmakta mıdır? Derleyici aslında hizalamayı 
+	tüm nesneler için yapmaktadır. Ancak zaten C ve C++ standartları yerel değişkenlerin yerleşimi hakkında bir şey söylememektedir. Örneğin:
+
+	void foo(void)
+	{
+		char a;
+		int b;
+		...
+	}
+
+	Burada bu iki yerel değişkenin ardışıl olmasının bir garantisi yoktur. İlk bildirilen değişkenin stack'te düşük adreste olmasının da bir 
+	garantisi yoktur. Dolayısıyla genellikle bu durum programcıyı ilgilendirmemektedir. Ancak dizi elemanları her zaman ardışıldır. Yani bir 
+	elemanın bittiği yerde boşluk olmaksızın diğeri başlamıdır. Örneğin:
+
+	short a[10];
+
+	Derleyici bu diziyi 2'nin katlarına yerleştirirse zaten dizinin tüm elemanları 2'nin katlarında olacaktır. Örneğin:
+
+	int b[10];
+
+	Burada da derleyici b dizisini 4'ün katına yerleştirirse zaten dizinin tüm elemanları 4'ün katlarında olur. Pekiyi dinamik bellek fonksiyonlarında
+	durum nasıldır? Çünkü biz malloc gibi bir fonksiyonun geri döndürdüğü değeri herhangi biçimde kullanabiliriz. Örneğin:
+
+	struct SAMPLE {
+		char a;
+		int b;
+		char c;
+		int d;
+	};
+	...
+
+	struct SAMPLE *ps;
+
+	ps = malloc(sizeof(struct SAMPLE));
+
+	Burada malloc alan tahsis ederken zaten oranın herhangi bir türden olabileceği fikriyle uygun değerin katlarında olan bir adres verecektir. 
+	Örneğin burada malloc fonksiyonun 4'ün katlarında bir adres vermesi gerekir. Tabii malloc fonksiyonu bizim bu adresi nasıl kullanıcığımızı 
+	bilmemektedir. Bu nedenle en kötü olasılığa göre bir hizalama uygulayacaktır. 	
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Hizalama en çok bir dosyanın içerisindeki bilgilerin bir yapıya okunacağı zaman çıkar. Aşağıdaki örnekte eğer hizalama byte hizalamasına
-	çekilmezse bimap dosyanın başlık kısmındaki bilgiler yapı elemanlarına tam orturmaz.
+	Derleyiciler genel olarak beş farklı hizalama stratejisi izleyebilmektedir:
+
+	1 Byte Hizalama (Byte Alignment)
+	2 Byte Hizalama (Word Alignment)
+	4 Byte Hizalama (Double Word Alignment)
+	8 Byte Hizalama (Quad Word Alignemnet)
+	16 Byte Hizalama (Double Quad Word Alignment)
+
+	N byte hizalama şu anlama gelmektedir: "Nesnenin uzunluğu ve N değerinin hangisi küçükse nesne o değerin katlarına hizalanır". Nesnenin 
+	tamamı da N'in katlarına hizalanmaktadır. Örneğin 4 byte hizalama söz konusu olsun. Bu durumda 1 byte'lık bir nesne (örneğin char bir 
+	nesne) 1'in katlarına, 2 byte'lık bir nesne (örneğin short bir nesne) 2'nin katlarına, 4 byte'lık bir nesne (örneğin int bir nesne) 4'ün 
+	katlarına ve 8 byte'lık bir nesne 4'ün katlarına yerleştirilir. Örneğin 8 byte (Quad Word alignment) söz konusu olsun. Bu durumda 1 byte'lık 
+	nesne 1'in katlarına, 2 byte'lık bir nesne 2'nin katlarına, dört byte'lık bir nesne 4'ün katlarına, 8 byte'lık bir nesne 8'in katlarına hizalanır. 
+	"1 byte hizalamanın aslında	hizalama yapmamakla" aynı anlama geldiğine dikkat ediniz. Dolayısıyla programcı hizalamayı kaldıracaksa derleyiciyi 
+	1 byte hizalama ayaralayabilir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Derleyicinin yaptığı hizalamalar bazen programcının işine gelmeyebilir. Yani programcı çeşitli gerekçelerle derleyicinin hizalama yapmasını 
+	istemeyebilir. Hizalamanın programcı tarafından kontrolü genellikle derleyicilerin sunduğu ek özelliklerle sağlanmaktadır. Microsoft 
+	derleyicilerinde hizalama komut satırından derleme yapılırken /ZpN (buradaki N 1, 2, 4, 8, 16 olabilir) seçeneği ile ayarlanmaktadır. 
+	Hizalama Visual Studio IDE'sinde proje seçeneklerinden "C-C++/Code Generation/Struct Member Alignment" combo box seçneğinden ayarlanabilmektedir. 
+	Eğer bu ayarlamalar yapılmazsa 32 bit derleme için default durum /Zp8 (yani quad word alignment), 64 bit derleme için /Zp16 biçimindedir. 
+	Microsoft derleyicileri bir yapının en büyük elemanı neyse yapının tamamını da o en büyük elemanı referans alarak hizalamaktadır. Yani 
+	bu durumda yapı nesnenin sonunda da yapının en büyük elemanının hizalama bilgisi kadar boşluk bulundurulacaktır. 
+
+	gcc ve clang derleyicilerinde de default durumda Microsoft'taki gibi 32 bit derleyiciler için 8 byte hizalama, 64 bit derleyiciler için 16 
+	byte hizalama kullanılmaktadır. Hizalamayı değiştirmek için -fpack-struct=N komut satırı seçeneği kullanılmalıdır. Örneğin
+
+	gcc -fpack-struct=1 -o sample sample.c
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Hizalama konusunda default belirlemeye neden müdahale etmek isteriz? İşte bunun en tipik örneği bir dosyanın içerisindeki bilgilerin fread 
+	ya da readgibi bir fonksiyonla bir yapı nesnesinin içerisine okunmasının istendiği durumlardır. Örneğin bir BMP dosyasının başındaki 12 
+	byte'a BMP başlığı denilmektedir. BMP başlığı şu biçimde içeriğe sahiptir:
+
+	Uzunluk		İçerik
+
+	2 byte		Magic Number
+	4 byte		Dosya uzunluğu
+	2 byte		Reserved
+	2 byte		Reserved
+	4 byte		Image bilgilerinin bulunduğu offset
+
+	Şimdi biz bu dosyanın başından 12 byte okuyarak okuduklarımızı bir yapı ile çakıştırmak isteyelim:
+
+	struct BITMAP_HEADER {
+		char magic[2];			/* 2 byte */
+		uint32_t size;			/* 4 byte */
+		uint16_t reserved1;		/* 2 byte */
+		uint16_t reserved2;		/* 2 byte */
+		uint32_t dataloc;		/* 4 byte */
+	};
+
+	İşte okudğumuz 12 byte bu elemanlarla default hizalama yüzünden çakışmayacaktır. Bu çakışmayı sağlamak için bizim hizalamayı byte hizalaması 
+	olarak ayarlamamız gerekir. Aşağıdaki örneği "test.bmp" isimli bir BMP dosyası oluşturup hep default hizalama ile hem de 1 byte hizalama 
+	ile deneyiniz. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-
-#pragma pack(1)
 
 struct BITMAP_HEADER {
 	char magic[2];			/* 2 byte */
@@ -11902,49 +11996,353 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Yapı elemanların sırası hizalama boşlukları üzerinde etkili olmaktadır. Derleyiciler hçbir zaman yapı elemanlarının yerlerini optimizasyon amacıyla
-	değiştirmezler. (Çünkü C ve C++ standartlarınca yapıların elemanlarının ilk yazlan düşük adreste olacak biçimde ardışıl dizildiği belirtilmektedir. 
-	Padding byte'lar kontrollü olduğu için ardışıllığı bozmamaktadır.)
+	Pekiyi hizalama program kodunun içerisinde ayaralanabilir mi? İşte 	hizalamayı değiştirmek için hem Microsoft hem gcc hem de clang 
+	derleyicilerinde #pragma pack(N) direktifi kullanılabilmektedir. Bu direktif komut satırında belirtilen hizalama seçeneğine göre daha 
+	yüksek önceliklidir. (Yani hem komut satırında belirleme yapıp hem de £pragma pack ile belirleme yaparsak #pragma pack belirlemesi dikkate 
+	alınır. Örneğin:
+
+	#include <stdio.h>
+
+	#pragma pack(1)
+
+	struct SAMPLE {
+		char a;
+		int b;
+		char c;
+		int d;
+	};
+
+	int main(void)
+	{
+		struct SAMPLE s;
+
+		printf("%zd\n", sizeof s);		/* 10 */
+
+		return 0;
+	}	
+
+	#pragma pack direktifi sonraki #pragma pack direktifine kadar etkili olmaktadır. Böylece programcı isterse programın farklı yerlerinde farklı 
+	hizalamalar kullanabilir. Örneğin:
+
+	#include <stdio.h>
+
+	#pragma pack(1)
+
+	struct SAMPLE {
+		char a;
+		int b;
+		char c;
+		int d;
+	};
+
+	#pragma pack(8)
+
+	struct MAMPLE {
+		char a;
+		int b;
+		char c;
+		int d;
+	};
+
+	int main(void)
+	{
+		struct SAMPLE s;
+		struct MAMPLE m;
+
+		printf("%zd\n", sizeof s);		/* 10 */
+		printf("%zd\n", sizeof m);		/* 16*/
+
+		return 0;
+	}
+		
+	C11 ile birlikte bir nesnenin (bir yapının elemanı için de söz konusu olabilir) hizalaması _Alignas(N) belirleyicisi ile değiştirilebilmektedir. 
+	Örneğin:
+
+	#include <stdio.h>
+
+	struct SAMPLE {
+		 int a;
+		_Alignas(8) int b;
+	};
+
+	int main(void)
+	{
+		struct SAMPLE s;
+
+		printf("%zd\n", sizeof s);		/* 16 */
+
+		return 0;
+	}
+
+	Burada yapının b elemanının önüne _Alignas(8) belirleyicisi getirilmiştir. Bu belirleyici aslında dördün katlarına yerleştirilecek int nesnesnin 
+	8'in katlarına yerleştirilmesini sağlamaktadır. Ancak C11 standartlarına göre _Alignas(N) belirleyicisi ile yüksek bir hizalama gereksinimi düşük 
+	bir hizalamaya çevrielemez. Örneğin:
+
+	struct SAMPLE {
+		 int a;
+		_Alignas(1) int b;		/* geçersiz! */
+	};
+
+	_Alignas ile belli nesnelerin ya da belli yapı elemanlarının hizalama gereksinimlerinin değiştirilebildiğine dikkat ediniz. 
+
+	Ayrıca C11 ile birlikte _Alignof(tür_ismi) isminde bir operatör de dile eklenmiştir. Bu operatör o anda o tür için derleyicinin uyguladığı hizalamayı
+	bize vermektedir. Örneğin:
+
+	#include <stdio.h>
+
+	int main(void)
+	{
+		printf("%zd\n", _Alignof(int));     /* 4 */
+
+		return 0;
+	}
+
+	_Alignas belirleyicisi bir tür ismiyle de kullanılabilmektedir. Örneğin:
+
+	_Alignas(int) char c;
+
+	_Alignas(tür_ismi) aslında _Alignas(_Alignof(tür_ismi)) anlamına gelmektedir. Yani bir _Alignas(int) dediğimizde int türünün hizalama gereksinimi neyse
+	o sayıyı parantez içerisine yazmış gibi oluruz. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-
-struct SAMPLE1 {
-	char a;
-	int b;
-	char c;
-	int d;
-};
-
-struct SAMPLE2 {
-	char a;
-	char c;
-	int b;
-	int d;
-};
-
-int main(void)
-{
-	struct SAMPLE1 s;
-	struct SAMPLE1 k;
-
-	printf("%u\n", sizeof(s));
-	printf("%u\n", sizeof(k));
-
-
-	return 0;
-}
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Read only LFU Algoritmasını kullanan basit bir önbellek sisteminin gerçekleştirilmesi
+	Anımsanacağı derleyicilerin yapı elemanlarının arasında hizalama amacıyla bıraktığı boşluklara "padding" deniyordu. Aynı türden iki yapı 
+	nesnesi birbirine atandığında "padding" kısımlarının birbirine atanması konusunda bir garanti verilmemektedir. Örneğin:
+	
+	struct SAMPLE {
+		char a;
+		int b;
+	};
+	...
+
+	struct SAMPLE x = {'a', 3}, y;
+
+	x = y;
+
+	Burada C standartları a elemanı ile b elemanı arasındaki muhtemelen 3 byte'lık padding alanının atama sırasında hedefe kopyalanaacağı konusunda
+	bir garanti vermemektedir. Programcının bu padding alanlarını kullanmaya çalışması iyi bir teknik değildir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-/* filecache.h */
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Sistem programalama karşımıza çıkan önemli olgulardan biri de "cache sistemleridir". Bir sistem programcısının cache sistemlerine ilişkin
+	temel bilgileri edinmiş olması gerekmektedir. Bu bölümde cache sistemlerinde üzerinde durulacaktır.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
-#ifndef FILECACHE_H_
-#define FILECACHE_H_
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Bir bilgiye erişilmek istenen durumlarda çoğu kez karşımıza iki bellek türü çıkmaktadır: Yavaş bellek ve hızlı bellek. Yavaş bellek genellikle
+	bol ve ucuzdur. Hızlı bellek ise kıt ve pahalıdır. Dolayısıyla tüm belleğin hızlı bellek olarak tasarlanması uygun olamayabilmektedir. 
+	Ayrıca bazı sistemlerde sistemin doğası gereği yavaş bellekler hızlı belleklerle yer değiştirememektedir. Genellikle asıl bilgiler yavaş 
+	belleklerde saklanır. Hızlı bellekler yavaş belleklere erişimi azaltarak hız kazancı sağlamak için kullanılırlar. 
+
+	Bir cache sisteminde yavaş belleğin belli bölümleri hızla bellekte tutulur. Yavaş bellekteki bilgiye başvurmak isteyen kişi önce bilgiyi 
+	hızlı bellekte arar. Eğer yavaş belleğin o kısmı hızlı bellek içerisinde bulunuyorsa bilgi hızlı bir biçimde elde edilir. Eğer yavaş belleğin 
+	içerisindeki bilgi o anda hızlı bellekte bulunmuyorsa bu durumda gerçekten yavaş belleğe başvurularak bilgi oradan elde edilir. Bu sistemde
+	yavaş belleğin belli bölümlerini tutan hızlı belleğe "cache bellek" denilmektedir. Bu sistemler de "cache sistemleri" olarak adlandırılmaktadır. 
+	(Cache sözcüğünün genellikle Türkçe karşılığı "ön bellek" biçiminde ifade edilmektedir. Biz bazen "cache" sözcüğünü bazen de "ön bellek"
+	sözcüğünü kullanacağız.)
+
+	Cache sisteminde bilgiye erişilmek istendiğinde eğer bilgi cache bellekte bulunuyorsa bu duruma İngilizce "cache hit (ön belleğin isabet 
+	ettirilmesi") denilmektedir. Eğer bilgi cache bellekte yoksa bu duruma da İngilizce "cache miss (cache belleğin ıskalanması)" denilmektedir. 
+	İyi bir cache sisteminde "cache hit" oranının yükseltimesi istenir. Cache hit oranı N tane erişimin yüzde kaçının cache'ten karşılandığına
+	denilmektedir. Bunu şöyle gösterebiliriz:
+
+	Cache hit oranı = cache hit sayısı / N
+
+	Pekiyi bir cache sisteminde cache hit oranı nasıl artırılabilir? Şüphesiz cache bellek büyütüldükçe bunun cache hit oranı üzerinde olumlu 
+	bir etkisi olacaktır. Ancak bu durumda maliyet de artacaktır. Cache hit oranı üzerinde en önemli etkenlerden biri yavaş belleğin nerelerinin 
+	hangi sürelerde hızlı bellekte tutulacağına ilişkin stratejilerdir. Bunlara İngilizce "cache replacement" algoritmaları denilmektedir. 
+
+	Bazen "cache" sözcüğü ile "buffer (tampon)" sözcükleri biribirine karıştırılmaktadır. Cache sistemleri hızlandırma amacıyla kullnılan sistemlerdir. 
+	Halbuki buffer mekanizması "bilgileri sırası bozulmadan geçici süre tutmak için oluşturulmuş" sistemlerdir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Bir cache sistemi donanımsal ya da yazılımsal biçimde oluşturulabilmektedir. Donanımsaşl cache sistemlerinde gerçekleştirim elektrik 
+	devreleriyle yapılmıştır dolayısıyla gebellikle yazılımsal bir müdahale söz konusu olamamaktadır. Yazılımsal cache sistemleri ise 
+	tamamen programalama yoluyla oluşturulmuş cache sistemleridir. 
+	
+	Sistem programlama faaliyetlerinde cache sistemleri değişik biçimlerde karşımıza çıkabilmektedir. Bunlara birkaç örnek vermek istiyoruz:
+
+	- Bugün bilgisayar sistemlerinde genellikle ana bellek olarak DRAM (Dynamic RAM) denilen bellekler kullanılmaktadır. DRAM belleklerde 
+	belleğin bir biti tipik olarak bir kapasitif elemanla bir transistörden oluşturulmaktadır. Bu yapı DRAM'ların az yer kaplamasını ve ucuz
+	olmasını sağlamaktadır. Bugün kullandığımız DRAM bellekler 10 nanosaniyeye kadar hızlandırılmış durumdadır. Eskiden (80'li yılların 
+	oralarına kadar) CPU'lar DRAM belleklerden daha yavaştı. Bu yıllarda dolayısıyla CPU'lar DRAM bellekleri beklemiyordu. Ancak 80'li yılların 
+	sonlarına doğru CPU'lar DRAM bellekleri hız bakımından geçti. Bu durumda CPU DRAM'dan bir bilgi talep ettiğinde o bilgi DRAM'dan gelene 
+	kadar bekliyordu (buna CPU terminolojisinde "wait state" denilmektedir) İşte 80'li yılların sonlarına doğu yavaş yavaş kişisel bilgisauarlarda
+	DRAM beklemeleri azaltmak için donanımsal biçimde çalışan cache bellekler oluşturulmaya başlandı. Bu tasarımda SRAM (static RAM) teknolojisi 
+	ile üretilen hızlı RAM'ler cache olarak kullanılıyordu. (SRAM'lerde bir bir tipik olarak SR Latch denilen flip flop devresi ile gerçekleştirilmektedir.
+	Bu tasarım bir bir için fazla sayıda transistörün kullanılmasına yol açmaktadır. Böylece SRAM'ler hem daha fazla yer kaplamakta hem de daha pahalı
+	olmaktadır.) İşte o yıllarda artık CPU'lar önce cache balleğe vuruyor eğer cache "miss olursa" DRAM bellekten bilgiyi alıyordu. Daha sonraları
+	CPU'lar daha da hızlanınca artık CPU'ların içerisine de SRAM olarak üretilmiş cache bellekler yerleştirilmeye başlandı. Böylece çok kademeli 
+	cache sistemleri uygulandı. CPU bilgiyi önce en hızlı biçimde kendi içerisindeki L1 cache denilen bellekte arıyor orada bulamazsa CPU 
+	dışındaki L2 cache cache denilen belleğe başvuruyordu. Eğer bilgi L2 cache'te de bulunamazsa DRAM erişimi yapılıyordu. Bugünkü bilgisayar
+	sistemlerinde genellikle 3 kademe cache kullanılmaktadır. L1 ve L2 cache'ler CPU içerisinde L3 cache CPU dışında konuşlandırılmaktadır.
+	Çok çekirdekli sistemlerde her çekirdeğin ayrı bir L1 ve L2 cache'i bulunmaktadır.
+
+	- Çok karşılaşılan bir cache sistemi de işletim sistemleri tarafından oluşturulan ve ismine "disk cache" sistemi, "buffer cache" sistemi 
+	ya da "page cache" denilen cache sistemleridir. İşletim sistemleri yazılımsal olarak diskte okunan blokları RAM'de bir cache alanında
+	tutmaktadır. Böylece bir disk okuması yapılmak istendiğinde önce RAM'deki bu cache'e başvurulmakta blok zaten orada varsa hiç okuması 
+	yapılmadan oradan alınmaktadır. Bu disk cache (buffer cache) sistemi işletim sistemlerinin performanslarında önemli bir etkiye sahiptir. 
+	Çünkü bilgisayar sistemlerinin en yavaş bileşenlerinden biri disk sistemidir. Bu cache sisteminde yavaş bellek diski hızlı bellek DRAM 
+	belleği temsil etmektedir. 
+
+	- İşletim sistemlerinin çekirdekleri disk cache (buffer cache) sisteminin yanı sıra son işleme sokulan dosya bilgilerinin saklandığı 
+	"i-node cache" ve son işleme sokulan dizin girişlerinin saklandığı "directory entry cache (dentry cache)" denilen cache sistemlerini de 
+	kullanmaktadır. Böylece bir dosya işlemi yapılırken dosya bilgilerine hızlı bir biçimde erişilebilmektedir. 
+
+	- Web tarayıcıları da kendi içerisinde bir cache sistemi kullanabilmektedir. Bir web sayfasına eriştiğimizde o sayfanın içeriği tarayıcının 
+	cache sisteminde bulunuyor olabilir. Bu durumda doğrudan sayfa kullanıcıya gösterilebilir. Burada yavaş bellek web sayfasının barındırıldığı 
+	sunucuyu, hızlı bellek ise yerel bilgisayarı temsil etmektedir. 
+
+	- Dağıtık uygulamalarda da cache sistemleriyle çokça karşılaşılmaktadır. Örneğin bir sosyal medya uygulamasında resimler o coğrafi bölgeye 
+	yakın olan daha hızlı erişilebilen CDN denilem server'larda tutulabilmektedir. 
+
+	- Standart C kütüphaenesindeki dosya fonksiyonları da ileride detaylı biçimde ele alacağımız gibi bir cache sistemi kullanmaktadır. 
+
+	- Manyetik temelli Hard Disklerde de bir cache sistemi bulundurulmaktadır. Sistem programcısı HDD'den bir blok okumak istediğinde eğer 
+	o blok HDD'nin kendi cache'i içerisinde varsa doğrudan oradan alınmaktadır. Eğer yoksa disk kafaları hareklet ettirilip bilgi elektro 
+	mekanik bir biçimde diskten elde edilmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Cache bellek genel olarak bloklardan (yani ardışıl byte topluluklarından) oluşmaktadır.Her bloğu yavaş belleğin farklı bir yerini tutabilmektedir. 	
+	Eğer cache sisteminde cache bellek yalnızca okuma amaçlı kullanılıyorsa yazma işlemi doğruan yavaş belleğe yapılıyorsa bu tür cache sistemlerine 
+	"read only cache sistemleri" denilmektedir. Eğer yazma işlemi de cache belleğe yapılabiliyorsa bu tür cache sistemlerine de "read-write 
+	sistemleri" ya da "write throuh cache sistemleri" denilmektedir. Şüphesiz read-write cache sistemleri daha yüksek bir performans sunmaktadır. 
+	Ancak bu sistemlerde birtakım anomaliler oluştuğunda cache belleğe yazılan ancak yavaş belleğe henüz aktarılmamış bilgilerin kaybedilme 
+	olasılığı vardır. Read-write cache sistemlerinde bir cache bloğu cache'ten atılacağı zaman onun daha önce değiştirilip değiştirilmediğine 
+	bakılması gerekir. Eğer o cache bloğuna yazma yapılmışsa o cache bloğu cache'ten atılmadan önce yavaş belleğe yazılmalıdır. Genel olarak 
+	cache terminolojisinde bir cache bloğunun içeriğinin güncellenmiş olmasına o cache bloğunun ""kirlenmiş (dirty)" olması denilmektedir. 
+	
+	Bir cache bloğunun yavaş belleğe içeriği değiştiğinden dolayı geri yazılmasına "flush"	işlemi de denilmektedir. Pekiyi cache blokları 
+	ne zaman flush edilmelidir? Bir cache bloğu cache'ten atılacağı zaman eğer kirlenmişse flush edilmelidir. Ancak kirlenmemişse onun flush 
+	edilmesine gerek yoktur. Ancak kirlenmiş cache bloklarının uzun süre flush edilmeden bekletilmesi de anomali durumlarında bilgi kayıplarına
+	yol açabilmektedir. Örneğin işletim sistemlerinin disk cache (buffer cache) sistemleri read-write cache sistemleridir. Ancak kirlenmiş cache 
+	blokları çok da fazla bekletilmeden belli periyotlarla çeşitli kernel thread'ler tarafından diske flush edilmektedir. Bu tür yazımlara 
+	"delayed write" denilmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+												32. Ders - 01/10/2023 - Pazar 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Yukarıda da belirttiğimiz gibi cache bellek tipik olarak blok ya da "line" denilen ardışıl byte topluluklarındanm oluşmaktadır. Genel olarak 
+	cache'teki her bir bloğun bir numarası vardır. Örneğin elimizde 100K'lık bir cache olsun. Bir cache bloğu da 1K'dan oluşsun. Bu cache içeisinde
+	toplam 100 tane cache bloğu vardır. İşte bu bloklara sırasıyla numaraler verilmektedir. Örneğin:
+
+	Cache
+	
+	0. Blok (1K)
+	1. Blok (1K)
+	2. Blok (1K)
+	...
+	97. Blok (1K)
+	98. Blok (1K)
+	99. Blok (1K)
+
+	Yavaş belleğin de 1MB olduğunu varsayalım. İşte yavaş bellek de yine cache bloklarında olduğu gibi bloklara ayrılmaktadır. Örneğin:
+
+	Yavaş Bellek
+
+	0. Blok (1K)
+	1. Blok (1K)
+	2. Blok (1K)
+	...
+	997. Blok (1K)
+	998. Blok (1K)
+	999. Blok (1K)
+
+	Bu örnekte toplam 1000 bloktan oluşan yavaş belleğin ardışıl olmayan 100 bloğu cache bellekte tutulmaktadır. Bu sistem yazılımsal olarak 
+	oluşturulacaksa bizim cache bloklerının ahngisinin yavaş belleğin hangi bloğundaki bilgiyi tuttuğunu bir biçimde izlememiz gerekir. 
+	Bu sistemde örneğin biz yavaş belleğin 718'inci bloğuna erişmek isteyelim. Sistemin önce bu 718'inci bloğun cache içerisinde olup olmadığına 
+	bakması gerekir. Örneğin bu 718'inci bloğun içeriği cache belleğin 54'üncü bloğunda olabilir. O zaman erişim hızlı bir biçimde cache'in 
+	54'üncü bloğundan sağlanacaktır. Ancak eğer bu 718'inci blok cache'te yoksa bu durumda bu blok gerçekten yavaş belleğin 718'inci bloğundan 
+	elde edilecektir. Mademki her blok işleminde önce o blok cache'te mi diye bakılmaktadır o halde bu arama işleminin hızlı yapılması gerekir. 
+	Bu tür sistemlerde sıralı arama (sequential search) iyi bir fikir değildir. Böylesi aramalarda tipik olarak "hash tabloları (hash table)"
+	denilen veri yapıları tercih edilmektedir. Kursumuzun algortimaalar ve veri yapıları kısmında hash tabloları incelenmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Yukarıda açıkladığımız gibi bir cache sistemi olsun. Yavaş belleğin 1000 bloktan cache belleğin ise 100 bloktan oluştuğunu varsayalım. 
+	Cache sistemlerindeki en önemli algoritmik sorun şudur: Biz yavaş belleğin hangi bloklarını cache bellekte tutmalıyız? Yani yukarıdaki 
+	örnekte 1000 blokluk yavaş belleğin hangi 100 bloğunu cache bellekte tutmalıyız? Bizim amacımız "cache hit" oranını yükseltmektir. Eğer biz
+	yavaş belleğin nerelerinin çok kullanıldığını önceden biliyor olsak problem çok basit olurdu. Bu duurmda en çok kullanılacak blokları cache'te
+	tutardık. Ancak böyle bir bilgiye genellikle sistem programcıları sahip olmazlar. Cache sistemlerinde genellikle cache bellekteki bloklar 
+	dinamik bir biçimde kullanılmaktadır. Yani duruma göre bir cache bloğunun içeriği atılıp yavaş belleğin daha uygun bir bloğu cache'e 
+	alınabilmektedir. Yavaş belleğin hangi bloklarının cache'te tutulacağına ilişkin algoritmalara İngilizce "cache replacement" algortimaları 
+	denilmektedir. Biz buna "cache algoritmaları" diyeceğiz.
+
+	Literatürde değişik durumlar için düşünülmüş çeşitli cache algoritmaları vardır. Biz burada en fazla kullanılan algoritmaları tanıtacağız. 
+
+	1) En Az Kullanılanın Cache'ten Atılması Algoritması (Least Frequently Used (LFU)): Bu yöntemde yavaş bellekten okunan bloklar cache'e alınır. 
+	Cache'teki her blok için bir sayaç tutulur. Her "cache hit" oluştuğunda o bloğun sayacı bir artırlır. Cache dolduğunda ve bir "cache miss" 
+	oluştuğunda o zamana kadar en az kullanılan blok cache'ten çıkarılır. Cache miss olan yavaş bellek bloğu cache'e alınır. Böylece cache'te
+	o zamana kadar fazla kullanılan bloklar tutulmuş olur. Buradaki varsayım şudur: Şimdiye kadar az kullanılmış olan bloklar bundan sonra da 
+	az kullanılacaktır. Bu algoritmada "thrashing" denilen bir problemin giderilmesi gerekmektedir. Cache'e yeni çekilen bloğun başlangıç sayacı 
+	0'da tutulursa ilk cache miss olduğunda bu blok yeniden cache'ten atılır. O halde cache'e alınan bloğun başlangıç sayacının 0 yapılması 
+	uygun değildir. 
+	
+	2) Son Zamanlarda En Az Kullanılanın Cache'ten Atılması (Least Recently Used (LRU)): Açık ara en fazla tercih edilen cache algoritması budur. 
+	Örneğin Linux çekirdeğindeki çeşitli cache sistemlerinde hep bu algortima kullanılmaktadır. Bu algoritmada cache'ten blok çıkatılacağı 
+	zaman onların toplam hit sayaçlarına bakılmaz. Onların son zamanlarda çok kullanılıp kullanılmadığına bakılır. Bilgisayar sistemlerinde 
+	tipik çalışmada birtakım bloklar bir zaman dilimi içerisinde çok kullanılıp sonra bir daha seyrek kullanılmakta ya da hiç kullanılmamaktadır. 
+	Örneğin işletim sisteminin disk cache sistemini düşünelim. Bir program çalıştığında o program belli disk bloklarını sürekli kullanıyor olabilir.
+	Ancak programın çalışması bittiğinde artık o bloklar çok seyrek kullanılıyor olacaktır. Bu algoritma tipik olarak bri bağlı liste ile 
+	gerçekleştirilmektedir. Cache hit olan bloklar bağlı listede öne çekilir. Böylece son zamanlara en az kullanılan bloklar bağlı listenin sonunda
+	kalır. Cache'ten blok çıkartılacağı zaman bağlı listenin sonundaki bloklar çıkartılır. 
+
+	3) En Fazla Kullanılanın Cache'ten Atılması (Most Frequenly Used (MRU)): Bu algroritma LFU algoritmasının tersini yapmaktadır. Yani toplamda 
+	o zamana kadar en fazla kullanılan bloğu cache'ten atmaktadır. Bu yöntem ilk başta saçma gelebilir. Ancak bazı seyrek sistemlerde her bloğun 
+	yaklaşık eşit sayıda kullanılacağı baştan biliniyor olabilir. Bu durumda o zamana kadar çok hit almış cache blokları gelecekte daha az kullanılma
+	potansiyilene sahiptir. Tabii bu algoritma çok seyrek kullanılmaktadır.
+
+	4) Rastgele Blokların Cache'ten Atılması (Random Cache Replacement): Bazı sistemlerde hiçbir öngürü yapılamamaktadır. Bu durumda rastgele
+	blokların cache'ten atılması uygun olabilmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Aşağıda read-onlu LRU cache sistemine bir örnek verilmiştir. Örneğimizde diski temsil eden "test.dat" isimli her bloğu 32 byte olan 
+	100 bloktan oluşaşn (toplam 3200 byte) bir dosya kullanılmaktadır. İşin başında bu dosyaya rastgele text içerik atanmıştır. Burada 
+	oluşturulan cache sistemindeki fonksiyonlar şunlardır:
+
+	HCACHE open_disk(const char *path, int flags);
+	int read_disk(HCACHE hc, int blockno, void *buf);
+	int close_disk(HCACHE hc);
+
+	open_disk fonksiyonu "test.dat" dosyasını açar, cache veri yapısına ilkdeğerlerini verir. read_disk fonksiyonu diskten cache sistemini kullanarak 
+	bir blok okumaktadır. close_disk fonksiyonu ise cache sistemini kapatmaktadır. Kullanılan cache veri yapısı şöyledir:
+
+	typedef struct tagCACHELINE {
+		char buf[LINE_SIZE];
+		int blockno;
+		size_t count;
+	} CACHE_LINE;
+
+	typedef struct tagCACHE {
+		int fd;
+		CACHE_LINE clines[NCACHE_LINES];
+		size_t tcount;
+	} CACHE, *HCACHE;
+
+	Burada cache sistemi CACHE isimli bir yapıyla temsil edilmiştir. Her cache bloğu CACHE_LINE isimli bir yapıyla temsil edilmiştir. 
+	Tüm cache blokları CACHE_LINE türünden bir dizide toplanmıştır. Her cache bloğunda cache içeriği, diskteki blok numarası ve hit sayacı
+	tutulmaktadır.
+
+	Buradaki simülasyon kodundaki algoritmik kusurlar şunlardır:
+
+	1) Okunmak istenen bloğun tek tek cache bloklarında sıralı bir biçimde aranması. Tabii buradaki simülasyonda 10 tane cache bloğu vardır.
+	Dolayısıyla sıralı arama çok hızlı bir biçimde gerçekleştilmektedir. Az sayıda (örneğin 10 civarında) elemanın bulunduğu durumda sıralı 
+	arama iyi bir yöntemdir. Yukarıda da belirttiğimiz gibi arama işlemi için genellikle "hash tabloları" kullanılmaktadır. 
+
+	2) En düşük sayaca sahip olan cache bloğu da sıralı arama ile bulunmaktadır. 
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* diskcache.h */
+
+#ifndef DISKCACHE_H_
+#define DISKCACHE_H_
 
 /* Symbolic Constants */
 
@@ -11974,13 +12372,13 @@ typedef struct tagCACHE {
 
 /* Function Prototypes */
 
-HCACHE open_file(const char *path, int flags);
-int read_file(HCACHE hc, int blockno, void *buf);
-int close_file(HCACHE hc);
+HCACHE open_disk(const char *path, int flags);
+int read_disk(HCACHE hc, int blockno, void *buf);
+void close_disk(HCACHE hc);
 
 #endif
 
-/* filecahe.c */
+/* diskcache.c */
 
 #define DEBUG
 
@@ -11990,7 +12388,7 @@ int close_file(HCACHE hc);
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "filecache.h"
+#include "diskcache.h"
 
 #ifdef DEBUG
 static void print_cline_counts(HCACHE hc);
@@ -11998,7 +12396,7 @@ static void print_cline_counts(HCACHE hc);
 
 static size_t select_line(HCACHE hc);
 
-HCACHE open_file(const char *path, int flags)
+HCACHE open_disk(const char *path, int flags)
 {
 	HCACHE hc;
 	int i;
@@ -12020,7 +12418,7 @@ HCACHE open_file(const char *path, int flags)
 	return hc;
 }
 
-int read_file(HCACHE hc, int blockno, void *buf)
+int read_disk(HCACHE hc, int blockno, void *buf)
 {
 	int i;
 	int rline;
@@ -12062,7 +12460,7 @@ int read_file(HCACHE hc, int blockno, void *buf)
 	return 0;
 }
 
-int close_file(HCACHE hc)
+void close_disk(HCACHE hc)
 {
 	close(hc->fd);
 
@@ -12106,31 +12504,28 @@ static void print_cline_counts(HCACHE hc)
 
 #endif
 
-/* filecache-test.c */
+/* diskcache-test.c */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <fcntl.h>
-#include "filecache.h"
+#include "diskcache.h"
 
 int create_test_file(const char *path, int nblocks);
 
-int main(int argc, char *argv[])
+int main(void)
 {
 	HCACHE hc;
 	char buf[32 + 1];
 	int blockno;
 
-#ifdef CREATE
 	if (create_test_file("test.dat", 100) == -1) {
 		perror("create_test_file");
 		exit(EXIT_FAILURE);
 	}
-	exit(EXIT_SUCCESS);
-#endif
-
-	if ((hc = open_file("test.dat", O_RDONLY)) == NULL) {
+	
+	if ((hc = open_disk("test.dat", O_RDONLY)) == NULL) {
 		fprintf(stderr, "cannot open file!..\n");
 		exit(EXIT_FAILURE);
 	}
@@ -12142,7 +12537,7 @@ int main(int argc, char *argv[])
 		if (blockno == -1)
 			break;
 
-		if (read_file(hc, blockno, buf) == -1) {
+		if (read_disk(hc, blockno, buf) == -1) {
 			perror("read_file");
 			exit(EXIT_FAILURE);
 		}
@@ -12150,8 +12545,7 @@ int main(int argc, char *argv[])
 		printf("Block content: %s\n\n", buf);
 	}
 
-	close_file(hc);
-
+	close_disk(hc);
 
 	return 0;
 }
@@ -12179,11 +12573,452 @@ int create_test_file(const char *path, int nblocks)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-    Büyük bir dosyayı Windows'ta ReadFile API fonksiyonuyla, UNIX/Linux sistemlerinde read fonksiyonuyla byte bu-yte okumak iyi bir teknk
-    değildir. Çünkü böyle bir uygulamada proses her defasında sistem fonksiyonun çağrılması nedeni ile "kernel moda" geçecektir. Aşaüıda
-    POSIX sistemlerinde 5 MB civarı bir dosya read fonksiyonuyla byte byte okunmuş ve bu işlemin ne kadar zaman aldığı hesaplanmıştır.
-    Apple Macbook Pro M1 SOC'un kullanıldığı MAc OS X sistemlerinde bu zaman yaklaşık 1.45 saniye civarındadır.
+	Read-write cache sistemlerinde cache belleğin yazma sırasında da kullanıldığını belirtmiştik. Yani bir blok yazılmak istendiğinde eğer 
+	o blok cache'te varsa doğrudan cache bloğu üzerine yazma yapılır. Tabii bu durumda bu blok atılacağı zaman güncellenmiş (kirlenmiş) olduğu
+	için yavaş belleğe geri yazılmalıdır. Pekiyi yazma sırasında "cache miss" olursa ne yapılmalıdır? Burada iki strateji izlenebilir: 
+	
+	1) Blok doğrudan yavaş belleğe yazılabilir. 
+	2) Blok önce cache'e çekilip yazma cache'e yapılabilir. Tabii burada aslında yavaş bellekteki bloğun cache'e çekilmesine gerek yoktur. 
+	Doğurdan yazma cache üzerine yapılabilir. 
+	
+	Bazen yazma sırasında "cache hit" olduğu durumda yazma işlemi hem cache'e ham de yavaş belleğe yapılabilmektedir. Böylece anomalilerde 
+	yavaş bellekte bir kayıp oluşmayacaktır.
+
 -------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Aşağıdaki örnekte daha önce yapmış olduğumuz disk cache simülasyonundaki cache sistemi read/write cache haline gtirilmiştir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* filecache.h */
+
+#ifndef FILECACHE_H_
+#define FILECACHE_H_
+
+/* Symbolic Constants */
+
+#define LINE_SIZE               32
+#define NCACHE_LINES            10
+#define INITIAL_COUNT           2
+
+#ifdef DEBUG
+#define DEBUG_PRINT(fmt, ...)  fprintf(stderr, fmt, ## __VA_ARGS__)     
+#else
+#define DEBUG_PRINT(fmt, ...)       
+#endif
+
+/* Type Definitions */
+
+typedef struct tagCACHELINE {
+	char buf[LINE_SIZE];
+	int blockno;
+	size_t count;
+	int dirty;
+} CACHE_LINE;
+
+typedef struct tagCACHE {
+	int fd;
+	CACHE_LINE clines[NCACHE_LINES];
+	size_t tcount;
+} CACHE, *HCACHE;
+
+/* Function Prototypes */
+
+HCACHE open_disk(const char *path, int flags);
+int read_disk(HCACHE hc, int blockno, void *buf);
+int write_disk(HCACHE hc, int blockno, const void *buf);
+int fluch_disk(HCACHE hc);
+int close_disk(HCACHE hc);
+
+#endif
+
+/* filecahe.c */
+
+#define DEBUG
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include "diskcache.h"
+
+#ifdef DEBUG
+static void print_cline_counts(HCACHE hc);
+#endif
+
+static size_t select_line(HCACHE hc);
+
+HCACHE open_disk(const char *path, int flags)
+{
+	HCACHE hc;
+	int i;
+
+	if ((hc = (HCACHE)malloc(sizeof(CACHE))) == NULL)
+		return NULL;
+
+	if ((hc->fd = open(path, flags)) == -1) {
+		free(hc);
+		return NULL;
+	}
+
+	for (i = 0; i < NCACHE_LINES; ++i) {
+		hc->clines[i].blockno = -1;
+		hc->clines[i].count = 0;
+		hc->clines[i].dirty = 0;
+	}
+	hc->tcount = 0;
+
+	return hc;
+}
+
+int read_disk(HCACHE hc, int blockno, void *buf)
+{
+	int i;
+	int rline;
+
+	for (i = 0; i < NCACHE_LINES; ++i)
+		if (hc->clines[i].blockno == blockno) {
+			DEBUG_PRINT("Cache hit block %d, used cache line %d\n", blockno, i);
+
+			memcpy(buf, hc->clines[i].buf, LINE_SIZE);
+			++hc->clines[i].count;
+			++hc->tcount;
+
+#ifdef DEBUG
+			print_cline_counts(hc);
+#endif
+
+			return 0;
+		}
+
+	rline = select_line(hc);
+
+	if (hc->clines[rline].dirty) {
+		if (lseek(hc->fd, hc->clines[rline].blockno * LINE_SIZE, SEEK_SET) == -1)
+			return -1;
+	
+		if (write(hc->fd, hc->clines[rline].buf, LINE_SIZE) == -1)
+			return -1;
+
+		hc->clines[rline].dirty = 0;
+	}
+
+	if (lseek(hc->fd, (off_t)blockno * LINE_SIZE, SEEK_SET) == -1)
+		return -1;
+	
+	if (read(hc->fd, hc->clines[rline].buf, LINE_SIZE) == -1)
+		return -1;
+
+	hc->clines[rline].blockno = blockno;
+
+	hc->clines[rline].count = hc->tcount / NCACHE_LINES + 1;
+	hc->tcount += hc->clines[rline].count;
+
+	memcpy(buf, hc->clines[rline].buf, LINE_SIZE);
+
+	DEBUG_PRINT("Cache miss block %d, used cache line %d\n", blockno, rline);
+
+#ifdef DEBUG
+	print_cline_counts(hc);
+#endif
+
+	return 0;
+}
+
+int write_disk(HCACHE hc, int blockno, const void *buf)
+{
+	int rline;
+
+	for (int i = 0; i < NCACHE_LINES; ++i)
+		if (hc->clines[i].blockno == blockno) {
+			DEBUG_PRINT("Cache hit block %d, used cache line %d\n", blockno, i);
+
+			memcpy(hc->clines[i].buf, buf, LINE_SIZE);
+			++hc->clines[i].count;
+			++hc->tcount;
+			hc->clines[i].dirty = 1;
+
+	#ifdef DEBUG
+			print_cline_counts(hc);
+	#endif
+
+			return 0;
+	}
+
+	rline = select_line(hc);
+	if (hc->clines[rline].dirty) {
+		if (lseek(hc->fd, hc->clines[rline].blockno * LINE_SIZE, SEEK_SET) == -1)
+			return -1;
+	
+		if (write(hc->fd, hc->clines[rline].buf, LINE_SIZE) == -1)
+			return -1;
+	}
+	memcpy(hc->clines[rline].buf, buf, LINE_SIZE);
+	hc->clines[rline].blockno = blockno;
+	hc->clines[rline].count = hc->tcount / NCACHE_LINES + 1;
+	hc->clines[rline].dirty = 1;
+
+	DEBUG_PRINT("Cache miss block %d, used cache line %d\n", blockno, rline);
+
+#ifdef DEBUG
+	print_cline_counts(hc);
+#endif
+
+	return 0;
+}
+
+int flush_disk(HCACHE hc)
+{
+	for (int i = 0; i < NCACHE_LINES; ++i) {
+		if (hc->clines[i].dirty) {
+			if (lseek(hc->fd, hc->clines[i].blockno * LINE_SIZE, SEEK_SET) == -1)
+				return -1;
+	
+			if (write(hc->fd, hc->clines[i].buf, LINE_SIZE) == -1)
+				return -1;
+		}
+	}
+
+	return 0;
+}
+
+int close_disk(HCACHE hc)
+{
+	if (flush_disk(hc) == -1)
+		return -1;
+
+	close(hc->fd);
+
+	DEBUG_PRINT("Cache closed!\n");
+
+	free(hc);
+
+	return 0;
+}
+
+static size_t select_line(HCACHE hc)
+{
+	size_t min_count;
+	size_t min_index;
+	int i;
+
+	min_count = hc->clines[0].count;
+	min_index = 0;
+
+	for (i = 1; i < NCACHE_LINES; ++i) {
+		if (hc->clines[i].count < min_count) {
+			min_count = hc->clines[i].count;
+			min_index = i;
+		}
+	}
+
+	return min_index;
+}
+
+#ifdef DEBUG
+
+static void print_cline_counts(HCACHE hc)
+{
+	int i;
+
+	putchar('\n');
+	printf("Total count: %llu\n", (unsigned long long)hc->tcount);
+	for (i = 0; i < NCACHE_LINES; ++i)
+		printf("Cachle Line %d --> Block: %d, Count: %llu, Dirty: %d\n", i, hc->clines[i].blockno, (unsigned long long)hc->clines[i].count, hc->clines[i].dirty);
+
+	putchar('\n');
+}
+
+#endif
+
+/* filecache-test.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include "diskcache.h"
+
+int create_test_file(const char *path, int nblocks);
+
+int main(void)
+{
+	HCACHE hc;
+	char buf[32 + 1];
+	int rw;
+	int blockno;
+
+	if (create_test_file("test.dat", 100) == -1) {
+		perror("create_test_file");
+		exit(EXIT_FAILURE);
+	}
+	
+	if ((hc = open_disk("test.dat", O_RDWR)) == NULL) {
+		fprintf(stderr, "cannot open file!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	for (;;) {
+		printf("Block No:");
+		scanf("%d", &blockno);
+		if (blockno == -1)
+			break;
+
+		printf("(r)ead/(w)rite?");
+		while (getchar() != '\n')
+			;
+		rw = getchar();
+
+		if (rw == 'r') {
+			if (read_disk(hc, blockno, buf) == -1) {
+				perror("read_file");
+				exit(EXIT_FAILURE);
+			}
+		}
+		else if (rw == 'w') {
+			for (int k = 5; k < 32; ++k)
+				buf[k] = rand() % 26 + 'A';
+			if (write_disk(hc, blockno, buf) == -1) {
+				perror("read_file");
+				exit(EXIT_FAILURE);
+			}
+		}
+		else {
+			printf("invalid operation!...\n");
+			continue;
+		}
+
+		buf[32] = '\0';
+		printf("Block content: %s\n\n", buf);
+	}
+
+	close_disk(hc);
+
+	return 0;
+}
+
+int create_test_file(const char *path, int nblocks)
+{
+	FILE *f;
+	int i, k;
+	char buf[LINE_SIZE];
+
+	srand(time(NULL));
+	if ((f = fopen(path, "wb")) == NULL)
+		return -1;
+
+	for (i = 0; i < nblocks; ++i) {
+		sprintf(buf, "%04d ", i);
+		for (k = 5; k < 32; ++k)
+			buf[k] = rand() % 26 + 'A';
+
+		if (fwrite(buf, LINE_SIZE, 1, f) != 1)
+			return -1;
+	}
+
+	fclose(f);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+													33. Ders 07/10/2023 - Cumartesi
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Bugün kullandığımız güçlü mikroişlemciler "koruma mekanizması (protection mechanism)" denilen önemli bir özelliğe sahiptir. Örneğin A serisi 
+	ARM işlemcileri, Intel işlemcileri, Power PC işlemcileri, Alpha işlemcileri, Itanium işlemcileri koruma mekanizmalarına sahiptir. Ancak 
+	mikrodenetleyiciler ve küçük kapasiteli işlemcilerde bu mekanizma bulunmamaktadır. Intel işlemcileri 80286 modelleriyle birlikte segment tabanlı,
+	80386 modelleriyle birlikte sayfa tabanlı koruma mekanizmasına sahip olmuşlardır. A (Applivation) serisi cortex'lere sahip ARM işlemcilerinde
+	koruma mekanizması vardır. Ancak M (Microcontroller) cortext'lerine sahip ARM işlemcilerinde genel olarak bu mekanizma bulunmamaktadır. 
+	Bugün Windows, Linux, macOS gibi işletim sistemleri ancak koruma mekanizmasına sahip işlemcilerde çalışabilmektedir. 
+
+	Koruma mekanizmasının temelde iki işlevi vardır:
+
+	1) Bellek Koruması
+	2) Komut Koruması
+
+	Çok prosesli işletim sistemlerinde farklı programlar aynı anda RAM'de bulunmaktadır. Bir program kendi bellek alanının dışına çıkıp başka
+	programların (ve hatta işletim sisteminin) bellek alanına erişip orada değişiklikler yaparsa bundan tüm sistem olumsuz etkilenebilir, diğer
+	prgramın çalışması bozulabilir, o programlar yaznlı çalışabilirler. Bir programın değişiklik yapmadan başka bir programın bellek alanına 
+	erişmesi de tehlikeldir. Bu sayede kötü amaçlı programlar başka programın çalışması hakkında casusluk yapabilirler. Halbuki C'de bir göstericiye
+	RAM'deki herhangi bir adresi yerleştirip RAM'in o bölgesine erişebiliriz. Pekiyi bir programın kendi bellek alanı dışına erişmesi nasıl 
+	engellenebilir? Bu engelleme yalnızca işletim sistemi tarafından yapılamaz. Engellemenin en alt düzeyde işlemci tarafından yapılması gerekir. 
+	Bir program kendi bellek alanının dışına eriştiği zaman bu erişim birinci elden işlemci tarafından tespit edilir. İşlemci bu durumu işletim
+	sistemine bildirir. İşletim sistemi de programı cezalandırarak sonlandırır. 
+
+	Bazı makine komutları uygunsuz kullanıldığında tüm sistemin çökmesine yol açabilmektedir. İşte işlemcilerin koruma mekanizmaları bu makine
+	komutlarını da denetlemektedir. Buna "komut koruması" denilmektedir. Bu tür komutları kullanan programlar işlemci tarafından tespit edilir.
+	İşlemci durumu işletim sistemine bildirir. İşletim sistemi de programı cezalandırarak sonlandırır. 
+
+	Yukarıda açıkladığımız koruma mekanizmasının işlemci tarafından nasıl sağlandığı ve ihlallerin işletim sistemine nasıl iletildiği kişiler
+	tarafından merak edilmektedir. Bu konu kursumuzun konusu dışındadır. Mekanizmanın ayrıntıları "Sembolik Makine Dili" kurslarında ele 
+	alınmaktadır. 
+
+	İşletim sistemleri bellekte her yere erişebilmeli her makine komutunu kullanabilmeldir. Aksi takdirde faaliyetlerini yürütemezler. O halde
+	koruma mekanizması işletim sistemi için uygulanmamalı yalnızca sıradan uygulama programları için uygulanmalıdır. İşte işlemcileri tasarlayanlar
+	genellikle çalışmnakta olan akış için iki çalışma modu kullanırlar: Kernel mod ve user mod. Bir kdo kernel modda çalışıyorsa ona koruma 
+	mekanizması uygulanmaz. Böylece kernel modda çalışan programlar bellekte her yere erişebilirler her makine komutunu kullanabilirler. Ancak
+	user modda çalışan kodlara koruma mekanizması uygulanmaktadır. Programların hemen hepsi user modda çalımaktadır. örneğin Windows'taki Excel, 
+	Word, Visual Studio, Internet Explorer vs hep user modda çalışırlar. Benzer biçimde UNIX/Linux sistemlerindeki programlar kabuğun kendisi 
+	(örneğin bash), dışsal komutlar user modda çalışırlar. UNIX/linux sistemlerindeki root proseslerin bu konuyla hiçbir ilgisi yoktur. Yani bu 
+	sistemlerde biz bir programı sudo yaparak çalıştırdığımızda yine o program user modda çalışmaktadır. 
+
+	İşletim sisteminin kodları, aygıt sürücü kodları kernel modda çalışmaktadır. Programcı bir kod parçasının koruma engeline takılmadan kernel
+	modda çalışmasını istiyorsa onu "aygıt sürücüsü (device driver)" olarak yazmalıdır. Intel işlemcilerinde dört çalışma modu vardır. Bunlara 
+	"ring" de denilmektedir. Bu çalışma modlarına 0, 1, 2, 3 biçiminde numara verilmiştir. Korumanın hiç uygulanmadığı mod 0, korumanın tam uygulandığı 
+	mod 3'tür. Windows, Linux ve macOS sistemleri Intel işlemcilerinin iki modunu kullanmaktadır: 0 ve 3. Yani her ne kadar Intel işlemcilerinde 
+	4 çalışam modu olsa da aktif olarak zaten iki mod kullanılmaktadır. 
+
+	Pekiyi user mod bir program işletim sisteminin istem fonksiyonunu çağırdığında ne olur? İşletim sisteminin sistem fonksiyonları bellekte
+	her yere erişebilmekte ve özel makine komutlarını kullanabilmektedir. Eğer user mod program işletim sisteminin sistem fonksyonarını user modda
+	çalıştırsa hemen koruma mekanizmasına takılırdı. İşte user mod bir program işletim sisteminin sistem fonksiyonlarını çağırdığında geçici süre
+	otomatik olarak user mod'tan kernel mod'a geçirilmektedir. Böylece sistem fonksiyonları kernel modda çalıştırılmaktadır. Sistem fonksiyonundan 
+	çıkılırken yeniden user moda geri dönülmektedir. Bu duruma "prosesin user mod'tan kernel moda geçmesi" ve "kernel moddan user moda geri dönmesi"
+	denilmektedir. Tabii kernel moda geçişin ve geri dönüşün bir zaman maliyeti vardır. Yani işletim sisteminin sistem fonksiyonlarını çağırmanın 
+	diğer fonksiyonları çağırmaktan zamansal bakımdan daha maliyetli olduğu söylenebilir. 
+
+	Biz kendi programımızın belleğin her yerine erişmesini istiyorsak, onun özel makine komutlarını kullanmasını sağlamak isiyorsak programamızı 
+	"aygıt sürücü (device driver)" biçiminde organize etmeliyiz. Tabii aygıt sürücüleri sisteme sıradan kullanıcılar yükleyememektedir. Aygıt
+	sürücüler sistemin yöneticileri tarafından (örneğin Linux'ta root kullanıcısı tarafından) yüklenebilmektedir. Aygıt sürücüler sistemin boot 
+	edilmesi sırasında işletim sisteminin bir parçası olarak yüklenebilir ya da sistem çalışırken çeşitli komutlarla da yklenebilmektedir. 
+
+	İşlemcileri tasarlayanlar genellikle koruma mekanizamasını "açılıp kapatılacak biçimde" tasarlamaktadır. Pek çok işlemci reset edildiğinde
+	koruma mekanizması aktif değildir. Koruma mekanizasması genellikle işletim sistemi yüklenirken işletim sisteminn kodları tarafından aktif
+	hale getirilmektedir. Koruma mekanizmasını kapatabilmek için yine kernel modda olnması gerekmektedir. Ancak işletim sistemleri bir kere
+	koruma mekanizmasını aktif hale getirince artık bir daha pasif hale getirmemektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    Bir dosyanın bütün byte'ları üzerinde bir işlem yapacak olalım. Dosyanın her byte'ını tek tek read fonksiyonu ile aşağıdaki gibi okumaya 
+	çalışmak kötü bir tekniktir:
+
+	while ((result = read(fd, &ch, 1)) > 0) {
+		/* ... */
+	}
+
+	Çünkü her byte için read fonksiyonun çağrılması (read fonksiyonu da sistem fonksiyonunu doğrudan çağırmaktadır) user mod, kernel mod 
+	geçişleri nedneiyle zaman kaybının oluşmasına yol açar. Bu durumda ilk akla gelen alternatif yöntem okuma işlmelerini blok blok yapmaktır. 
+	Örneğin:
+
+	while ((result = read(fd, buf, 8192)) > 0) 
+		for (ssize_t i = 0; i < result; ++i) {
+			/* ... */
+		}
+	
+	Burada sistem fonksiyonu çok daha az çağrılacak ve önemli bir hız kanacı oluşacaktır. 
+
+	Aşağıda bu durumun simülasyonuna ilişkin bir örnek verilmiştir. Örneğimizde içi sıfırlarla dolu 5120000 uzunluğunda bir dosya kullanılmıştır. 
+	Bu dosya aşağıdaki gibi yaratılabilir:
+
+	dd if=/dev/zero of=test.dat bs=512 count=10000
+
+	Aşağıdaki örnekte test1 programı her byte için read fonksiyonunu çağırmıştır. test2 programı ise 8192 byte'lık bloklarlarla okumayaı yapmıştır. 
+	test1 programının çalışma süresi 3.040 saniye, test2 programının çalışma süresi ise 0.014 saniye sürmüştür. İki yöntem arasında yaklaşık 300 
+	kat bir hız farkı vardır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* test1.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12193,101 +13028,228 @@ int create_test_file(const char *path, int nblocks)
 
 void exit_sys(const char *msg);
 
-int main(void)
+void proc(int ch)
 {
-    int fd;
-    char ch;
-    ssize_t result;
-    size_t count;
-    clock_t t1, t2;
-    double ts;
+	/* EMPTY */
+}
 
-    t1 = clock();
+int main(int argc, char *argv[])
+{
+	int fd;
+	char ch;
+	ssize_t result;
+	clock_t start, stop;
+	double telapsed;
 
-    if ((fd = open("/Users/KaanAslan/Study/SysProg/test.dat", O_RDONLY)) == -1)
-        exit_sys("open");
+	if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
 
-    while ((result = read(fd, &ch, 1)) > 0)
-        ;
-    if (result == -1)
-        exit_sys("read");
+    start = clock();
 
-    close(fd);
+	if ((fd = open(argv[1], O_RDONLY)) == -1)
+		exit_sys("open");
 
-    t2 = clock();
+	while ((result = read(fd, &ch, 1)) > 0)
+		proc(ch);
 
-    ts = (double)(t2 - t1) / CLOCKS_PER_SEC;
+	if (result == -1)
+		exit_sys("read");
 
-    printf("Elapsed time: %f\n", ts);
+	close(fd);
 
-    return 0;
+	stop = clock();
+
+	telapsed = (double) (stop - start) / CLOCKS_PER_SEC;
+
+	printf("%.3f\n", telapsed);
+
+	return 0;
 }
 
 void exit_sys(const char *msg)
 {
-    perror(msg);
+	perror(msg);
+	exit(EXIT_FAILURE);
+}
 
-    exit(EXIT_FAILURE);
+/* test2.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+void proc(int ch)
+{
+	/* empty */
+}
+
+int main(int argc, char *argv[])
+{
+	int fd;
+	ssize_t result;
+	clock_t start, stop;
+	double telapsed;
+	char buf[8192];
+
+	if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+    start = clock();
+
+	if ((fd = open(argv[1], O_RDONLY)) == -1)
+		exit_sys("open");
+
+	while ((result = read(fd, buf, 8192)) > 0) 
+		for (ssize_t i = 0; i < result; ++i)
+			proc(buf[i]);
+		
+	if (result == -1)
+		exit_sys("read");
+
+	close(fd);
+
+	stop = clock();
+
+	telapsed = (double) (stop - start) / CLOCKS_PER_SEC;
+
+	printf("%.3f\n", telapsed);
+
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-    C'nin standart dosya fonksiyonları her açılan dosya için bir önbellek oluşturmaktadır. Böylece biz dosyaan okuma yaptığımızda aslında standart C fonksiyonları
-    POSIX read fonksiyonunu ya da Windows'un ReadFile fonksiyonunu çağırıp bu önbelleği doldurmaktadır. Sonraki okumalarda yeniden bu fonksiyonları
-    çağırmadan mümkğn olduğunca bize isteğimiz bilgileri hızlı bir biçimde önbellekten vermektedir. Buradaki önbelleğe C dünyasında "tampon (bug-ffer)"
-    da denilmektedir. Bu tamponlamanın (yani önbellek sisteminin) amacı işletim sisteminin sistem fonksiyonlarının daha az çağrılmasını sağlamaktır.
-    Bu önbellek sistemini işletim sisteminin oluşturduğu disk önbellek sistemi ile karıştırmayınız.İşletim sistemi diske erişimi azaltmak için önbeellek sistemi
-    oluştururken standart C fonksiyonlarının önbellek sistemi işletim sisteminin sistem fonksiyonlarının daha az çağrılmasını sağlamaktadır.
+	C'nin prototipleri <stdio.h> içerisinde bulunan dosya fonksiyonları sistem fonksiyonlarının daha az çağrılmasına sağlamk içim tıpkı yukarıdaki 
+	örnekte yaptığımız gibi bir cache sistemi oluşturmaktadır. Standart C fonksiyonlarının oluşturduğu bu cache sistemine genellikle "cache"
+	yerine "buffer" denilmektedir. Bu nedenle SC'nin standart dosya fonksiyonlarına "tamponlu IO fonksiyonları (buffered IO functions)" da
+	denilmektedir. Biz örneğin fgetc fonksiyonu ile dosyadan bir byte bile okumak istesek aslında fgetc bir grup byte'ı tek bir sistem fonksiyonu
+	ile okuyup bize okunan tampondan byte'ı verir. Böylece diğer fgetc çağırmaları için yeniden sistem fonksiyonu çağrılmamakta doğrudan bilgiler 
+	bu tampondan alınmaktadır. Bu nedenle bir dosyadan bu biçimde byte byte okumalar için standart C fonksiyonları tercih edilmelidir. 
 
-    Aşağıdaki kodda aynı dosya (5 MB civarında) bu kez standart fgetc fonksiyonuyla byte buyte okunmuşturi Ortalama zaman 0.1 saniye civarındadır.
-    Bu da işlemin 15 kat daha hızlı yapıldığı anlamına gelmektedir.
+	Şimdi yukarıda örneği standart C fonksiyonlarıyla deneyelim. Okumayı şöyle yapacağız:
+
+	while ((ch = fgetc()) != EOF) {
+		/* ... */
+	}
+	
+	Burada programın bu versiyonu aynı koşullar altında 0.025 saniye zaman almıştır. Üç deneyin aldığı zamanları yeniden anımsatmak istiyoruz:
+
+	Her defasında read çağrılması (test1.c): 3.040
+	read fonksiyonu ile blok blok okuma yapılması (test2.c):  0.014 
+	C'nin tamponlu fgetc fonksiyonu il byte byte okuma yapıması (test3.c): 0.025
 -------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* test3.c */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
-int main(void)
+void proc(int ch)
+{
+    /* EMPTY */
+}
+
+int main(int argc, char *argv[])
 {
     FILE *f;
     int ch;
-    clock_t t1, t2;
-    double ts;
+    double telapsed;
+    clock_t start, stop;
 
-    t1 = clock();
-
-    if ((f = fopen("/Users/KaanAslan/Study/SysProg/test.dat", "rb")) == NULL) {
-        fprintf(stderr, "Cannot open file!..\n");
+    if (argc != 2) {
+        fprintf(stderr, "wrong number of arguments!..\n");
         exit(EXIT_FAILURE);
     }
 
-    while ((ch = fgetc(f)) != EOF)
-        ;
+    start = clock();
+
+    if ((f = fopen(argv[1], "rb")) == NULL) {
+        fprintf(stderr, "cannot open file!...\n");
+        exit(EXIT_FAILURE);
+    }
+
+    while ((ch = fgetc(f)) != EOF) 
+        proc(ch);
+
+    if (ferror(f)) {
+        fprintf(stderr, "IO error!..\n");
+        exit(EXIT_FAILURE);
+    }
 
     fclose(f);
 
-    t2 = clock();
+	stop = clock();
 
-    ts = (double)(t2 - t1) / CLOCKS_PER_SEC;
-
-    printf("Elapsed time: %f\n", ts);
+    telapsed = (double) (stop - start) / CLOCKS_PER_SEC;
+	printf("%.3f\n", telapsed);
 
     return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-    C'nin stdio fonksiyonları read/write bir cache (tampon) kullanmaktadır. Dolayısıyla bizim dosyaya yazdığımız şeyler aslında tampona yazılmaktadır.
-    Bu tampon da ya başka bilgi tampona aktarılırken dosyaya yazılır ya da fflush işlemi sırasında dosyaya yazılır. exit standart C fonksiyonu
-    prosesi sonlandırmadan önce fopen ile açılmış olamn bütün dosyaları fclose ile kapatmaktadır. fclose ise dosyayı önce fflsuh ile flush eder.
-    Aşağıdaki örnekte proses standart exit fonksiyonuyla değil POSIX'in _exit fonksiyomuyla sonlandırılmıştır. Dolayısıyşla dosyaya yazılanlar
-    flush edilemeyecektir.
+	Bu noktada terminolojiye ilişkin bir noktayı belirtmek istiyoruz. C'nin standart dosya fonksiyonlarının kullandığı FILE yapısına ilişkin
+	göstericiye İngilizce "stream" denilmektedir. Biz buna Derneğimizde "dosya bilgi göstericisi" diyoruz.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
-    Biz C'de hiç exit fonksiyonunu çağırmasak biel zaten main bitince exit fonksiyonu çağrılmaktadır.
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	C'nin dosya fonksiyonlarının kullandığı tamponun büyüklüğü <stdio.h> içerisindeki BUFSIZ sembolik sabitiyle dış dünyaya ifade edilmiştir. 
+	gcc derleyicilerinde (yani glibc kütüphanesinde) BUFIZ değeri 8192, Microsoft derleyicilerinde 512 biçimindedir. Tabii biz BUFSIZ değerini 
+	değiştirmekle bu tamponun büyüklüğünü değiştirmiş olmayız. Çünkü kütüphane kodları çoktan derlenmiştir. BUFSIZ sembolik sabiti bizim kullanılan 
+	tampon büyüklüğünü öğrenebilmemiz için <stdio.h> içerisinde bulundurulmuştur. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Bir dosyayı fgetc fonksiyonuyla byte byte okumak isteyelim. Bu fonksiyon tamponlu (yani cache sistemi ile) çalıştığına göre etkin bir 
+	kullanıma yol açacaktır. Pekiyi yukarıdaki örnekteki zamanların aşağıdaki gibi olmasının anlamı nedir?
+
+	Her defasında read çağrılması (test1.c): 3.040
+	read fonksiyonu ile blok blok okuma yapılması (test2.c):  0.014 
+	C'nin tamponlu fgetc fonksiyonu il byte byte okuma yapıması (test3.c): 0.025
+
+	Neden fgetc fonksiyonun kullanıldığı versiyon bloklo read okumalarının yapıldığı versiyondan daha yavaş çalışmıtır? İki yöntemde de tampon
+	8192 byte uzunluğundadır. Programın fgetc versiyonunda her byte için fgetc fonksiyonu çaağrılmıştır. Bir fonksiyon çağırmanın da mikro 
+	düzeyde bir zmana kaybı vardır. Ayrıca fgetc fonksiyonu tampondan bilgiyi almak için de biraz zaman kaybı oluşturmaktadır. Bu nedenle standart 
+	C kütüphanesinde fgetc fonksiyonunun yanı sıra getc isimli bener bir fonksiyon da bulundurulmuştur. Bu iki fonksiyon arasındaki tek fark getc
+	fonksiyonunun bir makro olarak yazılmasına izin verilmesidir. Eğer getc fonksiyonu bir makro olarak yazılmışsa fonksiyon çağırmanın oluşturduğu 
+	göreli zaman kaybı (function call overhead) elimine edilmiş olacaktır. Ancak getc fonksiyonun bir makro biçiminde yazılması zorunlu tutulmamıştır. 
+	Yukarıdaki örnekte fgetc yerine getc fonksiyonun çağrılması gcc derleyicilerinde bir zaman kazancı sağlamamaktadır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    C'nin <stdio.h> fonksiyonları kütüphanelerde genellikle dosyanın ardışıl tek bir kısmını tamponda tutmaktadır. Bu tampon read/write bir 
+	cache siştemi gibidir. Dolayısıyla bizim dosyaya yazdığımız şeyler de aslında önce tampona yazılmaktadır. Pekiyi tampona yazılan bilgiler 
+	ne zaman dosyaya aktarılacaktır? İşte tampondaki bilgilerin dosyaya yazılması tipik olarak şu durumlarda sağlanmaktadır:
+
+	- Tampona dosyanın yeni bir kısmı çekilirken eğer tampon güncellenmişse tampondakiler önce dosyaya yazılırlar. Bu durum tamponlama stratejisi 
+	ile de ilgilidir.
+
+	- Dosya fclose fonksiyonu ile kapatılırken eğer tampona bir yazma yapılmışsa tampondakiler dosyaya yazılırlar.
+
+	- exit standart C fonksiyonu zaten tüm dosyaları kapatııktan sonra prosesi sonlandırmaktadır. Dolayısıyla en kötü olasılıkla program sonlanırken
+	tampona yazılmış olan bilgiler dosyaya aktarılmaktadır. 
+
+	- fflsuh fonksiyonu her çağrıldığında tampondakiler açıkça dosya yazılmaktadır.
+	
+	Aşağıdaki programı çalıştırınız akış getchar fonksiyonunda beklerken Ctrl+C tuşlarına basarak programı sinyal yoluyla sonlandırınız. 
+	Bu durumda tampona yazılan bilgiler flush edilmeden program sonlandırılacak ve dosyada 0 byte görülecektir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
 
 int main(void)
 {
@@ -12300,70 +13262,95 @@ int main(void)
 
     fputc('a', f);
     fputc('b', f);
-    fputc('\n', f);
+ 
+    getchar();
 
-    _exit(0);
+    fclose(f);
 
     return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	fdopen isimli POSIX fonksiyonun kullanımı
+	C'nin dosya fonksiyonlarında tamponlu çalışmadan kaynaklanan bir nedenle okumadan yazmaya yazmadan okumaya geçişte ya fflush fonksiynu 
+	çağrılmalı ya da fseek fonksiyonu çağrılmalıdır. Örneğin aşağıdaki işlem hatalıdır ve tanımsız davranışa yol açmaktadır:
+
+	ch = fgetc(f);
+	fputc('x', f);
+
+	Burada fgetc ile 1 byte okunduğunda dosya göstericisi 1 byte ilerletilmektedir. Böylece fputc fonksiyonu sonraki offset'e yazılmak istenmiştir. 
+	Ancak işlem hatalıdır. Çünkü okumadan yazmaya yazmadan okumaya geçiş doğrudan yapılmaz. Bu kod şöyle düzeltilebilir:
+
+	ch = fgetc(f);
+	fseek(f, 0, SEEK_CUR);
+	fputc('x', f);
+
+	Burada aslında fseek fonksiyonu dosya göstericisini hareket ettirmemktedir. Ancak fseek okumadan yazmaya geçişte gerekli olan tampon 
+	hazırlığını da yapmaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
-
-void exit_sys(const char *msg);
-
-int main(int argc, char *argv[])
-{
-	int fd;
-	ssize_t result;
-	FILE *f;
-	char buf[10 + 1];
-	int ch;
-
-	if ((fd = open("test.txt", O_RDONLY)) == -1)
-		exit_sys("open");
-
-	if ((result = read(fd, buf, 10)) == -1)
-		exit_sys("read");
-
-	buf[result] = '\0';
-	printf("read ile okunan byte'lar: %s\n", buf);
-
-	if ((f = fdopen(fd, "r")) == NULL) {
-		fprintf(stderr, "cannot open file!..\n");
-		exit(EXIT_FAILURE);
-	}
-
-	while ((ch = fgetc(f)) != EOF)
-		putchar(ch);
-
-	if (ferror(f)) {
-		fprintf(stderr, "cannot read file!..\n");
-		exit(EXIT_FAILURE);
-	}
-
-	fclose(f);
-
-	return 0;
-}
-
-void exit_sys(const char *msg)
-{
-	perror(msg);
-
-	exit(EXIT_FAILURE);
-}
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	C'de her fopen fonksiyonu ile dosya açıldığında o dosya için o açıma ilişkin ayrı bir tampon oluşturulmaktadır. Yani tampon toplamda 
+	bir tane değildir, dosya başına da bir tane değildir. Her fopen çağrısı ayrı bir tampon oluşturmaktadır. Aslında tampon bilgileri fopen
+	donksiyonunun geri döndürdüğü FILE türünden yapı nesnesinin içerisinde saklanmaktadır. Biz aynı dosyayı birden fazla kez fopen fonksiyonu 
+	ile açabiliriz. Bu durumda bu açımlardan elde edilen FILE nesnelerinin ayrı tamponları ve ayrı dosya göstericileri olacaktır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	setbuf fonksiyonu dosya için ayrılan tamponun yerini değiştirmek için kullanılmaktadır. Bu fonksiyon tamponun boyutunu değiştirmez, BUFSIZ 
-	büyüklüğündeki tamponun yerini değiştirir. Fakat bu fonksiyon aynı zamanda ikinci parametre iin NULL adres girilirse dosyayı sıfır tamponlamalı 
-	(no buffered) moda da sokmaktadır. 
+	C'nin standart dosya fonksiyonları üç farklı tamponlama stratejisi (yani yöntemi) kullanabilmektedir. Buna dosyanın (stream'in) tamponlama
+	modu da denilmektedir. Bu modlar şunlardır:
+
+	1) Tam Tamponlamalı Mod (Full Buffered Mode).
+	2) Satır Tamponlamalı Mod (Line Buffered Mode)
+	3) Sıfır Tamponlamalı Mod (No Buffered Mode)
+
+	Tam tamponlamalı modda tampon (yani cache) tam kapasiteyle kullanmaya çalışılmaktadır. Dosyanın ardışıl bölümü tapona çekilir. Okunmak istenen
+	bilgiler mümkün olduğunca tampondan verilir. Tamponun dışna çıkılmışsa dosyanın yeni bir bölümü tampona aktarılır. Tabii bu sırada tampon 
+	kirlenmişse flush edilir. Bu en doğal çalışma modudur. 
+
+	Satır tamponlamalı modda tampona tek bir satır çekilir. Satırın sonında da '\n' karakteri vardır. Dosyadan okuma yapıldıkça buradan verilir. 
+	Satır bittiğinde yeni bir satır tampona çekilir. Yani tamponda tipik olarak tek bir satır bulunmaktadır. Tabii yine tampon kirlenmişse 
+	yeni satır tampona çekilirken flush işlemi yapılmaktadır. Bu modda tampona yazılan '\n' karakteri kesinlikle flush işlemine yol açmaktadır. 
+	Halbuki tam tamponlamada flush oluşturan özel bir byte yoktur. 
+
+	Sıfır tamponlamalı modda tampon hiç kullanılmaz. C'nin standart dosya fonksiyonları tamponlamayı kullanmadan doğrudan işletim sisteminin 
+	sistem fonksiyonlarıyla (UNIX/Linux sistemlerinde POSIX fonksiyonlarıyla, Windows sistemlerinde Windows API fonksiyonlarıyla) transferi 
+	gerçekleştirirler. 
+
+	Biz yukarıda tamponlama modlarının tipik davranışlarını belirttik. Aslında C standartları bu konudaki belirlemeleri biraz muğlak ve kesin 
+	olmayan biçimde yani bir "niyet biçiminde" belirtmiştir. Detayları derleyiciyi yazanlara bırakmıştır. Bu durumda örneğin staır tabanlı 
+	tamponlama seçilse bile işlemler tam tamponlamalı gibi yapılabilir. Standart C kütüphaneleri mümkün olduğunca tamponlama davranışını yukarıda
+	açıkladıpımız gibi gerçekleştirmektedir. Ancak örneğin normal disk dosyasının '\n' görene kadar satırsal bir biçimde okunması uygun olmayabilmektdir. 
+	Bu nedenle örneğin Microsoft derleyicileri, gcc ve clang derleyicileri (glibc kütüpahnesi) normal disk dosyaları için satır tamponalamlı modda
+	'\n' karakteri tampona yazıldığında flush işlemi yapmakta ancak okuma sırasında tamponu tamamen doldurmaktadırlar. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi bir dosyayı fopen fonksiyonu ile açtığımızda dosyanın default tamponlama modu nedir? İşte C standartları bu konuda bir şey söylememektedir. 
+	Fakat en normal durum disk dosyaları için default tamponalama modunun tam tamponlama olmasıdır. Yaygın derleyiciler default tamponlama modunu 
+	tam tamponlamalı mod olarak belirlemektedir. Ancak standratlarda stdin, stdout ve stderr dosyalarının default tamponlama modu için bazı
+	şeyler söylenmiştir. Bunu izleyen graflarda ele alacağız. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Dosyanın tamponlama modu ve tamponun yeri setbuf ve setvbuf standart C fonksiyonlarıyla değiştirilebilmektedir. sevbuf fonksiyonu setbuf
+	fonksiyonunu işlevsel olarak kapsamaktadır. Zaten bu fonksiyon setbuf fonksiyonunun yetersizlikleri nedeniyle tasarlanmıştır. setbuf ve 
+	setvbuf fonksiyonları dosya açıldıktan sonra ancak dosya üzerinde henüz hiçbir işlem yapılmadan kullanılmalıdır. Aksi tadirde "tanımsız 
+	davranış (undefined behavior)" oluşmaktadır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	setbuf fonksiyonu temel olarak dosya için ayrılan tamponun yerini değiştirmek için kullanılmaktadır. Bu fonksiyon tamponun boyutunu değiştirmez, 
+	Tampon her zaman BUFSIZ uzunluğundadır. Fonksiyon yalnızca tamponun yerini değiştirmektedir. Fonksiyonun prototipi şöyledir:
+
+	void setbuf(FILE *stream, char *buf);
+	
+	Fonksiyonun birinci parametresi tamponu değiştirilecek dosyaya ilişkin dosya bilgi göstericisini belirtmektedir. İkinci parametre yeni 
+	tamponun yerini belirtmektedir. Bu parametreye en azından BUFSIZ uzunluğunda tahsis edilmiş bir alanın adresi geçirilmelidir. Fonksiyonun 
+	ikinci parametresine NULL adres geçirilirse dosya sıfır tamponlamalı moda sokulmaktadır. 
+
+	Aşağıda tam tamponlamanın nasıl etki gösterdiğine yönelik basit bir örnek verilmiştir. Örnekte önce tamponun yeri setbuf fonksiyonuyla 
+	değiştirilmiş sonra dosyadan okuma yapılıp tampon görüntülenmiştir. Sonra da dosyaya yazma yapılmış yeniden tampon görüntülenmiştir. 
+	Okumadan yazmaya geçerken bir fseek çağırmasının yapıldığında dikkat ediniz. Genellikle fseek çağrıları tamamen tamponu yeniden doldurmaktadır. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -12413,7 +13400,9 @@ int main(void)
 
 	disp_hex(buf, BUFSIZ, 16);
 
-	printf("---------------------------------------------\n");
+	printf("---------------------------------------------\n\n");
+
+	fseek(f, 0, SEEK_CUR);
 
 	fputc('x', f);
 	disp_hex(buf, BUFSIZ, 16);
@@ -12424,10 +13413,24 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	setvbuf fonksiyonu setbuf fonksiyonundan daha yeteneklidir. Çünkü bu fonksiyonla biz hem tamponun yerini, hem büyüklüğünü hem de tamponlama stratejisini
-	değiştrebiliriz. Aşağıdaki örnekte dosyanın tampon 64 byte'a düşürülmüştür ve dosya Line buffered moda sokulmuştur. Her ne kadar line buffered modda
-	tampon bir satır kadar bilgiyle dolduruluyorsa da kütüphaneler yine okuma sırasında tamponun tamamını doldurabilmektedir. Ancak yazma sırasında kesinlikle
-	'\n' karakteri tampona yazıldığında tampon tazelenir. 
+	Yukarıda da belirttiğimiz gibi setvbuf fonksiyonu işlevsel olarak setbuf fonksiyonunu kapsamaktadır. setvbuf fonksiyonu ile biz dosyanın 
+	tamponlama modunu hem de tamponun yerini ve büyüklüğünü değiştirebiliriz. Fonksiyonun prototipi şöyledir:
+
+	int setvbuf(FILE *stream, char *buf, int mode, size_t size);
+
+	Fonksiyonun birinci parametresi ilgili dosyaya ilişkin dosya bilgi göstericisini, ikinci parametresi yeni tamponun yerini, üçüncü parametresi 
+	yeni tamponlama modunu ve dördüncü parametresi de tamponun yeni uzunluğunu belirtmektedir. Tamponlama modu için şu değerlerden biri 
+	girilmelidir:
+
+	_IOFBF	(Tam tamponlama)
+	_IOLBF	(Sator tamponlaması)
+	_IONBF	(Sıfır tamponlama)
+
+	Tamponlama modunu belirten üçünü parametreye _IONBF değeri girilirse artık ikinci dördüncü parametreler fonksiyon tarafından kullanılmamaktadır. 
+	Fonksiyonun ikinci parametresine NULL adres geçilebilir. Bu durumda tampon fonksiyon tarafından dördüncü parametre belirtilen uzunlukta tahsis 
+	edilmektedir. Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda sıfır dışı herhangi bir değere geri dönmektedir. 
+
+	Aşağıdaki örnekte biz açılmış olan dosyanın hem tampon büyüklüğü hem de tamponun yeri değiştirilmiştir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -12464,17 +13467,25 @@ void disp_hex(const void *buf, size_t size, size_t lbytes)
 int main(void)
 {
 	FILE *f;
-	char buf[64] = { '\0' };
+	char buf[BUFSIZ * 2];
 
-	if ((f = fopen("test.txt", "r+b")) == NULL) {
+	if ((f = fopen("test.txt", "r+")) == NULL) {
 		fprintf(stderr, "cannot open file!..\n");
 		exit(EXIT_FAILURE);
 	}
 
-	setvbuf(f, buf, _IOLBF, 64);
+	setvbuf(f, buf, _IOFBF, BUFSIZ * 2);
+
 	fgetc(f);
 
-	disp_hex(buf, 64, 16);
+	disp_hex(buf, BUFSIZ * 2, 16);
+
+	printf("---------------------------------------------\n\n");
+
+	fseek(f, 0, SEEK_CUR);
+
+	fputc('x', f);
+	disp_hex(buf, BUFSIZ * 2, 16);
 
 	fclose(f);
 
@@ -12482,26 +13493,143 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Klavye ve ekran "terminal aygıt sürücüsü" biçiminde isimlendirilen bir aygıt sürücü tarafından kontrol edilmektedir. Dolayısıyla aslında biz 
-	ekrana bir şey yazmak istediğimizde bu aygıt sürücüyü açıp ona bir şeyler yazarız. Bizim aygıt sürücüye yazdığımız şeyleri aygıt sürücü ekrana yazdırmaktadır. 
-	Aynı durum klavyeden okuma yaparken de söz konusudur. Aşağıda Linuz sistemlerinde pseudo terminal aygıt sürücü yoluyla açılıp bir şeyler yazılmıştır.
+	Bilgisayar sistemlerinde tüm işlemler aslında elektriksel düzeyde gerçekleştirilmektedir. Örneğin bilgiyarımızın genişleme yuvasına 
+	bir kart taktıldığını düşünelim. Bu kartın üzerinde birtakım entegre devreler potansiyel olarak birtakım işleri yapabilecek biçimde 
+	yerleştirilmiştir. Ancak bu tür donanım birimlerinin de hedef doğruktusunda programlanması gerekmektedir. Bu donanım birimlerine iş 
+	yaptırmak için komutlar elektriksel işaretler biçiminde gönderilmektedir. Ancak bu gönderim de makine komutlarıyla sağlanmaktadır. 
+	Yani genişleme yuvasına takılan kart aslında elektrisksel olarak programlanmakta ancak o elektiriksel işaretlerin karta gönderilmesi için de 
+	programlar yazılmaktadır. Bu tür donanım birimlerinin programlanması genellikle sembolik makine dili düzeyinde yapılmaktadır. Ancak programlama
+	sırasında gerekli pek çok makine komutu özel komutlardır ve işlemcinin koruma mekanizamasına takılma potansiyelindedir. Bu nedenle bu tür 
+	kodların kernel modda çalştırılması gerekmektedir. İşte bir donanım birimini programlayan ve kernel modda çalışan kodlara "aygıt sürücüler
+	(device drivers)" denilmektedir. O halde nerede bir donanım aygıtı varsa onu programlayan aşağı seviyeli kodların bulunuyor olması gerekir. 
+	Bu kodlar da aygıt sürücü biçimde yazılımalıdır. Örneğin bir ses kartını genişleme yuvasına taktiğimızda onun aygıt sürücüsü yüklenmedikten 
+	sonra kart bir işe yaramaktadır. 
+
+	Aygıt sürücüler işletim sisteminin kernel yapısına uygun bir mimari ile yazılmak zorundadır. Her işletim sisteminin belli bir aygıt sürücü 
+	mimarisi vardır. Aygıt sürücü yazımı işletim işletim sistemine hatta aynı işletim sisteminin versiyonlarına göre değişebilmektedir. Nasıl 
+	masaüstü bilgisayarların genişleme yuvalarına kart takmak için o kartın belli özelliklere sahip olması gerekiyorsa bir aygıt sürücünün de
+	işletim sisteminin belirlediği bazı özelliklere sahip olması gerekmektedir. 
+
+	Pekiyi aygıt sürücüler ne zaman ve nasıl yüklenmektedir? Aygıt sürücülerin bir bölümü kernel içerisine entegre edilmiş durumdadır. Bir 
+	bölümü sistem boot edilirken yüklenmektedir. Diğer bir bölümü ise gerektiğinde donanın aygıtı sisteme bağlandığında otomatik yüklenmektedir. 
+	Örneğin modern sistemlerde genişleme yuvalarına bir kart takıldığında ya da USB soketine bir donanım birimi takıldığında bu kartlar ve 
+	donanım birimleri kendini sisteme tanıtmaktadır. İşletim sistemelri de kendi aygıt sürücü istesinde bu kartlara ya da donanım birimlerine 
+	ilişkin aygıt sürücüler	varsa onları otomatik olarak yüklemektedir. Eskiden bu tür işlemler tamamen manuel yapılıyordu. Her durumda modern 
+	sistemlerde bir aygıt sürücünün yüklenebilmesi ancak sistem yöneticisinin onayıyla yapılabilmektedir. Örneğin UNIX/Linux sistemlerinde 
+	aygıt sürücüleri ancak root kullancısı sisteme yükleyebilir. Windows sistemlerinde default kullanıcı genellike admin durumundadır. Aygıt
+	sürücüler yüklenirken bir pop pencereyle sistem yöneticisi bilgilendirilir ve onun onayı alınır.
+
+	Bazı aygıt sürücleri bir donanım arayüzü biimindedir. Yani sistem programcısından komutlar alıp onu donanıma iletmektedir. Örneğin biz 
+	programcı olarak ses kartına ilişkin aygıt sürücüye komut gönderebiliriz. Bu aygıt sürücü de ses kartını programlayarak işlemleri 
+	gerçekleştirebilir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Aygıt sürücüler genel olarak birer dosya gibi kullanılmaktadır. Yani aygıt sürücünün bir ismi vardır. Bir dosya nasıl açılıyorsa aygıt sürücü 
+	öyle açılır. Aygıt sürücü dosya gibi açıldıktan sonra ona yazma yapıldığında yazılanlar aygıt sürücüyel gönderilir. Aygıt sürücüden yine 
+	dosya fonksiyonlarıyla okuma yapılır. Ayrıca aygıt sürücülerin içerisindeki önceden belirlenmiş fonksiyonlar user modtan çağrılabilmektedir. 
+	
+	Örneğin UNIX/Linux sistemlerinde bir aygıt sürücü open fonksiyonuyla açılır. Ona write fonksiyonuyla bilgi gönderilir. Ondan read fonksiyonuyla 
+	okuma yapılır. ioctl isimli bir fonksiyonla da aygır sürücüdeki belli fonksiyonlar çalıştırılır. En sonunda aygıt sürücü close fonksiyonuyla
+	kapatılır. 
+
+	Örneğin Windows sistemlerinde yine aygıt ssürücü CreateFile API fonksiyonuyla bir dosya biçiminde açılır. WriteFile API fonksiyonuyla 
+	aygıt sürücüye bilgi gönderilir. ReadFile API fonksiyonuyla aygıt sürücüden okuma yapılır. DeviceIOControl API fonksiyonuyla aygıt sürücü 
+	içerisindeki fonksiyonlar çağrılır. 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi aygıt sürücüler kabaca nasıl yazılmaktadır? İşte aygıt sürücüleri yazanlar aygıt sürücü açıldığında belli bir fonksiyonun çağrılmasını,
+	aygıt sürücüye yazma yapıldığında belli bir fonksiyonun çağrılmasını, aygıt sürücüden okuma yapıldığında belli bir fonksiyonun çağrılamsını,
+	aygıt sürücü kapatıldığında belli bir fonksiyonun çağrılmasını sağlamaktadır. Ayrıca aygıt sürücü içerisindeki bazı fonksiyonlara numaralar 
+	verip user moddan bu fonksiyonların çağrılması sağlarlar. 
+
+	Örneğin bir termometre devresini kontrol eden bir aygıt sürücü yazacak olalım. Aygıt sürücümüzün bir ismi vardır. Aygıt sürücü bir dosya gibi 
+	açıldığında aygıt sürücümüzün bir fonskyionu çağrılır. Biz orada gerekiyorsa birtakım ilk işlemleri yaparız. Aygıt sürücümüzden okuma yapıldığında
+	yine bizim bir fonksiyonumuz çağrılır. Örneğin bu fonksiyonda biz termometre devresinden ısıyı alarak okuma yapan programa veririz. Aygıt sürücü 
+	kapatılınca yine bizim bir fonksiyonumuz çağrılır biz de gereken bazı son işlemleri yaparız. 
+
+	Aygıt sürücüsü içerisindeki fonksiyonlar user moddan çağrılırken yine sistem fonksiyonlarında olduğu gibi proses kernel moddan user moda 
+	otomatik olarak geçirilmektedir. Yani aygıt sürücü içerisindeki fonksiyonlar kernel modda çalıştırılmaktadır. Fonksiyonun çalışması bittiğinde
+	yeniden user moddan kernel moda geri dönülmektedir. 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Klavye ve ekran aslında donanımsal birimlerdir. Dolayısıyla bunlar aygıt sürücüler tarafından yönetilirler. Yani aslında biz ekrana bir 
+	şeyler yazdırabilmek için yazılacak şeyleri aygıt sürücüye göndeririz. Aygıt sürücü onları ekrana çıkartır. Benzer biçimde biz aslında 
+	klavyeden okuma yaparken aygıt sürücüden okuma yaparız. Aygıt sürücü de kalvyeden alınanları bize verir. Ekran ve klavye birimelrine 
+	"terminal" bunlara aygıt sürücülere de "terminal aygıt sürücüleri" denilmektedir. 
+
+	C standartlarında ekran ve klavye sözcükleri kullanılmamıştır. Çünkü bir bilgisayar sisteminde ekran ve klavyenin bulunması zorunlu değildir. 
+	Ekran ve klavye yerine C standartlarında "stdout (standart output)" ve "stdin (standart input)" terimleri kullanılmıştır. C standartlarında 
+	stdout ve stdin birer dosya olarak geçmektedir. Böylece örneğin printf fonksiyonu ekrana yazmamaktadır. stdout isimli bir dosyaya yazamktadır.
+	scanf fonksiyonu klavyeden okumamaktadır. stdin isimli bir dosyadan okuma yapmaktadır. stdout ve stdin dosyalarının gerçekte ne olduğu 
+	standartlarda belirtilmemiştir. Tabii modern masaüstü sistemlerinde stdout dosyası aslında ekranı kontrol eden terminal aygıt sürücüsünü, 
+	stdin dosyası ise klavyeyi kontrol eden terminal aygıt sürücüsünü temsil etmektedir. Aygıt sürücüler birer dosya gibi kullanıldığı için 
+	bunların bir dosya olması da tasarımla uyumludur. Böylece biz bu sistemlerde aslında stdout dosyasına bir şeyler yazdığımızda yazdığımız 
+	şeyler aygıt sürücüsüne gider. Aygıt sürücüsü de onları ekrana çıkartır. Benzer biçimde biz stdin dosyasından bir şeyler okumak istediğimizde
+	aslında terminal klavyeyi kontrol eden aygıt sürücüden okuma yaparız. O da klavyeden girilenleri bize verir. 
+	
+	Modrn işletim sistemlerinde açık dosyanın hedefi değiştirebilmektedir. Örneğin stdout dosyasına yazılanlar aslında terminal aygıt sürücüsüne 
+	gönderilmektedir. Ancak biz istersek bu dosyaya yazılanların başka bir yere örneğin diskte bir dosyaya gönderilmesini sağlayabiliriz. 
+	Bu işleme işletim sistemleri dünyasında "IO yönlendirmesi (IO redirection)" denilmektedir. O halde biz örneğin IO yöönlendirmesi yoluyla 
+	stdout ve stdin dosyalarını başka hedeflere de yönlendirebiliriz. 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux dünyasında aygıt sürücüleri açmakta kullanılan dizin girişleri genel olarak /dev dizininde bulundurulmuştur. Bulunduğunuz 
+	terminalde tty komutunu vererek aygıt sürücünüzün ismini öğrenebilrisiniz. Örneğin:
+
+	$tty
+	/dev/pts/1
+
+	Aygıt sürücüler dosya gibi açılıp kullanıldığına göre biz bu aygıt sürücüyü open ile açıp, ona write ile yazma yaparsak yazılanlar o 
+	terminale çıkacaktır. Örneğin:
+
+	int fd;
+
+	if ((fd = open("/dev/pts/1", O_WRONLY)) == -1)
+		exit_sys("open");
+
+	write(fd, "ankara\n", 7);
+
+	close(fd);
+
+	İşte aslında C'nin stdout dosyasına yazma yapan fonksiyonları da neticede write fonksiyonunu kullanarak ekranda çıkacak şeyleri bu aygıt 
+	sürücüye yollamaktadır. Örneğin puts fonksiyonunu çağırdığımızda kabaca şu işlemler gerçekleşmektedir:
+
+	puts ---> write(stdout, ....) ----> Aygıt sürücü ----> Ekrana basma
+
+	Aşaıdaki örnekte önce terminal aygıt sürücüsünden (kalvyeden) okuma yapılıp sonra okunanlar ona (ekrana) yazdırılmıştır. Genellikle 
+	ekran ve klavye işlemleri tek bir aygıt sürücü ile yapılmaktadır. Yani bu aygıt sürücü hem ekranı hem de klavyeyi konrol etmektedir. 
+	Zaten terminal kavramı "ekran ve klavyeyi" içeren bir kavramdır. Dolayısıyla terminal aygıt sürücüsü de her iki aygıtı kontrol eden aygıt
+	sürücüsüdür. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 
 void exit_sys(const char *msg);
 
-int main(int argc, char *argv[])
+int main(void)
 {
 	int fd;
+	char buf[4096];
+	ssize_t result;
 
-	if ((fd = open("/dev/pts/0", O_WRONLY)) == -1)
+	if ((fd = open("/dev/pts/1", O_RDWR)) == -1)
 		exit_sys("open");
 
-	write(fd, "ankara", 6);
+	if ((result = read(fd, buf, 4096)) == -1)
+		exit_sys("read");
+
+	buf[result] = '\0';
+
+	if (write(fd, buf, strlen(buf)) == -1)
+		exit_sys("write");
 
 	close(fd);
 
@@ -12511,28 +13639,58 @@ int main(int argc, char *argv[])
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Linux sistemlerinde bir proses yaratıldığında aten 0, 1 ve 2 numaralı betimleyiciler açık bir biçimde proses başlar. 0 numaralı betimleyici
-	terminale ilişkin aygıt sürücüsünü girdi elde etmek için, 1 numaralı dosya betimleyicisi çıktı oluşturmak için temsil etmektedir. 2 numaralı betimleyici
-	de stderr dosyasını temsil eder. 
+	C'de stdin, stdout ve stderr değişken isimleri aslında FILE * türünden dosya bilgi göstericisi belirtmektedir. Bunlar masaüstü sistemlerde 
+	ekran ve klavyeyi kontrol eden aygıt sürücü dosyaları olarak açılmışlardır. Yani biz stdout dosyasına bir şey yazdığımızda aslında yazdığımız 
+	şeyler terminal aygıt sürücüsüne gönderilmektedir. Ancak bu değişkenlerin FILE * türünden yani tamponlu bir dosya belittiğine dikkat ediniz. 
+	Yani diğer dosyalar için nasıl bir tampon eşliğinde aktarım yapılıyorsa bu aygıt sürücü dosyalarına da yine bir tampon eşliğinde aktarım 
+	yapılmaktadır. <stdio.h> içerisinde başı f ile başlamayan fonskiyonlar da aslında birer dosya fonksiyonudur. Ancak onlar default olarak 
+	stdout ve stdin dosyalarını kullanmaktadır. Yani örneğin aşağıdaki iki fonksiyon çağrısı tamamen eşdeğerdir:
+
+	fprintf(stdout, ...);
+	printf(....);
+
+	Aşağıdaki gibi çağrı da eşdeğerdir:
+
+	fscanf(stdin, ...);
+	scanf(....);
+
+	Zaten C standartları örneğin fprintf fonksiyonunu açıklayıp printf fonksiyonu için fprintf fosnksiyonunun stdout dosyasına yazan biçimi 
+	diye kısa açıklama bulundurmuştur. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+												35. Ders 14/10/2023 - Cumartesi
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+	UNIX/Linux sistemlerinde bir proses çalışmaya başladığında genel olarak 0, 1 ve 2 numaralı dosya betimleyicileri zaten açık durumdadır. 
+	0 numaralı betimleyici klavyeyi temsil eden terminal aygıt sürücüsüne ilişkindir. Yani bu betimleyiciden read fonksiyonu ile okuma
+	yapılmak istenirse aslında klavyeden okuma yapılacaktır. stdin betimleyicisinin O_RDONLY modda açıldığı varsayılmaktadır. 1 numaralı betimleyici 
+	de yine terminal aygıt sürücüsüne ilişkindir. Ancak bu betimleyici ile yazma yapıldığında terminal aygıt sürücüsü yazılanları ekrana 
+	bastırmaktadır. 1 numaralı betimleyicinin O_WRONLY açıldığı kabul edilmektedir. 2 numaralı betimleyici default durumda tamamen 1 numaralı 
+	betimleyicde olduğu gibi terminal aygıt sürücüsüne ilişkindir. 2 numaralı betimleyici ile yazma yapılırsa yazılanlar yine ekrana basılacaktır. 
+	UNIX/Linux dünyasında 0 numaralı betimleyiciye "stdin betimleyicisi", 1 numaralı betimleyiciye "stdout betimleycisi" ve 2 numaralı 
+	betimelyiciye de "stderr betimleyicisi" denilmektedir. Bizim açmadığımız 0, 1 ve 2 numaralaı betimleyicileri özel bir durum yoksa biz 
+	kapatmamalıyız. C'deki stdin, stdout ve stderr dosya bilgi göstericileri arka planda UNIX/Linux sistemlerinde sırasıyla 0, 1 ve 2 numaralı 
+	betimleyicileri kullanmaktadır. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#define BUFFER_SIZE	4096
+
 void exit_sys(const char *msg);
 
 int main(void)
 {
-	char buf[4096];
+	char buf[BUFFER_SIZE];
 	ssize_t result;
 
-	if ((result = read(0, buf, 1024)) == -1)
+	if ((result = read(0, buf, BUFFER_SIZE)) == -1)
 		exit_sys("read");
 
 	if (write(1, buf, result) == -1)
@@ -12544,39 +13702,66 @@ int main(void)
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Benzer biçimde Windows'ta da bir proses yaratıldığında terminal aygıt sürücülerine ilişkin dosya HANDLE değerleri işletim sistemi düzeyinde 
-	elde edilmiş durumdadır. Ancak burada bu handle değerleri POSIX sistemlerindeki gibi baştan belli değildir. GetStdHandle API fonksiyonuyla bunlar
-	elde edilmektedir. 
+	Benzer biçimde Windows sistemlerinde de bir proses çalışmaya başladığında genellikle (ama her zaman değil) klavye, ekran ve hata dosyalarını 
+	temsil eden dosyalar açık durumdadır. Bu dosyalar yine terminal aygıt sürücüsüne ilişkindir. Ancak bunların Windows'taki HANDLE değerleri 
+	önceden belli değildir. Dolayısıyla program çalışırken programcı tarafından GetStdHandle isimli bir API fonksiyonuyla elde edilirler. 
+	Fonksiyonun prototipi şöyledir:
+
+	HANDLE WINAPI GetStdHandle(
+		DWORD nStdHandle
+	);
+
+	Fonksiyona parametre olarak aşağıdakiklerden biri girilebilir:
+
+	STD_INPUT_HANDLE
+	STD_OUTPUT_HANDLE
+	STD_ERROR_HADNLER
+
+	Bu değerler biçizm hangi standart handle'ı elde edeceğimizi belirtmektedir. Fonksiyon başarısızlık durumunda INVALID_HANDLE_VALUE değerine
+	geri döner. Prosesin standart handle'ları olmayabilir. Bu durumda fonksiyon NULL değerine geri döner. Ancak GetLastError değeri bu durumda 
+	set edilmemektedir. 
+
+	Windows sistemlerinde de standart C kütühanesindeki stdin, stdout ve stderr dosya bilgi göstericileri GetStdHandle ile elde eidlen aygıt sürücülere
+	ilişkin dosyaları kullanmaktadır. 
+
+	Aşağıdaki örnekte Windows sistemlerinde önce stdin ve stdout dosyalarının handle değerleri elde edilmiş sonra stdin dfosyasından okuma yapılıp
+	okunanlar stdout dosyasına yazdırılmıştır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
+#include <Windows.h>
+
+#define BUFFER_SIZE		4096
 
 void ExitSys(LPCSTR lpszMsg);
 
 int main(void)
 {
-	HANDLE hStdin, hStdout;
-	char buf[4096];
+	HANDLE hStdIn, hStdOut;
+	char buf[BUFFER_SIZE];
 	DWORD dwRead, dwWritten;
 
-	if ((hStdin = GetStdHandle(STD_INPUT_HANDLE)) == INVALID_HANDLE_VALUE)
+	if ((hStdIn = GetStdHandle(STD_INPUT_HANDLE)) == INVALID_HANDLE_VALUE)
+		ExitSys("GetStdHandle");
+	
+	if ((hStdOut = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE)
 		ExitSys("GetStdHandle");
 
-	if ((hStdout = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE)
-		ExitSys("GetStdHandle");
+	if (hStdIn == NULL || hStdOut == NULL) {
+		fprintf(stderr, "Standard input or standard output handle doesn't exist!..\n");
+		exit(EXIT_FAILURE);
+	}
 
-	if (!ReadFile(hStdin, buf, 4096, &dwRead, NULL))
+	if (!ReadFile(hStdIn, buf, BUFFER_SIZE, &dwRead, NULL))
 		ExitSys("ReadFile");
-
-	if (!WriteFile(hStdout, buf, dwRead, &dwWritten, NULL))
-		ExitSys("WriteFile");
+		
+	if (!WriteFile(hStdOut, buf, dwRead, &dwWritten, NULL))
+		ExitSys("WriteLile");
 
 	return 0;
 }
@@ -12596,6 +13781,1049 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
+	Biz default olarak stderr dosyasının (hem C'de hem de POSIX ve API düzeyinde) stdout dosyasıyla aynı terminal aygıt sürücüsüne yönlendirildiğini 
+	belirtmiştik. Pekiyi stdout ile stderr arasında ne farklılık vardır. Biz stdout dosyasına da stderr dosyasına bir şeyler yazdırdığımızda 
+	ikisi de ekranda görüntülenmektedir. 
+
+	Bir dosya dosyanın bir hedefi vardır. Ancakbu hedef değiştirilebilmektedir. Dosyanın hedefenin hedefinin değiştirilemsine işletim sistemi
+	dünyasında "IO Yönlendirmesi (IO Redirection)" denilmektedir. Örneğin stdout dosyasının hedefi ekranı kontrol eden eaygıt sürücüsü iken
+	biz onu bir disk dosyasına yönlendirebiliriz. Bu durumda printf fonksiyonu gibi stdout dosyasına yazan fonksiyonlar aslında dosya yazmış 
+	olurlar. Benzer biçimde biz stdin ve stderr dosyalarını da yönlendirebiliriz. 
+
+	IO yönlendirmelerinin kernel tarafından nasıl yapıldığı ileride ayrı bir başlıka ele alınacaktır. Biz şimdilik kullanıcı düzeyinde IO 
+	yönlenidrmesi ile ilgileneceğiz. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Biz bir programı kabuk üzerindne çalıştırırken  program isminden sonra ">" karakterini kullanırsak çalıştırdığımız programın stdout dosyasını
+	yönlendirmiş oluruz. Örneğin:
+
+	./sample > test.txt 
+
+	Burada stdou dosyasına yazılanlar artık ekrana çıkmatacak "test.txt" dosyasına yazılacaktır. Tabii stderr dosyasına yazılanlar yine 
+	ekrana çıkmaya devam edecektir. Kabuk üzerinde program isminden sonra "2>" karakterlerini kullandığımızda ise stderr dosyasını yönlendirmiş 
+	oluruz. Örneğin:
+
+	./sample 2> test.txt
+
+	Burada sample programının stderr dosyasına yazdığı şeyler artık ekranda görülmeyecek "test.txt" dosyasına yazılacaktır. Tabii iki yönlendirmeyi 
+	birlikte de yapabliriz. Örneğin:
+
+	./sample > test.txt 2> mest.txt
+
+	Kabukta yönlendirme Windows'un komut satırında da aynı biçimde yapılmaktadır. 
+
+	Biz programımızdaki hata mesajlarını stderr dosyasına yazdırmalıyız. Default durumda bu hata mesajları ekrana çıkacaktır. Ancak programı 
+	çalıştıran kişiler IO yönlendirmesi ile hedefi değiştirebilecekleridir. Eğer bi hata mesajlarını doğrudan stdout dosyasına yazdırırsak 
+	bu durumda programın hata mesajlarıyla normal mesajları ayırmanın bir yolu kalmaz.  
+	
+	Örneğin find isimli programla bir dosyayı dizin ağacında aşağıdaki gibi arayacak olalım:
+
+	$>find / -name "sample.c"
+
+	find bu ii yaparken erişim haklarından dolayı bazı dizinler okuyamayacaktır. Okuyamadığı dizinler için hata mesajlarını program stderr 
+	dosyasına yazdırmaktadır. Default durumda stderr dosyasına yazılanlar ekrana çıkacaktır. Böylece ekranda hem hata mesajları hem de normal
+	mesajlar görünecektir. Ancak biz stderr dosyasını bir dosyaya yönlendirirsek iki tür mesajın da ekranda gözükmesini engellmiş oluruz. Örneğin:
+
+	$>find / -name "sample.c" 2> err.txt
+
+	Burada kullanıcı hata mesajlarının dosyada gereksiz yer kaplamasını da istemeyebilir. UNIX/Linux sistemlerinde /dev dizinin altında 
+	bazı özel aygıt sürücüler vardır. Örneğin /dev/null aygıt sürücüsü kendisne yazılan bilgileri doğrudan atmaktadır. O halde find programını
+	şöyle de öalıştırabiliriz:
+
+	$>find / -name "sample.c" 2> /dev/null
+
+	Bu kullanımın bir benzeri Windows'ta NUL biçiminde bulunmaktadır. 
+
+	stdout ve stderr dosyalarını aynı hedefe yönlendirme aaşağıdaki gibi yapılmamalıdır:
+
+	./sample > test.txt 2> test.txt
+
+	Çünkü genel olarak kabuk programları her yönlendirme sembolünde ilgili dosyayı yeniden "truncate" modunda açmaktadır. Eğer böyle bir şey 
+	isteniyorsa aşağıdkai gibi yapılmalıdır:
+
+	./sample > test.txt 2>&1
+
+	Burada "2>&1" karakterleri "2 numaralı betimleyiciyi (stderr betimleyicisini) bir numaralı betimleyici ile (stdout betimleyicisi) aynı dosyaya
+	yönlendir" anlamına gelmektedir. 
+
+	Normal olarak klavyeden okunacak bilgiler sanki klavyeden girilmiş gibi dosyadan da okunabilir. Bunun için kabuk üzerinde "<" sembolü ile
+	stdin dosyasının yönlendirilmesi gerekir. Örneğin:
+
+	$>sample < test.txt
+
+	Burada sample programının stdin dosyasından okudukları aslında "test.txt" dosyasından okunacaktır. Yani biz bu işlemle default olarak 
+	terminal aygıt sürücüsüne yönlendirilmiş olan stdin dosyasını açıkça "test.txt" dosyasına yönlendirmiş olduk.
+
+	Biz bir dosyadan okuma yapan dosya sonuna geldiğinde sonlanan bir program yazmış olalım. Bu programı stdin dosyasından çalışır hale 
+	getirdiğimizde EOF etkisi nasıl oluşturulacaktır. Ne de olsa terminal gerçek bir dosya değildir. Yani terminalin (kalvyenin) sonuna 
+	gelmek biçiminde bir kavram yoktur. İşte terminal aygıt sürücüleri EOF etkisi yaratan özel tuş kombinasyonları kullanmaktadır. UNIX/Linux
+	dünyasında "Ctrl+d" tuşları Windows dünyasında "Ctrl+Z" tuşları "dosya sonu" etkisi oluşturmaktadır. Tabii bu tuşlara bastığımızda terminali
+	kapatmış olmayız. Yaşnızca anlık bir EOF etkisi oluşturulmaktadır. Yine stdin dosyasından okuma yapmaya devam edebiliriz. EOF etkisi 
+	yaratmak için Ctrl+z ve Ctrl+d tuşlarına satır başlarında basınız. Pek çok terminal aygıt sürücüsü ancak satır başlarında bu özel karakterlere
+	basılmışsa EOF etkisi yaratmaktadır. 
+
+	Aşağıda bir dosyayı okuyarak ekrana yazdıran bir C programı verilmiştir. Eğer program komut satırı argümanı verilmeden çalıştırılırsa 
+	stdin dosyasından (yani klavyeden) okuma yapmaktadır. İşte bu durumda bu programdan çıkabilmek için UNIX/Linux sistemlerinde "Ctrl+d"
+	tuşlarına, Windows sistemlerinde ise "Ctrl+Z" tuşlarına basmak gerekir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char *argv[])
+{
+    FILE *f;
+    int ch;
+
+    if (argc > 2) {
+        fprintf(stderr, "wrong number of arguments!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (argc == 1)
+        f = stdin;
+    else 
+        if ((f = fopen(argv[1], "r")) == NULL) {
+            fprintf(stderr, "cannot open file: %s\n", argv[1]);
+            exit(EXIT_FAILURE);
+        }
+
+    while ((ch = fgetc(f)) != EOF)
+        putchar(ch);
+
+    if (ferror(f)) {
+        fprintf(stderr, "cannot read file!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    fclose(f);
+ 
+    return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	C'deki (işletim sisteminin değil) stdin, stdout	ve stderr dosyaları da diğer dosyalarda olduğu gibi tamponlu çalışmaktadır. Yani örneğin 
+	biz stdout dosyasına bir şeyler yazdığımız zaman önce o tampona yazılmakta sonra işletim sisteminin sistem fonksiyonlarıyla (POSIX 
+	fonksiyonları ya da Windows API fonksiyonlarıyla) aktarım yapılmaktadır. Pekiyi C'nin stdin, stdout ve stderr dosyaları iiçin default
+	tamponlama modu nedir? Standartlar şunları söylemektedir
+
+	1) stdout ve stdin dosyaları işin başında eğer interaktif bir aygıta yönlendirilmişse hiçbir zaman tamponlamalı modda olamaz. Ancak satır
+	tamponlamalı ya da sıfır tamponlamalı modda olabilir. Ancak bu dosyalar interaktif olmayan bir aygıta yönlendirilmişse işin başında tam 
+	tamponlamalı modda olmak zorundadır. Terminal (klavye ve ekran) interaktif aygıt kabul edilmektedir. Normal disk dosyaları interaktif 
+	olmayan aygıtı temsil etmektedir. 
+
+	2) stderr dosyası ister interaktif bir aygıta isterse interaktif olmayan bir aygıta yönlendirilmiş olsun hiçbir zaman işin başında tam
+	tamponlamalı modda olamaz. 
+
+	Standartlardaki bu anlatımdan çıkan sonuçlar şunlardır:
+
+	- Biz stdin ve stdout dosyalarını diskte bir dosyaya yönlendirirsek kesinlikle tam tamponlamalı modda olurlar. Ancak bir yönlendirme yapmazsak 
+	C derleyicilerini yazanlara bağlı olarak satır tamponlamalı ya da sıfır tamponlamalı modda olabilirler. Gerçekten de Windows sistemlerinde 
+	işin başında stdout "sıfır tamponalamalı" modda ilen Linux sistemlerinde "satır tamponlamalı" moddadır. 
+
+	- stderr dosyası bir disk dosyasına yönlendirilmiş olsa bile tam işin başında tamponalamalı modda olamamaktadır. Ancak satır tamponlamalı 
+	ya da sıfır tamponlamalı modda olabilmektedir. 
+
+	Bu durumda örneğin aşağıdaki gibi bir printf çağrısında yazılanların ekranda görünmesi garanti değildir:
+
+	printf("this is a test");
+
+	Eğer ilgili derleyici satır tamponlamalı mod kullanıyorsa (Linux derleyicilerinde olduğu gibi) bu yazılanlar henüz ekranda görünmeyecektir. 
+	Eğer ilgil derleyici sıfır tamponlamalı mod kullanıyorsa (Windows derleyicilerinde olduğu) gibi bu yazılanlar ekranda görünecektir. 
+
+	Pekiyi yukarıdaki printf çağrısında çağrı bittikten sonra yazdırılanların ekranda çıkmasını nasıl garanti ederiz? Bunu garanti etmek 
+	için şunlar yapılabilir:
+
+	- Yazdırılacak şeylerin sonuna "\n" karakteri eklenebilir. En kötü olasılık satır tamponalaması olacğına göre yzılanlar kesinlikle 
+	printf bitince ekranda görünecektir. Örneğin:
+
+	printf("this is a test\n");
+
+	Tabii burada imleç aşağı satırın başına da geçecektir. 
+
+	- printf çağrısından sonra stdout tamponu flush edilebilir. Örneğin:
+		
+	printf("this is a test");
+	fflush(stdout);
+
+	- stdout dosyası setbuf ya da setvbuf fonksiyonlarıyla sıfır tamponlamalı moda sokulabilir. Ancak bunun hemen programın başında yapılması 
+	gerekir. Örneğin:
+
+	setbuf(stdout, NULL);
+	printf("this is a test");
+	
+	C derleyicilerinin çoğunda stdin dosyasından okuma yapılmak istendiğinde bu fonksiyonlar kendi içlerinde önce stdout dosyasını flush 
+	etmektedir. Bu nedenle aşağıdaki bir kodda stdout default durumda satır tamponlamalı olsa bile yazı ekranda görünebilecektir:
+
+	printf("input a number:");
+    scanf("%d", &val);
+
+	Ancak C standartlarında böyle bir garanti verilmemiştir. Taşınabilirlik için fflush işleminin açıkça uygulanması gerekir:
+
+	printf("input a number:");
+	fflush(stdout);
+    scanf("%d", &val);
+
+	Her ne kadar C'nin stdin dosyası standartlarda işin başında "satır tamponlamalı ya da sıfır tamponlamalı" modda olabilir denmişse de
+	pratikte hep bu dosya staır tamponlamalı biçimde oluşturulmaktadır. Bunun endeni işletim sistemlerinin terminal aygıt sürücülerinin klavyeden 
+	satır satır okuma yapmasıdır.stdin dosyası istense de bu sistemlerde sıfır tamponlamalı moda sokulamamaktadır. 
+
+	Aşağıdaki programı Windows ve Linux sistemlerinde ayrı ayrı derleyerek çalıştrınız. 
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	printf("ankara");
+
+	for (;;)
+		;
+	
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	stdin dosyasından (klavyeden) biz bir karakter okumak istesek bile bu dosya "satır tamponlamalı" modda olduğu için bir satırlık bilgi 
+	klavyeden okunup tampona yerleştirilecek ve tampondaki, ilk karakter okunacaktır. Her zaman satır tamponlamada satırın sonunda '\n' 
+	karakteri tampona yerleştirilmektedir. Örneğin:
+
+	ch = getchar();
+	ch = getchar();
+
+	Burada birinci getchar fonksiyonu eğer stdin tamponununda karakter varsa hemen karakteri tampondan alır. Ancak stdin tamponu boşsa bir
+	satırlık bilgiyi tampona yerleştirir ve onun ilk karakterini verir. Biz kalvyeden "a" tuşuna basıp ENTER tuşuna basmış olalım. stdin tamponu
+	şöyle olacaktır:
+
+	a\n
+
+	İlk getchar fonksiyonu a karakterini tampondna alıp geri döncektir. İkinci getchar fonksiyonu da tampon dolu olduğu için tampondaki \n
+	karakterini alıp hemen geri dönecektir. C'ye yeni başlayanlar ikinci getchar fonksiyonunun neden klavyeden okumaya yol açmadığına 
+	şaşırmaktadır. Muhtemelen burada satır tamponlamalı çalışma mekanizması bilinmemektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+													36. Ders 15/10/2023 - Pazar
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Aşağıdaki programda birinci getchar stdin tamponu boş olduğu için bir satırlık bilgiyi stdin tamponuna yerleştirecek ve tampondaki ilk 
+	karakter ile geri dönecektir. İkinci getchar tampon boş olmadığı tamponda \n karakteri olduğu için onu alıp onunla geri dönecektir. 
+	Dolayısıyla ikinci getchar klavyeden bir giriş beklemeyecektir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	int ch;
+
+	ch = getchar();
+	printf("%c (%d)\n", ch, ch);
+
+	ch = getchar();
+	printf("%c (%d)\n", ch, ch);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	stdin işin başında açılmış olan bir C dosyası olduğuna göre onun toplamda tek bir tamponu vardır. Yani stdin dosyasından okuma yapan
+	standart C fonksiyonları aynı tamponu kullanmaktadır. Aşağıdaki örnekte birinci getchar stdin tamponunu bir satır ile dolduracaktır. 
+	Tamponun sonunda da \n karakteri bulunacakır. gets fonksiyonu (her ne kadar C11 ile C'den kaldırıldıysa da) \n karakterine kadar stdin 
+	dosyasından okuma yapıp okudukarını parametresiyle belirtilen adrsten itibaren yerleştirmektedir. gets fonksiyonu stdin dosyasında \n
+	karakterini gördüğünde onu okur ancak parametresiyle aldığı adrese yerleştirmez. Onun yerine bu adrese null karakter yerleştirmektedir. 
+	Dolayısıyla aşağıdaki örnekte gets fonksiyonu klavyeden bir giriş beklemeyecektir. 
+	
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	int ch;
+	char buf[1024];
+
+	ch = getchar();
+	printf("%c\n", ch);
+
+	gets(buf);
+	printf("%s\n", buf);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Aşağıdaki döngü nasıl bir etki oluşturur?
+
+	int ch;
+	...
+
+	while ((ch = getchar()) != EOF)
+		putchar(ch);
+
+	Burada ilk getchar stdin tamponu boş olduğu için bir satır bilgi isteyip onu tampona yerleştirecektir. Biz burada "ankara" yazısını girip 
+	ENTER tuşuna basmış olalım. Tamponun durumu şöyle olacaktır:
+
+	ankara\n
+
+	İlk getchar tampondan 'a' karakterini alıp bunu ekrana (stdout dosyasına) yazdıracaktır. Diğer getchar çağrıları tampon dolu olduğu için 
+	diğer karakterleri alıp yazdıracktır. Tamponun sonundaki \n karakteri de alınıp ekrana yazdırılacaktır. Ancak bu karakter ekrana yazdırıldığında
+	imleç aşağı satırın başına geçecektir. Artık tampon boştur. O halde yazdığımız satırın aynısı ekrana yazılmış olacaktır. Tampon boş olduğu 
+	için aynı olaylar yinelenecektir. Burada Windows'ta Ctrl+z tuşları ile UNIX/Linux sistemlerinde Ctrld+d tuşları ile EOF etkisi yaratarak 
+	döngünden çıkabiliriz. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	int ch;
+
+	while ((ch = getchar()) != EOF)
+		putchar(ch);
+
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Biz gerçekten klavyedem yeni bir giriş yapılması istiyorsak bu durumda stdin tamponunu manuel bir biçimde boşaltmamız gerekir. stdin 
+	tamponunu başaltabilen standart bir C fonksiyonu yoktur. '\n' karakteri görene kadar stdin tamponundan karakterleri atmak için aşağıdaki
+	gibi bir döngü yeterli olmaktadır:
+
+	while (getchar() != '\n')
+		;
+
+	Bu döngüde en son '\n' karakteri okunacak ve döngüden çıkılacaktır. Döngüden çıkıldığında stdin tamponu artık boş olduğuna göre sonraki 
+	fonksiyonlar klavyeden yeni bir giriş isteyecektir. Bu tür durumlarda stdin dosyasının bir disk dosyasına yönlendirilmesi ve dosyanın 
+	sonunda '\n' karakterinin olmaması bir sonsuz döngü oluşumuna yol açabilir. Bu durumu ihmal edebilirsiniz. Eğer bu durumu da ele almak 
+	istiyorsanız döngüyü aşağıdaki gibi düzenleyebilirsiniz:
+
+	while ((ch = getchar()) != '\n' && ch != EOF)
+		;
+			
+	stdin taponun boşaltılması için bir fonksiyon yazılabilir:
+	
+	void clear_stdin(void)
+	{
+		int ch;
+
+		while ((ch = getchar()) != '\n' && ch != EOF)
+			;
+	}
+	
+	Tabii bu fonksiyonu biz zaten boşken çağırırsak fonksiyon bizden giriş ister. Bu fonksiyonu tampon doluyken çağırmalıyız. 
+	
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+void clear_stdin(void)
+{
+	int ch;
+
+	while ((ch = getchar()) != '\n' && ch != EOF)
+		;
+}
+
+int main(void)
+{
+	int ch;
+	char buf[1024];
+
+	ch = getchar();
+	printf("%c\n", ch);
+
+	clear_stdin();
+
+	ch = getchar();
+	printf("%c\n", ch);
+
+	clear_stdin();
+
+	gets(buf);
+	puts(buf);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Anımsanacağı gibi blok içeren makroların do-while biçiminde yazılması gerekmektedir. Yukarıdaki fonksiyon makro biçiminde aşağıdaki gibi 
+	yazılabilir:
+
+	#define clear_stdin()										\
+		do														\
+		{														\
+			int ch;												\
+																\
+			while ((ch = getchar()) != '\n' && ch != EOF)		\
+				;												\
+		}														\
+		while (0)
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#define clear_stdin()										\
+		do														\
+		{														\
+			int ch;												\
+																\
+			while ((ch = getchar()) != '\n' && ch != EOF)		\
+				;												\
+		}														\
+		while (0)
+
+int main(void)
+{
+	int ch;
+	char buf[1024];
+
+	ch = getchar();
+	printf("%c\n", ch);
+
+	clear_stdin();
+
+	ch = getchar();
+	printf("%c\n", ch);
+
+	clear_stdin();
+
+	gets(buf);
+	puts(buf);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	İstersek işin başında stdout dosyasının da default tapmonlama modunu setbuf ya da setvbuf fonksiyonlarıyla değiştirebiliriz. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	setvbuf(stdout, NULL, _IONBF, 0);
+	
+	printf("ali");
+
+	for (;;)
+		;
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	getchar fonksiyonu stdin dosyasından tek bir karakter okur ve okudğu karakterin sıra numarasına geri döner. getchar dosyanın sonuna gelindiğinde 
+	ya da IO hatası oluştuğunda EOF değerine geri dönmektedir.  Fonksiyonun prototipi şöyledir:
+
+	int getchar(void);
+
+	getchar fonksyonu aşağıdakiyle eşdeğerdir:
+
+	fgetc(stdin)
+
+	Hatta bazı eski C derleyicilerinde getchar bir makro biçiminde aşağıdkai gibi yazılmıştır:
+
+	#define getchar()	fgetc(stdin)
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Şimdi de stdin dosyasından okuma yapan standart C fonksiyonları üzerinde biraz duralım. 
+
+	gets fonksiyonu yukarıda belirttiğimiz gibi C99'da deprecated yapılmış C11'de C'den çıkartılmıştır. Ancak bu fonksiyon yine de yaygın 
+	derleyicilerde geçmişe uyum için bulundurulmaktadır. gets fonksiyonun prototipi şöyledir:
+
+	#include <stdio.h>
+
+	char *gets(char *s);
+		
+	gets fonksiyonu stdin dosyasından okuma yapar okuduğu karakterleri programcının belirlediği diziye yerleştirir. En son '\n' karakterini 
+	okuduğunda ya da dosya sonuna gelindiğinde bu karakter yerine hedef diziye '\0' yerleştirip işlemini sonlandırmaktadır. Yani gets fonksiyonu 
+	'\n' karakteri görene kadar ya da dosya sonunagelinene kadar stdin dosyasından okuma yapmaktadır. Ancak '\n' karakterini hedef diziye 
+	yerleştirmemektedir. gets fonksiyonu başarı durumunda parametresiyle belirtilen adresin aynısına geri dönmektedir. Eğer gets hiçbir karakter 
+	okuyamadan EOF ile karşılaşırsa diziye bir yerleştirme yapmaz ve NULL adresle geri döner. gets aynı zamanda IO hatası oluştuğunda da 
+	NULL adresle geri dönmektedir. Bu durumda dizinin içeriği yarı doldurulmuş bir biçimde olabilir. 
+
+	gets fonksiyonu genellikle getchar fonksiyonu kullanılarak yazılmaktadır. Tipik bir gerçekleştirimi aşağıdaki gibi olabilir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+char *mygets(char *s);
+
+int main(void)
+{
+	char buf[1024];
+
+	printf("Bir yazi giriniz:");
+	fflush(stdout);
+
+	mygets(buf);
+	puts(buf);
+	
+	return 0;
+}
+
+char *mygets(char *s)
+{
+	int ch;
+	size_t i;
+
+	for (i = 0; (ch = getchar()) != '\n' && ch != EOF; ++i)
+		s[i] = ch;
+
+	if (ch == EOF) 
+		if (i == 0 || ferror(stdin))
+			return NULL;
+
+	s[i] = '\0';
+
+	return s;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Yukarıda da belirtitğimiz gibi C11'de gets fonksiyonu kaldırılmış ve yerine isteğe bağlı biçimde gets_s fonksiyonu eklenmiştir. 
+	gets_s Microsoft derleyicilerinde zaten uzun süredir bulunmaktadır. Ancak gcc ve clang'ın kullandığı glibc kütüphanesinde bu fonksiyon 
+	bulunmamaktadır. gets_s fonksiyonunun prototipi şöyledir:
+
+	char *gets_s(char *s, rsize_t n);
+	
+	Fonksiyon stdin dosyasındna en fazla iinci parametresiyle beliritlen sayıdan bir eksik karakter okur. Yine'\n' karakterini gördüğünde 
+	yada dosya sonuna geldiğinde ya da IO hatası oluştuğunda işlemini sonlandırır. Fonksiyonun geri dönüş değeri gets fonksiyonundaa olduğu
+	gibidir. 
+
+	Aşağıda bu fonksiyonun gerçekleştirimi yapılmıştır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+char *mygets_s(char *str, size_t size);
+
+int main(void)
+{
+	char buf[5];
+
+	mygets_s(buf, 5);
+	puts(buf);
+	
+	return 0;
+}
+
+char *mygets_s(char *str, size_t n)
+{
+	size_t i;
+	int ch;
+
+	if (str == NULL || n == 0)
+		return NULL;
+
+	for (i = 0; i < n - 1; ++i) {
+		if ((ch = getchar()) == '\n')
+			break;
+		if (ch == EOF) {
+			if (i == 0 || ferror(stdin))
+				return NULL;
+			break;
+		}
+
+		str[i] = ch;
+	}
+	
+	str[i] = '\0';
+
+	return str;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	gets fonksiyonu gğvensiz olduğundan ve C'den kaldırıldığı için ve gets_s fonksiyonu da isteğe bağlı bulundurulduğu için programcılar 
+	gets yerine fgets fonksiyonunu tercih etmektedir. fgets fonksiyonunun prototipini anımsayınız:
+
+	#include <stdio.h>
+
+	char *fgets(char *s, int size, FILE *stream);
+
+	fgets fonksiyonu gets_s fonksiyonuna benzemekle birlikte önemli bir farklılığa sahiptir. fgtes eğer '\n' karakterini erken görürse 
+	bu '\n' karakterini de diziye yerleştirmektedir. Oysa gets ve gets_s hiçbir zaman '\n' karakterini diziye yerleştirmemektedir. 
+	fgets fonksiyonunun diğer davranışları gets_s fonksiyonundaki gibidir. Örneğin:
+
+	fgets(buf, 10, stdin);
+
+	Burada fgtes en fazla 9 karakter okuyacaktır. Çünkü dizinin sonuna null karakteri de yerleştirecektir. Girilen karakterler şunlar olsun:
+
+	ankara\n
+
+	Burada fgtes '\n' dahil olmak üzere bu karakterlerin hepsini diziye yerleştirir ayrıca yazının sonuna null karakteri de ekler. Şimdi 
+	girilen karakterler şunlar olsun:
+
+	kastamonu\n
+
+	Burada fgets 9 karakter okurken '\n' karakterini görmediği için '\n' karakterini diziye yerleştirmez. Ancak null karakteri diziye 
+	yerleştirir. Yine fgets henüz hiçbir karakter okunmadan dosya sonuna gelinmişse NULL adresle geri dönmektedir. Normal durumda  fgets
+	parametresi ile belirtilen adresin aynısına geri dönmektedir. 
+
+	Görüldüğü fgets maalesef bazı durumlarda '\n' karakterini diziye yerleştirmekte bazı durumlarda yerleştirmemektedir. İşte programcılar 
+	genellikle fgets çağrısında sonra "eğer diziye '\n' karakteri yerleştirilmişse onun yerine null karakteri yerleştirmektedir. fgets 
+	fonksiyonu ile stdin dosyasından yazı okuma işlemi tipik olarak şöyle yapılmaktadır:
+
+	char buf[10];
+	char *str;
+	...
+
+	fgets(buf, 10, stdin);
+	if ((str = strchr(buf, '\n')) != NULL)
+		*str = '\0';
+
+	Burada dizinin sonunda '\n' karakterinin olup olmadığına bakılmış eğer '\n' karakteri dizisinin sonunda varsa onun yerine null 
+	karakter diziye yerleştirilmiştir. Burada fgtes hiçbir okuma yapılmadan dosya sonu ile karşılaşırsa (yani örneğin kullanıcı hemen 
+	Ctrl+z ya da Ctrl+d tuşlarına basarsa) bir anomali oluşacaktır. Programcı bu durumu da eğer gerekiyorsa kontrol etmelidir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	scanf fonksiyonunun prototipi şöyledir:
+
+	#include <stdio.h>
+
+	int scanf(const char *format, ...);
+
+	Fonksiyon aslında fscanf fonksiyonunun stdin dosyasından çalışan biçimidir:
+
+	#include <stdio.h>
+
+	int fscanf(FILE *f, const char *format, ...);
+
+	scanf fonksiyonunun bazı ayrıntıları vardır. Biz burada fonksiyonun tamponlamayı ilgilendiren bazı özelliklerini açıklayacağız. scanf
+	fonksiyonu stdin dosyasından karakter karakter okuma yapar. Eğer format karakterine uygun olmayan bir karakter ile karşılaşırsa onu dosyaya
+	(tampona) geri yerleştirir ve işlemi sonlandırır. scanf normal durumda başarılı olarak yerşletirdiği parçasayısına geri dönmektedir. Örneğin:
+
+	result = scanf("%d%d", &a, &b);
+
+	Şimdi dosyada (tamponda) şu karakterler bulunyor olsun:
+
+	123istanbul\n
+
+	scanf 123 sayısını a nesnesine yerleştirir. Ancak 'i' karakteri "%d" format karakterine uymadığı için işlemini keser. Yani b nesnesine 
+	bir yerleştirme yapmaz ve 1 değerine geri döner. Dosyadaki (tampondaki) karakterler şöyle olsun:
+
+	istanbul\n
+
+	Burada scanf hiç yerleştirme yapamayacağı için 0 ile geri dönecektir. scanf fonksiyonu baştaki boşluk karakterlerini (leading space)
+	atmaktadır. Ancak baştaki boşluk karakterlerini atıp henüz format karakterine uygun olmayan bir karakterle de karşılaşmadan dosya sonunu 
+	görürse bu durumda EOF özl değerine geri dönmektedir. Örneğin dosyanın içeriği şöyle olsun (_ karakteri SPACE karakterlerini belirtmektedir):
+
+	___EOF
+
+	Bu durumda scanf EOF değerine geri dönecektir. Ancak örneğin:
+
+	___istanbulEOF
+
+	Bu durumda scanf 0 değerine geri döncektir. 
+
+	scanf işle birden fazla okuma yapılırken scanf baştaki ve girişler arasındaki boşluk karakterlerini atmaktadır. Örneğin:
+
+	result = scanf("%d%d", &a, &b);
+
+	stdin dosyasında (tamponunda) şu karakterler olsun (_ karakteri SPACE karakterlerini belirtmektedir): 
+
+	__10___20__\n
+
+	scanf burada iki yerleştirmeyi de başarılı bir biçimde yapacak ve 2 değerine geri dönecektir. scanf fonksiyonun baştaki boşluk karakterlerini
+	(leading space)" attığına ancak sondakileri (trailing space) atmadığına dikkat ediniz. Yukarıdaki okumadna sonra stdin dosyasında (tamponda)
+	şu karakterler kalacaktır:
+
+	__\n
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	scanf fonksiyonu ile menü oluştururken geçirsiz girişlerin ele alınması örneği
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <string.h>
+
+void clear_stdin(void)
+{
+	int ch;
+
+	while ((ch = getchar()) != '\n' && ch != EOF)
+		;
+}
+
+int disp_menu(void)
+{
+	int choice;
+
+	printf("1) Kayit ekle\n");
+	printf("2) Kayit sil\n");
+	printf("3) Arama\n");
+	printf("4) Cikis\n\n");
+
+	printf("Seciminiz:");
+	fflush(stdout);
+
+	if (scanf("%d", &choice) == 0) {
+		clear_stdin();
+		return 0;
+	}
+
+	return choice;
+}
+
+int main(void)
+{
+	int choice;
+
+	for (;;) {
+		choice = disp_menu();
+
+		switch (choice) {
+			case 1:
+				printf("kayit ekleniyor\n\n");
+				break;
+			case 2:
+				printf("kayit siliniyor\n\n");
+				break;
+			case 3:
+				printf("arama yapiliyor\n\n");
+				break;
+			case 4:
+				goto EXIT;
+			default:
+				printf("gecersiz giris!..\n\n");
+				break;
+		}
+	}
+	
+EXIT:
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+											37. Ders 22/10/2023 - Pazar
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	scanf fonksiyonunda format karakterleri arasındaki karakterlerin girişlerde mutlaka bulundurulması gerekir. Örneğin:
+	
+	scanf("%d/%d/%d", &day, &month, &year);
+
+	Burada her ilk iki int değerden hemen sonra bir tane '/' karakterinin kullanılması gerekir. Uygun bir giriş şöyle olabilir:
+
+	12/10/2009
+
+	'/' karakterelerinin solunda ve sağında boşluk karakterleri bulundurulamaz. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	int day, month, year;
+
+	printf("Tarihi dd/mm/yyyy biçiminde giriniz:");
+	scanf("%d/%d/%d", &day, &month, &year);
+
+	printf("%d-%d-%d\n", day, month, year);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	scanf fonksiyonunda format karakterlerindeki herhangi bir boşluk karakteri (SPACE ve \n olabilir) "boşluk karakteri görmeyene kadar stdin'den 
+	okuma yap ve onları at" anlamına gelmektedir. C'yi yeni öğrenenler bu durumu bilmedikleri için scanf fonksiyonunu yanlışlıkla printf gibi 
+	kullanabilmektedir. Örneğin:
+		
+	scanf("%d%d\n", &a, &b);
+
+	Burada programcı yanlışlıkla format karakterlerinin sonuna '\n' karakterini yerleştirmiştir. (Burada '\n' yerine SPACE karakteri de 
+	yerleştirilseydi davranışta bir değişiklik olmayacaktı.) scanf fonksiyonu formatlarinde bir boşluk karakteri gördüğünde "boşluk görmeyene 
+	kadar stdin dosyasından okuma" yapmaya çalışmaktadır. FDolayısıyla burada iki değer girildikten sonra csanf fonksiyonu hemen işlemini 
+	bitirmeyecektir. Örneğin:
+
+	scanf("%d / %d / %d", &day, &month, &year);
+
+	Burada artık '/' karakterlerinin solunda ve sağında boşluk karakterleri olabilmektedir. 
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	scanf fonksiyonunun baştaki boşluk karakterlerini (leading space) attığına, ancak sondakileri (trailing space) atmadığına dikkat edniz. 
+	Bu durumda scanf fonksiyonundan sonra gets, getchar gibi fonksiyonları kullanmadan önce stdin tamponun boşaltılması gerekebilir.
+
+	scanf fonksiyonunun başka ayrıntıları da vardır. Ancak burada bunların üzerinde d
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+void clear_stdin(void)
+{
+	int ch;
+
+	while ((ch = getchar()) != '\n' && ch != EOF)
+		;
+}
+
+int main(void)
+{
+	int a;
+	char ch;
+
+	printf("Bir sayi giriniz:");
+	fflush(stdout);
+
+	scanf("%d", &a);
+
+	clear_stdin();
+
+	printf("Bir karakter giriniz:");
+	fflush(stdout);
+
+	ch = getchar();
+
+	printf("%d %c\n", a, ch);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Daha önceden de belirttiğimiz gibi scanf eğer baştaki bpşluk karakterlerini attıktan sonra EOF ile karşılaşırsa EOF özel değerine geri 
+	dönmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+int main(void)
+{
+	int val;
+
+	while (scanf("%d", &val) != EOF) 
+		printf("%d\n", val);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	scanf fonksiyonu ile ilgili başka yarıntılar da vardır. Bunları standartlardan elde edebilirsiniz. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde open fonksiyonu ile bir dosya betimleyicisini elde etmiş olalım. Bu betimleyiciden hareketle tamponlu işlemler 
+	yapabilmek ve C'nin standart dosya fonksiyonlarını kullanabilmek için bu dosya betimleyicisinin FILE * türünden bir dosya bilgi göstericisine
+	geri dönüştürülmesi gerekmektedir. Bu işlem fdopen isimli POSIX fonksiyonuyla yapılmaktadır. Fonksiyonun prototipi şöyledir:
+
+	#include <stdio.h>
+
+	FILE *fdopen(int fd, const char *mode);
+
+	Fonksiyonun birinci parametresi open fonksiyonundan eldee dilmş olan dosya betimleyicisini, ikinci parametresi ise dosya açış modunu 
+	belirtmektedir. Fonksiyon başarı durumunda dosya bilgi göstericisine (stream), başarısızlık durumunda NULL adrese geri dönmektedir. 
+	Şüphesiz burada belirtilen açış modu ile open fonksiyonunda belirtilen açış modunun uyumlu olması gerekmektedir. Tabii bu biçimde bir 
+	dönüştürmeden sonra dosya fclose ile kapatıldığında fclose zaten söz konusu betimleyici ile close fonksiyonunu çağıracaktır. 
+	
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+	int fd;
+	FILE *f;
+	int ch;
+
+	if (argc != 2)	{
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((fd = open(argv[1], O_RDONLY)) == -1)
+		exit_sys("open");
+	
+	if ((f = fdopen(fd, "r")) == NULL) 
+		exit_sys("fdopen");
+
+	while ((ch = fgetc(f)) != EOF)
+		putchar(ch);
+
+	if (ferror(f)) {
+		fprintf(stderr, "cannot read!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	fclose(f);
+
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+	exit(EXIT_FAILURE);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde fdopen fonksiyonunun tersini yapan fileno isimli bir fonksiyon da bulunmaktadır. Bu fonksiyon FILE * türünden 
+	dosya bilgi göstericisini bizden alır bize aşağı seviyeli POSIX dosya fonksiyonlarında kullanılabilecek dosya betimleyicisini verir. 
+	Fonksiyonun prototipi şöyledir:
+
+	#include <stdio.h>
+
+    int fileno(FILE *stream);
+
+	Fonksiyon başarı durumunda dosya betimleyicisine, balarısızlık durumunda -1 değerine geri dönmektedir. errno değişkeni uygun biçimde 
+	set edilmektedir. 
+
+	Aşağıdaki örnekte önce bir dosya fopen fonksiyonuyla açılmış sonra da fileno fonksiyonuya dosya betimleyicisi elde edilip read fonksiyonu 
+	ile dosyadna okuma yapılmıştır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+	int fd;
+	FILE *f;
+	char buf[30 + 1];
+	ssize_t result;
+
+	if (argc != 2)	{
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((f = fopen(argv[1], "r")) == NULL) {
+		fprintf(stderr, "cannot open file!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((fd = fileno(f)) == -1)
+		exit_sys("fileno");
+
+	if ((result = read(fd, buf, 30)) == -1)
+		exit_sys("read");
+
+	buf[result] = '\0';
+	puts(buf);
+	
+	fclose(f);
+
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+	exit(EXIT_FAILURE);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi fdopen ve fileno fonksiyonlarının mantıksal olarak eşdeğerleri Windows'ta var mıdır? Anımsanacağı gibi Windows'ta dosya betimleyicisi 
+	yerine HANDLE türü ile temsil edilen handle değerlei kullanılıyordu. Bu nedenle fdopen fonksiyonun ve fileopen fonksiyonunun Windows eşdeğerleri 
+	yoktur. Ancak Microsoft DOS zamanlarından beri POSIX fonksiyonlarına benzer dosya fonksiyonlarını da bulundurmaktadır. Tabii bı fonksiyonlar 
+	işletim sistemi çekirdeği tarafından desteklenen fonksiyonlar değildir. Bu fonksiyonlar user modda çalışan bir çeşit "sarma (wrapper)" 
+	fonksiyonlardır. Yani söz konsu bu fonksiyonlar aslında arka planda Windows'un API fonksiyonları çağrılarak gerçekleştirilmiştir. 
+
+	Microsoft'un UNIX/Linux sistemlerindeki POSIX fonksiyonlarına benzer fonksiyonlarının prototipleri <io.h> dosyası içerisinde bulunmaktadır. 
+	Bu fonksiyonlar klasik UNIX tarzı harflendirme ile isimlendirilmiştir ve bunların başlarında bir '_' karakteri bulunmaktadır. Örneğin:
+
+	_open ve _sopen_s
+	_read
+	_write
+	_close
+	_lseek
+	...
+
+	İşte bu <io.h> içerisinde _fdopen ve _fileno fonksiyonları da bulunmaktadır. Ancak bu fonksiyonlar UNIX/Linux sistemlerindeki gibi parametrik
+	yapıya sahiptirler. 
+
+	Aşağıda Microsoft'a özgü "sarma <io.h> fonksiyonları" kullanılarak UNIX/Linux strili küçük bir program yazılmıştır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <io.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+	int fd;
+	FILE *f;
+	int ch;
+
+	if ((fd = _open("sample.c", _O_RDONLY)) == -1)
+		exit_sys("_open");
+
+	if ((f = _fdopen(fd, "r")) == NULL)
+		exit_sys("_fdopen");
+
+	while ((ch = fgetc(f)) != EOF)
+		putchar(ch);
+
+	if (ferror(f)) {
+		fprintf(stderr, "cannot read file!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	fclose(f);
+			
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi biz sıfırdan C'nin stdio kütüphanesini yazmak istersek bunu nasıl yapabiliriz? Böyle bir standart stdio kütüphanesi yazabilmek için
+	kabaca aşağıdaki işlemlerin yapılması gerekmektedir.
+
+	- Öncelikle bir FILE yapısının oluşturulması gerekir. C standartları FILE yapısının elemanları hakkında hiçbir açıklama yapmamıştır. 
+	Dolayısıyla FILE yapısını istediğiniz gibi oluşturabilirsiniz. Ana nokta bu FILE yapısının oluşturulmaıdır. Örneğin:
+
+	typedef struct {
+		....
+	} FILE;
+
+	Pekiyi bu FILE yapısının içerisindeki elemanlar neler olmalıdır? Bu FILE yapısının elemanları tamponu yönetebilmek için gerekli bilgileri 
+	barındırmalıdır. Kabaca bu yapıda tutulması gereken elemanlar şunlardır:
+		
+		- Aşağı seviyeli dosya işlemlerinde kullanılacak işletim sistemine özgü handle değeri (yani UNIX/Linux sistemleri için dosya betimleyicisi, 
+		Windows sistemleri için HANDLE değeri).
+		- Dosyanın açış modu
+		- Tamponun yeri ve uzunluğu
+		- Tamponun aktif noktası (yani dosya işlemi yapıldığında tamponun neresinden işlem yapılacaktır)
+		- Tamponun kirli (dirty) olup olmadığı bilgisi
+		- Asıl dosyanın neresinin tamponda olduğu bilgisi
+		- Son işlem EOF yüzünden başarısızsa bu bilgi FILE yapısının içerisindeki bir bayrakta tutulmalıdır. Benzer biçimde son yapılan IO
+		işlemi başarısızsa bu da bir bayrakla tutulmalıdır. feof ve ferror fonksiyonları bu bayraklarla geri dönebilir. 
+		- Diğer bilgiler
+	
+	- fopen fonksiyonu yazılırken önce FILE yapısı ve tampon tahsis edilmeli sonra dosya işletim sisteminni aşağı seviyeli fonksiyonlarıyla
+	açılmalıdır. Örneğin:
+
+	FILE *fopen(const char *path, const char *mode)
+	{
+		1) mode parametresi parse edilmeli
+		2) FILE yapısı tahsis edilmeli
+		3) Tampon tahsis edilip bilgileri FILE yapısının içerisinde saklanmalı
+		4) Diğer işlemler
+		5) FILE yapısının adresi ile geri dönülmeli. 
+	}
+		
 	C'nin Stdio ktüphenesinin yazımı için bir ipucu (tam bitilmiş bir kod değil)
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
@@ -12761,32 +14989,35 @@ void exit_sys(const char *msg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	freopen standart C fonksiyonu stdin, stdout ve stderr dosyalarını (ve diğer dosyaları da) yönlendirmek için kullanılabilmektedir. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
+	freopen isimli standart C fonksiyonu yüksek seviyeli biçimde ""dosya yönlendirmeesi (IO redirection)" yapmaktadır. Fonksiyonun prototipi
+	şöyledir:
 
-#include <stdio.h>
-#include <stdlib.h>
+	#include <stdio.h>
 
-int main(void)
-{
+	FILE *freopen(const char *path, const char *mode, FILE *stream);
+
+	Fonksiyonun birinci parametresi yönlendirmenin yapılacağı disk dosyasını belirtmektedir. İkinci parametre bu dosyanın nasıl açılacağını 
+	belirtir. Eğer bu ikinci parametre "w" içeren bir parametre ise yönlendirme bu dosyaya yazılacak biçimde yapılmaktadır. Eğer bu parametre
+	"r" içeren biçimdeyse yönlendirme bu dosyadan okunacak biçimde yapılmaktadır. Fonksiyonun son parametresi yönlendirilecek dosyaya ilişkin 
+	dosya bilgi göstericisini (stream) almaktadır. Fonksiyon başarı durumunda dosyaya ilişkin dosya bilgi göstericisine, başarısızlık durumunda 
+	NULL adrese geri dönmektedir. Fonksiyonun bize verdiği dosya bilgi göstericisi birinci parametreyle belirttiğimiz dosyaya ilişkin dosya 
+	bilgi göstericisidir. Bu işlem sonrasında son parametreyle belirtilmiş olan gösterici ile fonksiyonun geri döndürdüğü gösterici aynı 
+	FILE nesnesini gösteriyor durumda olur. Örneğin:
+
 	FILE *f;
-	int i;
 
 	if ((f = freopen("test.txt", "w", stdout)) == NULL) {
-		fprintf(stderr, "Cannot open file!..\n");
+		fprintf(stderr, "cannot open file!..\n");
 		exit(EXIT_FAILURE);
 	}
 
-	for (i = 0; i < 10; ++i)
-		printf("%d\n", i);
+	Burada stdout dosyası "test.txt" dosyasına yönlendirilmiş durumdadır. Yani artık stdout dosyasına yazılacak şeyler "test.txt" dosyasına 
+	yazılacaktır. Aslında fonksiyon stdout göstericisinin gösterdiği yerdeki FILE nesnesi üzerinde değişiklik yapmaktadır. Dolayısıyla stdout
+	gösteicisinin gösterdiği yer aslında değişmemekte ve freopen fonksiyonu yine aynı adresi geri döndürmektedir. Dolayısıyla freopen fonksiyonunun 
+	geri döndürdüğü dosya bilgi göstericisine aslında gerçek anlamda gereksinim duyulmamaktadır. 
 
-	fclose(f);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	freopen ile stdin dosyasının yönlendirilmesi
+	Aşağıda freopen fonksiyonunun kullanımına bir örnek verilmiştir. 
+	
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -12795,438 +15026,54 @@ int main(void)
 int main(void)
 {
 	FILE *f;
-	int i;
-	int val;
-
-	if ((f = freopen("test.txt", "r", stdin)) == NULL) {
-		fprintf(stderr, "Cannot open file!..\n");
+	
+	if ((f = freopen("test.txt", "w", stdout)) == NULL) {
+		fprintf(stderr, "cannot open file!..\n");
 		exit(EXIT_FAILURE);
 	}
 
-	while (scanf("%d", &val) == 1)
-		printf("%d\n", val);
+	for (int i = 0; i < 10; ++i)
+		printf("%d\n", i);
+
+	fprintf(f, "Ok\n");
 
 	return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Linux sistemlerindeki C derleyicilerinde stdout dosyası default durumda satır tamponlamalı moddadır. Halbuki Windows sistemlerindeki C derleyici
-	lerinde sıfır tamponlamalı moddadır. Bu nedenle aşağıdaki programda "ankara" yazısı UNIX/Linux sistemlerinde görülmeyecek ancak Windows sistemlerinde
-	görülecektir. 
+	Pekiyi freopen ile yaılan yönlendirme geriye alınabilir mi? Yani örneğin biz stdout ya da stderr dosyalarını bir disk dosyasına yönlendirdikten 
+	sonra onları yeniden ilgili aygıt sürücülere yönlendirebilit miyiz? Maalesef bunu yapmanın standart bir yolu yoktur. 
+
+	IO yönlendirmesi çokça karşılaşılan bir uygulama olduğu halde freopen fonksiyonu çok seyrek kullanılmaktadır. Çünkü freopen fonksiyonunda
+	yönlendirilecek dosyasının C'ce açılmış bir dosya olması gerekmektedir. Halbuki IO yönlendirmelerinin çoğu daha aşağı seviyede gerçekleştirilmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	freopen fonksiyonu ile stdin dosyasını yönlendirebiliriz. Aşağıda bu işleme bir örnek verilmiştir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(void)
 {
-	printf("ankara");
-
-	for (;;)
-		;
-	
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Tabii biz fflush fonksiyonuyla stdout dosyasını tazaleyebiliriz. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	printf("ankara");
-	fflush(stdout);
-
-	for (;;)
-		;
-		
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	En kötü olasılıkla stdout satır tamponlamalı olacağına göre aşağıdaki kodda her zaman "ankara" yazısı ekranda görüntülecenektir. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	printf("ankara\n");
-
-	for (;;)
-		;
-		
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	stdin dosyası işletim sistemlerinden dolayı genellikle default durumda ya da sonradan sıfır tamponlamalı moda sokulamamaktadır. Bu nedenle
-	Windows sistemlerinde ve UNIX/Linux sistemlerinde stdin satır tamponlamalıdır. Yani bir stdin dosyasından bir karaleter bile okumak istesek
-	eğer tampon doluysa bize bu karakter tampon verilir. Eğer tampon boş ise bizden bir satırlık bilgi istenir. Tampondaki satırın 
-	sonunda '\n' karakteri de bulnmaktadır. Dolsyısıyla aşağıdaki kodda ikinci getchar klavyeden giriş beklemez. Tampondaki '\n' karakterini alarak 
-	geri döner. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	int ch;
-	
-	ch = getchar();
-	printf("%c (%d)", ch, ch);
-
-	ch = getchar();
-	printf("%c (%d)", ch, ch);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	stdin tamponunu başaltabilen standart bir fonksiyon yoktur. Dolayısıyla programcının bunu bir fonksiyon ya da makroyla yapması gerekir. 
-	Aşağıda böyle bir fonksiyon görülmektedir. Fonksiyondaki EOF konntrolü program bazı uç durumlarda gerekebilmektedir. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-void clear_stdin(void)
-{
+	FILE *f;
 	int ch;
 
-	while ((ch = getchar()) != '\n' && ch != EOF)
-		;
-}
-
-int main(void)
-{
-	int ch;
-
-	ch = getchar();
-	printf("%c\n", ch);
-	
-	clear_stdin();
-	
-	ch = getchar();
-	printf("%c\n", ch);
-	
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Yukarıdaki clear_stdin bir makro olarak da yazılabilirdi
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-#define clear_stdin()			\
-do {							\
-		int ch;					\
-								\
-	} while ((ch = getchar()) != '\n' && ch != EOF)	
-
-int main(void)
-{
-	int ch;
-
-	ch = getchar();
-	printf("%c\n", ch);
-	
-	clear_stdin();
-	
-	ch = getchar();
-	printf("%c\n", ch);
-	
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	İstersek işin başında stdout dosyasının da default tapmonlama modunu setbuf ya da setvbuf fonksiyonlarıyla değiştirebiliriz. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	setvbuf(stdout, NULL, _IONBF, 0);
-	
-	printf("ali");
-
-	for (;;)
-		;
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	gets fonksiyonun gerçekleştirimi
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-char *mygets(char *str)
-{
-	int ch;
-	size_t i;
-
-	for (i = 0; (ch = getchar()) != '\n' && ch != EOF; ++i)
-		str[i] = ch;
-
-	if (i == 0 && ch == EOF)
-		return NULL;
-
-	str[i] = '\0';
-
-	return str;
-}
-
-int main(void)
-{
-	char s[100];
-	
-	mygets(s);
-	puts(s);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	C11'de gets fonksiyonu kaldırılmış ve yerine isteğe bağlı biimde gets_s fonksiyonu eklenmiştir. gets_s Microsoft derleyicilerinde zaten uzun süredir
-	bulunmaktadır. Ancak gcc ve clang'ın kullandığı glibc kütüphanesinde bu fonksiyon bulunmamaktadır. Aşağıda bu fonksiyonun gerçekleştirimi yapılmıştır. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-char *mygets_s(char *str, size_t size)
-{
-	size_t i;
-	int ch;
-
-	for (i = 0; i < size - 1; ++i) {
-		if ((ch = getchar()) == '\n' || ch == EOF)
-			break;
-		str[i] = ch;
+	if ((f = freopen("test.txt", "r", stdin)) == NULL) {
+		fprintf(stderr, "cannot open file!..\n");
+		exit(EXIT_FAILURE);
 	}
 
-	if (i == 0 && ch == EOF)
-		return NULL;
+	while ((ch = getchar()) != EOF)
+		putchar(ch);
 
-	str[i] = '\0';
-
-	return str;
-}
-
-int main(void)
-{
-	char s[10];
-	
-	mygets_s(s, 10);
-	puts(s);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	gets_s yeri,ne fgets fonksiyonu aşağıdaki gibi kullanılabilir
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-#include <string.h>
-
-int main(void)
-{
-    char s[10];
-    char *str;
-
-    if ((str = fgets(s, 10, stdin)) != NULL)
-        if ((str = strchr(s, '\n')) != NULL)    
-            *str = '\0';
-
-    if (str != NULL)        
-        puts(s);
-
-    return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Önce getchar, sonra gets kullanırken stdin tamponun boşaltılması gerekebilir
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-void empty_stdin(void)
-{
-	int ch;
-
-	while ((ch = getchar()) != '\n' && ch != EOF)
-		;
-}
-
-int main(void)
-{
-	int ch;
-	char name[512];
-
-	printf("Bir karakter giriniz:");
-	fflush(stdout);
-
-	ch = getchar();
-	empty_stdin();
-
-	printf("Bir isim giriniz:");
-	fflush(stdout);
-
-	gets(name);
-
-	printf("'%c' - \"%s\"\n", ch, name);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Tabii önce gets sonra getchar kullanılıyor olsaydı tamponu boşaltmaya gerek kalmazdı
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	int ch;
-	char name[512];
-
-	printf("Bir isim giriniz:");
-	fflush(stdout);
-	gets(name);
-
-	printf("Bir karakter giriniz:");
-	fflush(stdout);
-	ch = getchar();
-
-	printf("'%c' - \"%s\"\n", ch, name);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	scanf fonksiyonu ile menü oluştururken geçirsiz girişlerin ele alınması örneği
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-void empty_stdin(void)
-{
-    int ch;
-
-    while ((ch = getchar()) != '\n' && ch != EOF)
-        ;
-}
-
-int disp_menu(void)
-{
-	int option;
-
-	printf("1) Ara\n");
-	printf("2) Sil\n");
-	printf("3) Çıkış\n\n");
-	
-	printf("Seçiminiz:");
-
-	if (scanf("%d", &option) == 0) {
-		empty_stdin();
-		return 0;
+	if (ferror(stdin)) {
+		fprintf(stderr, "cannot read file!..\n");
+		exit(EXIT_FAILURE);
 	}
 
-	return option;
-}
-
-int main(void)
-{
-	int option;
-
-	for (;;) {
-		option = disp_menu();
-
-		switch (option) {
-			case 1:
-				printf("Aranıyor\n\n");
-				break;
-			case 2:
-				printf("Siliniyor\n\n");
-				break;
-			case 3:
-				goto EXIT;
-			default:
-				printf("Geçersiz giriş!\n\n");
-		}
-	}
-EXIT:
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	scanf fonksiyonunda format karakterleri arasındaki karakterlerin girişlerde mutlaka bulundurulması gerekir. Format karakterlerindeki herhangi bir 
-	boşluk karakteri "boşluk karakteri görmeyene kadar stdin'den okuma yap ve onları at" anlamına gelmektedir. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	int day, month, year;
-
-	printf("Tarihi dd/mm/yy biçiminde giriniz:");
-	scanf("%d/%d/%d", &day, &month, &year);
-
-	printf("%d-%d-%d\n", day, month, year);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	scanf fonksiyonunun baştaki boşluk karakterlerini (leading space) attığına, ancak sondakileri (trailing space) atmadığına dikkat edniz. 
-	Bu durumda scanf fonksiyonundan sonra gets, getchar gibi fonksiyonları kullanmadan önce stdin tamponun boşaltılması gerekebilir.
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-void empty_stdin(void)
-{
-    int ch;
-
-    while ((ch = getchar()) != '\n' && ch != EOF)
-        ;
-}
-
-int main(void)
-{
-	int no;
-	char name[120];
-
-	printf("No:");
-	scanf("%d", &no);
-
-	empty_stdin();	
-
-	printf("Adı soyadı:");
-	gets(name);
-
-	printf("No: %d, Name: %s\n", no, name);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	EOF görene kadar scanf ile okuma yapan bir örnek
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-
-int main(void)
-{
-	int val;
-
-	while (scanf("%d", &val) != EOF) 
-		printf("%d\n", val);
+	fclose(f);
 
 	return 0;
 }
@@ -13284,7 +15131,160 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Linux sistemlerinde setenv fonksiyonu ile prosesin çevre değişkeni değiştirilebilir, ekleme yapılabilir. 
+											38. Ders 28/10/2023 - Cumartesi
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	İşletim sistemleri dünyasında sıkça karşımıza çıkan önemli bir kavram da "çevre değişkenleri (environment variables)" denilen kavramdır. 
+	Sistem programcısının bu kavramı bilmesi ve gerektiğinde bundan faydalanması önemlidir. Biz de bu bölümde "proseslerin çevre değişkenleri"
+	üzerinde duracağız.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Proseslerin çevre değişkenleri "anahtar-değer (key-value)" çiftlerini tutan, anahtar verildiğinde ona karşı gelen değerin elde edildiği
+	sözlük tarzı bir listedir. Anahtarlar ve değerler birer yazı (string) biçimindedir. Çevre değişkenleri konusunda söz konusu anahtar 
+	yazıya "çevre değişkeni (environment variable)" ona karşılık gelen yazıya da "çevre değişkeninin değeri" denilmektedir. Örneğin bir çevre 
+	değişkeni "CITY" isminde olabilir. Ona karşı gelen değer de "Ankara" olabilir. 
+
+	Çevre değişkenleri ilk bakışta "basit bir sözlük veri yapısı" gibi düşünülmektedir. Konuya yeni başlayan kişiler böyle bir veri 
+	yapısının neden işletim sistemi düzeyinde oluşturulduğunu neden kütüphane fonksiyonlarıyla oluşturulmadığını merak etmektedir. 
+	Gerçekten de pek çok programlama dilinin standart kütüphanesinde ya da bizzat sentaks ve semantik yapısı içerisinde sözlük (dictiobary)
+	tarzı veri yapıları hazır bir biçimde bulunmaktadır. 
+
+	Genellikle işletim sistemleri (örneğin Windows, Linux, macOS) prosesin çevre değişkenlerini "anahtar-değer" çiftleri biçiminde liste 
+	tarzı bir veri yapısında saklamaktadır. Çevre değişkenleri için bu sistemlerde prosese özgü bellek bölgelerei bulundurulmaktadır. Yani 
+	çevre değişkenleri pek çok işletim sisteminde proses kontrol blokta değil bizzat prosesin bellek alanında tutulmaktadır. Prosesin çevre
+	değişken listesinin tutulduğu alan İngilizce genellikle "environment block" biçiminde isimlendirilmektedir. 
+
+	İşletim sisteminde prosesin çevre değişkenleri default durumda genellikle proses yaratılırken üst prosesten alt prosese aktarılmaktadır. 
+	Yani bir programı hangi program çalıştırıyorsa çalıştırılan program (alt process) çevre değişkenlerini çalıştıran programdan (üst proses)
+	almaktadır. Ancak program çalışmaya başladıktan sonra programcı bu çevre değişkenleri üzerinde değişiklikler yapabilmektedir. Örneğin biz 
+	Linux ya da macOS sistemlerinde komut satırından bir program çalıştırdığımızda çalıştırdığımız programın çevre değişkenleri onu çalıştıran 
+	komut satırı programında (tipik olarak bash) aktarılmaktadır. Aynı dırım Windows sistemlerinde de böyledir. Windows sistemlerinde bir simgeye
+	çift tıklayarak bir programı çalıştırdığımızda çalıştırılan programın çevre değişkenleri masaüstü prossi olan "explorer.exe" isimli üst 
+	prosesten alınmaktadır. 
+
+	Bir sistem programcısının çevre değişikenleri üzerinde bazı işlemleri yapabiliyor olması gerekmektedir. İzleyen paragraflarda çevre değişkenlerine 
+	ilişkin bazı önemli ilemlerin nasıl yapıldığı üzerinde duracağız. Tabii çevre değişkenleri programlana dilinden bağımzıs aşağı seviyeli 
+	bir konu olduğu için ilgili sistemdeki düşük seviyeli fonksiyonlarla gerçekleştirilmektedir. Çevre değişkenleri üzerinde işlemler Windows 
+	sistemlerinde API fonksiyonlarıyla, UNIX/Linux ve macOS sistemlerinde ise POSIX fonksiyonlarıyla yapılmaktadır. 
+
+	Çevre değişkenlerinin (yani anahtarların) Windows sistemlerinde büyük harf küçük harf duyarlılığı yoktur. Ancak UNIX/Linux sistemlerinde 
+	ve macOS sistemlerinde büyük harf küçük harf duyarlılığı vardır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Bir çevre değişkeninin anahtarı verildiğinde onun değerini elde etmek için getenv isimli bir standart C fonksiyonu bulundurulmuştur. Bu 
+	fonksiyon genel olarak ilgili sistemdeki daha aşağı seviyeli, fonksiyonları çağırarak işlemi yapmaktadır. getenv fonksiyonunun prototipi
+	şöyledir:
+
+	 #include <stdlib.h>
+
+     char *getenv(const char *name);
+
+	 Fonksiyon parametre olarak çevre değişkenin ismini alır. Çevre değişkeninin değerinin bulunduğu char türden dizinin adresine geri döner. 
+	 Fonksiyonun geri döndürdüğü adresteki dizi statik biçimde tahsis edilmiştir. Dolayısıyla güvenli bir biçimde kullanılabilir. Ancak bu 
+	 adresteki dizi üzerinde değişiklik yapılmamalıdır. Eğer proseste ilgili çevre değişkeni yoksa fonksiyon NULL adresle geri dönmektedir. 
+
+	 Aşağıdaki örnekte komut satırı argümanı ile verilen çevre değişkeninin değeri ekrana (stdout dosyasına) yazdırılmaktadır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char *argv[])
+{
+	char *value;
+
+	if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((value = getenv(argv[1])) == NULL) {
+		fprintf(stderr, "environment variable not found: %s\n", argv[1]);
+		exit(EXIT_FAILURE);
+	}
+
+	puts(value);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde ve macOS sistemlerinde getenv aynı zamanda bir POSIX fonksiyonudur. (Aslında tüm standart C fonksiyonları aynı 
+	zamanda bir POSIX fonksiyonu kabul edilmektedir.) Dolayısıyla bu sistemlerde getenv zaten düşük seviyeli bir fonksiyondur. Ancak Windows 
+	sistemlerinde prosesin çevre değişkenini elde edebilmek için GetEnvironmentVariable isimli bi API fonksiyonu kullanılmaktadır. getenv 
+	standart C fonksiyonu Windows sistemlerinde aslında bu API fonksiyonu kullanılarak yazılmıştır. 
+
+	GetEnvironmentVariable fonksiyonunun prototipi şöyledir:
+
+	DWORD GetEnvironmentVariable(
+		LPCTSTR lpName,
+		LPTSTR  lpBuffer,
+		DWORD   nSize
+	);
+
+	Fonksiyonunun birinci parametresi aranacak çevre değişkenini belirtmektedir. İkinci parametre çevre değişkeninin değerinin yerleştirileceği
+	char türden dizinin adresini almaktadır. Üçüncü parametre ise bu dizinin uzunluğunu alır. Fonksiyon başarı durumunda diziye yerleştirilen 
+	karakter sayısına geri dönmektedir. Bu sayıya null karakter dahil değildir. Eğer verilen dizinin uzunluğu yetersiz olursa fonksiyon 
+	dizi için gereken uzunluğu (null karakter dahil olacak biçimde) bize verir. Windows sistemlerinde bir çevre değişkeninin maksimum değeri 
+	32768 karakter olabilmektedir. 
+
+	Fonksiyonda hata kontrolü yapılırken bir noktaya dikkat etmek gerekir. Bir eçvre değişkeni var olduğu halde değeri boş olabilir. Bu durumda
+	GetEnvironmentVariable fonksiyonu yine 0 değerine geri dönecektir. O halde fonksiyonun 0 değerine dönmesinin iki gerekçesi olabilir. Birincisi
+	çevre değişkenini bulamaması, ikincisi çevre değişkenini bulması ancak onun değerinin boş olması. Bu nedenle fonksiyon 0 ile geri döndüğü 
+	zaman GetLastError fonksiyonu ile durum tespit edilmelidir. 
+
+	Aşağıda GetEnvironmentVariable fonksiyonunun kullanımına bir örnek verilmiştir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+
+#define BUFFER_SIZE		4096
+
+int main(void)
+{
+	char value[BUFFER_SIZE];
+	DWORD dwResult;
+
+	dwResult = GetEnvironmentVariable("PATH", value, BUFFER_SIZE);
+
+	if ((dwResult == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND)) {
+		fprintf(stderr, "envirionment variable not found!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (dwResult > BUFFER_SIZE) {
+		fprintf(stderr, "buffer too small, requşred size: %u\n", dwResult);
+		exit(EXIT_FAILURE);
+	}
+
+	puts(value);
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde ve macOS sistemlerinde program çalışırken prosesin  çevre değişkenine bir ekleme yapmak için setenv ve putenv
+	isimli POSIX fonksiyonları kullanılmaktadır. Tabii bu fonksiyonlarla eklenen çevre değişkenleri kalıcı değildir. Proses sonlandığında 
+	prosesin bütün çevre değişkenleri zaten yok edilmektedir. 
+
+	setenv fonksiyonunun protoripi şöyledir:
+
+	#include <stdlib.h>
+
+	int setenv(const char *envname, const char *envval, int overwrite);
+
+	Fonksiyonun birinci parametresi çevre değişkeninin ismini (anahtar değeri), ikinc parametresi ise değerini almaktadır. Son parametre 
+	sıfır ya da sıfır dışı bir değer biçiminde girilir. Bu parametre sıfır dışı bir değer rolarak geçilirse söz konusu çevre değişkeninin
+	olduğu durumda artık yeni değer set edilir. Bu parametre 0 geçilirse bu durumda çevre değişkeni varsa fonksiyon yine başarılı olur ancak 
+	eçre değişkeninin değeri değişmez.
+
+	Aşağıdaki örnekte program çevre değişkeninin ismini vedeğerini komut satırı argümanlarıyla almıştır. Önce eçre değişkenini set etmiş 
+	sonra da get ederek yazdırmıştır. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -13292,18 +15292,24 @@ int main(void)
 
 void exit_sys(const char *msg);
 
-int main(void)
+int main(int argc, char *argv[])
 {
-	char *env;
+	char *value;
 
-	if (setenv("CITY", "Ankara", 1) == -1)
+	if (argc != 3) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (setenv(argv[1], argv[2], 1) == -1)
 		exit_sys("setenv");
 
-	if ((env = getenv("CITY")) == NULL) {
-		fprintf(stderr, "cannot get environment variable!..\n");
+	if ((value = getenv(argv[1])) == NULL) {
+		fprintf(stderr, "environment variable not found: %s\n", argv[1]);
 		exit(EXIT_FAILURE);
 	}
-	puts(env);
+
+	puts(value);
 
 	return 0;
 }
@@ -13316,7 +15322,62 @@ void exit_sys(const char *msg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX(Linux sistemlerinde puenv isimli bir POSIX fonksiyonu da vardır. Bu fonksiyon Windows sistemlerinde _putenv ismiyle de bulunmaktadır. 
+	putenv fonksiyonunu ele almadan önce tipik bir UNIX türevi işletim sisteminin çevre değişkenlerini bellekte nasıl tuttuğunu açıklamak 
+	istiyoruz. Çevre değişkenleri için "environ" isminde global bir göstericiyi gösteren gösterici bulundurulmaktadır. Bu environ değişkeni 
+	bir gösterici dizisini göstermektedir. Gösterici dizisinin sonunda NULL adres vardır. 
+
+	environ (char **) -----> adres (char *) -----> "anahtar=değer"
+							 adres (char *) -----> "anahtar=değer"
+							 adres (char *) -----> "anahtar=değer"
+							 ...
+							 adres (char *) -----> "anahtar=değer"
+							 adres (char *) -----> "anahtar=değer"
+							 NULL
+
+	Örneğin getenv fonksiyonu aslında bu gösterici dizisinde arama yapmaktadır. getenv foksiyonu doğrudan eçvre değişkenini bulursa '=' 
+	karakterinin sağındaki adresle geri dönmektedir. setenv fonksiyonu buradaki gösterici dizisine eleman eklemektedir. Örneğin yukarıdaki 
+	çevre değişken bloğuna anahtarı "CITY" olan değeri "ankara" olan bir çevre değişkeni ekleyelim. environ dizisi şu hale gelecektir:
+
+	environ (char **) -----> adres (char *) -----> "anahtar=değer" (malloc ile tahsis edilmiş)
+							 adres (char *) -----> "anahtar=değer" (malloc ile tahsis edilmiş)
+							 adres (char *) -----> "anahtar=değer" (malloc ile tahsis edilmiş)
+							 ...
+							 adres (char *) -----> "anahtar=değer" (malloc ile tahsis edilmiş)
+							 adres (char *) -----> "anahtar=değer" (malloc ile tahsis edilmiş)
+							 YENİ EKLENEN ADRES -----> "CITY=ankara" (burası malloc ile tahsis ediliyor)
+							 NULL
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	putenv isimli POSIX fonksiyonu da prosesin çevre değişkenlerine ekleme yapmak için kullanılabilir. Fonksiyonun prototipi şöyledir:
+
+	#include <stdlib.h>
+
+	int putenv(char *string);
+
+	Fonksiyon parametre anahtar=değer" biçiminde yazının adresini almaktadır. Alında putenv fonksiyonu yukarıda açıkladığımız çevre değişkenlerine
+	ek yaparken environ göstericisini gösterdiği yeri malloc ile tahsis etmemktedir. Doprudna bizim verdiğimiz adresi o gösterisi dizisine 
+	yazmaktadır. Dolayısıyla setenv fonksiyonundan farklı bir çalışması vardır. Örneğin:
+
+	char buf[] = "COUNTRY=turkey";
+
+	putenv(buf);
+
+	Bu işlemi yaptıktan sonra çevre değişken bloğu aşağıdaki gibi bir hale gelecektir:
+
+	environ (char **) -----> adres (char *) -----> "anahtar=değer"
+							 adres (char *) -----> "anahtar=değer"
+							 adres (char *) -----> "anahtar=değer"
+							 ...
+							 adres (char *) -----> "anahtar=değer"
+							 adres (char *) -----> "anahtar=değer"
+							 YENI EKLENEN ADRES (buf)  -----> "COUNTRY=turkey"
+							 NULL
+	
+	Dolayısıyla putenv fonksiyonu ile verilen adresin program sonlanana kadar yaşıyor olması gerekmektedir. putenv fonksiyonu başarı durumunda 
+	0 değerine, başarısızlık durumunda sıfır dışı bir değere geri dönmektedir. 
+
+	putenv fonksiyonu ile olan bir çevre değişkeninin değerini de değiştirebiliriz. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -13326,18 +15387,19 @@ void exit_sys(const char *msg);
 
 int main(void)
 {
-	char *env;
+    char *value;
 
-	if (putenv("CITY=Ankara") == -1)
-		exit_sys("putenv");
+    if (putenv("CITY=istanbul") != 0)        /* string'ler statik ömürlüdür */
+        exit_sys("putenv");
 
-	if ((env = getenv("CITY")) == NULL) {
-		fprintf(stderr, "cannot get environment variable!..\n");
-		exit(EXIT_FAILURE);
-	}
-	puts(env);
+    if ((value = getenv("CITY")) == NULL) {
+        fprintf(stderr, "cannot find environment variable!..\n");
+        exit(EXIT_FAILURE);
+    }
 
-	return 0;
+    puts(value);
+
+    return 0;
 }
 
 void exit_sys(const char *msg)
@@ -13348,7 +15410,22 @@ void exit_sys(const char *msg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Windows sistemlerinde çevre değişkenini set eden asıl fonksiyon SetEnvironmentVariable isimli API fonksiyonudurç
+	Windows sistemlerinde çevre değişkenini değiştirmek ve çevre değişken bloğuna yeni bir çevre değişkeni eklemek için SetEnvironmentVariable
+	isimli API fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+	BOOL SetEnvironmentVariable(
+		LPCTSTR lpName,
+		LPCTSTR lpValue
+	);
+
+	Fonksiyonun birinci parametresi çevre değişkeninin ismini (yani anahtarını), ikinci parametresi ise değerini almaktadır. Fonksiyon başarı 
+	durumunda sıfır dışı bir değere, balarısızlık durumunda 0 değerine geri dönmektedir. Eğer ilgili çevre değişkeni zaten varsa fonksiyon 
+	onun değerini değiştirmektedir. Fonksiyonun ikinci parametresi NULL adres geçilebilir. Bu durumda ilgili eçvre değişkeni silinmektedir. 
+
+	SetEnvironmentVariable fonksiyonunda ikinci parametre NULL adres geçilirse ilgili çevre değişkeni silinmektedir. Ancak çevre değişkenlerinin 
+	silinmesi seyrek olarak karşımıza çıkabilecek bir durumdur. 
+
+	Aşağıdaki SetEnvironmentVariable API fonksiyonunun kullanımına bir örnek verilmiştir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -13383,30 +15460,152 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Linux sistemlerinde prosesin tüm çevre değişkenlerini elde edebilmek için environ isimli global göstericiyi gösteren göstericiden 
-	faydalanılmaktadır. Bu göstericinin maalesef extern bildirimi herhangi bir başlık dosyasında yoktur.
+												39. Ders 04/11/2023 - Cumartesi
 -------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Nasıl prosesin çevre değişken bloğuna çevre değişkenleri ekleniyorsa aynı zamanda çevre değişken bloğundan bir çevre değişkeni de silinebilir. 
+	Ancak oluşturulmuş çevre değişkenlerinin değerlerinin değiştirilmesi çok karşılaşılan bir durum iken çevre değişkenlerinin silinmesi 
+	çok seyrek karşılaşılabilecek bir durumdur. Windows sistemlerinde SetenvironmentVariable fonksiyonunun ikinci parametresi NULL adres 
+	girilierek ilgili çevre dğeişkeni silinebilir. Örneğin:
+
+	if (!SetEnvironmentVariable("CITY", NULL)) {
+		fprintf(stderr, "Cannot set environment variable!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	UNIX/Linux sistemlerinde çevre değişkenlerinin silinmesi için unsetenv POSIX fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+	#include <stdlib.h>
+
+	int unsetenv(const char *name);
+
+	Fonksiyon silinecek çevre değişkeninin ismini (anahtarını) parametre olarak alır ve siler. unsetenv fonksiyonu başarı durumunda 0 değerine, 
+	başarısızlık durumunda -1 değerine geri dönmektedir. 
+
+	Aşağıdaki Windows örneğinde önce PATH çevre değişkeni elde edilip değeri yazdırılmıştır. Sonra bu çevre değişkeni silinmiştir. Sonra yeniden 
+	elde edilmeye çalışıldığında sorun oluşacaktır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+
+#define SIZE	4096
 
 int main(void)
 {
-	int i;
+	char val[SIZE];
+	DWORD dwResult;
 
-	for (i = 0; environ[i] != NULL; ++i)
-		puts(environ[i]);
+	if ((dwResult = GetEnvironmentVariable("PATH", val, SIZE)) == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
+		fprintf(stderr, "Environment variable not found!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (dwResult > SIZE) {
+		fprintf(stderr, "Insufficient buffer!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	printf("%s\n", val);
+
+	if (!SetEnvironmentVariable("PATH", NULL)) {
+		fprintf(stderr, "Cannot set environment variable!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((dwResult = GetEnvironmentVariable("PATH", val, SIZE)) == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
+		fprintf(stderr, "Environment variable not found!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (dwResult > SIZE) {
+		fprintf(stderr, "Insufficient buffer!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	printf("%s\n", val);
 
 	return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Windows sistemlerinde GetEnvironmentStrings isimli API fonksiyonu çevre değişken listesini tek bir adresle 
-	Anahtar=Değer\0Anahtar=Değer\0Anahtar=Değer\0\0
-	biçiminde vermektedir. Söz konusu çevre değişken bloğu istenirse FreeEnvironmentStrings API fonksiyonuyla boşaltılabilir.
-	(Yani bu fonksiyon çağrıldıktan sonra artık proseste çevre değişkeni kalmaz.)
+	UNIX/Linux sistemlerinde prosesin tüm çevre değişkenlerini elde edebilmek için environ isimli global göstericiyi gösteren göstericiden 
+	faydalanılmaktadır. Ancak göstericinin extern bildirimi herhangi bir başlık dosyasında bulundurulmamıştır. Bu nedenle programcının 
+	environ değişkeninin extern bildirimini kendisinin yapması gerekmektedir:
+	
+	extern char **environ;
+
+	environ global değişkeninin bir gösterici dizisini gösterdiğini ve bu dizinin sonunda NULL adres bulunduğunu anımsayınız:
+
+	environ (char **) -----> adres (char *) -----> "anahtar=değer"
+							adres (char *) -----> "anahtar=değer"
+							adres (char *) -----> "anahtar=değer"
+							...
+							adres (char *) -----> "anahtar=değer"
+							adres (char *) -----> "anahtar=değer"
+							NULL
+
+	Tabii biz bu biçimde eçre değişkenlerini elde edeken onları tek bir yazı halinde "anahtar=değer" biçiminde elde edeceğiz. Anahtarla değerleri 
+	'=' karaketerini dikkate alarak ayrıştırabilirsiniz. Ayrıştırma işlemini yaparken geçici biçimde '=' karakterini '\0' ile değiştirebilirsiniz. 
+	Ancak çevre değişken bloğunu mümkün olduğunca değiştirmeye çalışmayınız. 
+	
+	Aşağıdaki UNIX/Linux sistemlerinde prosesin tüm çevre değişkenleri elde edilmiştir.
+
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <Windows.h>
+#include <string.h>
+
+extern char **environ;
+
+int main(void)
+{
+	char *str;
+
+	for (int i = 0; environ[i] != NULL; ++i)
+		puts(environ[i]);
+
+	puts("--------------------------");
+
+	for (int i = 0; environ[i] != NULL; ++i) {
+		if ((str = strchr(environ[i], '=')) != NULL) {
+			*str = '\0';
+			printf("%s --> %s\n", environ[i], str + 1);
+			*str = '=';
+		}
+	}
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde "env" isimli kabuk komutu kabuğun çevre değişken listesini tıpkı yukarıda yazdığımız programd aolduğu gibi 
+	görüntülemektedir. Programcılar kendi programlarına aktarılacak çevre değişkenlerini bu komutla görüntüleyebilirler. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Windows sistemlerinde GetEnvironmentStrings isimli API fonksiyonu çevre değişken listesini tek bir adresle aşağıdaki gibi vermektedir:
+	
+	Anahtar=Değer\0Anahtar=Değer\0Anahtar=Değer\0\0
+	
+	Fonksiyonun prototipi şöyledir:
+
+	LPCH GetEnvironmentStrings(VOID);
+
+	Burada LPCH aslında char türden bir adres türünü belirtmektedir. (LPSTR türü yanlış izlenmim verebileceği gerekçesiyle kullanılmamıştır.)
+
+	Windows'ta komut satırında kabuğun tüm çevre değişkenlerini görüntülemek için "set" komutu kullanılmaktadır.
+
+	Aşağıdaki programda prosesin eçvre değişken listesi yazıdırlmıştır. 
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
 
 int main(void)
 {
@@ -13426,42 +15625,331 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Çevre değişkenleri sayesinde programlar kullanıcı tarafından ayarlanabilen çeşitli belirlemeleri kullanabilir. Aşağıdaki örnekte program
-	"x.dat" isimli bir dosyayı DATADIR isimli bir çevre değişkeninin bulunduğu yerde aramamaktadır. Eğer bu çevre değişkeni yoksa dosya 
-	prosesin çalışma dizininde arayacaktır.
+	Prosesin tüm çevre değişken bloğunu yok etmek için Windows sistemlerinde FreeEnvironmentStrings API fonksiyonu kullanılmaktadır:
+
+	BOOL FreeEnvironmentStringsA(
+		LPCH penv
+	);
+
+	Fonksiyon parametre olarak GetEnvirionmentStrings fonksiyonundan elde edilen adresi almaktadır. Başarı durumunda 0 dışı herhangi bir 
+	değere başarısızlık durumunda 0 değerine geri dönmektedir. Aynı işlem UNIX/Linux sistemlerinde clearenv POSIX fonksiyonu ile yapılmaktadır.
+	Fonksiyonun prototipi şöyledir:
+
+	#include <stdlib.h>
+
+    int clearenv(void);
+
+	Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda sıfır dışı bir değere (-1 değerine değil) geri dönmektedir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Peikiyi prosesin çevre değişkenlerinden kim ve nasıl faydalanmaktadır? İşte çevre dğeişkenleri genel olarak kullanıcılar tarafından 
+	(ya da bazen programlar tarafından) set edilir. Birtakım fonksiyonlar ve programlar da onlara bakarak eylemleri üzerinde bazı belirlemeler
+	yaparlar. Örneğin biz Microsoft ya da gcc derleyicilerinde derleme işlemini yaparken açısal parantezler içerisinde ya da iki tırnak içerisinde 
+	berlirtilmiş olan include dosyaları nerede bu derleyiciler tarafından nerede aranmaktadır? İşte derleyiciler bunları belli bir dizinde ararlar. 
+	Ancak komut satırı argümanlarıyla verilen dizinlere ve bazı çevre değişkenlerinin belirttiği dizinlere de bakarlar. Bu sayede biz kendi 
+	include dosyalarımızı bir dizine yerleştirebiliriz ve derleyicimizin o dizine bakmasını çevre değişkenini set ederek sağlayabiliriz. 
+	Aşağı seviyeli programı kullanırken o programların başvurduğu çevre değişkenlerinin neler olduğunu onların dokümanlarından öğrenebilirsiniz. 
+	Örneğin biz bir program yazacak olalım. Programımız bir "data dosyası" kullanacak olsun. Bu data dosyası default durumda programın çalıştığı 
+	dizinde "data.dat" isminde bulunabilir. Ancak programımız kullanıcının bu adat dosasının ismini ve yerini değiştirmesine izin verebilir. 
+	Bunun için biz DATA_LOCATION isminde bir çevre değişkeni uydurabiliriz. Programı kullanan kişinin bu data dosyasını yerleştirdikten sonra 
+	yol ifadesini bu çevre değişkenine yazmasını isteyebiliriz. Böylece kullanıcılar için daha esnek kullanım sunabiliriz. Örneğin:
 
-#define DATAFILE		"x.dat"
-
-int main(void)
-{
-	char *val;
-	char path[4096];
+	#define DEFAULT_DATA_PATH			"data.dat"
+	...
+	char *data_path;
 	FILE *f;
+	...
 
-	if ((val = getenv("DATADIR")) != NULL)
-		sprintf(path, "%s/%s", val, DATAFILE);
-	else
-		sprintf(path, "./%s", DATAFILE);
+	if ((data_path = getenv("DATA_LOCATION")) == NULL)
+		data_path = DEFAULT_DATA_PATH;
 
-	if ((f = fopen(path, "rb")) == NULL) {
-		fprintf(stderr, "cannot open data file!..\n");
+	if ((f = fopen(data_path, "r+b")) == NULL) {
+		fprintf(stderr, "cannot open data file: %s\n", data_path);
 		exit(EXIT_FAILURE);
 	}
-	printf("Ok\n");
 
-	/* ... */
+	Buarada eğer kullanıcı DATA_LOCATION isimli eçvre değişkenini  oluşturmamışsa data dosyası bulunulan dizinde "data.dat" ismiyle aranacaktır.
+	Eğer kullanıcı bu çevre değişkenini set etmişse bu durumda bu çevre değişkeninin belirttiği yol ifadesi ile data dosyasının yeri tespit 
+	edilecektir. 
 
-	fclose(f);
+	Çevre değişkenlerini işletim sistemi düzeyindeki global değişkenler gibi düşünebilirsiniz. Bunları birileri set edip birileri kullanmaktadır. 
+	Kursumuz ilerledikçe çeşitli eçvre değişkenlerinin kim tarafından ve nasıl kullanıldığına yönelik gerçek örneklerle karşılaşacağız. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
-	return 0;
-}
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Çevre değişkenleri üst prosesten alt prosese aktarılmaktadır. Program kabuk üzerinde çalıştırılıyorsa kabuğun çevre değişkenleri kabuktan
+	çalıştırılan programlara aktaralacaktır. Bu durumda bir programa çevre değişkenini aktarmak istiyorsak onu kabuğun çevre değişken listesine 
+	ekleyebiliriz. 
+
+	UNIX/Linux sistemlerinde komut satırında kabuk programının çevre değişken listesine ekleme yapmak için "export" komutu kullanılmaktadır. 
+	Komutun genel biçimi şöyledir:
+
+	export değişken=değer
+
+	Örneğin:
+
+	export CITY=Ankara
+
+	Eğer değer boşluk içeriyorsa tırnaklanması gerekir. Örneğin:
+
+	export CITY="NewYork City"
+
+	Değişken bir kere export edildikten sonra artık değeri export yazılmadan da değiştirilebilir. Örneğin:
+
+	CITY=Trabzon
+
+	Aynı işlem Windows sistemlerinde set komutuyla u yapılmaktadır. Örneğin:
+
+	set CITY=Ankara
+
+	Bu sistemlerde değeri değiştirmek için yeniden set kullanmak zorunludur. 
+
+	UNIX/Linux sistemlerinde komut satırında $isim biçimindeki sentaks "bunu çevre değişkeninin değeri ile değiştir" anlamına gelmektedir. 
+	Örneğin:
+
+	$ export CITY=ankara
+	$ $CITY
+	ankara: komut bulunamadı
+
+	Burada $CITY yazılıp ENTER tuşuna basıldığnda sanki "ankara" yazılıp ENTER tuşuna basılmış gibi bir etki oluşmaktadır. Kabuktaki echo 
+	komutu yazıları ekrana yazdırmak için kullanılmaktadır. Örneğin:
+
+	$ echo bugün hava çok güzel
+	bugün hava çok güzel
+
+	O halde bir eçvre değişkeninin değerini ekrana "echo $isim" komutunu uygulayarak yazdırabiliriz. Örneğin:
+	
+	$ echo $CITY
+	ankara
+
+	Eğer bir çevre değişkeni yoksa kabul $isim yerine boşluk karakteri yerleştirmektedir. Yani bu durum bir hataya yol açmamaktadır.
+
+	Windows'ta çevre değişkenini değeriyle değişirmek için %isim% sentaksı kullanılmaktadır. Örneğin:
+
+	C:\>set CITY=ankara
+	
+	C:\>echo %CITY%
+	ankara
+
+	Şimdi de bir çevre değişkeninin değerinin sonuna ekeleme yaapalım:
+
+	$ export CITY=Ankara
+	$ echo $CITY
+	Ankara
+	$ CITY=$CITY"-Istanbul"
+	$ echo $CITY
+	Ankara-Istanbul
+
+	Şimdi aynı şeyi Windows'ta yapalım:
+
+	C:\>set CITY=Ankara
+
+	C:\>echo %CITY%
+	Ankara
+
+	C:\>set CITY=%CITY%-Istanbul
+
+	C:\>echo %CITY%
+	Ankara-Istanbul
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Biz kabuk üzerinde kabuk komutlarıyla kabuğa bir çevre değişkeni eklediğimizde o çevre değişkeni yalnızca o kabuk prosesinin çevre değişken 
+	listesine eklenmektedir. Başka bir terminal penceresi açtığımızda o eçvre değişkeni orada görünmeyecektir. Çünkü her terminalde aynı 
+	kabuk çalışıyor olsa bile bunlar farklı proseslerdir. (Örneğin biz sample programını birden fazla kez çalıştırabiliriz. Bunların her 
+	biri ayrı prosesler olur.) Pekiyi biz çevre değişkenlerinin her kabuk tarafından görünmesini nasıl sağlayabiliriz. İşte bu işlemler 
+	genel Windows ve UNIX/Linux (macOS'te UNIX türevi bir sistem gibidir) sistemlerinde farklı biçimlerde sağlanmaktadır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde bir kabuk programı çalıştırılırken önce bazı "script dosyalarına" bakıp oradaki komutları çalıştırmaktadır. 
+	Kabuk programlarının çalışmaya başladığında otomatik olarak baktığı bu dosyalara İngilizce "shell start-up files" denilmektedir. Bu dosyaların
+	neler olduğu kabuktan kabuğa ve kabuğun çalıştırma biçimlerine göre değişebilmektedir. Bix burada bash kabuğunun start-up dosyalarına 
+	değineceğiz. bash kabuğunun baktığı start-up dosyalar onun nasıl çalıştırıldığına göre değişebilmektedir. bash programı üç biçimde 
+	çalıştırılabilmektdir:
+
+	1) Interactive login shell 
+	2) Interactive nopn-login shell
+	3) Non-interactive shell
+
+	Burada "interactive" sözcüğü komut satırlı çalışmayı belirtmektedir. Yani kullanıcı bir komut uygular komut çalıştırılır yeniden prompt'a 
+	düşülür. Buradaki "login shell" kabuk çalıştırıldığında "user name/password" sorulup sorulmayacağını belirtmektedir. Nihayet kabuk programları
+	tek bir komut çalıştırılarak sonlandırılabilmektedir. Bu çalışma biçimine de "non-interactive" çalıştırma biçimi denilmektedir. Örneğin 
+	biz bash programını "Ctrl+F+N" tuşlarına basarak çalıştrırsak "interactive login shell" biçiminde çalıştırmış oluruz. (Ctrl+F+N tuşlarıya 
+	açılan terminallere "sanal terminal (virtual terminal)" da denilmektedir. Eğer biz grafik arayüz içerisinde terminal açarsak buradaki bash
+	programını "interactive non-login shell" biçiminde çalıştırmış oluruz. Bu tür terminal açmaya "sahte terminal (pseudo termimal)" de denilmektedir. 
+	Nihayet biz bash programını "-c" seçenei ile çalıştırırsak bir tek komutu çalıştırıp bash programını sonlandırırız. Bu biçimdeki çalışma 
+	da "non-interactive" çalışmadır. 
+
+	1) Eğer bash "interactive login shell" biçiminde çalıştırılmışsa önce "/etc/profile" dosyasına başvurur. Eğer bu dosya varsa buradaki 
+	komutları çalıştırır. Sonra "~/.bash_profile", "~/.bash_login", "~/.profile" dosyalarından ilk olarak hangisini bulursa yalnızca onu 
+	çalıştırır. 
+
+	2) Eğer bash "interactive non-login shell" biçiminde çalıştırılırsa bu durumda "~/.bashrc" dosyasını okuyup çalıştıurmaktadır. "~/.bashrc"
+	dosyası bazı programlar tarafından oluşturulmuş olabilir. Bu durumda komutları dosyanın sonuna ekleyebilirsiniz.
+
+	bash programının dokğmanlarında bu konuyla ilgili bilgileri bulabilirsiniz:
+
+	https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+													40. Ders 05/11/2023 - Pazar
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Windows sistemlerinde aslında masaüstü "explorer.exe" denilen bir prosestir. Dolayısıyla aslında biz masaüstünden bir program çalıştırdığımızda
+	(terminal programı da dahil olmak üzere) bu programı bu "explorer.exe" programı çalıştırmaktadır. Çevre değişkenleri de üst prosesten 
+	alt prosese aktarıldığına göre bizim yapmamız gereken şey çevre değişkenlerini kalıcı bir biçimde "explorer.exe" prosesine yerleştirmektir. 
+	Bunu sağlamak için Windows 11'de "Ayarlar/Sistem Bilgisi/Gelişmiş Sistem Ayarları/Ortam Değişkenleri" penceresi açılır. Buradaki pencerede
+	alt alta iki bölüm bulunmaktadır. Üstteki o anki aktif kullanıya ilişkin çevre değişkenlerini, aşağıdaki ise sistem genelindeli çevre 
+	değişkenlerini belirtmektedir. Eğer biz bir çevre dğeişkeninin belli bir kullanıcı için eklersek o çevre değişkeni yalnızca o kullanıcı 
+	ile giriş yapıldığında etkili olmaktadır. Eğer biz bir çevre değişkeninin sistem genelinde eklersek bu durumda bundan tüm prosesler yani
+	başka kullanılar da etkilenecektir. Tabii buradaki pencerelerde çevre değişkenleri üzerinde güncellemeler yapıldığı zaman bu güncellemeler
+	o anda çalışmakta olan prosesleri etkilemeyecektir. Çünkü çevre değişkenleri proses yaratılırken üst prosesten aktarılmaktadır. Bu tür 
+	durumlarda programlardan çıkıp onları yeniden çalıştırmalısınız.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi proses içerisinde pek çok çevre dğeişkeni görmekteyiz. Bunlar nereden gelmektedir? Aslında işletim sistemlerinde sistem boot 
+	edilirken peşi sıra bir grup proses yaratılmaktadır. Yani bir program başkasını o da başkasını çalıştırmaktadır. İşte bu sırada çeşitli 
+	prosesler yeni çevre değişkenlerini eklerler. Böylece çevre değişkenleri arta arta oluşmaktadır. Tabii en sonunda kabuk programı da 
+	yukarıda belirttiğimiz start-up dosyalardaki komutları çalıştırdığında oradan da çevre değişkenleri gelmektedir. Örneğin Linux'ta 
+	"user name/password" login isimli program tarafından sorulmaktadır. login programı girişi başarılı bir biçimde yaparsa "/etc/passwd" 
+	dosyası içerisinden elde ettiği bilgilerden hareketler HOME, USER, SHELL, PATH, LOGNAME, MAIL çevre değişkenlerini oluşturmaktadır. 
+	Kabul programı login programı tarafından çalıştırılmaktadır. İşte bash isimli kabuk programının kendisi de birtakım çevre değişkenlerini 
+	prosese eklemektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Daha önceden de belirttiğimiz gibi çalışmakta olan programalara "proses (process)" denilmektedir. İşletim sistemleri bir proses yaaratıldığında
+	prosesi izlemek için ismine "Proses Kontrol Block (Process Control Block)" bir veri yapısı oluşturmaktadır. Windows, Linux, macOS gibi 
+	koruma mekanizmasına sahip işlemlerin kullanıldığı işletim sistemlerinde prosesler genel olarak birbirinden izole edilmiştir. Biz bir 
+	programı birden fazla kez çalıştırdığımızda oluşturulan prosesler birbirinden bağımsızdır. 
+
+	İşletim sistemlerinde pek çok özellik prosese özgdür. Örneğin her prosesin ayrı bir "çalışma dizini (current working directory)"si vardır. 
+	Her prosesin açtığı dosyalar diğerinden farklıdır. Yetkiler yine prose özgüdür. Her prosesin bellek alanı biribirinden ayrılmıştır. Örneğin 
+	sistemlerin çoğunda "heap" alanı da prosese özgüdür. 
+
+	Eskiden proseslerin tek bir akışı oluyordu. Ancak 90'lı yıllarla birlikte "thread" kavramı işletim sistemlerine sokulmuştur. Bugünkü 
+	modern işlem sistemleri "multithread" çalışmaya izin vermektedir. Thread'ler proseslerin bağımsız çizelgelenen akışlarıdır. Örneğin 
+	programın bir akışı foo fonksiyonunda ilerlerken diğer bir akışı bar fonksiyonunda ilerleyebilir. İşte böyle prosesin bağımsız akışlarına 
+	"thread" denilmektedir. Bir proses tek bir akışka (yani thread ile) çalışmaya başlar. Prosesin diğer thread'lerini programcı kendisi 
+	yaratmaktadır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Bugün kullandığımız kapasiteli modern işletim sistemleri thread temelinde "zaman paylaşımlı (time sharing)" bir çalışma mekanizması 
+	oluşturmaktadır. Bu mekanizmada proseslerin thread'leri bir kuruk sisteminde toplanır. Buna "çalışma kuyruğu (run queue)" denilmektedir. 
+	Çalışma kuyruğundan sıradaki thread alınır, CPU'ya atanır. Belli bir süre onun CPU'da çalışmasına izin verilir. O süre dolduğunda thread
+	CPU'dan alınarak sıradaki diğer thread CPU'ya atanır. O da belli bir süre çalıştırılır. Bir thread'in parçalı çalışma süresine "quanta süresi
+	(time quantum)" denilmektedir. Quanta süreleri işlemcinin hızı da göz önünde bulundurularak işletim sistemleri tarafından belirlenmektedir. 
+	Quanta süresi uzun tutulursa interaktivite azalır, kıs turulursa birim zamanda yapılan iş miktarı (througput) düşer. Kullanıcı programının 
+	sürekli çalıştığı gibi bir illüzyon yaşamaktadır. Aslında kullanıcının programı kesikli kesikli çalıştırılmaktadır. Bir thread'in CPU'ya 
+	atanıp belli bir süre çalıştırılması ve çalışma bittikten sonra diğer bir thread'in CPU'ya atanması sürecine "bağlamsal geçiş (context switch)"
+	denilmektedir. Tabii context switch işlemi de belli bir zman almaktadır. İşletim sistemelrinin bu işlemlerle uğraşan alt sistemlerine
+	"çizelgeleyici (scheduler)" denilmektedir. 
+	
+	Bugün bilgisayarlarımızda birden fazla işlemci ya da çekşrdek vardır. Ancak zaman paylaşımlı çalışma modelinde bir farklılık oluşmamaktadır. 
+	Nasıl bir işletmeden tek bir yemel servis noktası yerine birden fazla servis noktası olduğunda temel kuyruk mekanizmasında bir farklılık 
+	oluşmuyorsa aynı durum çok işlemcili ya da çekirdekli sistemlerde de benzer biçimdedir. Tipik olarak işletim sistemleri her CPU ya da 
+	çekirdek için ayrı çalışma kuyrukları oluşturmaktadır. Tabii işletim sistemi bu CPU ya da çekirdeklerdeki iş yükünü de dengelemeye çalışır. 
+	(Yani örneğin bir CPU ya da çekirdeğin açlışma kuyruğunda az sayıda thread kalmışsa başka kuyruktaki thread'leri buraya taşıyabilmektedir.)
+
+	CPU'ya atanan bir thread'in quanta süresini bitirdiğinde CPU'dan kopartılması donanım kesmeleri yoluyla zorla yapılmaktadır. Bu tür sistemlere 
+	"preemtive" sistemler denilmektedir. Bazı sistemlerde thread CPU atandığında zorla koparma işlemi yapılmaz. Thread CPU'yu kendisi kendi 
+	isteğiyle bırakır. Aslında bu tür sistemler eskiden genellikle thread'siz sistemler olarak karşımıza çıkıyordu. Thread'siz sistem tek thread'li
+	sistem gibi düşünülebilir. Bu tür işletim sistem sistemlerine "non-preemptive" sistemler ya da "cooperative multitask" sistemler denilmektedir. 
+	Örneğin Windows 3.X işletim sistemleri, PalmOS işletim sistemleri böyle sistemlerdi. Ancak günümüzde sistemler hep preemtive biçimdedir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Prosesler konusunda en temel işlem bir prosesin yaratılmasıdır. Bir prosesin yaratılması demekle aslında dolaylı olarak bir programın 
+	çalıştırılması kastedilmektedir. Biz programları işletim sisteminin sunduğu kabuk ortamından faydalanarak çalıştırmaktayız (örneğin 
+	Windows'ta bir dosyaya çift tıklayarak, Linux'ta kabukta programın ismini yazarak.) Aslında proseslerin yaratılması işletim sisteminin 
+	sistem fonksiyonlarıyla yapılmaktadır. Dolayısıyla kabuk programları da aslında bu sistem fonksiyonlarını kullanmaktadır. Proses yaratmak 
+	için Windows'ta sistem fonksiyonlarını çağıran API fonksiyonları UNIX/Linux macOS sistemlerinde de POSIX fonksiyonları bulunmaktadır. 
+	Biz bu bölümde öcne Windows sistemlerinde sonra UNIX/Linux ve macOS sistemlerinde proses yaratımı üzerinde duracağız. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
 	Windows sistemlerinde proses yaratmak için (yani bir programı çalıştırabilmek için) CreateProcess isimli API fonksiyonu kullanılmaktadır.
+	Fonksiyonun prototipi şöyledir:
+
+	BOOL CreateProcess(
+		LPCTSTR					lpApplicationName,
+		LPSTR					lpCommandLine,
+		LPSECURITY_ATTRIBUTES	lpProcessAttributes,
+		LPSECURITY_ATTRIBUTES	lpThreadAttributes,
+		BOOL					bInheritHandles,
+		DWORD					dwCreationFlags,
+		LPVOID					lpEnvironment,
+		LPCSTR					lpCurrentDirectory,
+		LPSTARTUPINFO			lpStartupInfo,
+		LPPROCESS_INFORMATION	lpProcessInformation
+	);
+
+	Fonskiyonun birinci parametresi çalıştırılacak olan programın yol ifadesini almaktadır. Bu yol ifadesi mutlak ya da göreli olabilir. 
+	Fonksiyonun ikinci parametresi programın komt satırı argümanlarını belirtmektedir. Bu komut satırı argümanları tek bir yazı biçiminde 
+	oluşturulur. Ancak bu parametrenin const olamayan bir gösterici olduğuna dikkat ediniz. Fonksiyon verilen adreste değişiklik yapıp sonra 
+	onu eski haline getirmektedir. Bu nedenle ikinci parametrenin bir string olarak girilmemesi gerekir. (C'de stringlerin karakterlerinin 
+	değiştirilmesi tanımsız davranışa yol açmaktadır.) Komut satırı argümanları fonksiyon tarafından boşluk karakterlerinden ayrıştırılıp 
+	gösterici dizisine yerleştirilmekte ve main fonksiyonun argv parametresi bu biçimde oluşturulmaktadır. Tabii ilk komut satırı argümanının 
+	programın ismi olması zorunlu olmasa da genel bir kabuldür. Örneğin:
+
+	char szCmdLine[] = "C:\\windows\\notepad.exe test.txt";
+	...
+	CreateProcess("C:\\windows\\notepad.exe", szCmdLine, ...);
+	
+	Burada "C:\windows\notepad.exe" programı çalıştırılmak istenmiştir. Komut satırı argümanları boşluk parse edildiğinde iki tane olacaktır:
+
+	C:\\windows\\notepad.exe
+	test.txt
+
+	Program için uzantı verilmezse programın default ".exe" uzantılı olduğu kabul edilmektedir. 
+
+	Fonksiyonun birinci parametresi NULL adres geçilebilmektedir. Bu durumda çalıştırılacak program ikicni parametredeki boşluksuz ilk string 
+	olarak belirlenmektedir. Örneğin:
+
+	char szCmdLine[] = "C:\\windows\\notepad.exe test.txt";
+	...
+	CreateProcess(NULL, szCmdLine, ...);
+
+	Burada birinci parametre NULL adres geçilmiştir. Bu durumda fonksiyon ikinci parametrededki ilk string'i çalıştırılacak program olarak 
+	ele alır. İkinci parametrenin tamamı yine aynı zamanda komut satırı argümanı olmaktadır. Genellikle programcılar bu birinciyi parametreyi 
+	NULL geçip çalıştırılacak programı ve komut satırı argümanlarını ikinci parametreye girerler. Ancak bu durumda çalıştırılacak program 
+	boşluklardan parse edildiği için dikkat etmek gerekir. Windows eğer iki tırnaklanmamışsa boşluklardan sırasıyla keserek aramayı yapar.
+	Örneğin ikinci parametre şöyle girilmiş olsun:
+
+	"c:\\program files\\sub dir\\program name"
+
+	Burada sistem sırasıyla şu aramaları yapar ve ilk bulduğu dosyayı çalıştırmaya çalışır:
+
+	c:\program.exe
+	c:\program files\sub.exe
+	c:\program files\sub dir\program.exe
+	c:\program files\sub dir\program name.exe
+
+	Bu tür durumlarda boşluk içeren kısım iki tırnak içerisine alımabilir. Örneğin:
+
+	"\"c:\\my folder\\prog.exe\" ali veli selami"
+
+	CreateProcess fonksiyonunun ikinci parametresinde önemli bir özellik vardır. (Ancak bu özellik birinci parametresinde yoktur.) Eğer 
+	CreateProcess fonksiyonun birinci NULL geçilip ikinci parametresindeki ilk boşluksuz yazı ile belirtilen program isminde hiçbir ters 
+	bölü karakteri kullanılmamışsa bu durum özel bir anlama gelmektedir. Bu durumda söz konusu "çalıtırılabilir (executable)" dosyanın 
+	aranması sırasıyla şu biçimde yapılmaktadır:
+
+	1) CreateProcess uygulayan prosesin ".exe" dosyasının bulunduğu dizin
+	2) CreateProcess uygulayan prosesin çalışma dizini (current working directory)
+	3) 32 Bit Windows Sistem Dizini ("Windows" dizininin içerisindeki "System32" dizini)
+	4) 16 bit Windows Sistem Dizini ("Windows" dizininin içerisindeki "System" dizini)
+	5) Windows dizininin kendisi
+	6) CreateProcess uygulayan prosesin PATH çevre değişkininde belirtlen dizinler sırasıyla
+
+	Burada dikkat edilmesi gereken önemli nokta şudur. Yukarıdaki arama davranışı yalnızca "CreateProcess fonksiyonun birinci paraöetresi NULL
+	geçilip, ikinci paramtresindeki ilk boşluksuz yazının hiçbir ters bölü karakteri içermemesi durumunda" gösterilmektedir. 
+
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /* Prog1.c */
