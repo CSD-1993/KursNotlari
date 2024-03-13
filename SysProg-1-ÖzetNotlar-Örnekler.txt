@@ -14,7 +14,6 @@
  
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-
 /*------------------------------------------------------------------------------------------------------------------------------------------
 													1. Ders 27/05/2023 - Cumartesi
 -------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -28143,8 +28142,6 @@ void get_random_record(char *key, PERSON *per)
 
 /* Type Declararions */
 
-typedef int DATATYPE;
-
 typedef struct tagPERSON {
 	char name[32];
 	int city;
@@ -28254,9 +28251,9 @@ bool insert_item_bt(HBTREE hbtree, int key, const PERSON *value)
 	}
 
 	if (key < parent_node->key)
-		parent_node->left = node;
+		parent_node->left = new_node;
 	else
-		parent_node->right = node;
+		parent_node->right = new_node;
 
 	++hbtree->count;
 
@@ -28784,591 +28781,880 @@ bool disp_node(int key, PERSON *value)
 	 Burada örneğin 70 numaralı elemanın indeksi 3'tür. Bu durumda bu elemanın alt düğümleri 6 ve 7'inci indekstedir. İşte aslında heap 
 	 ağaçlarında hiç ağaç oluşturulmaz. Sanki ağaç oluşturulmuş gibi her şey dizi üzerinde yukarıdaki indeks kuralına uygun bir biçimde yapılır. 
  -------------------------------------------------------------------------------------------------------------------------------------------*/
- <BURADA KALDIK>
+ 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	
+		Aşağıda heap ağaçları ile öncelik kuyruklarının oluşturulmasına bir örnek verilmektedir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
+/* hpqueue.h */
 
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Heap ağaçlarıyla Öncelik kutruklarının (priority queues) gerçekleştirimi.
-
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-/* PriorityQueue.h */
-
-#ifndef PRIORITYQUEUE_H_
-#define PRIORITYQUEUE_H_
+#ifndef PQUEUE_H_
+#define PQUEUE_H_
 
 #include <stddef.h>
+#include <stdbool.h>
 
-/* Symbolic Constants */
+#define PQUEUE_DEF_CAPACITY		8
 
-#define FALSE				0
-#define TRUE				1
-
-#define DEF_CAPACITY		8
-
-
-/* Type Declarations */
-
-typedef int BOOL;
+/* Type Declarartion */
 
 typedef struct tagPERSON {
 	char name[32];
-	/* ... */
 } PERSON;
 
-typedef PERSON VALUE;
-typedef int PRIORITY;
+typedef PERSON VALUETYPE;
 
 typedef struct tagHEAP_ITEM {
-	PRIORITY prio;
-	VALUE value;
+	int prio;
+	VALUETYPE value;
 } HEAP_ITEM;
 
-typedef struct tagPRIORITY_QUEUE {
-	HEAP_ITEM *pItems;
+typedef struct PQUEUE {
+	HEAP_ITEM *hitems;
 	size_t capacity;
 	size_t count;
-} PRIORITY_QUEUE, *HPRIORITY_QUEUE;
+} PQUEUE, *HPQUEUE;
 
 /* Function Prototypes */
 
-HPRIORITY_QUEUE CreatePriorityQueue(void);
-HPRIORITY_QUEUE CreatePriorityQueueWithCapacity(size_t capacity);
-BOOL Put(HPRIORITY_QUEUE hPQueue, PRIORITY prio, const VALUE *pValue);
-BOOL Get(HPRIORITY_QUEUE hPQueue, PRIORITY *prio, VALUE *pValue);
+HPQUEUE create_pq(void);
+bool put_pq(HPQUEUE hpqueue, int prio, VALUETYPE *value);
+bool get_pq(HPQUEUE hpqueue, int *prio, VALUETYPE *value);
+bool resize_pq(HPQUEUE hpqueue, size_t new_capacity);
+void destroy_pq(HPQUEUE hqueue);
 
-/* Macros */
 
-#define GetCount(hPQueue)		((hPQueue)->count)
-#define GetCapacity(hPQueue)	((hPQueue)->capacity)
-#define IsEmpty(hPQueue)		((hPQueue)->count == 0)
+/* inline Function Definitions */
+
+static inline bool isempty_pq(HPQUEUE hpqueue)
+{
+	return hpqueue->count == 0;
+}
+
+static inline void clear_pq(HPQUEUE hpqueue)
+{
+	hpqueue->count = 0;
+}
 
 #endif
 
-/* PriorityQueue.c */
+/* hpqueue.c */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "PriorityQueue.h"
+#include "pqueue.h"
 
-HPRIORITY_QUEUE CreatePriorityQueueWithCapacity(size_t capacity)
+HPQUEUE create_pq(void)
 {
-	HPRIORITY_QUEUE hPQueue;
+	HPQUEUE hpqueue;
 
-	if ((hPQueue = (HPRIORITY_QUEUE)malloc(sizeof(PRIORITY_QUEUE))) == NULL)
+	if ((hpqueue = (HPQUEUE)malloc(sizeof(PQUEUE))) == NULL)
 		return NULL;
-	if ((hPQueue->pItems = (HEAP_ITEM *)malloc(capacity * sizeof(HEAP_ITEM))) == NULL) {
-		free(hPQueue);
+
+	if ((hpqueue->hitems = (HEAP_ITEM *)malloc(sizeof(HEAP_ITEM) * PQUEUE_DEF_CAPACITY)) == NULL) {
+		free(hpqueue);
 		return NULL;
 	}
-	hPQueue->capacity = capacity;
-	hPQueue->count = 0;
+	hpqueue->capacity = PQUEUE_DEF_CAPACITY;
+	hpqueue->count = 0;
 
-	return hPQueue;
+	return hpqueue;
 }
 
-HPRIORITY_QUEUE CreatePriorityQueue(void)
-{
-	return CreatePriorityQueueWithCapacity(DEF_CAPACITY);
-}
 
-BOOL Put(HPRIORITY_QUEUE hPQueue, PRIORITY prio, const VALUE *pValue)
+bool put_pq(HPQUEUE hpqueue, int prio, VALUETYPE *value)
 {
-	HEAP_ITEM *items;
-	size_t i;
+	size_t index;
 
-	if ((hPQueue->count + 1) == hPQueue->capacity) {
-		if ((items = (HEAP_ITEM *)realloc(hPQueue->pItems, hPQueue->capacity * sizeof(HEAP_ITEM) * 2)) == NULL)
-			return FALSE;
-		hPQueue->pItems = items;
-		hPQueue->capacity *= 2;
+	if (hpqueue->count + 1 == hpqueue->capacity) 
+		if (!resize_pq(hpqueue, hpqueue->capacity * 2))
+			return false;
+
+	index = hpqueue->count + 1;
+
+	while (index > 1 && prio > hpqueue->hitems[index / 2].prio) {
+		hpqueue->hitems[index] = hpqueue->hitems[index / 2];
+		index /= 2;
 	}
+	hpqueue->hitems[index].prio = prio;
+	hpqueue->hitems[index].value = *value;
+	++hpqueue->count;
 
-	i = hPQueue->count + 1;
-	if (i != 1)
-		while (prio > hPQueue->pItems[i / 2].prio && i > 1) {
-			hPQueue->pItems[i] = hPQueue->pItems[i / 2];
-			i /= 2;
-		}
-
-	hPQueue->pItems[i].prio = prio;
-	hPQueue->pItems[i].value = *pValue;
-	++hPQueue->count;
-
-	return TRUE;
+	return true;
 }
 
-BOOL Get(HPRIORITY_QUEUE hPQueue, PRIORITY *prio, VALUE *pValue)
+bool get_pq(HPQUEUE hpqueue, int *prio, VALUETYPE *value)
 {
-	HEAP_ITEM lastItem;
 	size_t i, ci;
 
-	if (hPQueue->count == 0)
-		return FALSE;
+	if (hpqueue->count == 0)
+		return false;
 
-	*prio = hPQueue->pItems[1].prio;
-	*pValue = hPQueue->pItems[1].value;
-
-	lastItem = hPQueue->pItems[hPQueue->count];
+	*prio = hpqueue->hitems[1].prio;
+	*value = hpqueue->hitems[1].value;
 
 	i = 1;
 	ci = 2;
 
-	while (ci < hPQueue->count) {
-		if (ci + 1 < hPQueue->count && hPQueue->pItems[ci].prio < hPQueue->pItems[ci + 1].prio)
+	while (ci <= hpqueue->count) {
+		if (ci + 1 < hpqueue->count && hpqueue->hitems[ci + 1].prio > hpqueue->hitems[ci].prio)
 			++ci;
-		if (lastItem.prio > hPQueue->pItems[ci].prio)
+		if (hpqueue->hitems[hpqueue->count].prio > hpqueue->hitems[ci].prio)
 			break;
-		hPQueue->pItems[i] = hPQueue->pItems[ci];
+			
+		hpqueue->hitems[i] = hpqueue->hitems[ci];
 		i = ci;
 		ci *= 2;
 	}
-	hPQueue->pItems[i] = lastItem;
+	hpqueue->hitems[i] = hpqueue->hitems[hpqueue->count];
+	--hpqueue->count;
 
-	--hPQueue->count;
+	return true;
 }
 
-/* Test.c */
+bool resize_pq(HPQUEUE hpqueue, size_t new_capacity)
+{
+	HEAP_ITEM *hitems;
+	
+	if (new_capacity <= hpqueue->capacity)
+		return false;
+
+	if ((hitems = (HEAP_ITEM *)realloc(hpqueue->hitems, new_capacity * sizeof(HEAP_ITEM))) == NULL)
+		return false;
+
+	hpqueue->hitems = hitems;
+	hpqueue->capacity = new_capacity;
+
+	return true;
+}
+
+void destroy_pq(HPQUEUE hpqueue)
+{
+	free(hpqueue->hitems);
+	free(hpqueue);
+}
+
+
+/* app.c */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stddef.h>
-#include "PriorityQueue.h"
+#include "pqueue.h"
+
+void disp_pq(HPQUEUE hpqueue)
+{
+	for (size_t i = 1; i <= hpqueue->count; ++i)
+		printf("%d  ", hpqueue->hitems[i].prio);
+	printf("\n");
+}
 
 int main(void)
 {
-	HPRIORITY_QUEUE hPQueue;
-	PRIORITY priorities[] = { 100, 80, 89, 34, 23, 90, 68, 120, 85, 77 };
-	VALUE values[] = { {"Ali Serçe"}, {"Kaan Aslan"}, {"Sacit Ünlü"}, {"Hasan Kılıçaslan"}, {"Mustafa Yılmaz"},
-		{"Gülümser Yılmaz"}, {"Jale Kanlıdere"}, {"Yücel Gündüz"}, {"Kazım Tanış"}, {"Rıza Bozkurt"} };
-	PRIORITY prio;
-	VALUE value;
-	int i;
+	HPQUEUE hpqueue;
+	int prios[] = {100, 85, 90, 60, 70, 10, 40, -1};
+	VALUETYPE values[] = {{"Ali Serce"}, {"Sacit Bulut"}, {"Ayse Er"}, {"Necati Ergin"}, {"Guray Sonmez"},
+		{"Ziya Taskent"}, {"Gencay Coskun"}};
+	int prio;
+	VALUETYPE value;
 
-	if ((hPQueue = CreatePriorityQueue()) == NULL) {
-		fprintf(stderr, "Cannot create priority queue!..\n");
+	if ((hpqueue = create_pq()) == NULL) {
+		fprintf(stderr, "cannot create priority queue!...\n");
 		exit(EXIT_FAILURE);
 	}
 
-#define SIZE	(sizeof(priorities) / sizeof(*priorities))
-
-	for (i = 0; i < SIZE; ++i) {
-		if (!Put(hPQueue, priorities[i], &values[i])) {
-			fprintf(stderr, "cannot put priority queue!..\n");
+	for (int i = 0; prios[i] != -1; ++i)
+		if (!put_pq(hpqueue, prios[i], &values[i])) {
+			fprintf(stderr, "cannot add item!..\n");
 			exit(EXIT_FAILURE);
 		}
+
+	disp_pq(hpqueue);
+
+	while (!isempty_pq(hpqueue)) {
+		if (!get_pq(hpqueue, &prio, &value)) {
+			fprintf(stderr, "cannot get value!..\n");
+			exit(EXIT_FAILURE);
+		}
+		printf("prio: %d, value: %s\n", prio, value.name);
+		disp_pq(hpqueue);
+		printf("----------------------\n");
 	}
 
-	for (i = 1; i < hPQueue->count + 1; ++i)
-		printf("%d ", hPQueue->pItems[i].prio);
-	printf("\n");
-
-	while (!IsEmpty(hPQueue)) {
-		Get(hPQueue, &prio, &value);
-		printf("Priority: %d, Value=%s\n", prio, value.name);
-	}
+	destroy_pq(hpqueue);
 
 	return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Veri yapılarının genelleştirilmesinin bir yolu fonksiyonların her tür için çalışabilir hale getirilmesidir. Bunun fonksiyonlar void gösterici 
-	parametreleri alır. Karşılaştırma işlemleri karşılaştırma fonksiyonlarına yaptırılır. 
+	Şimdiye kadar yaptığımız örneklerde ilgili veri yapılarının türleri baştan belirlenmiş durumdaydı. Her ne kadar bazı örneklerde biz
+	veri yapısı içerisinde tutulacak dğerlerin türlerini DATATYPE, VALUETYPE gibisi isimlerle typedef ettiysek de bu durum bir genelleme 
+	oluşturmamaktadır. Başka bir deyişle şimdiye kadar yaptığımız örneklerde veri yapılarımız toplamda tek bir türe ilişkin olabilmektedir. 
+	Örneğin bağlı listeler için şu yapıları kullanmıştık:
 
-	Aşağıdaki örnekte ikilci ağaç bu biçimde türden bağımsız bir biçimde oluşturulmaktadır.
+	typedef int DATATYPE;
+
+	typedef struct tagNODE {
+		DATATYPE val;
+		struct tagNODE *next;
+	} NODE;
+
+	typedef struct tagLLIST {
+		NODE head;
+		NODE *tail;
+		size_t count;
+	} LLIST, *HLLIST;
+
+	Burada biz birden fazla bağlı liste oluşturabilecek bir mekanizma sağlamıştık. Ancak tüm bağlı listelerimiz DATATYPE türünü tutmaktadır. 
+	DATATYPE türü int olarak typedef edilldiğine göre biz ne kadar bağlı liste yaratırsak yaratalım hepsi int değerleri tutan bağlı listeler 
+	olacaktır. Örneğin İkili arama ağaçları için şu yapıları kullanmıştık:
+
+	typedef struct tagPERSON {
+		char name[32];
+		int city;
+	} PERSON;
+
+	typedef struct tagNODE {
+		int key;
+		PERSON value;
+		struct tagNODE *left;
+		struct tagNODE *right;
+	} NODE;
+
+	typedef struct tagBTREE {
+		NODE *root;
+		size_t count;
+	} BTREE, *HBTREE;
+
+	Burada da biz birden fazla bağlı liste oluşturabiliyorduk. Ancak bu bağlı listelerin hepsinin anahtarı int değerleri için PERSON türünden
+	olmak zorundadır. Özetle şimdiye oluşturduğumuz veri yapıları "genel" değil belli bir tür için oluşturuldu. Şimdi biz ""türden bağımsız"
+	yani her türle çalışabilecke veri yapılarının nasıl oluşturalacağı üzerinde duracağız. Böylelikle veri yapılarını her tür için çalışabilir
+	hale getirebileceğiz.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-/* BinaryTree.h */
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Türden bağımsız veri yapılarının oluşturulabilmesi için iki teknik kullanılabilir:
+
+	1) void Gösterici Tekniği
+	2) Gömme Tekniği
+
+	void gösterici tekniği aslında etkin bir yöntem değildir. Bu yöntemin hem kullanımı zordur hem de bu yöntem diğerine göre yavaştır. 
+	Bu nedenle programcılar gömme tekniğini tercih etmektedir. Örneğin Linux kaynak kodlarında veri yapılarında genellik sağlamak için hep
+	bu teknik kullanılmıştır.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	void gösterici tekniğinde veri yapısının tutacağı değerlerin türleri yerine onların adresleri ve uzunlukları kullanılır. Eğer karşılaştırma
+	yapılmak istenirse callback fonksiyonlardan faydalanılmaktadır. Örneğin ikili arama ağacını bu teknikle gerçekleştirmek isteyelim. Biz 
+	artık ağaç düğümlerinde tutulacak anahtar ve değerin türünü bilmek zorunda değiliz. Ancak onların uzunluklarını bilmek zorundayız. 
+	Bunun için gereken yapı bildirimleri şöyle olabilir:
+		
+	typedef struct tagNODE {
+		struct tagNODE *left;
+		struct tagNODE *right;
+		char key_value[];
+	} NODE;
+
+	typedef struct tagQNODE {
+		struct tagQNODE *next;
+		NODE *node;
+	} QNODE;
+
+	typedef struct tagBTREE {
+		NODE *root;
+		size_t count;
+		QNODE *head;
+		QNODE *tail;
+		size_t key_size;
+		size_t value_size;
+		bool (*compare)(const void *, const void *);
+	} BTREE, *HBTREE;
+
+	Burada tagNODE yapısının son elemanına dikkat ediniz. Burada C99 ile birlikte C'ye eklenmiş olan "flexible array member" özelliği 
+	kullanılmıştır. Bu özelliğe göre bir yapının son elemanı (başka elemanlarında bu yapılamaz) uzunluğu belirtilmemiş bir dizi olabilir. 
+	Derleyici bu dizi için bir yer ayırmamaktadır. Bu diziden amaç ilgili yapı nesnesinin bellekteki bitim adresinin kolay bir biçimde tespit
+	edilmesini sağlamaktır. Handle alanında (tagBTREE yapısı) anahtar ve değer olarak kullanılacak bilgilerin uzunluğunun ve bir karşılaştırma
+	fonksiyonunun adresinin bulundurulduğna dikkat ediniz. Biz ikili arama ağacını yaratırken bu bilgileri vermek zorundayız. 
+
+	Aşağıda void göstericiler kullanılarak türden bağımsız ikili arama ağacına bir örnek verilmiştir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* binarytree.h */
 
 #ifndef BINARYTREE_H_
 #define BINARYTREE_H_
 
 #include <stddef.h>
+#include <stdbool.h>
 
-/* Symbolic Constants */
-
-#define FALSE		0
-#define TRUE		1
-
-/* Type Declaraions */
-
-typedef int BOOL;
-typedef int (*COMPARE)(const void *, const void *);
+/* Type Declararions */
 
 typedef struct tagNODE {
-	struct tagNODE *pLeft;
-	struct tagNODE *pRight;
-	char key[];
-	/* key ....*/
-	/* value .... */
+	struct tagNODE *left;
+	struct tagNODE *right;
+	char key_value[];
 } NODE;
 
-typedef struct tagBINARY_TREE {
-	NODE *pRoot;
-	size_t keySize;
-	size_t valueSize;
+typedef struct tagQNODE {
+	struct tagQNODE *next;
+	NODE *node;
+} QNODE;
+
+typedef struct tagBTREE {
+	NODE *root;
 	size_t count;
-	COMPARE compare;
+	QNODE *head;
+	QNODE *tail;
+	size_t key_size;
+	size_t value_size;
+	int (*compare)(const void *, const void *);
+} BTREE, *HBTREE;
 
-} BINARY_TREE, *HBINARY_TREE;
+/* Function Prototypes */
 
-/* Function prototypes */
+HBTREE create_bt(size_t key_size, size_t value_size, int (*compare)(const void *, const void *));
+bool insert_item_bt(HBTREE hbtree, const void *key, const void *value);
+bool walk_inorder_lr_bt(HBTREE hbtree, bool (*proc)(const void *, const void *));
+bool walk_inorder_rl_bt(HBTREE hbtree, bool (*proc)(const void *, const void *));
+bool walk_postorder_lr_bt(HBTREE hbtree, bool (*proc)(const void *, const void *));
+bool walk_preorder_lr_bt(HBTREE hbtree, bool (*proc)(const void *, const void *));
+bool walk_breadth_first_bt(HBTREE hbtree, bool (*proc)(const void *, const void *));
+bool delete_bt(HBTREE hbtree, const void *key);
+void clear_bt(HBTREE hbtree);
+void destroy_bt(HBTREE hbtree);
 
-HBINARY_TREE CreateBinaryTree(size_t keySize, size_t valueSize, COMPARE compare);
-BOOL InsertItem(HBINARY_TREE hBTree, const void *pKey, const void *pValue);
-BOOL DeleteItem(HBINARY_TREE hBTree, const void *pKey);
-BOOL WalkInOrderAscending(HBINARY_TREE hBTree, BOOL(*Proc)(const void *pKey, void *pValue));
-BOOL WalkInOrderDescending(HBINARY_TREE hBTree, BOOL(*Proc)(const void *pKey, void *pValue));
-void ClearBinaryTree(HBINARY_TREE hBTree);
+/* inline Function Fefinitions */
 
-/* Macros */
-
-#define GetCount(hBTree)		((hBTree)->count)
+static inline size_t count_bt(HBTREE hbtree)
+{
+	return hbtree->count;
+}
 
 #endif
 
-/* BinaryTree.c */
+/* binarytree.c */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "BinaryTree.h"
+#include "binarytree.h"
 
-static NODE *CreateNode(HBINARY_TREE hBTree, const void *pKey, const void *pValue);
-static BOOL WalkInOrderAscendingRecur(NODE *pNode, size_t keySize, BOOL(*Proc)(const void *pKey, void *pValue));
-static void ClearBinaryTreeRecur(NODE *pNode);
-static void SubTreeShift(HBINARY_TREE hBTree, NODE *pUpParentNode, NODE *pUpNode, NODE *pDownNode);
-static BOOL WalkInOrderDescendingRecur(NODE *pNode, size_t keySize, BOOL(*Proc)(const void *pKey, void *pValue));
+static bool walk_inorder_lr_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *));
+static bool walk_inorder_rl_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *));
+static bool walk_postorder_lr_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *));
+static bool walk_preorder_lr_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *));
+static void create_queue(HBTREE hbtree);
+static NODE *put_queue(HBTREE hbtree, NODE *node);
+static NODE *get_queue(HBTREE hbtree);
+static void destroy_queue(HBTREE hbtree);
+static void subtree_shift(HBTREE hbtree, NODE *node1, NODE *node2, NODE *node3);
+static void clear_recur(NODE *node);
 
-HBINARY_TREE CreateBinaryTree(size_t keySize, size_t valueSize, COMPARE compare)
+HBTREE create_bt(size_t key_size, size_t value_size, int (*compare)(const void *, const void *))
 {
-	HBINARY_TREE hBTree;
+	HBTREE hbtree;
 
-	if ((hBTree = (HBINARY_TREE)malloc(sizeof(BINARY_TREE))) == NULL)
+	if ((hbtree = (HBTREE)malloc(sizeof(BTREE))) == NULL)
 		return NULL;
 
-	hBTree->pRoot = NULL;
-	hBTree->keySize = keySize;
-	hBTree->valueSize = valueSize;
-	hBTree->count = 0;
-	hBTree->compare = compare;
+	hbtree->root = NULL;
+	hbtree->count = 0;
+	hbtree->key_size = key_size;
+	hbtree->value_size = value_size;
+	hbtree->compare = compare;
 
-	return hBTree;
+	return hbtree;
 }
 
-BOOL InsertItem(HBINARY_TREE hBTree, const void *pKey, const void *pValue)
+bool insert_item_bt(HBTREE hbtree, const void *key, const void *value)
 {
-	NODE *pNewNode, *pNode, *pParentNode;
-	int compResult;
-
-	if ((pNewNode = CreateNode(hBTree, pKey, pValue)) == NULL)
-		return FALSE;
-
-	if (hBTree->pRoot == NULL) {
-		hBTree->pRoot = pNewNode;
-		++hBTree->count;
-		return TRUE;
-	}
-
-	pNode = hBTree->pRoot;
-
-	while (pNode != NULL) {
-		pParentNode = pNode;
-		compResult = hBTree->compare(pKey, &pNode->key);
-		if (compResult < 0)
-			pNode = pNode->pLeft;
-		else if (compResult > 0)
-			pNode = pNode->pRight;
-		else {
-			memcpy(pNode->key + hBTree->keySize, pValue, hBTree->valueSize);
-			return TRUE;
-		}
-	}
-
-	if (hBTree->compare(pKey, pParentNode->key) > 0)
-		pParentNode->pRight = pNewNode;
-	else
-		pParentNode->pLeft = pNewNode;
-
-	++hBTree->count;
-
-	return TRUE;
-}
-
-static void SubTreeShift(HBINARY_TREE hBTree, NODE *pUpParentNode, NODE *pUpNode, NODE *pDownNode)
-{
-	if (pUpParentNode == NULL)
-		hBTree->pRoot = pDownNode;
-	else if (pUpParentNode->pLeft == pUpNode)
-		pUpParentNode->pLeft = pDownNode;
-	else
-		pUpParentNode->pRight = pDownNode;
-}
-
-BOOL DeleteItem(HBINARY_TREE hBTree, const void *pKey)
-{
-	NODE *pDeleteNode, *pDeleteParentNode, *pReplaceParentNode, *pReplaceNode;
+	NODE *new_node, *node, *parent_node = NULL;
 	int result;
 
-	pDeleteNode = hBTree->pRoot;
-	pDeleteParentNode = NULL;
+	if ((new_node = (NODE *)malloc(sizeof(NODE) + hbtree->key_size + hbtree->value_size)) == NULL)
+		return false;
+	memcpy(new_node->key_value, key, hbtree->key_size);
+	memcpy(new_node->key_value + hbtree->key_size, value, hbtree->value_size);
+	
+	new_node->left = NULL;
+	new_node->right = NULL;
 
-	while (pDeleteNode != NULL) {
-		result = hBTree->compare(pDeleteNode->key, pKey);
-		if (result == 0)
-			break;
-		pDeleteParentNode = pDeleteNode;
-		if (result > 0)
-			pDeleteNode = pDeleteNode->pLeft;
-		else if (result < 0)
-			pDeleteNode = pDeleteNode->pRight;
+	if (hbtree->root == NULL) {
+		hbtree->root = new_node;
+		++hbtree->count;
+		return true;
+	}
+	node = hbtree->root;
+
+	while (node != NULL) {
+		parent_node = node;
+		result = hbtree->compare(key, node->key_value);
+
+		if (result < 0)
+			node = node->left;
+		else if (result > 0)
+			node = node->right;
+		else {
+			memcpy(node->key_value + hbtree->key_size, value, hbtree->value_size);
+			return true;
+		}
 	}
 
-	if (pDeleteNode == NULL)
-		return FALSE;
+	if (hbtree->compare(key, parent_node->key_value) <  0)
+		parent_node->left = new_node;
+	else
+		parent_node->right = new_node;
 
-	if (pDeleteNode->pLeft == NULL)
-		SubTreeShift(hBTree, pDeleteParentNode, pDeleteNode, pDeleteNode->pRight);
-	else if (pDeleteNode->pRight == NULL)
-		SubTreeShift(hBTree, pDeleteParentNode, pDeleteNode, pDeleteNode->pLeft);
-	else {
-		pReplaceParentNode = pDeleteNode;
-		pReplaceNode = pDeleteNode->pRight;
-		while (pReplaceNode->pLeft != NULL) {
-			pReplaceParentNode = pReplaceNode;
-			pReplaceNode = pReplaceNode->pLeft;
-		}
-		if (pReplaceParentNode != pDeleteNode) {
-			SubTreeShift(hBTree, pReplaceParentNode, pReplaceNode, pReplaceNode->pRight);
-			pReplaceNode->pRight = pDeleteNode->pRight;
-		}
-		SubTreeShift(hBTree, pDeleteParentNode, pDeleteNode, pReplaceNode);
-		pReplaceNode->pLeft = pDeleteNode->pLeft;
-	}
+	++hbtree->count;
 
-	return TRUE;
+	return true;
 }
 
-static NODE *CreateNode(HBINARY_TREE hBTree, const void *pKey, const void *pValue)
+bool walk_inorder_lr_bt(HBTREE hbtree, bool (*proc)(const void *, const void *))
 {
-	NODE *pNode;
-	size_t size;
+	if (hbtree->root != NULL)
+		return walk_inorder_lr_recur(hbtree->root, hbtree->key_size, proc);
 
-	size = sizeof(NODE) + hBTree->keySize + hBTree->valueSize;
-	if ((pNode = malloc(size)) == NULL)
+	return true;
+}
+
+bool walk_inorder_rl_bt(HBTREE hbtree, bool (*proc)(const void *, const void *))
+{
+	if (hbtree->root != NULL)
+		return walk_inorder_rl_recur(hbtree->root, hbtree->key_size, proc);
+
+	return true;
+}
+
+bool walk_postorder_lr_bt(HBTREE hbtree, bool (*proc)(const void *, const void *))
+{
+	if (hbtree->root != NULL)
+		return walk_postorder_lr_recur(hbtree->root, hbtree->key_size, proc);
+
+	return true;
+}
+
+bool walk_preorder_lr_bt(HBTREE hbtree, bool (*proc)(const void *, const void *))
+{
+	if (hbtree->root != NULL)
+		return walk_preorder_lr_recur(hbtree->root, hbtree->key_size, proc);
+
+	return true;
+}
+
+static bool walk_preorder_lr_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *))
+{
+	if (!proc(node->key_value, node->key_value + key_size))
+		return false;
+
+	if (node->left != NULL)
+		if (!walk_preorder_lr_recur(node->left, key_size, proc))
+			return false;
+
+	if (node->right != NULL)
+		if (!walk_preorder_lr_recur(node->right, key_size, proc))
+			return false;
+	
+	return true;
+}
+
+bool walk_breadth_first_bt(HBTREE hbtree, bool (*proc)(const void *, const void *))
+{
+	NODE *node;
+	bool result = true;
+
+	create_queue(hbtree);
+	put_queue(hbtree, hbtree->root);
+
+	while ((node = get_queue(hbtree)) != NULL) {
+		if (!proc(node->key_value, node->key_value + hbtree->key_size)) {
+			result = false;
+			break;
+		}
+		if (node->left != NULL)
+			if (put_queue(hbtree, node->left) == NULL) {
+				fprintf(stderr, "put_queue cannot allocate memory!..\n");
+				result = false;
+				break;
+			}
+		if (node->right != NULL)
+			if (put_queue(hbtree, node->right) == NULL) {
+				result = false;
+				fprintf(stderr, "put_queue cannot allocate memory!..\n");
+				break;
+			}
+	}
+
+	destroy_queue(hbtree);
+
+	return result;
+}
+
+static void create_queue(HBTREE hbtree)
+{
+	hbtree->head = NULL;
+	hbtree->tail = NULL;
+}
+
+static NODE *put_queue(HBTREE hbtree, NODE *node)
+{
+	QNODE *new_qnode;
+
+	if ((new_qnode = (QNODE *)malloc(sizeof(QNODE))) == NULL)
 		return NULL;
 
-	pNode->pLeft = pNode->pRight = NULL;
-	memcpy(pNode->key, pKey, hBTree->keySize);
-	memcpy(pNode->key + hBTree->keySize, pValue, hBTree->valueSize);
+	new_qnode->node = node;
+	new_qnode->next = NULL;
 
-	return pNode;
+	if (hbtree->tail != NULL)
+		hbtree->tail->next = new_qnode;
+	else
+		hbtree->head = new_qnode;
+	hbtree->tail = new_qnode;
+
+	return node;
 }
 
-static BOOL WalkInOrderAscendingRecur(NODE *pNode, size_t keySize, BOOL(*Proc)(const void *pKey, void *pValue))
+static NODE *get_queue(HBTREE hbtree)
 {
-	if (pNode->pLeft != NULL)
-		if (!WalkInOrderAscendingRecur(pNode->pLeft, keySize, Proc))
-			return FALSE;
-	if (!Proc(pNode->key, pNode->key + keySize))
-		return FALSE;
-	if (pNode->pRight != NULL)
-		if (!WalkInOrderAscendingRecur(pNode->pRight, keySize, Proc))
-			return FALSE;
+	QNODE *qnode;
+	NODE *rnode;
 
-	return TRUE;
+	if (hbtree->head == NULL)
+		return NULL;
+	qnode = hbtree->head;
+	hbtree->head = qnode->next;
+	if (hbtree->head == NULL)
+		hbtree->tail = NULL;
+
+	rnode = qnode->node;
+	free(qnode);
+
+	return rnode;
 }
 
-BOOL WalkInOrderAscending(HBINARY_TREE hBTree, BOOL(*Proc)(const void *pKey, void *pValue))
+bool delete_bt(HBTREE hbtree, const void *key)
 {
-	if (hBTree->pRoot != NULL)
-		return WalkInOrderAscendingRecur(hBTree->pRoot, hBTree->keySize, Proc);
+	NODE *delete_node, *delete_parent_node, *replace_parent_node, *replace_node;
+	int result;
 
-	return TRUE;
+	delete_node = hbtree->root;
+	delete_parent_node = NULL;
+
+	while (delete_node != NULL) {
+		result = hbtree->compare(key, delete_node->key_value);
+		if (result == 0)
+			break;
+		delete_parent_node = delete_node;
+		if (result < 0)
+			delete_node = delete_node->left;
+		else if (result > 0)
+			delete_node = delete_node->right;
+	}
+
+	if (delete_node == NULL)
+		return false;
+
+	if (delete_node->left == NULL)
+		subtree_shift(hbtree, delete_parent_node, delete_node, delete_node->right);
+	else if (delete_node->right == NULL)
+		subtree_shift(hbtree, delete_parent_node, delete_node, delete_node->left);
+	else {
+		replace_parent_node = delete_node;
+		replace_node = delete_node->right;
+		while (replace_node->left != NULL) {
+			replace_parent_node = replace_node;
+			replace_node = replace_node->left;
+		}
+		if (replace_parent_node != delete_node) {
+			subtree_shift(hbtree, replace_parent_node, replace_node, replace_node->right);
+			replace_node->right = delete_node->right;
+		}
+		subtree_shift(hbtree, delete_parent_node, delete_node, replace_node);
+		replace_node->left = delete_node->left;
+	}
+
+	free(delete_node);
+	--hbtree->count;
+
+	return true;
 }
 
-
-static BOOL WalkInOrderDescendingRecur(NODE *pNode, size_t keySize, BOOL(*Proc)(const void *pKey, void *pValue))
+void clear_bt(HBTREE hbtree)
 {
-	if (pNode->pRight != NULL)
-		if (!WalkInOrderDescendingRecur(pNode->pRight, keySize, Proc))
-			return FALSE;
-	if (!Proc(pNode->key, pNode->key + keySize))
-		return FALSE;
-	if (pNode->pLeft != NULL)
-		if (!WalkInOrderDescendingRecur(pNode->pLeft, keySize, Proc))
-			return FALSE;
-
-	return TRUE;
-}
-
-BOOL WalkInOrderDescending(HBINARY_TREE hBTree, BOOL(*Proc)(const void *pKey, void *pValue))
-{
-	if (hBTree->pRoot != NULL)
-		return WalkInOrderDescendingRecur(hBTree->pRoot, hBTree->keySize, Proc);
-
-	return TRUE;
-}
-
-static void ClearBinaryTreeRecur(NODE *pNode)
-{
-	if (pNode->pLeft != NULL)
-		ClearBinaryTreeRecur(pNode->pLeft);
-	if (pNode->pRight != NULL)
-		ClearBinaryTreeRecur(pNode->pRight);
-
-	free(pNode);
-}
-
-void ClearBinaryTree(HBINARY_TREE hBTree)
-{
-	if (hBTree->pRoot != NULL) {
-		ClearBinaryTreeRecur(hBTree->pRoot);
-
-		hBTree->pRoot = NULL;
-		hBTree->count = 0;
+	if (hbtree->root != NULL) {
+		clear_recur(hbtree->root);
+		hbtree->root = NULL;
+		hbtree->count = 0;
 	}
 }
 
-/* Test.c */
+void destroy_bt(HBTREE hbtree)
+{
+	if (hbtree->root != NULL)
+		clear_recur(hbtree->root);
+
+	free(hbtree);
+}
+
+static bool walk_inorder_lr_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *))
+{
+	if (node->left != NULL)
+		if (!walk_inorder_lr_recur(node->left, key_size, proc))
+			return false;
+
+	if (!proc(node->key_value, node->key_value + key_size))
+		return false;
+
+	if (node->right != NULL)
+		if (!walk_inorder_lr_recur(node->right, key_size, proc))
+			return false;
+
+	return true;
+}
+
+static bool walk_inorder_rl_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *))
+{
+	if (node->right != NULL)
+		if (!walk_inorder_rl_recur(node->right, key_size, proc))
+			return false;
+
+	if (!proc(node->key_value, node->key_value + key_size))
+		return false;
+
+	if (node->left != NULL)
+		if (!walk_inorder_rl_recur(node->left, key_size, proc))
+			return false;
+	return true;
+}
+
+static bool walk_postorder_lr_recur(NODE *node, size_t key_size, bool (*proc)(const void *, const void *))
+{
+	if (node->left != NULL)
+		if (!walk_postorder_lr_recur(node->left, key_size, proc))
+			return false;
+
+	if (node->right != NULL)
+		if (!walk_postorder_lr_recur(node->right, key_size, proc))
+			return false;
+
+	if (!proc(node->key_value, node->key_value + key_size))
+		return false;
+
+	return true;
+}
+
+static void destroy_queue(HBTREE hbtree)
+{
+	QNODE *qnode, *temp_qnode;
+
+	qnode = hbtree->head;
+
+	while (qnode != NULL) {
+		temp_qnode = qnode->next;
+		free(qnode);
+		qnode = temp_qnode;
+	}
+}
+
+static void subtree_shift(HBTREE hbtree, NODE *node1, NODE *node2, NODE *node3)
+{
+	if (node1 == NULL)
+		hbtree->root = node3;
+	else if (node1->left == node2)
+		node1->left = node3;
+	else
+		node1->right = node3;
+}
+
+
+static void clear_recur(NODE *node)
+{
+	if (node->left != NULL)
+		clear_recur(node->left);
+
+	if (node->right != NULL)
+		clear_recur(node->right);
+
+	free(node);
+}
+
+/* app.c */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "BinaryTree.h"
-
-/* Anahtar int, değerler PERSON */
+#include "binarytree.h"
 
 typedef struct tagPERSON {
 	char name[32];
+	int no;
 } PERSON;
 
-int KeyCompare(const void *pKey1, const void *pKey2)
-{
-	const int *pi1 = (const int *)pKey1;
-	const int *pi2 = (const int *)pKey2;
-
-	return *pi1 - *pi2;
-}
-
-BOOL Disp(const void *pKey, void *pValue)
-{
-	const int *pNo;
-	PERSON *pPerson;
-
-	pNo = (int *)pKey;
-	pPerson = (PERSON *)pValue;
-
-	printf("%d ---> %s\n", *pNo, pPerson->name);
-
-	return TRUE;
-}
+bool disp_node(const void *key, const void *value);
+int comp_person(const void *key1, const void *key2);
 
 int main(void)
 {
-	HBINARY_TREE hBTree;
-	int keys[] = { 100, 50, 120, 25, 75, 115, 150, 10, 30, 60, 80, 145, 200 };
-	PERSON persons[] = { {"Sacit Erol"}, {"Ayşe Er"}, {"Demir Büyüközkaya"}, {"Harun Şanlı"},
-		{"Fehmi Sakin"}, {"Olcay Torun" }, {"Kaan Aslan"}, {"Güray Sönmez"}, {"Bulut Hakkı"},
-		{"Defne Yılmaz"}, {"Timur Selçuk"}, {"Kazım Koç"}, {"Gül Koca"} };
-	int i;
-	int key = 80;
+	HBTREE hbtree;
+	PERSON per = {"Noname", 0};
+	int keys[] = {70, 50, 34, 56, 19, 80, 67, 43, 27, 76, 79, 105, 82, 65, 0};
+	int del_key = 70;
 
-	if ((hBTree = CreateBinaryTree(sizeof(int), sizeof(PERSON), KeyCompare)) == NULL) {
-		fprintf(stderr, "Cannot create binary tree!..\n");
+	if ((hbtree = create_bt(sizeof(int), sizeof(PERSON), comp_person)) == NULL) {
+		fprintf(stderr, "cannot create binary tree!..\n");
 		exit(EXIT_FAILURE);
 	}
 
-	for (i = 0; i < sizeof(keys) / sizeof(*keys); ++i) {
-		if (!InsertItem(hBTree, &keys[i], &persons[i])) {
-			fprintf(stderr, "cannot insert item!..\n");
+	for (int i = 0; keys[i] != 0; ++i)
+		if (!insert_item_bt(hbtree, &keys[i], &per)) {
+			fprintf(stderr, "cannot insert item: %d\n", keys[i]);
 			exit(EXIT_FAILURE);
 		}
-	}
-
-	WalkInOrderAscending(hBTree, Disp);
-
-	if (!DeleteItem(hBTree, &key)) {
-		fprintf(stderr, "cannot find item!..\n");
+	
+	walk_inorder_lr_bt(hbtree, disp_node);
+	printf("\n------------------------------\n");
+	walk_inorder_rl_bt(hbtree, disp_node);
+	printf("\n------------------------------\n");
+	walk_postorder_lr_bt(hbtree, disp_node);
+	printf("\n------------------------------\n");
+	walk_preorder_lr_bt(hbtree, disp_node);
+	printf("\n------------------------------\n");
+	walk_breadth_first_bt(hbtree, disp_node);
+	printf("\n------------------------------\n");
+	if (!delete_bt(hbtree, &del_key)) {
+		fprintf(stderr, "cannot find item!...\n");
 		exit(EXIT_FAILURE);
 	}
+	walk_breadth_first_bt(hbtree, disp_node);
 
-	printf("---------------------------\n");
+	destroy_bt(hbtree);
 
-	WalkInOrderDescending(hBTree, Disp);
+	return 0;
+}
 
-	ClearBinaryTree(hBTree);
+bool disp_node(const void *key, const void *value)
+{
+	const int *ikey = (const int *)key;
+	printf("%d ", *ikey);
+	fflush(stdout);
+
+	return true;
+}
+
+int comp_person(const void *key1, const void *key2)
+{
+	const int *ikey1 = (const int *)key1;
+	const int *ikey2 = (const int *)key2;
+
+	if (*ikey1 > *ikey2)
+		return 1;
+
+	if (*ikey1 < *ikey2)
+		return -1;
 
 	return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	C'nin <stddef.h> içeriisnde bildirilmiş olan offsetof makrosu yapının tür ismini ve yapıdaki bir eleman ismini parametre olarak alır, o elemanın 
-	yapının başından itibaren kaçıncı offsette olduğunu verir. 
+	Genelleştirmede void gösterici tekniği yerine gömme tekniğinin tercih edildiğini belirtmiştik. Bu tekniği açıklamadna önce hazırlık 
+	amacıyla C'ye ilişkin bir konunun üzerinde duracağız.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+ 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	C'nin <stddef.h> içerisinde bildirilmiş olan offsetof makrosu yapının tür ismini ve yapıdaki bir eleman ismini parametre olarak alır, 
+	o elemanın yapının başından itibaren kaçıncı offsette olduğunu verir. Örneğin:
+
+	struct SAMPLE {
+		int a;					
+		int b;
+		char c[32];
+		char d;
+		int e;
+	};
+	size_t result;
+
+	result = offsetof(struct SAMPLE, e);
+
+	Burada yapının e elemanı yapı nesnesinin başından itibaren muhtemelen 44'üncü offset'indedir. Elemanların offset numaraları aşağıdaki 
+	gibi olacaktır:
+
+	struct SAMPLE {
+		int a;				/* 0 */		
+		int b;				/* 4 */
+		char c[32];			/* 8 */
+		char d;				/* 40 */
+		int e;				/* 44 */
+	};
+
+	İşte offsetof makrosu bir yapı elemanının yapın nesnesnin kaçıncı offsetinde olduğunu elde etmek için kullanılmaktadır. offsetof makrosu
+	size_t türündne bir değer vermektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stddef.h>
+
+struct SAMPLE {
+	int a;
+	int b;
+	char c[32];
+	char d;
+	int e;
+};
+
+int main(void)
+{
+	size_t result;
+
+	result = offsetof(struct SAMPLE, e);
+	printf("%zd\n", result);					/* 44 */
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	offsetof makrosu tipik olarak aşağıdakine benzer bir biçimde yazılmaktadır:
+
+	#define myoffsetof(type, member)		((size_t)&((type *)0)->member)
+
+	Burada 0 adresi önce ilgili yapı türünden adrese dönüştürülmüştür. (0 değerini herhangi türden bir adrese dönüştürürsek bu NULL adres 
+	anlamına gelmemektedir. 0 dğeri void * türüne dönüştürülürse bu NULL ares anlamına gelmektedir.) Sonra yapının elemanına eriilip onun adresi
+	alınmıştır. Bu durumda adresin sayısal bileşeni aslında ilgili eelemanın offset'i olacaktır. Nihayet bu değer son olarak size_t türüne 
+	dönüştürülmüştür. Yukarıdaki 0 adresinden başlayan yapının elemanına erişip onun adresini alma işlemi C'de "tanımsız davranış" değildir.
+	Çünkü burada standartlara göre gerçek bir erişim yapılmamaktadır. Yalnızca oranın adresi elde edilmiştir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
 
-/* #define offsetof(type, member)	 */
+#define myoffsetof(type, member)		((size_t)&((type *)0)->member)
 
 struct SAMPLE {
 	int a;
-	char b;
-	int c;
+	int b;
+	char c[32];
 	char d;
-	double e;
-	int f;
+	int e;
 };
 
 int main(void)
 {
-	int result;
-
-	result = offsetof(struct SAMPLE, e);
-	printf("%lu\n", (unsigned long)result);
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	offsetof makrosu klasik biçimde aşağıdaki gibi yazılmaktadır:
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-#include <stddef.h>
-
-#define myoffsetof(type, member)	 ((size_t) &((type *)0)->member)
-
-struct SAMPLE {
-	int a;
-	char b;
-	int c;
-	char d;
-	double e;
-	int f;
-};
-
-int main(void)
-{
-	int result;
+	size_t result;
 
 	result = myoffsetof(struct SAMPLE, e);
-	printf("%lu\n", (unsigned long)result);
+	printf("%zd\n", result);					/* 44 */
 
 	return 0;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-		Bir yapı içerisindeki bir elemanınadresini, o elemanın ismini ve yapının türünü bildiğimizi varsayalım. Bu durumda elemaın adresine ilişkin yapuı nesnessinin
-		başlangıç adresini veren container_of biçiminde bir makro yazabiliriz. Bu makro standart değildir. 
+	Bir yapı içerisindeki bir elemanın adresini, o elemanın ismini ve yapının türünü bildiğimizi varsayalım. Bu durumda elemanın adresine 
+	ilişkin yapı nesnesinin başlangıç adresini veren container_of biçiminde bir makro yazabiliriz:
 
-		#define container_of(ptr, type, member)			((type *) ((char *) (ptr) - offsetof(type, member)))
+	#define container_of(ptr, type, member)			((type *) ((char *) (ptr) - offsetof(type, member)))
 
-		Makronun birinci parametresi nesne içerisindeki elemanın adresi, ikinci parametresi yapının tür ismi ve üçüncü parametresi elemanın ismini almaktadır.
+	Makronun birinci parametresi nesne içerisindeki elemanın adresi, ikinci parametresi yapının tür ismi ve üçüncü parametresi de elemanın 
+	ismini almaktadır. C standartlarında offsetof bir makro bulunmakla birlikte bu işi yapabilecek bir makro bulunmamaktadır. 
+	Aşağıdaki container_of makrosunn kullanımına ilişkin bir örnek verilmektedir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -29398,406 +29684,318 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Veri yapılarını genelleştirmenin diğer bir yolu da asıl türü değil, meta data alanları üzerinde veri yapısını oluşturmaktır. 
-	Örneğin aslında NODE'ları birbirine bağlayan bir bağlı liste söz konusu olabilir. Bu node'lar da başka bir yapının içerisinde bulunabilir. 
-	Bu durumda biz aslında bu yapıları biribirine bağlamış oluruz. Örneğin Linux kernel kodlarında veri yapılarının genelleşirilmesi bu teknikle 
-	gerçekleştirilmektedir. 
+	Gömme yöntemiyle veri yapıları genelleştirilirken aslında veri yapıları adeta kendi çekirdek kısımlarından oluşturulur. Örneğin bir bağlı 
+	listenin türden bağımsız bir biçimde bu teknikle oluşturulmak istendiğini düşünelim. Bağlı liste belli türdne bilgileri değil NODE isimli
+	düğümleri birbirine bağlayacaktır. Ancak NODE isimli düğümler bağlı liste elemanlarının tutacağı nesneleri içermeyecektir. Örneğin:
+
+	typedef struct tagNODE {
+		struct tagNODE *next;
+		struct tagNODE *prev;
+	} NODE;
+
+	Görüldüğü gibi burada NODE yapısı düğümğn tuttuğu bilgiyi içermemektedir. İşte bağlı liste bu biçimdeki düğümleri birbirine bağlamaktadır. 
+	Örneğin:
+
+	head_node <---> node <----> node <---> node <---> ....
+
+	Pekiyi bağlı liste düğümleri yalnızca link tuttuğuna göre böyle bir bağlı listeninin nasıl bir faydası olabilir? İşte bu düğümler aslında 
+	başka bir yapının içerisinde bir eleman olarak tutulacaktır. Örneğin:
+
+	struct PERSON {
+		char name[32];
+		int no;
+		NODE link;
+	};
+
+	Görüldüğü gibi PERSON yapısının bir elemanı bağlı listenin düğümündne oluşmaktadır. Yani biz aslında düğümlerdne bağlı liste oluşturmaktayız
+	ancak bu düğümler de ilgili türden nesnelerin elemanı durumundadır. Nasıl olsa biz yapının bir elemanının adresini bildiğimizde o yapı 
+	nesnesinin başlangıç adresini yukarıda gösterdiğimiz gibi container_of makrosu ile elde edebiliriz. 
+
+	Bu yöntemde bir yapı nesnesi tek bir bağlı liste içerisinde bulunmak zorunda değildir. Örneğin Linux çekirdeğinde proses kontrol bloğu temsil 
+	eden task_struct yapısı pek çok bağlı listede bulunmaktadır. Burada yapılacak şey yapı içerisinde birden fazla link elemanı tutmaktır. 
+	Örneğin:
+
+	struct PERSON {
+		char name[32];
+		int no;
+		NODE link1;
+		NODE link2;
+	};
 -------------------------------------------------------------------------------------------------------------------------------------------*/
-
-/* GenericList.h */
-
-#ifndef GENERICLIST_H_
-#define GENERICLIST_H_
-
-#include <stddef.h>
-
-/* Symbolic Constants */
-
-#define FALSE		0
-#define TRUE		1
-
-/* Type Declarations */
-
-typedef int BOOL;
-
-typedef struct tagNODE {
-	struct tagNODE *pNext;
-	struct tagNODE *pPrev;
-} NODE;
-
-/* Fuciton Prototypes */
-
-NODE *AddItemHead(NODE *pList, NODE *pNewNode);
-NODE *AddItemTail(NODE *pList, NODE *pNewNode);
-NODE *InsertItemNext(NODE *pInsertNode, NODE *pNewNode);
-NODE *InsertItemPrev(NODE *pInsertNode, NODE *pNewNode);
-void DeleteItem(NODE *pDeleteNode);
-BOOL WalkList(NODE *pList, BOOL(*Proc) (NODE *));
-BOOL WalkListRev(NODE *pList, BOOL(*Proc) (NODE *));
-
-/* Macros */
-
-#define container_of(ptr, type, member)			((type *) ((char *) (ptr) - offsetof(type, member)))
-
-#endif
-
-/* GenericList.c */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include "GenericList.h"
-
-NODE *AddItemHead(NODE *pList, NODE *pNewNode)
-{
-	return InsertItemNext(pList, pNewNode);
-}
-
-NODE *AddItemTail(NODE *pList, NODE *pNewNode)
-{
-	return InsertItemPrev(pList, pNewNode);
-}
-
-NODE *InsertItemNext(NODE *pInsertNode, NODE *pNewNode)
-{
-	pNewNode->pPrev = pInsertNode;
-	pNewNode->pNext = pInsertNode->pNext;
-	pInsertNode->pNext->pPrev = pNewNode;
-	pInsertNode->pNext = pNewNode;
-
-	return pNewNode;
-}
-
-NODE *InsertItemPrev(NODE *pInsertNode, NODE *pNewNode)
-{
-	pInsertNode->pPrev->pNext = pNewNode;
-	pNewNode->pNext = pInsertNode;
-	pNewNode->pPrev = pInsertNode->pPrev;
-	pInsertNode->pPrev = pNewNode;
-
-	return pNewNode;
-}
-
-void DeleteItem(NODE *pDeleteNode)
-{
-	pDeleteNode->pPrev->pNext = pDeleteNode->pNext;
-	pDeleteNode->pNext->pPrev = pDeleteNode->pPrev;
-}
-
-BOOL WalkList(NODE *pList, BOOL(*Proc) (NODE *))
-{
-	NODE *pNode;
-
-	for (pNode = pList->pNext; pNode != pList; pNode = pNode->pNext)
-		if (!Proc(pNode))
-			return FALSE;
-
-	return TRUE;
-}
-
-BOOL WalkListRev(NODE *pList, BOOL(*Proc) (NODE *))
-{
-	NODE *pNode;
-
-	for (pNode = pList->pPrev; pNode != pList; pNode = pNode->pPrev)
-		if (!Proc(pNode))
-			return FALSE;
-
-	return TRUE;
-}
-
-/* Test.c */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "GenericList.h"
-
-struct PERSON {
-	char name[32];
-	int no;
-	NODE node;
-};
-
-NODE g_listPerson = { &g_listPerson, &g_listPerson };
-
-struct CITY {
-	char city[64];
-	NODE node;
-	int plate;
-};
-
-NODE g_listCity = { &g_listCity, &g_listCity };
-
-BOOL DispPerson(NODE *pNode)
-{
-	struct PERSON *pperson;
-
-	pperson = container_of(pNode, struct PERSON, node);
-	printf("%s, %d\n", pperson->name, pperson->no);
-
-	return TRUE;
-}
-
-BOOL DispCity(NODE *pNode)
-{
-	struct CITY *pcity;
-
-	pcity = container_of(pNode, struct CITY, node);
-	printf("%s, %d\n", pcity->city, pcity->plate);
-
-	return TRUE;
-}
-
-int main(void)
-{
-	struct PERSON persons[] = { {"Sacit Erol", 10}, {"Ayşe Er", 20}, {"Demir Büyüközkaya", 30}, {"Harun Şanlı", 40},
-	{"Fehmi Sakin", 50}, {"Olcay Torun", 60 }, {"Kaan Aslan", 70}, {"Güray Sönmez", 80}, {"Bulut Hakkı", 90},
-	{"Defne Yılmaz", 100}, {"Timur Selçuk", 110}, {"Kazım Koç", 120}, {"Gül Koca", 130} };
-
-	struct CITY cities[] = { {.city = "Adana", .plate = 1}, {.city = "Eskişehir", .plate = 26}, {.city = "İzmir", .plate = 35}, {.city = "İstanbul", .plate = 34} };
-	int i;
-
-	for (i = 0; i < 13; ++i)
-		AddItemTail(&g_listPerson, &persons[i].node);
-
-	WalkList(&g_listPerson, DispPerson);
-
-	printf("---------------------\n");
-
-	for (i = 0; i < 4; ++i)
-		AddItemTail(&g_listCity, &cities[i].node);
-
-	WalkList(&g_listCity, DispCity);
-
-	return 0;
-}
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Bu teknikle biz bir yapı nesnesini iki ayrı bağlı listenin elemanı haline getirebiliriz. 
+	Aşağıdaki örnekte bir handle sistemi kullanılarak gömme tekniği ile türden bağımsız bağlı liste oluşturulmuştur. Burada yine bağlı listeler
+	create_llist gibi bir fonksiyonla yaratılmaktadır. Gömme tekniğinde handle sisteminin kullanılması aşağı seviyeli çekirdek kodları için
+	uygun bir yöntem olmayabilir. Ancak biz aşağıda önce handle sistemi ile gömme tekniğine örnek vereceğiz. Sonra handle sistemi olmadan
+	aynı tekniği kullanacağız. Yukarıda da belirttiğimiz gibi aslında örneğin Linux, BSD, CSD gibi işletim sistemi kodlarında bu handle sistemi
+	kullanılmamaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-struct STUDENT {
-	char name[32];
-	int no;
-	NODE nodeClass;
-	NODE nodeLibrary;
-};
+/* llist.h */
 
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Aslında yukarıdaki genelleştirme bir handle sistemi biçiminde de gerçekleştirilebilir. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-/* GenericList.h */
-
-#ifndef GENERICLIST_H_
-#define GENERICLIST_H_
+#ifndef LLIST_H_
+#define LLIST_H_
 
 #include <stddef.h>
+#include <stdbool.h>
 
-/* Symbolic Constants */
-
-#define FALSE		0
-#define TRUE		1
-
-/* Type Declarations */
-
-typedef int BOOL;
+/* Type Declarations  */
 
 typedef struct tagNODE {
-	struct tagNODE *pNext;
-	struct tagNODE *pPrev;
+	struct tagNODE *next;
+	struct tagNODE *prev;
 } NODE;
 
-typedef struct tagLIST {
+typedef struct tagLLIST {
 	NODE head;
 	size_t count;
-} LIST, *HLIST;
+} LLIST, *HLLIST;
 
-/* Fuciton Prototypes */
+/* Function Prototypes */
 
-HLIST CreateList(void);
-NODE *AddItemHead(HLIST hList, NODE *pNewNode);
-NODE *AddItemTail(HLIST hList, NODE *pNewNode);
-NODE *InsertItemNext(HLIST hList, NODE *pInsertNode, NODE *pNewNode);
-NODE *InsertItemPrev(HLIST hList, NODE *pInsertNode, NODE *pNewNode);
-void DeleteItem(HLIST hList, NODE *pDeleteNode);
-BOOL WalkList(HLIST hList, BOOL(*Proc) (NODE *));
-BOOL WalkListRev(HLIST hList, BOOL(*Proc) (NODE *));
-void CloseList(HLIST hList);
+HLLIST create_llist(void);
+NODE *insert_next(HLLIST hllist, NODE *node, NODE *new_node);
+NODE *insert_prev(HLLIST hllist, NODE *node, NODE *new_node);
+NODE *add_tail(HLLIST hllist, NODE *new_node);
+NODE *add_head(HLLIST hllist, NODE *new_node);
+void remove_node(HLLIST hllist, NODE *node);
+NODE *getp_item(HLLIST hllist, size_t index);
+bool walk_llist(HLLIST hllist, bool (*proc)(NODE *));
+bool walk_llist_rev(HLLIST hllist, bool (*proc)(NODE *));
+void clear_llist(HLLIST hllist);
+void destroy_llist(HLLIST hllist);
 
-/* Macros */
+/* inline Function Definitions */
 
-#define GetCount(hList)			((hList)->count)
+static inline size_t count_llist(HLLIST hllist)
+{
+	return hllist->count;
+}
+
+static inline NODE *head_llist(HLLIST hllist)
+{
+	return hllist->head.next;
+}
+
+static inline NODE *tail__llist(HLLIST hllist)
+{
+	return hllist->head.prev;
+}
+
+/* Macro Definitions */
+
 #define container_of(ptr, type, member)			((type *) ((char *) (ptr) - offsetof(type, member)))
+
+#define FOR_EACH(hllist, node)		for (node = (hllist)->head.next; node != &(hllist)->head; node = node->next)
+#define FOR_EACH_REV(hllist, node)	for (node = (hllist)->head.prev; node != &(hllist)->head; node = node->prev)
+#define FREE_LLIST(hllist, node)	for (NODE *tnode = (hllist)->head.next;  node = tnode, tnode = tnode->next, node != &(hllist)->head; )
 
 #endif
 
-/* GenericList.c */
+
+/* llist.c */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "GenericList.h"
+#include "llist.h"
 
-HLIST CreateList(void)
+/* Function Definitions */
+
+HLLIST create_llist(void)
 {
-	HLIST hList;
+	HLLIST hllist;
 
-	if ((hList = (HLIST)malloc(sizeof(LIST))) == NULL)
+	if ((hllist = (HLLIST)malloc(sizeof(LLIST))) == NULL)
 		return NULL;
 
-	hList->head.pNext = &hList->head;
-	hList->head.pPrev = &hList->head;
-	hList->count = 0;
+	hllist->head.next = &hllist->head;
+	hllist->head.prev = &hllist->head;
+	hllist->count = 0;
 
-	return hList;
+	return hllist;
 }
 
-NODE *AddItemHead(HLIST hList, NODE *pNewNode)
+NODE *insert_next(HLLIST hllist, NODE *node, NODE *new_node)
 {
-	return InsertItemNext(hList, &hList->head, pNewNode);
+	node->next->prev = new_node;
+	new_node->next = node->next;
+	node->next = new_node;
+	new_node->prev = node;
+
+	++hllist->count;
+
+	return new_node;
 }
 
-NODE *AddItemTail(HLIST hList, NODE *pNewNode)
+NODE *insert_prev(HLLIST hllist, NODE *node, NODE *new_node)
 {
-	return InsertItemPrev(hList, &hList->head, pNewNode);
+	node->prev->next = new_node;
+	new_node->next = node;
+	new_node->prev = node->prev;
+	node->prev = new_node;
+
+	++hllist->count;
+
+	return new_node;
 }
 
-NODE *InsertItemNext(HLIST hList, NODE *pInsertNode, NODE *pNewNode)
+NODE *add_tail(HLLIST hllist, NODE *new_node)
 {
-	pNewNode->pPrev = pInsertNode;
-	pNewNode->pNext = pInsertNode->pNext;
-	pInsertNode->pNext->pPrev = pNewNode;
-	pInsertNode->pNext = pNewNode;
-
-	++hList->count;
-
-	return pNewNode;
+	return insert_prev(hllist, &hllist->head, new_node);
 }
 
-NODE *InsertItemPrev(HLIST hList, NODE *pInsertNode, NODE *pNewNode)
+NODE *add_head(HLLIST hllist, NODE *new_node)
 {
-	pInsertNode->pPrev->pNext = pNewNode;
-	pNewNode->pNext = pInsertNode;
-	pNewNode->pPrev = pInsertNode->pPrev;
-	pInsertNode->pPrev = pNewNode;
-
-	++hList->count;
-
-	return pNewNode;
+	return insert_next(hllist, &hllist->head, new_node);
 }
 
-void DeleteItem(HLIST hList, NODE *pDeleteNode)
+void remove_node(HLLIST hllist, NODE *node)
 {
-	pDeleteNode->pPrev->pNext = pDeleteNode->pNext;
-	pDeleteNode->pNext->pPrev = pDeleteNode->pPrev;
+	node->prev->next = node->next;
+	node->next->prev = node->prev;
 
-	--hList->count;
+	--hllist->count;
 }
 
-BOOL WalkList(HLIST hList, BOOL(*Proc) (NODE *))
+NODE *getp_item(HLLIST hllist, size_t index)
 {
-	NODE *pNode;
+	NODE *node;
 
-	for (pNode = hList->head.pNext; pNode != &hList->head; pNode = pNode->pNext)
-		if (!Proc(pNode))
-			return FALSE;
+	if (index >= hllist->count)
+		return NULL;
 
-	return TRUE;
+	node = hllist->head.next;
+	for (size_t i = 0; i < index; ++i)
+		node = node->next;
+
+	return node;
 }
 
-BOOL WalkListRev(HLIST hList, BOOL(*Proc) (NODE *))
+bool walk_llist(HLLIST hllist, bool (*proc)(NODE *))
 {
-	NODE *pNode;
+	for (NODE *node = hllist->head.next; node != &hllist->head; node = node->next)
+		if (!proc(node)) 
+			return false;
 
-	for (pNode = hList->head.pPrev; pNode != &hList->head; pNode = pNode->pPrev)
-		if (!Proc(pNode))
-			return FALSE;
-
-	return TRUE;
+	return true;
 }
 
-void CloseList(HLIST hList)
+bool walk_llist_rev(HLLIST hllist, bool (*proc)(NODE *))
 {
-	free(hList);
+	for (NODE *node = hllist->head.prev; node != &hllist->head; node = node->prev)
+		if (!proc(node))
+			return false;
+
+	return true;
 }
 
-/* Test.c */
+void clear_llist(HLLIST hllist)
+{
+	hllist->head.next = &hllist->head;
+	hllist->head.prev = &hllist->head;
+
+	hllist->count = 0;
+}
+
+void destroy_llist(HLLIST hllist)
+{
+	free(hllist);
+}
+
+/* app.c */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include "GenericList.h"
+#include "llist.h"
 
-struct PERSON {
+typedef struct tagPERSON {
 	char name[32];
 	int no;
-	NODE node;
-};
+	NODE link;
+} PERSON;
 
-struct CITY {
-	char city[64];
-	NODE node;
-	int plate;
-};
-BOOL DispPerson(NODE *pNode)
-{
-	struct PERSON *pperson;
-
-	pperson = container_of(pNode, struct PERSON, node);
-	printf("%s, %d\n", pperson->name, pperson->no);
-
-	return TRUE;
-}
-
-BOOL DispCity(NODE *pNode)
-{
-	struct CITY *pcity;
-
-	pcity = container_of(pNode, struct CITY, node);
-	printf("%s, %d\n", pcity->city, pcity->plate);
-
-	return TRUE;
-}
+bool disp_person(NODE *node);
 
 int main(void)
 {
-	struct PERSON persons[] = { {"Sacit Erol", 10}, {"Ayşe Er", 20}, {"Demir Büyüközkaya", 30}, {"Harun Şanlı", 40},
-	{"Fehmi Sakin", 50}, {"Olcay Torun", 60 }, {"Kaan Aslan", 70}, {"Güray Sönmez", 80}, {"Bulut Hakkı", 90},
-	{"Defne Yılmaz", 100}, {"Timur Selçuk", 110}, {"Kazım Koç", 120}, {"Gül Koca", 130} };
-
-	struct CITY cities[] = { {.city = "Adana", .plate = 1}, {.city = "Eskişehir", .plate = 26}, {.city = "İzmir", .plate = 35}, {.city = "İstanbul", .plate = 34} };
-	int i;
-
-	HLIST hPersonList, hCityList;
-
-
-	if ((hPersonList = CreateList()) == NULL) {
-		fprintf(stderr, "cannot create list!..\n");
+	HLLIST hllist;
+	PERSON *per;
+	NODE *node;
+	
+	if ((hllist = create_llist()) == NULL) {
+		fprintf(stderr, "cannot create linked list...\n");
 		exit(EXIT_FAILURE);
 	}
 
-	if ((hCityList = CreateList()) == NULL) {
-		fprintf(stderr, "cannot create list!..\n");
-		exit(EXIT_FAILURE);
+	for (int i = 0; i < 100; ++i) {
+		if ((per = (PERSON *)malloc(sizeof(PERSON))) == NULL) {
+			fprintf(stderr, "ccano tallocate memory!..\n");
+			exit(EXIT_FAILURE);
+		}
+		per->no = i;
+		per->name[0] = '\0';
+
+		add_tail(hllist, &per->link);
 	}
 
-	for (i = 0; i < 13; ++i)
-		AddItemTail(hPersonList, &persons[i].node);
+	walk_llist(hllist, disp_person);
+	
+	printf("\n--------------------\n");
+	
+	FOR_EACH (hllist, node) {
+		per = container_of(node, PERSON, link);
+		printf("%d ", per->no);
+		fflush(stdout);
+	}
 
-	WalkList(hPersonList, DispPerson);
+	printf("\n--------------------\n");
 
-	printf("---------------------\n");
+	FOR_EACH_REV (hllist, node) {
+		per = container_of(node, PERSON, link);
+		printf("%d ", per->no);
+		fflush(stdout);
+	}
 
-	for (i = 0; i < 4; ++i)
-		AddItemTail(hCityList, &cities[i].node);
-
-	WalkList(hCityList, DispCity);
-
-	CloseList(hPersonList);
-	CloseList(hCityList);
+	FREE_LLIST(hllist, node) {
+		per = container_of(node, PERSON, link);
+		free(per);
+	}
 
 	return 0;
 }
+
+bool disp_person(NODE *node)
+{
+	PERSON *per;
+
+	per = container_of(node, PERSON, link);
+	printf("%d ", per->no);
+	fflush(stdout);
+
+	return true;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	<BURADA KALDIK>
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
 	Graf veri yapısı için iki yöntem sık kullanılmaktadır:
