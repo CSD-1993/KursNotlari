@@ -35223,34 +35223,41 @@ void ExitSys(LPCSTR lpszMsg)
 
 	SetEvent(g_hEvent);
 
-	Nesne SetEvent fonksiyonu ile açık duruma geçirildiktin sonra WaitForSingleObject fonksiyonunda bekleyen thread oradan çıkar. İşte eğer 
-	nesne otomatik ise bu durumda WaitForSİngleObject fonksiyonundan çıkılırken nesne otomatik oalrak yeniden kapalı duruma geçmektedir. 
-	Eğer nesne manuel durumdaysa WaitForSingleObject fonksiyonu sonlandığında nesne hala açık durumda olmaya devam eder. 
--------------------------------------------------------------------------------------------------------------------------------------------*/
+	Nesne SetEvent fonksiyonu ile açık duruma geçirildiktin sonra WaitForSingleObject fonksiyonunda bekleyen thread blokeden çıkar. İşte eğer 
+	nesne otomatik ise bu durumda WaitForSİngleObject fonksiyonundan çıkılırken nesne otomatik olarak yeniden kapalı duruma geçmektedir. 
+	Eğer nesne manuel durumdaysa WaitForSingleObject fonksiyonu sonlandığında nesne hala açık durumda olmaya devam eder. Event nesnelerini 
+	kapalı duruma geçirmek için ResetEvent API fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
 
-<BURADA KALDIK>
+	BOOL ResetEvent(
+		HANDLE hEvent
+	);
+	
+	Fonksiyon event nesnesinin handle değerini parametre olarak alır, başarı durumunda sıfır değerine başarısızlık durumunda sıfır dışı bir 
+	değere geri döner. 
 
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Windows'ta Event nesneleri başka bir thread uyandırana kadar thread'i blokede bekletmek için kullanılmaktadır. 
-	Bu nesnelerin UNIX(Linux sistemlerinde tam karşılığı yoktur ancak "durum değişkenleri (conditioned variables)" yaklaşık bu amaçlarla 
-	kullanılabilmektedir.
+	WaitForSingleObject (ya da WaitForMultipleObjects) fonksiyonu ile birden fazla thread otomatik moddaki event nesnesini bekliyorsa, bu
+	event nesnesi açık duruma geçtiğinde yalnızca tek bir thread'in blokesi çözülür. Çünkü event nesnesi otomatik durumda olduğu için 
+	WaitForSingleObject fonksiyonundan çıkılır çıkılmaz nesne atomik bir biçimde kapalı duruma geçirilecektir. Tabii eğer event nesnesi 
+	manuel modda ise SetEvent yapıldığında event nesnesini bekleyen thread'lerin blokesi çözülecektir.
+
+	Aşağıda event senkronizasyon nesnesinin kullanımına bir örnek verilmiştir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 
-void ExitSys(LPCSTR lpszMsg);
 DWORD __stdcall ThreadProc1(LPVOID lpvParam);
 DWORD __stdcall ThreadProc2(LPVOID lpvParam);
-DWORD __stdcall ThreadProc3(LPVOID lpvParam);
+
+void ExitSys(LPCSTR lpszMsg);
 
 HANDLE g_hEvent;
 
 int main(void)
 {
-	HANDLE hThread1, hThread2, hThread3;
-	DWORD dwThreadID1, dwThreadID2, dwThreadID3;
+	HANDLE hThread1, hThread2;
+	DWORD dwThreadID1, dwThreadID2;
 
 	if ((g_hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL)
 		ExitSys("CreateEvent");
@@ -35261,46 +35268,39 @@ int main(void)
 	if ((hThread2 = CreateThread(NULL, 0, ThreadProc2, NULL, 0, &dwThreadID2)) == NULL)
 		ExitSys("CreateThread");
 
-	if ((hThread3 = CreateThread(NULL, 0, ThreadProc3, NULL, 0, &dwThreadID3)) == NULL)
-		ExitSys("CreateThread");
+	printf("Press ENTER to set event...\n");
+	getchar();
+	SetEvent(g_hEvent);
+
 
 	WaitForSingleObject(hThread1, INFINITE);
 	WaitForSingleObject(hThread2, INFINITE);
-	WaitForSingleObject(hThread3, INFINITE);
 
-	CloseHandle(g_hEvent);
+	CloseHandle(hThread1);
+	CloseHandle(hThread2);
 
 	return 0;
 }
 
 DWORD __stdcall ThreadProc1(LPVOID lpvParam)
 {
-	int i;
+	printf("Thread1 running...\n");
+	printf("waiting for the event object...\n");
 
-	for (i = 0; i < 10; ++i) {
-		printf("Thread1 doing something: %d\n", i);
-		Sleep(1000);
-	}
-	SetEvent(g_hEvent);
+	WaitForSingleObject(g_hEvent, INFINITE);
+	printf("Ok, thread1 resumes...\n");
 
 	return 0;
 }
 
 DWORD __stdcall ThreadProc2(LPVOID lpvParam)
 {
-	printf("Thread2 is waiting for thread-1...\n");
+	printf("Thread2 running...\n");
+	printf("waiting for the event object...\n");
+
 	WaitForSingleObject(g_hEvent, INFINITE);
-	printf("Ok, Thread-2 continues...\n");
-
-	return 0;
-}
-
-DWORD __stdcall ThreadProc3(LPVOID lpvParam)
-{
-	printf("Thread3 is waiting for thread-1...\n");
-	WaitForSingleObject(g_hEvent, INFINITE);
-	printf("Ok, Thread-3 continues...\n");
-
+	printf("Ok, thread2 resumes...\n");
+	
 	return 0;
 }
 
@@ -35319,67 +35319,199 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Okuma Yazma Kilitleri (Read/Write Locks) bir kaynağa okuma ve yazma amaçlı erişen thread'lerin bulunduğu durumda etkin bir okuma işleminin 
-	sağlanması için düşünülmüştür. Thread'lerden kaynağa yazma amaçlı erişirken diğer thread'ler kaynağa okuma ya da yazma amaçlı erişmemelidir. 
-	Thread'lerden biri kaynağa okuma amaçlı erişirken diğer thread'ler kaynağa yazma amalı erişmemeli ancak okuma amaçlı erişebilmelidir. 
-	Bu senkronizasyon biçimi yalnızca mutex ya da semaphore nesneleriyle çözülemez. 
+	Sık karşılaşılan diğer bir senkronizasyon nesnesi de "okuma-yazma kilitleri (reder-writer lock)" denilen nesnelerdir. Önce bu nesnelere 
+	neden gereksinim duyulduğunu açıklayalım. Bir kaynak üzerinde bir grup thread'in "okuma" bir grup thread'in de "yazma" eyleminde bulunduğunu
+	düşünelim. Burada "okuma" eylemi demekle "kaynakta değişiklik yaratmayan", yazma eylemi demekle de "kaynakta değişiklik yaratan" eylemleri 
+	kastediyoruz. Örneğin global bir bağlı liste söz konusu olsun. Thread'lern bazıları bu bağlı liste üzerinde "arama" işlemi yaparken bazıları 
+	da bu bağlı liste üzerinde insert işlemi yapıyor olsunlar. Burada arama işlemi okuma eylemini, insert işlemi ise yazma eylemini temsil 
+	etmektedir. Birden fazla thread'in aynı anda bağlı listede arama yapmasının sakıncası yoktur. Ancak bir thread bağlı listede insert işlemi 
+	yaparken başka thread'lerin o işlem bitene kadar arama işlemi ya da insert işlemi yapmaması gerekir. Benzer biçimde bir thread bağlı liste 
+	üzerinde arama işlemi yaparken başka bir thread'in insert işlemi de yapmaması gerekir. İki thread için buradaki olası durumları şöyle ifade 
+	edebiliriz:
 
-	Aşağıda Windoes sistemlerinde Okuma Yazma kilitlerine bir örnek verilmiştir. 
+	Thread1				Thread2			Ne Yapılmalı?
+	-------------------------------------------------------
+	Okuma				Okuma			İzin Verilmeli
+	Okuma				Yazma			Senkronize Edilmeli
+	Yazma				Okuma			Senkronize Edilmeli
+	Yazma				Yzma			Senkronize Edilmeli
+
+	O halde buradan çıkan sonuç şudur:
+
+	1) Bir thread yazma yaparken yazma ve okuma yapacak thread'ler bu yazma olayının bitmesini beklemelidir. 
+	2) Bir thread okuma yaparken yazma yapacak thread'ler bu okuma işlminin bitmesini beklemelidir. 
+	3) Bir thread okuma yaparken, okuma yapacak diğer thread'ler eş zamanlı olarak bu işlemi yapabilirler.
+
+	Okuma-yazma kilitleri Windows sistemlerinde de UNIX/Linux sistemlerinde de var olan senkronizasyon nesnelerindendir. Biz burada önce Windows
+	sistemlerindeki okuma-yazma kilitlerini daha sonra UNIX/Linux sistemlerindeki okuma-yazma kilitlerini göreceğiz. 
+
+	Pekiyi reader-writer lock yerine yukarıdaki işlem mutex nesneleri ile yapılamaz mı? Eğer yukarıdaki problem mutex nesneleriyle çözülmeye
+	çalışılırsa bu durumda mecburen okuma sırasında da kilitleme yapılır. Dolayısıyla gereksiz bir biçimde okuma yapmak isteyen birden fazla
+	thread birbirlerini beklemek zorunda kalır. Aşağıdaki temsili (pseudo) kodu inceleyiniz:
+
+	pthread_mutex_t g_mutex;
+	...
+
+	read()
+	{
+		pthread_mutex_lock(&g_mutex);
+		...
+		pthread_mutex_unlock(&g_mutex);
+	}
+
+	write()
+	{
+		pthread_mutex_lock(&g_mutex);
+		...
+		pthread_mutex_unlock(&g_mutex);
+	}
+
+	Burada görüldüğü gibi bireden fazla read işlemi birlikte yapılamamaktadır. 
+
+	Reader-writer lock nesneleri aslında taban (base) senkronizasyon nesnelerinden değildir. Bunlar mutex ve koşul değişkenleri (condition 
+	variable) kullanılarak gerçekleştirilebilmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Windows sistemlerinde okuma-yazma kilitleri şöyle kullanılmaktadır:
+
+	1) Okuma-yazma kilit nesneleri SRWLOCK türüyle temsil edilmektedir. Önce global düzeyde SRWLOCK türünden bir nesne yaratılır. Bu nesneye 
+	InitializeSRWLock fonksiyonu ile ilkdeğerleri verilir. Fonksiyonun prototipi şöyledir:
+
+	void InitializeSRWLock(
+		PSRWLOCK SRWLock
+	);
+
+	Fonksiyon SRWLOCK nesnesinin başlangıç adresini parametre olarak almaktadır. Örneğin:
+
+	SWRLOCK g_srwLock;
+	...
+	InitializeSRWLock(&g_srwLock);
+
+	2) Okuma amaçlı kritik kod şöyle oluşturulmaktadır:
+
+	AcquireSRWLockShared(&g_srwLock);
+	...
+	... <KRİTİK KOD>
+	...
+	ReleaseSRWLockShared(&g_srwLock)
+
+	Burada okuma amaçlı kilidin alınması AcquireSRWLockShared fonksiyonu ile yapılmaktadır. Fonksiyon eğer kilit başka bir thread tarafından 
+	yazma amaçlı olarak alındıysa blokeye yol açmaktadır. Ancak kilit başka bir thread tarafından okuma amaçlı alındıysa blokeye yol açmadan 
+	kritik koda geçişi sağlamaktadır. Okuma amaçlı kritik koddan çıkılırken kilit ReleaseSRWLockShared fonksiyonu ile serbest bırakılmalıdır. 
+
+	Yazma Amaçlı kritik kod da şöyle oluşturulmaktadır:
+
+	AcquireSRWLockExclusive(&g_srwLock);
+	...
+	... <KRİTİK KOD>
+	...
+	ReleaseSRWLockExclusive(g_srwLock)
+
+	Eğer kilit başka bir thread tarafından okuma amaçlı ya da yazma amaçlı olarak alınmışsa AcquireSRWLockExclusive fonksiyonu blokede bekler. 
+	Eğer kilit okuma ya da yazma amaçlı hiçbir thread tarafından alınmadıysa kritik koda geçiş yapılır. Yazma amaçlı kritik koddan çıkılırken 
+	kilit ReleaseSRWLockExclusive fonksiyonu ile serbest bırakılmalıdır.  
+
+	Fonksiyonların prototipileri şöyledir:
+
+	void AcquireSRWLockShared(
+		PSRWLOCK SRWLock
+	);
+
+	void ReleaseSRWLockShared(
+		PSRWLOCK SRWLock
+	);
+
+	void AcquireSRWLockExclusive(
+		PSRWLOCK SRWLock
+	);
+
+	void ReleaseSRWLockExclusive(
+		PSRWLOCK SRWLock
+	);
+
+	Fonksiyonlar SRWLOCK nesnelerinin adreslerini parametre olarak almaktadır. 
+
+	Windows'ta reader-writer lock nesnelerinin serbest bırakılması gibi bir durum söz konusu değildir. Bunlar zaten bir kaynak tutmamaktadır.
+
+	Aşağıda Windows sistemlerinde reader-write lock nesnelerinin kullanımına ilişkin bir örnek verilmiştir. Bu örnekte belli sayıda thread
+	yaratılıp bunların rastgele read-write işlemleri yapması sağlanmıştır. Ekrandaki çıktı incelendiğinde write işlemi başladığında bitene 
+	kadar başka hiç read ya da write işleminin yapılmadığı görülecektir. Ancak read işlemleri birlikte yapılabilmektedir. Programın ekran 
+	çıktısının bir kısmının örnek bir görüntüsü şöyledir.
+
+	...
+	Thread-1 thread begins writing...
+	Thread-1 thread ends writing...
+	Thread-3 thread begins reading...
+	Thread-3 thread ends reading...
+	Thread-6 thread begins writing...
+	Thread-6 thread ends writing...
+	Thread-2 thread begins reading...
+	Thread-7 thread begins reading...
+	Thread-7 thread ends reading...
+	Thread-2 thread ends reading...
+	...
+
+	Burada örneğin Thread-2 ve Thread-7'nin read işlemine birlikte girdiği görülmektedir. Ancak bir write işlemi başladığında o write işlemi 
+	bitene kadar read ya da write yapılamamaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <windows.h>
 
-#define NTHREADS				30
-#define MAX_THREAD_NAME			32
+#define NTHREADS			10
 
-void ExitSys(LPCSTR lpszMsg);
 DWORD __stdcall ThreadProc(LPVOID lpvParam);
-void Read(LPCSTR lpszThreadName);
-void Write(LPCSTR lpszThreadName);
+void Read(const char *pszThreadName);
+void Write(const char *pszThreadName);
+void ExitSys(LPCSTR lpszMsg);
 
 SRWLOCK g_srwLock;
 
 int main(void)
 {
 	HANDLE hThreads[NTHREADS];
-	DWORD dwThreadIDs[NTHREADS];
-	int i;
-	LPCSTR lpszThreadName;
+	DWORD dwThreadIds[NTHREADS];
+	char szThreadName[32];
+	char *pszThreadName;
 
 	srand(time(NULL));
 
 	InitializeSRWLock(&g_srwLock);
 
-	for (i = 0; i < NTHREADS; ++i) {
-		if ((lpszThreadName = (LPCSTR)malloc(MAX_THREAD_NAME)) == NULL) {
-			fprintf(stderr, "Cannot allocate memory!..\n");
+	for (int i = 0; i < NTHREADS; ++i) {
+		sprintf(szThreadName, "Thread-%d", i + 1);
+		if ((pszThreadName = strdup(szThreadName)) == NULL) {
+			fprintf(stderr, "cannot allocate memory!..\n");
 			exit(EXIT_FAILURE);
 		}
-		sprintf(lpszThreadName, "Thread-%d", i + 1);
 
-		if ((hThreads[i] = CreateThread(NULL, 0, ThreadProc, lpszThreadName, 0, &dwThreadIDs[i])) == NULL)
+		if ((hThreads[i] = CreateThread(NULL, 0, ThreadProc, pszThreadName, 0, &dwThreadIds[i])) == NULL)
 			ExitSys("CreateThread");
 	}
-
-	WaitForMultipleObjects(NTHREADS, hThreads, TRUE, INFINITE);
-
+	
+	if (WaitForMultipleObjects(NTHREADS, hThreads, TRUE, INFINITE) == WAIT_FAILED)
+		ExitSys("CreateThread");
+	
+	for (int i = 0; i < NTHREADS; ++i)
+		CloseHandle(hThreads[i]);
+	
 	return 0;
 }
 
-
 DWORD __stdcall ThreadProc(LPVOID lpvParam)
 {
-	int i;
-	LPCSTR lpszThreadName = (LPCSTR)lpvParam;
+	const char *pszThreadName = (LPCTSTR)lpvParam;
 
-	for (i = 0; i < 10; ++i) {
+	for (int i = 0; i < 10; ++i) {
+		Sleep(rand() % 100);
 		if (rand() % 2 == 0)
-			Write(lpvParam);
+			Read(pszThreadName);
 		else
-			Read(lpvParam);
+			Write(pszThreadName);
 	}
 
 	free(lpvParam);
@@ -35387,21 +35519,21 @@ DWORD __stdcall ThreadProc(LPVOID lpvParam)
 	return 0;
 }
 
-void Read(LPCSTR lpszThreadName)
+void Read(const char *pszThreadName)
 {
 	AcquireSRWLockShared(&g_srwLock);
-	printf("%s READING starts...\n", lpszThreadName);
-	Sleep(rand() % 50);
-	printf("%s READING ends...\n", lpszThreadName);
+	printf("%s thread begins reading...\n", pszThreadName);
+	Sleep(rand() % 300);
+	printf("%s thread ends reading...\n", pszThreadName);
 	ReleaseSRWLockShared(&g_srwLock);
 }
 
-void Write(LPCSTR lpszThreadName)
+void Write(const char *pszThreadName)
 {
 	AcquireSRWLockExclusive(&g_srwLock);
-	printf("%s WRITING starts...\n", lpszThreadName);
-	Sleep(rand() % 50);
-	printf("%s WRINTING ends...\n", lpszThreadName);
+	printf("%s thread begins writing...\n", pszThreadName);
+	Sleep(rand() % 300);
+	printf("%s thread ends writing...\n", pszThreadName);
 	ReleaseSRWLockExclusive(&g_srwLock);
 }
 
@@ -35420,7 +35552,70 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	POSIX sistemlerinde okuma yazma kilitlerine örnek.
+	UNIX/Linux sistemlerinde de okuma-yazma kilitlerinin temel kullanım biçimi benzerdir. İşlemler şöyle yürütülmektedir:
+
+	1) Okuma yazma kilitleri pthread_rwlock_t türüyle temsil edilmektedir. Programcı bu türden global bir nesne tanımlar. Nesneye ilkdeğer 
+	vermenin iki yolu vardır. Birincisi statik düzeyde PTHREAD_RWLOCK_INITIALIZER isimli maroyu kullanmaktadır. Örneğin:
+
+	#include <pthread.h>
+
+	pthread_rwlock_t g_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+
+	İkincisi ise pthread_rwlock_init fonksiyonunu kullanmaktır. Örneğin:
+
+	pthread_rwlock_t g_rwlock;
+	...
+	int pthread_rwlock_init(&g_rwlock);
+
+	pthread_rwlock_init fonksiyonunun prototipi şöyledir:
+
+	int pthread_rwlock_init(pthread_rwlock_t *rwlock, const pthread_rwlockattr_t *attr);
+
+	Fonksiyonun birinci parametresi ilkdeğer verilecek pthread_rwlock_t nesnesinin adresini almaktadır. İkinci parametre reader-writer lock
+	nesnesinin özelliklerinin belirtildiği pthread_rwlockattr_t türünden nesnenin adresini almaktadır. İkinci parametre NULL geçilebilir. Bu 
+	durumda nesne default özelliklerle yaratılmaktadır. Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda errno değerine geri dönmektedir. 
+
+	2) Okuma amaçlı kritik kod şöyle oluşturulmaktadır:
+
+	pthread_rwlock_rdlock(&g_rwlock);
+	...
+	... <KRİTİK KOD>
+	...
+	pthread_rwlock_unlock(&g_rwlock);
+
+	Yazma amaçlı kritik kod ise şöyle oluşturulmaktadır:
+
+	pthread_rwlock_wrlock(&g_rwlock);
+	...
+	... <KRİTİK KOD>
+	...
+	pthread_rwlock_unlock(&g_rwlock);
+
+	Fonksiyonların prototipleri şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
+	int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock);
+	int pthread_rwlock_unlock(pthread_rwlock_t *rwlock);
+
+	Fonksiyonlar pthread_rwlock_t türünden nesnenin adresini almaktadır. Genel çalışma biçimi yukarıda Windows sistemlerinde açıkladığımız
+	gibidir. Burada Windows sistemlerinden farklı olarak unlock işlemi için tek fonksiyon bulunmaktadır. Yani kilit okuma amaçlı da alınsa,
+	yazma amaçlı da alınsa kilidin bırakılması pthread_rwlock_unlock fonksiyonu ile yapılmaktadır. Fonksiyonlar başarı durumunda 0 değerine
+	başarısızlık durumunda errno değerine geri dönmektedir. 
+
+	3) Programcı reader-writer lock nesnesi ile işini bitirsikten sonra pthread_rwlock_destroy fonksiyonu ile nesneyi yok edilmelidir. Fonksiyonun 
+	prototipi şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_rwlock_destroy(pthread_rwlock_t *rwlock);
+
+	Fonksiyon yine pthread_rwlock_t nesnesinin adresini parametre olarak alır, başarı durumunda sıfır değerine başrısızlık durumunda ise 
+	errno değerine geri döner. 
+
+	Aşağıda UNIX/Linux sistemlerinde reader-writer lock nesnelerinin kullanımına örnek verilmiştir. Bu örnek aslında yukarıda Windows 
+	sistemeri için yaptiğimız örneğin UNIX/linux versiyonu gibidir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -35430,191 +35625,274 @@ void ExitSys(LPCSTR lpszMsg)
 #include <unistd.h>
 #include <pthread.h>
 
-#define NTHREADS				30
-#define MAX_THREAD_NAME			32
+#define NTHREADS        10
 
 void *thread_proc(void *param);
-void read_resource(const char *name);
-void write_resource(const char *name);
-void exit_errno(const char* msg, int result);
+void read_proc(const char *ptname);
+void write_proc(const char *ptname);
+void exit_sys_errno(const char *msg, int eno);
 
-pthread_rwlock_t g_rwlock;
+pthread_rwlock_t g_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
-int main(int argc, char *argv[])
+int main(void)
 {
-	int result;
 	pthread_t tids[NTHREADS];
-	int i;
-	char *name;
-
+    char tname[32], *ptname;
+	int result;
+	
 	srand(time(NULL));
 
-	if ((result = pthread_rwlock_init(&g_rwlock, NULL)) != 0)
-		exit_errno("pthread_rwlock_init", result);
+	for (int i = 0; i < NTHREADS; ++i) {
+         sprintf(tname, "Thread-%d", i + 1);
+        if ((ptname = strdup(tname)) == NULL) {
+            fprintf(stderr, "cannot allocate memory!..\n");
+            exit(EXIT_FAILURE);
+        }
+        if ((result = pthread_create(&tids[i], NULL, thread_proc, ptname)) != 0) 
+		    exit_sys_errno("pthread_create", result);
+    }
 
-	for (i = 0; i < NTHREADS; ++i) {
-		if ((name = (char *)malloc(MAX_THREAD_NAME)) == NULL) {
-			fprintf(stderr, "cannot allocate memory!..\n");
-			exit(EXIT_FAILURE);
-		}
-		sprintf(name, "Thread-%d", i + 1);
-		if ((result = pthread_create(&tids[i], NULL, thread_proc, name)) != 0)
-			exit_errno("pthread_create", result);
-	}
+    for (int i = 0; i < NTHREADS; ++i)
+        pthread_join(tids[i], NULL);
 
-	for (i = 0; i < NTHREADS; ++i)
-		pthread_join(tids[i], NULL);
-
-	pthread_rwlock_destroy(&g_rwlock);
-
+    if ((result = pthread_rwlock_destroy(&g_rwlock)) != 0)
+            exit_sys_errno("pthread_rwlock_destroy", result);
+		
 	return 0;
 }
 
 void *thread_proc(void *param)
 {
-	int i;
+    const char *ptname = (const char *)param;
 
-	for (i = 0; i < 10; ++i) {
-		if (rand() % 2 == 0)
-			write_resource(param);
-		else
-			read_resource(param);
-	}
-
-	free(param);
+   for (int i = 0; i < 10; ++i) {
+        usleep(rand() % 100000);
+        if (rand() % 2 == 0)
+            read_proc(ptname);
+        else
+            write_proc(ptname);
+   }
 
 	return NULL;
 }
 
-void read_resource(const char *name)
+void read_proc(const char *ptname)
 {
-	pthread_rwlock_rdlock(&g_rwlock);
-	printf("%s READING starts...\n", name);
-	usleep(rand() % 1000000);
-	printf("%s READING ends...\n", name);
-	pthread_rwlock_unlock(&g_rwlock);
+    int result;
+
+    if ((result = pthread_rwlock_rdlock(&g_rwlock)) != 0)
+        exit_sys_errno("pthread_rwlock_rdlock", result);
+
+    printf("%s thread begins reading...\n", ptname);
+    usleep(rand() % 300000);
+    printf("%s thread ends reading...\n", ptname);
+
+    if ((result = pthread_rwlock_unlock(&g_rwlock)) != 0)
+        exit_sys_errno("pthread_rwlock_unlock", result);
 }
 
-void write_resource(const char *name)
+void write_proc(const char *ptname)
 {
-	pthread_rwlock_wrlock(&g_rwlock);
-	printf("%s WRITING starts...\n", name);
-	usleep(rand() % 100000);
-	printf("%s WRITING ends...\n", name);
-	pthread_rwlock_unlock(&g_rwlock);
+    int result;
+
+    if ((result = pthread_rwlock_wrlock(&g_rwlock)) != 0)
+        exit_sys_errno("pthread_rwlock_wrlock", result);
+
+    printf("%s thread begins writing...\n", ptname);
+    usleep(rand() % 300000);
+    printf("%s thread ends writing...\n", ptname);
+
+    if ((result = pthread_rwlock_unlock(&g_rwlock)) != 0)
+        exit_sys_errno("pthread_rwlock_unlock", result);
 }
 
-void exit_errno(const char *msg, int result)
+void exit_sys_errno(const char *msg, int eno)
 {
-	fprintf(stderr, "%s: %s\n", msg, strerror(result));
+	fprintf(stderr, "%s: %s\n", msg, strerror(eno));
 
 	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Liux sistemlerinde durum değişkenleri (condiitonal variable) belli bir koşiul sağlalanana kadar bloke oluşturmak için kullanılmaktadır. 
-	Durum değişkenleri tek başlarına kullanılmazlar. Mutlaka mutex nesneleriyle birlikte kullanılırlar. 
-	Tipik olarak kullanım kalıbı şöyledir:
+	UNIX/Linux sistemlerinde ismine "koşul değişkenleri (condition variables)" denilen önemli bir senkronizasyon nesnesi vardır. Koşul 
+	değişkenleri eskiden Windows sistemlerinde yoktu. Ancak belli bir zamandan sonra Windows sistemlerine de sokuldu. Windows'ta event nesneleri 
+	olduğu için koşul değişkenleri yerine bu nesneler onların görevlerini tam olmasa da yaklaşık olarak yerine getirebiliyordu Ancak yukarıda 
+	da belirttiğimiz gibi daha sonraları Windows sistemlerine de koşul değişkenleri eklenmiştir. 
+
+	Koşul değişkenlerinin amacı bir koşul sağlanmadığı sürece thread'i blokede bekletmek, koşul sağlanınca thread'in blokesini çözmektir. 
+	Ancak koşul değişkenlerinin kullanılması ve çalışma biçiminin anlaşılması şimdiye kadar gördüğümüz senkronizasyon nesnelerine göre
+	daha zordur.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde koşul değişkenleri tipik olarak aşağıdaki adımlardan geçilerek kullanılmaktadır:
+	
+	1) UNIX/Linux sistemlerinde koşul değişkenleri tek başlarına kullanılmamaktadır. Mutex nesneleri ile birlikte kullanılmaktadır. Koşul 
+	değişkenleri pthread_cond_t türüyle temsil edilmektedir. Programcı koşul değişkenlerini yine global düzeyde bir mutex ile birlikte 
+	tanımlar. Koşul değişkenlerine ilkdeğer verilmesi statik düzeyde PTHREAD_COND_INITIALIZER makrosuyle yapılabilir. Örneğin:
+
+	pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
+	pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+	Kooşul değişkenlerine ilkdeğer vermek için pthread_cond_init fonksiyonu da kullanılabilmektedir. Fonksiyonun prototipi şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr);
+
+	Fonksiyonun birinci parametresi pthread_cond_t nesnesini adresini, ikinci parametresi koşul değişkeninin özelliklerin belirtildiği 
+	pthread_condattr_t nesnesinin adresini almaktadır. Biz bu kursta koşul değişkenlerinin özelliklerini ele almayacağız. Bu ikinci parametreyi 
+	NULL olarak geçebilirsiniz. Bu durumda koşul değişkenleri default özelliklerle yaratılmaktadır. Zaten PTHREAD_COND_INITIALIZER makrosu da 
+	koşul değişkenlerini default özelliklerle yaratmaktadır. Fonksiyon başarı durumunda sıfır değerine, başarısızlık durumunda errno değerine 
+	geri dönmektedir. 
+
+	2) Koşul değişkenleri ile koşul sağlanana kadar bekleme yapmak için pthread_cond_wait isimli fonksiyon kullanılmaktadır. Fonksiyonun 
+	prototipi şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
+
+	Fonksiyonun birinci parametresi koşul değişkeninin adresini, ikinci parametresi mutex nesnesinin adresini almaktadır. Fonksiyon başarı 
+	durumunda 0 değerine, başarısızlık durumunda errno değerine geri dönmektedir. Örneğin:
+
+	pthread_cond_wait(&g_cond, &g_mutex);
+
+	Ancak koşul sağlanana kadar bekleme böyle yapılmamaktadır. Belli bir kalıba uygun biçimde bu fonksiyon çağrılmalıdır. Koşul değişkenini
+	bekleme kalıbı aşağıdaki gibidir:
 
 	pthread_mutex_lock(&g_mutex);
-
-	while (koşul sağlanmadığı sürece)
-		pthread_cond_wait(&g_cond, g_mutex);
-
+	while (koşul_sağlanmadığı_sürece)
+		pthread_cond_wait(&g_cond, &g_mutex);
 	pthread_mutex_unlock(&g_mutex);
 
-	pthread_cond_wait uykuya dalmadan önce atomik bir biçimde mutex'in sahipliğini bırakmaktadır. Bu biçimde uykuya dalmış olan tthread'ler 
-	pthread_cond_signal ya da pthread_cond_broadcast fonksiyonlarıyla uyandırılır. pthread_cond_signal tek bir thread'i (onun hangisi olacağı belli değildir)
-	uyandırırken pthread_cond_broadcast uykuya dalmış olan tüm thread'leri uyandırır. Ancak pthread_cond_wait fonksiyonundan thread iki aşamda çıkmaktadır. 
-	Önce uykudan uyanı. Bu uyanma işlemi durum değişkeni yoluyla gerçekleşir. Ancak thread uykudan uyandıktan sonra mutex'in sahipliğini pthread_mutex_lock 
-	ile almaya çalışır. Mutex'in sahipliğini aldıktan sonra pthread_cond_wait geri döner. Böylece pthread_cond_broadcast yapıldığında durum değişkenini bekleyen
-	tüm thread'ler uyansa da bunlardan yalnızca biri mutex sahipliğini alarak ptthread_cond_wait fonksiyonundan çıkar. Ancak thread'ler uyanmışlardır.
-	Fakat pthread_mutex_lock yüzünden beklemektedirler. Tabii mutex'in sahipliğini alabilen thread pthread_mutex_unlock yağınca bu sefer bekleyenlerden biri 
-	pthread_mutex_wait fonksiyonundan çıkar. Böylece aslında pthread_cond_broadcast sonrasında tüm thread'ler teker pthread_cond_wait'ten çıkmış olurlar.
-	Ancak bir thread'in pthread_cond_wait fonksiyonundan çıkmış olması koşul sağlandığı anlamına gelmemektedir. Eğer koşul sağlanmamışsa while döngüsü yüzünden 
-	thread yeniden durum değişkeni yoluyla uykuya dalar. Uyandırma işleminin yine mutex yoluyla yapılması tavsiye edilir. Örneğin:
+	Burada dikkat edilmesi gereken durumlar şunlardır: pthread_cond_wait bir döngü içerisinde çağrılmalıdır. Döngünün aşağıdaki gibi oluşturulduğuna
+	dikkat ediniz:
+
+	while (koşul_sağlanmadığı_sürece)
+		pthread_cond_wait(&g_cond, &g_mutex);
+
+	Burada döngünün içerisindeki koşul "koşulun sağlanmadığı sürece uykuda kalınmasına ilişkin" koşuldur. Yani bu koşul sağlanmadığı zaman 
+	thread uyandırılacaktır. Örneğin:
+
+	while (g_flag == 0)
+		pthread_cond_wait(&g_cond, &g_mutex);
+
+	Burada g_flag değişkeni sıfır olduğu sürece thread blokede bekleyecektir. Yani blokenin çözülmesi için g_flag değişkeninin 0'dan farkllı
+	bir değerde olması gerekmektedir. 
+
+	Yukarıdaki kalıptaki diğer önemli bir nokta da koşul döngüsüne girmeden mutex nesnesinin sahipliğinin alındığı ve çıkışta da sahipliğin 
+	bırakıldığıdır. Yukarıdaki kalıbın ne anlama geldiği izleyen paragraflarda açıklanacaktır. 
+
+	3) Koşul değişkenini bekleyen thread'i uyandırmak için iki POSIX fonksiyonu bulunmaktadır: pthread_cond_signal ve pthread_cond_broadcast.
+	pthread_cond_signal fonksiyonu koşul değişkeninde bekleyen tek bir thread'i uyandırma amacındadır. pthread_cond_broadcast ise koşul 
+	değişkeninde bekleyen tüm thread'leri uyandırma amacındadır. pthread_cond_signal fonksiyonu aslında tek bir thread'i uyandırmak istemektedir. 
+	Ancak işletim sistemlerinde bu durum her zaman mümkün olamadığı için istemeden birden fazla thread de uyandırılabilmektedir. Bu duruma 
+	"yanlış uyanma (spurious wakeup)" denilmektedir. Bu iki uyandırma biçimini şu örneğe benzetebiliriz: Bir odada 10 kişi uyuyor olsun. Siz de
+	yalnızca Ahmet'i uyandırmak isteyin. Ancak yaptığınız gürültüden istemeden Mehmet ve Selami de uyanmış olabilir. İşte Mehmet ve Selami'nin 
+	uyanması "yanlış uyanma (spurious wakeup)" durumudur. Ancak siz bir megafonla bağırarak odadaki herkesi de uyandırabilirsiniz. Bu işlem 
+	pthread_cond_broadcast işlemine benzemektedir. Şimdi siz "yanlışlıkla uyandırma (spurious wakeup)" gibi bir sürecin nasıl olup da yüksek 
+	teknoloji gereken işletim sistemlerinde söz konusu olabildiğini merak edebilirsiniz. İşte işletim sistemlerinin etkin tasarımında mecburen böylesi 
+	durumlar oluşabilmektedir. pthread_cond_signal fonksiyonunun koşul değişkeninde bekleyen bir thread'i değil "en az bir thread'i" uyandırdığına 
+	dikkat ediniz. Ayrıca yanlış uyandırmanın yalnızca pthread_cond_signal yoluyla değil başka nedenlerden dolayı da oluşabileceğini belirtmek 
+	istiyoruz. 
+
+	Koşul değişkeninde bekleyen bir thread'in pthread_cond_signal ya da pthread_cond_broadcast fonksiyonu ile uyandırılması koşulun sağlandığı
+	anlamına gelmemektedir. Uyanan thread'ler koşulu test etmeli, koşul sağlanmıyorsa yeniden uykuya dalacak biçimde hareket etmelidir. 
+	O halde pthread_cond_signal ya da pthread_cond_broadcast uygulanmadan önce bu fonksiyonları uygulayan kitarafın koşulun sağlanmasına yol 
+	açması gerekir. Aşağıdaki beklemeye dikkat ediniz:
 
 	pthread_mutex_lock(&g_mutex);
+	while (g_flag == 0)
+		pthread_cond_wait(&g_cond, &g_mutex);
+	pthread_mutex_unlock(&g_mutex);
 
-	g_condition = 1;
+	Burada diğer bir thread g_flag değişkenini değiştrmeden pthread_cond_signal ya da pthread_cond_broadcast uygularsa thrad uyandırılıp 
+	pthread_cond_wait fonksiyonundan çıksa bile koşul sağlanmadığından dolayı yeniden uykuya dalacaktır. Tipik olarak programcı pthread_cond_signal
+	ya da pthread_cond_broadcast uygulamadan önce mutex nesnesinin sahipliğini almalı koşulu kritik kod içerisinde oluşturmalı, bu fonksiyonları
+	çağırdıktan sonra mutex nesnesinin sahipliğini bırakmalıdır. Yani tipik uygulama şöyle olmalıdır:
 
+	pthread_mutex_lock(&g_mutex);
+	g_flag = 1;
 	pthread_cond_broadcast(&g_cond);
-
 	pthread_mutex_unlock(&g_mutex);
 
-	Tabii bu işlemin her zaman kritik kod bloğu içeisinde yapılmasına gerek olmayabilir. Ancak koşul değişkeninin set edilmesiyle uyandırma işleminin
-	kesilmeden yapılması gerekebilemketedir. Aşağıdaki örnekte thread'lerden biri g_condition == 1 durumunda diğeri g_condition == 2 durumunda yoluna
-	devam etmektedir. 
+	pthread_cond_signal ve pthread_cond_broadcast fonksiyonlarının prototipleri şöyledir:
 
-	Maalesef durum değişkeni kullanan sistemlerde pthread_cond_wait gibi durum değişkenini bekleyen fonksiyonlar gereksiz durumlarda da uyandırılabilmektedir.
-	Bu gereksiz uyandırmaya "spurious wakeup" denilmektedir. Bu gereksiz uyandırma bazen ptherad_cond_signal yapılması durumunda aslında tek bir thread'in değil de 
-	birden fazla thread'in uyandırılması gibi de ortaya çıkmaktadır. Bazen de sistem başka bir nedenden dolayı thread'i gereksiz uyandırabilemketir. Bu nedenle
-	mutlaka pthread_cond_wait fonksiyonunun while döngüsü içerisinde çağrılması önerilmektedir. 
+	#include <pthread.h>
 
+	int pthread_cond_signal(pthread_cond_t *cond);
+	int pthread_cond_broadcast(pthread_cond_t *cond);
+	
+	Fonksiyonlar koşul değişken nesnesinin adresini paranetre olarak almakta, başarı durumunda 0 değerine, başarısızlık durumunda errno değerine
+	geri dönmektedirler. 
+
+	4) Koşul değişkeninin ve mutex nesnesinin kullanımı bittiğinde bunlar pthread_cond_destroy ve pthread_mutex_destroy fonksiyonuyla 
+	yok edilmelidir. pthread_cond_destroy fonksiyonunun prototipi şöyledir:
+
+	 #include <pthread.h>
+
+    int pthread_cond_destroy(pthread_cond_t *cond);
+
+	Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda errno değerine geri dönmektedir. Aslında genel olarak pthread_cond_destroy 
+	ve pthread_mutex_destroy fonksiyonları pek çok kütüphanede bir şey yapmamaktadır. Ancak yine de bu fonksiyonların uyumluluk bakımından 
+	çağrılması gerekir. 
+
+	Aşağıda koşul değişkenlerinin kullanımına tipik bir örnek verilmiştir. Örneğimizde iki thread g_flag değişkeninin sıfır dışı bir değer
+	olmasını beklemektedir. Ana thread'te g_flag değişkeni 1 değerine set edilip pthread_broadcast işlemi uygulandığında bekleyen iki thread 
+	de uyanmaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <pthread.h>
 
-void *thread_proc1(void* param);
-void *thread_proc2(void* param);
-void exit_errno(const char* msg, int result);
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void exit_sys_errno(const char *msg, int eno);
 
-pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 
-int g_condition = 0;
+int g_flag = 0;
 
 int main(void)
 {
-	int result;
 	pthread_t tid1, tid2;
+	int result;
+	
+	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
 
-	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
-		exit_errno("pthread_create", result);
+	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
+	
+    printf("press ENTER to continue...\n");
+    getchar();
 
-	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
-		exit_errno("pthread_create", result);
+    if ((result = pthread_mutex_lock(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_lock", result);
 
-	printf("press ENTER to continue...\n");
-	getchar();
+    g_flag = 1;
+    if ((result = pthread_cond_broadcast(&g_cond)) != 0)
+        exit_sys_errno("pthread_cond_broadcast", result);
 
-	if ((result = pthread_mutex_lock(&g_mutex)))
-		exit_errno("pthread_mutex_lock", result);
+    if ((result = pthread_mutex_unlock(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_lunock", result);
 
-	g_condition = 1;
+	if ((result = pthread_join(tid1, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
 
-	if ((result = pthread_cond_broadcast(&g_cond)) != 0)
-		exit_errno("pthread_cond_signal", result);
+	if ((result = pthread_join(tid2, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
 
-	if ((result = pthread_mutex_unlock(&g_mutex)))
-		exit_errno("pthread_mutex_unlock", result);
+    if ((result = pthread_cond_destroy(&g_cond)) != 0)
+        exit_sys_errno("pthread_cond_destroy", result);
 
-
-	printf("press ENTER to continue...\n");
-	getchar();
-
-	if ((result = pthread_mutex_lock(&g_mutex)))
-		exit_errno("pthread_mutex_lock", result);
-
-	g_condition = 2;
-
-	if ((result = pthread_cond_broadcast(&g_cond)) != 0)
-		exit_errno("pthread_cond_signal", result);
-
-	if ((result = pthread_mutex_unlock(&g_mutex)))
-		exit_errno("pthread_mutex_unlock", result);
-
-	printf("press ENTER to exit...\n");
-	getchar();
-
-	pthread_join(tid1, NULL);
-	pthread_join(tid2, NULL);
-
-	pthread_mutex_destroy(&g_mutex);
-	pthread_cond_destroy(&g_cond);
+    if ((result = pthread_mutex_destroy(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_destroy", result);
 
 	return 0;
 }
@@ -35623,79 +35901,195 @@ void *thread_proc1(void *param)
 {
 	int result;
 
-	if ((result = pthread_mutex_lock(&g_mutex)) != 0)
-		exit_errno("pthread_mutex_lock", result);
+    printf("thread-1 is waiting at the condition variable..\n");
 
-	while (g_condition != 1)
-		if ((result = pthread_cond_wait(&g_cond, &g_mutex)) != 0)
-			exit_errno("pthread_cond_wait", result);
+    if ((result = pthread_mutex_lock(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_lock", result);
 
-	printf("thread_proc1 ---> Koşul sağlandı...\n");
+    while (g_flag == 0)
+        if ((result = pthread_cond_wait(&g_cond, &g_mutex)) != 0)
+            exit_sys_errno("pthread_cond_wait", result);
 
-	if ((result = pthread_mutex_unlock(&g_mutex)) != 0)
-		exit_errno("pthread_mutex_lock", result);
+    if ((result = pthread_mutex_unlock(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_unlock", result);
 
-	return NULL;
+    printf("ok, thread-1 resumes...\n");
+
+    return NULL;
 }
 
 void *thread_proc2(void *param)
 {
-	int result;
+    int result;
 
-	if ((result = pthread_mutex_lock(&g_mutex)) != 0)
-		exit_errno("pthread_mutex_lock", result);
+    printf("thread-2 is waiting at the condition variable..\n");
 
-	while (g_condition != 2)
-		if ((result = pthread_cond_wait(&g_cond, &g_mutex)) != 0)
-			exit_errno("pthread_cond_wait", result);
+    if ((result = pthread_mutex_lock(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_lock", result);
 
-	printf("thread_proc2 ---> Koşul sağlandı...\n");
+    while (g_flag == 0)
+        if ((result = pthread_cond_wait(&g_cond, &g_mutex)) != 0)
+            exit_sys_errno("pthread_cond_wait", result);
 
-	if ((result = pthread_mutex_unlock(&g_mutex)) != 0)
-		exit_errno("pthread_mutex_lock", result);
+    if ((result = pthread_mutex_unlock(&g_mutex)) != 0)
+        exit_sys_errno("pthread_mutex_unlock", result);
+
+    printf("ok, thread-2 resumes...\n");
 
 	return NULL;
 }
 
-void exit_errno(const char *msg, int result)
+void exit_sys_errno(const char *msg, int eno)
 {
-	fprintf(stderr, "%s: %s\n", msg, strerror(result));
+	fprintf(stderr, "%s: %s\n", msg, strerror(eno));
 
 	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Linux sistemlerinde durumm değişkenleri daha çok aynı prosesin thread'leri arasında kullanılıyor olsa da aslında da kullanılabilir. 
-	Tabii bu durumda durum değişkenin ve mutex nesnesinin paylaşılan bellek alanı üzerinde yatrılmaları ve yaratım sırasında attribute nesnesi ile 
-	prosesler arası kullanım durumu set edilmelidir. Bu işlem mutex nesnelerindekine benzer biçimde yapılmaktadır:
+	Şimdi de koşul değişkenlerini kullanmak için belirttiğimiz kalıpların ne anlam ifade ettiği üzerinde duracağız. Bekleme işleminin mutex
+	nesnesinin sahipliği alınarak yapılması gerektiğini belirtmiştik. Örneğin:
+
+	pthread_mutex_lock(&g_mutex);
+	while (g_flag == 0)
+		pthread_cond_wait(&g_cond, &g_mutex);
+	pthread_mutex_unlock(&g_mutex);
+
+	Burada önce mutex nesnesinin sahipliğinin alındığını görüyorsunuz. pthread_cond_wait fonksiyonu uykuya dalmadan önce atomik bir biçimde 
+	mutex nesnesinin sahipliğini bırakmaktadır. Şimdi aşağıdaki koda bakalım:
+
+	pthread_mutex_lock(&g_mutex);
+	g_flag = 1;
+	pthread_mutex_unlock(&g_mutex);
+	
+	pthread_cond_broadcast(&g_cond);
+
+	Burada pthread_cond_broadcast uygulandığında bu koşul değişkeninde bekleyen tüm thread'ler uyanacaktır. İşte pthread_cond_wait fonksiyonu 
+	uykuya dalmadan önce mutex nesnesinin sahipliğini nasıl bırakıyorsa uyanırken de sahipliği alarak uyanmaktadır. Böylece thread uyandığında 
+	koşul eğer sağlanıyorsa döngüden çıkıp yine mutex'i sahipliği bırakacaktır. Şimdi yukarıdaki kodda g_flag değerinin zaten 1 olduğunu 
+	düşünelim. Bu durumda mutex nesnesinin sahipliği alınacak g_flag == 1 olduğu için de döngüye girilmeyecektir. Böylece mutex nesnesinin sahipliği 
+	bırakılacaktır. 
+	
+	Pekiyi neden yukarıdaki kalıpta bir döngü kullanılmıştır. Neden döngü yerine if deyimi kullanılmamıştır? İşte bunun nedeni "yalancı uyanma 
+	(spurious wakeup)" yüzündendir. Döngü yerine aşağıdaki gibi bir if deyiminin olduğunu varsayalım:
+
+	pthread_mutex_lock(&g_mutex);
+	if (g_flag == 0)
+		pthread_cond_wait(&g_cond, &g_mutex);
+	pthread_mutex_unlock(&g_mutex);
+
+	Burada yanlış uyandırma oluştuğunda eğer koşul sağlanmıyorsa thread'in yeniden uykuya dalması gerekir. Bunun için de bir döngünün kullanılması 
+	gerekmektedir. Şimdi programcının koşul değişkeninde bekleyen thread'lerden yalnızca birini çözmek istediğini düşünelim. Aşağıdaki kalıp 
+	bunu yapamayacaktır:
+
+	pthread_mutex_lock(&g_mutex);
+	while (g_flag == 0)
+		pthread_cond_wait(&g_cond, &g_mutex);
+	pthread_mutex_unlock(&g_mutex);
+
+	Burada diğer tarafın pthread_cond_signal uyguladığını kabul edelim. Bu durumda 2 thread'in de uyandırıldığını düşünelim. Bu iki thread de 
+	mutex nesnesinin sahipliğini almaya çalışacak ancak yalnızca biri alacaktır. Dolayısıyla diğeri bu mutex nesnesini bekleyecektir. Ancak
+	mutex nesnesinin sahipliğini almış olan thread onu bıraktığında bu kez diğer thread mutex nesnesinin sahipliğini alarak koşul değişkeninden 
+	çıkacaktır. O halde programcının mutex kontrolünde yeniden koşul değişkenini eski haline getirmesi gerekmektedir. Örneğin:
+
+	pthread_mutex_lock(&g_mutex);
+	while (g_flag == 0)
+		pthread_cond_wait(&g_cond, &g_mutex);
+	g_flag = 0;
+	pthread_mutex_unlock(&g_mutex);
+
+	pthread_cond_signal ya da pthread_cond_broadcast uygulayan tarafın koşul değişkenlerini aşağıdaki gibi mutex kontrolü içerisinde değiştirmesi
+	aslında mutlak anlamda gerekmemektedir:
+
+	pthread_mutex_lock(&g_mutex);
+	g_flag = 1;
+	pthread_cond_broadcast(&g_cond);
+	pthread_mutex_unlock(&g_mutex);
+
+	Ancak koşulların birden fazla ğeğişkene bağlı olduğu durumda önce mutex kontrolü ile kritik kod içerisinde koşulların ayarlanması 
+	gerekebilmektedir. C'deki aslında basit bir atama işlemi bile çok thread'li ortamda senkronizasyon sorunlarına yol açabilmektedir. 
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	UNIX/Linux sistemlerinde durum değişkenleri daha çok aynı prosesin thread'leri arasında kullanılıyor olsa da aslında prosesler arasında 
+	da kullanılabilmektedir. Tabii bu durumda koşul değişkeninin ve mutex nesnesinin paylaşılan bellek alanı üzerinde yaratılması ve yaratım 
+	sırasında da attribute nesneleri ile prosesler arası kullanım durumunun set edilmesi gerekmektedir. Bu işlem mutex nesnelerindekine benzer 
+	biçimde yapılmaktadır:
 
 	pthread_cond_t g_cond;
 	...
 	pthread_condattr_t attr;
 
 	pthread_condattr_init(&attr);
-	pthread_condattr_setpshared(&attr, 1);
+	pthread_condattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
 	pthread_cond_init(&g_cond, &attr);
 	pthread_condattr_destroy(&attr);
 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Belli bir zamand Windows sistemlerine de durum değişkenleri eklenmiştir. Windows sistemlerindeki durum değişkenleri mutex'lerle değil
-	CRITICAL_SECTION ve Read/Write Lock nesneleriyle kullanılabilmektedir. Genel kullanım biçimi UNIX/Linux sistemlerindekine çok benzemektedir. 
+	Daha önce de belirttiğimiz gibi belli bir zamandan sonra Windows sistemlerine de durum değişkenleri eklenmiştir. Windows sistemlerindeki 
+	durum değişkenleri mutex nesneleriyle değil CRITICAL_SECTION ve Read/Write Lock nesneleriyle kullanılabilmektedir. Genel kullanım biçimi 
+	UNIX/Linux sistemlerindekine çok benzemektedir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	ÇOk işlemcili ya da çok çekirdekli sistemlerde bir işlemci ya da çekirdek bir makine komutunda bir RAM okuması ya da yazması yapıyorsa
-	diğer işlemci ya da çekirdek aynı RAM adresinden okuma ya da yazma yaparsa belli koşullarda oradaki bilgi bozulabilir ya da bilgi yanlış 
-	okunabilir. Yani örneğin Intel işlemcilerinde tel bir MOV makine komutu ile iki işlemci ya da çekirdek RAM'de aynı adrese yazma yaparsa 
-	(ya da biri yazma yaparken diğeri okuma yaparsa) bus çakışması yüzünden okuma ya da yazma işleminde bozuk veriler oluşabilmektedir. Bunu engellemek için
-	işlemcilerde özel makine komutları bulundurulmuştur. İşte bu tür basit işlemlerin gereksiz bir biçimde kritik kod altında yapılması yerine bu özel makine
-	komutlarını kullanan birtakım fonksiyonlarla yapılması uygun olur. Microsoft Windows sistemlerinde InterlockedXXX biçiminde bir grup fonksiyon 
-	blundurmuştur. 
+	Bir thread'in çalışmasına ara verilmesi preemptive bir biçimde donanım kesmeleri yoluyla yapılmaktadır. İşlemci bir makine komutunu 
+	çalıştırırken kesme oluşsa bile makine komutunun çalışması bitmeden kesme konumuna geçmez. Yani iki komut arasında kesmeleri işleme sokmaktadır. 
+	Thread'ler dünyasında bir işlemin "atomik (atomic)" yapılması "kesilmeden yapılması" anlamına gelmektedir. O halde makine komutları atomiktir. 
+	Aşağıdaki işleme bakınız:
 
-	Aşağıdaki örnekte Windows'un InterlockedIncrement fonksiyonu ile global bir değişken iki thread'de çok çekirdekli ssitemler de dahil olmak üzere
-	atomik bir biçimde artırılmıştır.
+	++g_count;
+
+	Böyle bir kod genellikle derleyiciler tarafından tek bir makine komutuyla değil birkaç makine komutuyla yapılmaktadır. Örneğin Intel 
+	işlemcilerinde bu işlem için derleyici aşağıdaki gibi üç makine komutu üretebilmektedir:
+
+	MOV EAX, g_count
+	INC	EAX
+	MOV g_count, EAX
+
+	İşte komutlar arasında thread'ler arası geçiş (context switch) oluşursa daha önce ele aldığımız senkronizasyon sorunları oluşacaktır. 
+	Aslında ++g_count işlemi bazı işlemcilerde tek bir makine komutuyla da yapılabilmektedir. Örneğin bu işlem Intel işlemcilerinde aşağıdaki 
+	gibi tek bir makine komutuyla da yapılabilmektedir: 
+
+	INC g_count
+
+	Makine komutları atomik olduğuna göre bu işlem çok thread'li ortamlarda tamamen güvenli midir? İşte makine komutları arasında thread'ler
+	arası geçiş oluşmamakla birlikte  çok işlemcili ya da çok çekirdekli sistemlerde başka bir sorun da ortaya çıkmaktadır. İşlemcilerin 
+	bazılarında birden fazla çekirdek aynı bellek adresine erişirken oradaki bilgiyi bozabilmektedir. Bunun donanımsal olarak nasıl gerçekleştiği 
+	üzerinde burada durmayacağız. Böyle bir olasılık düşük olsa da maalesef yine de bulunmaktadır. Yine bir çekirdek bir bellek adresine 
+	bir değer yazarken diğer bir çekirdek oradan değer okumak istediğinde okuyan taraf önceki ya da sonraki değeri değil bozuk bir değeri de 
+	okuyabilmektedir. Bu durumda maalesef tek bir değişken bile iki thread arasında anlık kullanılacak olsa yine de bu işlemin senkronize
+	edilmesi gerekmektedir. Ancak bir tek değişkene bir değer atamak için mutex gibi bir senkronizasyon nesnesini kullanmak performansı 
+	düşürmektedir. Aslında işlemcileri tasarlayanlar bunun çaresini de düşünmüşlerdir. Bir makine komutunun diğer çekirdekleri ya da işlemcileri 
+	o komutluk durdurarak yalnızca o komutu çalıştıran işlemci ya da çekirdeğin belleğe erişmesi sağlanabilmektedir. Örneğin Intel işlemcilerinde 
+	bir makine komutunun başına LOCK öneki getirilirse işlemci o komutu diğer işlemcileri durdurarak çalıştırmaktadır:
+
+	LOCK INC g_count
+
+	Bu işlem artık Intel işlemcilerinde çok çekirdekli sistemlerde de sorunu çözecektir. Tabii buradaki LOCK öneki performansı da düşürmektedir. 
+	Derleyicinin her komutta bu öneki kullanması kodun yavaş çalışmasına yol açacaktır. Pekyi biz C programcısı olarak derleyicinin böyle 
+	bir kod üretmesini nasıl sağlayabiliriz?
+/*------------------------------------------------------------------------------------------------------------------------------------------
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Windows sistemlerinde diğer işlemcileri bir komutluk durdurarak bellek işlemi yapabilmek için tasarlanmış başı Interlocked ile başlayan 
+	InterlockedXXX biçiminde API fonksiyonları vardır. Tabii bu fonksiyonların içi sembolik makine dilinde yazılmıştır. Önemli birkaç Interlocked 
+	fonksiyonlarının prototiplerini aşağıda veriyoruz:
+
+	LONG InterlockedIncrement(LONG volatile *Addend);
+	LONG InterlockedAdd(LONG volatile *Addend, LONG Value);
+	LONG InterlockedDecrement(LONG volatile *Addend);
+	LONG InterlockedExchange(LONG volatile *Target, LONG Value);
+
+	Aslında çok fazla Interlocked fonksiyon bulunmaktadır. Bunların listesi için aşağıdaki MSDN dokümanlarına başvurabilirsiniz:
+	
+	https://learn.microsoft.com/en-us/windows/win32/sync/synchronization-functions
+	
+	Yukarıdaki fonksiyonlar long türden nesnelerin adreslerini parametre olarak almaktadır. Interlocked fonksiyonlarının genellikle tek bir 
+	makine komutuyla yapılabilecek işlemler için bulundurulduğuna dikkat ediniz. 
+
+	Aşağıdaki örnekte iki thread de aynı global değişkeni bir milyon kez artırmıştır. Ancak bu işlemi yukarıda görmüş olduğumuz InterllockedIncrement 
+	fonksiyonuyla yapmıştır. Bu fonksiyon bir nesneyi atomik olarak tek bir makine komutuyla diğer işlemcileri durdurarak artırmaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -35732,7 +36126,7 @@ DWORD __stdcall ThreadProc1(LPVOID lpvParam)
 	long i;
 
 	for (i = 0; i < 1000000; ++i)
-		_InterlockedIncrement(&g_count);
+		InterlockedIncrement(&g_count);
 
 	return 0;
 }
@@ -35742,7 +36136,7 @@ DWORD __stdcall ThreadProc2(LPVOID lpvParam)
 	long i;
 
 	for (i = 0; i < 1000000; ++i)
-		_InterlockedIncrement(&g_count);
+		InterlockedIncrement(&g_count);
 
 	return 0;
 }
@@ -35762,40 +36156,80 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	C11 ile birlikte C'ye isteğe bağlı olarak _Atomic biçiminde bir tür belirleyicisi ve niteleyicisi eklenmiştir. _ATomic ile tanımlanan 
-	nesnlerken derleyici tarafından çok işlemcili sistemlerde atomik işlem yapacak biçimde kod üretilir. Tabii _Atomic atomic yapılamayack işlemlerde
-	bir etk,i göstermemektedir. Bir C11 derleyicisinin _Atomic belirleyicisini türünü destekleyip desteklemediği __STDC_NO_ATOMICS__  makrosuna
-	bakılarak belirlenebilir. Microsoft C derleyicileri _Atomic belirleyicisini desteklememektedir. Ancak gcc derleyicileri belli bir sürümden
-	sonra bu belirleyiciyi desteklemektedir. 
+	Derleyiciler tarafından doğrudan tanınan çağrılması için prototipe gereksinim duyulmayan ve genellikle derleyicilerin CALL makine komutu
+	yerine inline fonksiyon gibi açım yaptığı özel fonksiyonlara "built-in" ya da "intrinsic" fonksiyon denilmektedir. C derleyicilerinin bir 
+	bölümü bazı standart C fonksiyonlarını ve kendilerine özgü bazı eklenti (extension) fonksiyonları bu biçimde ele almaktadır. Microsoft C 
+	derleyicilerinde, gcc ve clang derleyicilerinde "built-in" ya da "intrinsic" fonksiyonlar bulunmaktadır. Microsoft C derleyicilerinin 
+	"intrinsic" fonksiyon listesine aşağıdaki bağlantıdan ulaşabilirsiniz:
 
-	Aşağıdaki örnekte g_count _Atomic ile tanımlandığı için zaten ++g_count işlemi derleyici tarafından atomik bir biçimde yapılacaktır. 
-	Başka bir deyişle derleyici bu değişken işleme sokulurken onu tek bir makine komutuyla ve lock işlemi ile işleme sokmaktadır.
+	https://learn.microsoft.com/en-us/cpp/intrinsics/compiler-intrinsics?view=msvc-170
+
+	gcc Derleyicilerinin built-in fonksiyonlarına da aşağıdaki bağlantılardan ulaşabilirsiniz:
+
+	https://gcc.gnu.org/onlinedocs/gcc/Target-Builtins.html
+	https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
+
+	gcc'de bazı built-in fonksiyonlar atomik işlemler için bulundurulmuştur. Bunları Microsoft'un InterlockedXXX fonksiyonlarına benzetebilirsiniz. 
+	Ancak gcc'de önceleri bu atomic built-in fonksiyonlar __sync_xxx biçiminde isimlendirilmişti. Sonra C++'a <atomic> kütüphanesi eklenince 
+	C++ kütüphanesi de kullanabilsin diye bu eski __sync_xxx isimli fonksiyonlar yerine bunların "memory model" parametresi alan __atomic_xxx 
+	versiyonları oluşturuldu. Artık yeni programların __atomic_xxx biçimindeki bu yeni fonksiyonları kullanması tavsiye edilmektedir. Her iki 
+	fonksiyon grubunun dokümanlarına ilişkin bağlantıları aşağıda veriyoruz:
+
+    https://gcc.gnu.org/onlinedocs/gcc-4.9.0/gcc/_005f_005fatomic-Builtins.html
+    https://gcc.gnu.org/onlinedocs/gcc-4.1.0/gcc/Atomic-Builtins.html
+
+    __atomic_xxx fonksiyonlarındaki "memory model" parametresi __ATOMIC_SEQ_CST olarak girilebilir. Biz burada bu memory model  parametresinin 
+	ne anlam ifade ettiği üzerinde durmayacağız. 
+
+    Örneğin bir nesneyi atomic bir biçimde 1 artırmak isteyelim. Hiç mutex kullanmadan bunu gcc derleyicilerinde şöyle yapabiliriz:
+
+    __atomic_fetch_add(&g_count, 1, __ATOMIC_SEQ_CST);
+
+    Bir değişkene yalnızca değer atamak için aşağıdaki atomic fonksiyon kullanılabilir:
+
+    void __atomic_store_n(type *ptr, type val, int memmodel);
+    void __atomic_store(type *ptr, type *val, int memmodel);
+
+    Benzer biçimde bir nesnenin içerisindeki değeri almak için de aşağıdaki atomic fonksiyonlar kullanılabilir:
+
+    void __atomic_load_n (type *ptr, int memmodel);
+    void __atomic_load (type *ptr, type *ret, int memmodel);
+
+	Aşağıdaki örnekte iki thread aynı global değişkeni artırmaktadır. Biz daha önce bu örneği çeşitli senkronizasyon nesneleriyle zaten 
+	yapmıştık. Burada hiç senkronizasyon nesnesi kullanmadan gcc'nin atomic built-in fonksiyonlarıyla aynı şeyi yapıyoruz.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* atomic.c */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 
-void *thread_proc1(void* param);
-void *thread_proc2(void* param);
-void exit_errno(const char* msg, int result);
+#define MAX_COUNT		100000000
 
-_Atomic int g_count;
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void exit_sys_errno(const char *msg, int eno);
+
+int g_count;
 
 int main(void)
 {
-	int result;
 	pthread_t tid1, tid2;
+	int result;
 
 	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
-		exit_errno("pthread_create", result);
+		exit_sys_errno("pthread_create", result);
 
 	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
-		exit_errno("pthread_create", result);
+		exit_sys_errno("pthread_create", result);
 
-	pthread_join(tid1, NULL);
-	pthread_join(tid2, NULL);
+	if ((result = pthread_join(tid1, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
+
+	if ((result = pthread_join(tid2, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
 
 	printf("%d\n", g_count);
 
@@ -35804,75 +36238,110 @@ int main(void)
 
 void *thread_proc1(void *param)
 {
-	int i;
-
-	for (i = 0; i < 1000000; ++i)
-		++g_count;
+	for (int i = 0; i < MAX_COUNT; ++i)
+		__atomic_fetch_add(&g_count, 1, __ATOMIC_SEQ_CST);
 
 	return NULL;
 }
 
 void *thread_proc2(void *param)
 {
-	int i;
-
-	for (i = 0; i < 1000000; ++i)
-		++g_count;
+	for (int i = 0; i < MAX_COUNT; ++i)
+		__atomic_fetch_add(&g_count, 1, __ATOMIC_SEQ_CST);
 
 	return NULL;
 }
 
-void exit_errno(const char *msg, int result)
+void exit_sys_errno(const char *msg, int eno)
 {
-	fprintf(stderr, "%s: %s\n", msg, strerror(result));
+	fprintf(stderr, "%s: %s\n", msg, strerror(eno));
 
 	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	C++'ta C'nin _Atomic beelirleyicisi yoktur. Atomik işlemler <atomic> başlık dosyasında bildirilen std::atomic<T> sınıfyla yapılmaktadır.
-	Bu sınıfın operatör fonksiyonları gerçekten çok işlemcili sistemler için atomik işlemler yapmaktadır. Dolayısıyla C++'da yukarıdaki işlemlerin
-	eşdeğerleri şöyle oluşturulabilir:
+	C11 ile birlikte C'ye isteğe bağlı olarak _Atomic biçiminde bir tür belirleyicisi ve niteleyicisi de eklenmiştir. _Atomic ile tanımlanan 
+	nesneler için derleyiciler atomik işlem yapacak biçimde kod üretmektedir. Tabii bu _Atomic belirleyicisi atomic yapılamayack işlemlerde
+	bir etki göstermemektedir. Bir C11 derleyicisinin _Atomic belirleyicisini destekleyip desteklemediği __STDC_NO_ATOMICS__  makrosuna
+	bakılarak belirlenebilir. Microsoft C derleyicileri henüz _Atomic belirleyicisini desteklememektedir. Ancak gcc derleyicileri belli bir 
+	sürümden sonra bu belirleyiciyi desteklemektedir. Ayrıca C11 ile birlikte <atomic.h> başlık dosyasında aşağıdaki gibi tür makroları da 
+	bulundurulmuştur:
+
+	atomic_bool			_Atomic _Bool
+	atomic_char			_Atomic char
+	atomic_schar		_Atomic signed char
+	atomic_uchar		_Atomic unsigned char
+	atomic_short		_Atomic short
+	atomic_ushort		_Atomic unsigned short
+	atomic_int			_Atomic int
+	atomic_uint			_Atomic unsigned int
+	atomic_long			_Atomic long
+	atomic_ulong		_Atomic unsigned long
+	atomic_llong		_Atomic long long
+	...
+
+	Bunların tam listesi için standartlara başvurabilirsiniz. Yine C++11 ile birlikte atomik işlem yapan fonksiyonlar da isteğe bağlı olarak 
+	standart hale getirilmiştir. Bunların bazılarını aşağıda veriyoruz:
+
+	atomic_store
+	atomic_store_explicit 
+	atomic_load
+	atomic_load_explicit
+	atomic_exchange
+	atomic_exchange_explicit
+	atomic_compare_exchange_strong
+	atomic_compare_exchange_strong_explicit
+	atomic_compare_exchange_weak
+	atomic_compare_exchange_weak_explicit
+	atomic_fetch_add
+	atomic_fetch_add_explicit
+	atomic_fetch_sub
+	atomic_fetch_sub_explicit
+
+	Aşağıdaki örnekte g_count global değişkeni _Atomic ile tanımlandığı için zaten ++g_count işlemi derleyici tarafından atomik bir biçimde 
+	yapılacaktır. Başka bir deyişle derleyici bu değişken işleme sokulurken onu tek bir makine komutuyla ve lock işlemi ile işleme sokmaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <atomic>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
 #include <pthread.h>
 
-void *thread_proc1(void* param);
-void *thread_proc2(void* param);
-void exit_errno(const char* msg, int result);
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void exit_sys_errno(const char *msg, int eno);
 
-using namespace std;
-
-atomic<int> g_count;
+_Atomic int g_count;
 
 int main(void)
 {
-	int result;
 	pthread_t tid1, tid2;
+	int result;
 
-	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
-		exit_errno("pthread_create", result);
+	srand(time(NULL));
+	
+	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
 
-	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
-		exit_errno("pthread_create", result);
+	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
+	
+	if ((result = pthread_join(tid1, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
 
-	pthread_join(tid1, NULL);
-	pthread_join(tid2, NULL);
+	if ((result = pthread_join(tid2, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
 
-	printf("%d\n", static_cast<int>(g_count));
+	printf("%d\n", g_count);
 
 	return 0;
 }
 
 void *thread_proc1(void *param)
 {
-	int i;
-
-	for (i = 0; i < 1000000; ++i)
+	for (int i = 0; i < 1000000; ++i)
 		++g_count;
 
 	return NULL;
@@ -35880,63 +36349,224 @@ void *thread_proc1(void *param)
 
 void *thread_proc2(void *param)
 {
-	int i;
-
-	for (i = 0; i < 1000000; ++i)
+	for (int i = 0; i < 1000000; ++i)
 		++g_count;
 
 	return NULL;
 }
 
-void exit_errno(const char *msg, int result)
+void exit_sys_errno(const char *msg, int eno)
 {
-	fprintf(stderr, "%s: %s\n", msg, strerror(result));
+	fprintf(stderr, "%s: %s\n", msg, strerror(eno));
 
 	exit(EXIT_FAILURE);
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Genel olarak static data kullanan fonksiyonlar thread güvenli olmazlar. Bunları thread güvenli hale getirmek için static data kullanma durumunu
-	ortadan kaldırmak gerekir. Aşağıdaki örnekte myitoa thread güvenli değildir ancak myitoa_tsafe thrad güvenlidir. 
+	C++'ta C'nin _Atomic belirleyicisi yoktur. (Genel olarak C++ Programlama Dili C Programlama Dilini kapsıyor olsa da bu kapsama mükemmel 
+	düzeyde değildir. C++'ta atomik işlemler <atomic> başlık dosyasında bildirilen std::atomic<T> isimli sınıf şabşlonuyla yapılmaktadır. 
+	Bu sınıfın operatör fonksiyonları gerçekten çok işlemcili sistemler için atomik işlemler yapmaktadır. Dolayısıyla yukarıdaki işlemlerin 
+	C++'taki eşdeğerleri aşağıdaki gibi oluşturulabilir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
+#include <atomic>
+#include <windows.h>
 
-char *myitoa(int a)
-{
-	static char buf[32];
+using namespace std;
 
-	sprintf(buf, "%d", a);
+void ExitSys(LPCSTR lpszMsg);
+DWORD __stdcall ThreadProc1(LPVOID lpvParam);
+DWORD __stdcall ThreadProc2(LPVOID lpvParam);
 
-	return buf;
-}
-
-char *myitoa_tsafe(char *str, int a)
-{
-	sprintf(str, "%d", a);
-
-	return str;
-}
+atomic<int> g_count;
 
 int main(void)
 {
-	char s[32];
-	char *str;
+	HANDLE hThread1, hThread2;
+	DWORD dwThreadID1, dwThreadID2;
 
-	str = myitoa(1234);
-	puts(str);
+	if ((hThread1 = CreateThread(NULL, 0, ThreadProc1, NULL, 0, &dwThreadID1)) == NULL)
+		ExitSys("CreateThread");
 
-	myitoa_tsafe(s, 1234);
-	puts(s);
+	if ((hThread2 = CreateThread(NULL, 0, ThreadProc2, NULL, 0, &dwThreadID2)) == NULL)
+		ExitSys("CreateThread");
+
+	WaitForSingleObject(hThread1, INFINITE);
+	WaitForSingleObject(hThread2, INFINITE);
+
+	printf("%ld\n", (int)g_count);
 
 	return 0;
 }
 
+DWORD __stdcall ThreadProc1(LPVOID lpvParam)
+{
+	long i;
+
+	for (i = 0; i < 1000000; ++i)
+		++g_count;
+
+	return 0;
+}
+
+DWORD __stdcall ThreadProc2(LPVOID lpvParam)
+{
+	long i;
+
+	for (i = 0; i < 1000000; ++i)
+		++g_count;
+
+	return 0;
+}
+
+void ExitSys(LPCSTR lpszMsg)
+{
+	DWORD dwLastErr = GetLastError();
+	LPTSTR lpszErr;
+
+	if (FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, dwLastErr,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpszErr, 0, NULL)) {
+		fprintf(stderr, "%s: %s", lpszMsg, lpszErr);
+		LocalFree(lpszErr);
+	}
+
+	exit(EXIT_FAILURE);
+}
+
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Microsoft 2005 yılına kadar standart C kütüphanesinin thread güvenli olan ve thread güvenli olmayan iki farklı versiyonuu bulundurmaktaydı. 
-	Ancak 2005'ten itibaren tek bir standart C kütüphanesi bulundurmaya başlamıştır. O da thread güvenli, kütüphanedir. POSIX sistemlerinde static data 
-	kullanan sorunlu standart C fonksiyonlarının hepsinin xxxx_r isimli thread güvenli bir versiyonu bulundurulmuştur. Bu versiyonlar genel olarak 
-	static data kullanmak yerine ekstra bir parametre ile static data için kullanılacak alanı fonksiyonu çağırandan istemeketdir. 
+	Bir fonksiyon farklı thread'lerden aynı anda çağrıldığında herhangi bir sorun oluşmuyorsa o fonksiyon thread güvenlidir. Yani "thread 
+	güvenlilik (thread safety)" birden fazla thread tarafından aynı anda çağrılan fonksiyonların sorun çıkartmaması anlamına gelmektedir. 
+	Pekiyi thread güvenliliği bozan faktörler nelerdir? İşte eğer fonksiyon bir "statik data" kullanıyorsa (yani global bir nesneyi ya da 
+	static yerel bir nesneyi kullanıyorsa) o fonksiyon thread güvenli olamaz. Çünkü global değişkenlerin ve static yerel değişkenlerin 
+	toplamda tek bir kopyası vardır. Thread akışları aynı fonksiyonda ilerlerken aynı kopya üzerinde işlem yaptıklarından dolayı bir anomali 
+	oluşabilecektir. Örneğin:
+
+	void foo(void)
+	{
+		static int a = 0;
+		
+		++a;
+		...
+		++a
+		...
+		++a;
+		...
+	}
+
+	Burada bu foo fonksiyonu farklı thread'lerden aynı anda çağrıldığında bu farklı thread'ler static nesnenin aynı kopyasını kullanacağından 
+	dolayı bir bozulma oluşacaktır. static yerel nesnelerin stack'te değil "data" ya da "bss" alanlarında yaratıldığını anımsayınız.
+	Aynı durum global nesne kullanan fonksiyonlar için de geçerlidir. Yukarıda da belirttiğimiz gibi "thread güvenlilik (thread safety)" 
+	bir fonksiyonun farklı thread'ler tarafından aynı anda çağrıldığında sorun oluşmaması anlamına gelmektedir. Thread güvenliliği bozan 
+	en faktör "static data" kullanımıdır. Yani programın static yerel ya da global nesneleri kullanmasıdır. Örneğin:
+
+	char *myitoa(int a)
+	{
+		static char buf[32];
+
+		sprintf(buf, "%d", a);
+
+		return buf;
+	}
+
+	Burada myitoa thread güvenli değildir. Çünkü bu fonksiyon birden fazla thread tarafından aynı anda (iç içe geçecek biçimde) çağrılırsa
+	sorun oluşacaktır. Çünkü iki çağrının kullandığı yerel nesne aynı nesnedir. 
+
+	Pekiyi fonksiyonu "thread güvensiz" yapan şey nedir? Eğer bir fonksiyon statik veri kullanıyorsa (yani static yerel nesneler ya da global 
+	nesneler) fonksiyon thread güvenli olmaz. Ortak kaynakları kullanan fonksiyonlar thread güvenli değildir. Mademki fonksiyonu thread güvenli 
+	olmaktan çıkartan faktör fonksiyonun statik veri kullanmasıdır. O halde biz fonksiyonu static data kullanmaktan çıkartırsak thread güvenli 
+	hale getirmiş oluruz. Örneğin:
+
+	char *myitoa_tsafe(char *buf, int a)
+	{
+		sprintf(str, "%d", a);
+
+		return buf;
+	}
+
+	Burada myitoa fonksiyonu artık static yerel bir dizinin adresiyle geri dönmemektedir. Ona geçirilen adresle geri dönmektedir. Örnek 
+	bir kullanım şöyle olabilir:
+		
+	char s[100];
+
+	myitoa_tsafe(s, 123456)
+
+	Burada myitoa_tsafe fonksiyonu artık farklı thread'ler tarafından aynı anda çağrılsa bile bir sorun oluşmayacaktır. (Tabii burada s dizisinin 
+	yerel bir dizi olduğunu kabul ediyoruz.)
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+ 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	C'nin de bazı standartc fonksiyonları static yerel nesne ya da dizi kullanmaktadır. Dolayısıyla bu fonksiyonlar thread güvenli değildir. 
+	Örneğin localtime fonksiyonu thread güvenli değildir. local time fonksiyonunun parametrik yapısını anımsayınız:
+
+	struct tm *localtime(const time_t *timep);
+
+	Burada localtime fonksiyonu struct tm türünden static yerel bir nesnenin adresiyle geri dönmektedir. 
+
+	struct tm *localtime(const time_t *timep)
+	{
+		static struct tm lt;
+		....
+
+		return &lt;
+	}
+
+	Görüldüğü gibi fonksiyon aslında bize bir adres vermektedir, ancak bu adres static yerel bir nesnenin adresidir. Dolayısıyla onun tek 
+	bir kopyası vardır. Biz bu fonksiyonu farklı thread'lerden aynı anda çağırırsak aslında aynı nesne üzerinde işlem yapılacağı için bu 
+	nesnenin içeriği bozulacaktır. Benzer biçimde ctime fonksiyonu da static yerel bir dizinin adresiyle dönmektedir. Bu fonksiyon da
+	thread güvenli değildir. Benzer biçimde rassal sayı üretmekte kullanılan rand fonksiyonu da global bir nesne (tohum nesnesi) kullanmaktadır. 
+	Dolayısıyla bu fonksiyon da thread güvenli değildir. Aşağıda C'de thread güvenli olmama potansiyelinde olan standart C fonksiyonlarının 
+	listesini veriyoruz:
+
+	strtok
+	strerror
+	ctime
+	gmtime
+	localtime
+	asctime
+	rand
+	srand
+	tmpnam
+	tempnam
+	setlocal
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi thread güvenli olmayan bir fonksiyonu nasıl thread güvenli hale getiririz? İlk yapılacak şey şüphesiz fonksiyonun static data 
+	(statik yerel ya da global nesneleri kastediyoruz) kullanmasını engellemektir. Static data kullanan programlar thread güvenli olamazlar. 
+	Bu durumda fonksiyonu thread güvenli hale getirmek için yapılacak şey onun static data kullanmasını engellemektir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Pekiyi C'nin standart kütüphanesindeki bazı fonksiyonlar thread güvenli doğaya sahip değilse ne yapabiliriz?  Bu fonksiyonlar izleyen 
+	paragraflarda ele alacağımız gibi "thread'e özgü global alanlar" oluşturularak kütüphaleri yazanlar tarafından thread güvenli hale 
+	getirilebilirler. Çalıştığınız C derleyicisinin standart kütüphanesinin thrad güvenli olup olmadığını öğrenmelisiniz. 
+
+	C'nin 2011 versiyonuna kadar (C11) C standartlarında thread lafı edilmemişti. Ancak ilk kez C11'de thread kavramı standartlara sokuldu ve
+	isteğe bağlı (optional) bir thread kütüphanesi de standartla eklendir. Ancak bu standartlar da yukarıda belirttiğimiz fonksiyonların 
+	thread güvenli olup olmadığı konusunda bir açıklama yapmamıştır. Yani özet olarak bir C derleyicisindeki yukarıdakine benzer standart 
+	C fonksşyonları thread gğvenli olabilir ya da olmayabilir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Microsoft 2005 yılına kadar standart C kütüphanesinin thread güvenli olan ve thread güvenli olmayan iki farklı versiyonunu bulundurmaktaydı. 
+	Ancak 2005'ten itibaren tek bir standart C kütüphanesi bulundurmaya başlamıştır. O da thread güvenli kütüphanedir. 
+	
+	POSIX sistemlerinde static data kullanan sorunlu standart C fonksiyonlarının hepsinin xxxxx_r isimli thread güvenli bir versiyonu da 
+	bulundurulmuştur. Bu versiyonlar genel olarak static data kullanmak yerine ekstra bir parametre ile static data için kullanılacak alanı 
+	fonksiyonu çağırandan istemeketdir. Örneğin localtime ve localtime_r fonksiyonlarının prototipleri şöyledir:
+
+	struct tm *localtime(const time_t *timep);
+	struct tm *localtime_r(const time_t *timep, struct tm *result);
+
+	localtime_r fonksiyonu static yerel nesne kullanmamakta parametre olarak alınan struct tm nesnesine yerleştirme yapmaktadır. Tabii 
+	fonksiyon parametresiyle aldığı nesnenin adresine geri dönmektedir. Örneğin rand ve rand_r fonksiyonlarının prototipleri şöyledir:
+
+	int rand(void);
+	int rand_r(unsigned int *seedp);
+
+	rand_r fonksiyonunun global tohum değişkeni kullanmadığına tohum değişkenini parametre olarak aldığına dikkat ediniz. 
 
 	Aşağıdaki örnekte ctime fonksiyonun thread güvenli versiyonu olan ctime_r fonksiyonu kullanılmıştır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -36002,69 +36632,36 @@ void exit_errno(const char *msg, int result)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	C++'da C++11 ile birlikte standart zorunlu bir thread kütüphanesi oluşturulmuştur. Tabii aslında bu kütüphane Windows sistemlerinde Windows API
-	fonksiyonlarını, UNIX/Linux sistemlerinde POSIX'in pthread fonksiyonalrını kullanmatadır. Yalnızca arayüz standart hale getirilmiştir. 
+	C'nin standart FILE stream işlemlerinin thread güvenli olup olmadığı hakkında da bir şey söylenmemiştir. Ancak hem Microsoft C kütüphanesi 
+	hem de GNU C kütüphanesi FILE stream işlemlerini thread güveli biçimde yapmaktadır. Yani iki ayrı thread global bir stream nesnesi üzerinde 
+	işlem yapıyorsa kullanılan tampon bu fonskiyonlar tarafından kritik kodlarla zaten korunmuş durumdadır. İç içe geçme durumu oluşmamaktadır. 
+	Benzer biçimde C++'ın <iostream> kürüphanesi de	aynı dosya üzerinde işlem yapılırken bile thread güvenlidir. Ancak standartlar bunu garanti 
+	etmemktedir. 
 
-	Aşağıda C++'da thread yaratımına bir örnek verilmiştir.
--------------------------------------------------------------------------------------------------------------------------------------------*/
+	Aşağıda Windows sistemlerinde iki thread eş zamanlı olarak aynı dosyaya yazma yapaktadır. Dosya tamponunun her açılan dosya için ayrı 
+	bir biçimde oluşturulduğunu anımsayınız. Eğer Windows'ta dosya nesneleri thread güvenli olmasaydı bu yazma işlemlerinde iç içe geçme 
+	olabilirdi. Buradaki örnekte "test.txt" dosyasının içini inceleyiniz. İç içe geçmenin olmadığını göreceksiniz. Örneğin:
 
-#include <iostream>
-#include <string>
-#include <thread>
-
-using namespace std;
-
-class Sample {
-public:
-	Sample(const char *name) : m_name(name)
-	{}
-	void operator()()
-	{
-		cout << m_name + "\n";
-	}
-private:
-	string m_name;
-};
-
-void thread_proc1()
-{
-	cout << "thread-1 running...\n";
-}
-
-void thread_proc2()
-{
-	cout << "thread-2 running...\n";;
-}
-
-int main(void)
-{
-	Sample s1("thread-1"), s2("thread-2");
-
-	thread t1(s1);
-	thread t2(s2);
-	thread t3(thread_proc1);
-	thread t4(thread_proc1);
-
-	t1.join();
-	t2.join();
-	t3.join();
-	t4.join();
-
-	return 0;
-}
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	Genel olarak C++'ın sınıfları aynı nesne üzerinde okuma konusunda thread güvenli ancak yazma konusunda thread güvenli değildir. 
-	Fakat hem farklı nesneler üzerinde okuma ve yazma işlemleri thread güvenlidir. Bunların standartlarda bu anlamda thread güvenli versionları yoktur.
--------------------------------------------------------------------------------------------------------------------------------------------*/
-
-/*------------------------------------------------------------------------------------------------------------------------------------------
-	C'nin standart FILE stream işlemlerinin thread güvenli olup olmadığı hakkında da bir şey söylenmemiştir. Ancak hem Microsoft kütüphanesi hem de
-	GNU kütüphanesi FILE stream işlemlerini thread güveli yapmaktadır. Yani iki ayrı tread global bir stream nesnesi üzerinde işlem yapıyorsa kullanılan
-	tampon bu fonskiyonlar tarafından kritik kodlarla korunmuş durumdadır. İç içe geçme durumu oluşmamatadır. Benzer biçimde C++'ın <iostream> kürüphanesi de
-	aynı dosya üzerinde işlem yapılırken bile thread güvenlidir. Ancak standartlar bunu garanti etmemktedir. 
-
-	Aşağıdaki örnekte hem Windows hem de UNIX/Linux sistemlerinde stdio fonksiyonları kendi içerisinde tampona yazma sırasında kritik kod oluşturmaktadır.
+	...
+	thread-1
+	Thread-1
+	Thread-1
+	Thread-1
+	Thread-1
+	Thread-2
+	Thread-2
+	Thread-2
+	Thread-2
+	Thread-2
+	Thread-2
+	Thread-1
+	Thread-1
+	Thread-1
+	Thread-1
+	Thread-1
+	Thread-1
+	Thread-1
+	...
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -36135,6 +36732,74 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
+	Yukarıda da belirttiğimiz gibi GNU C Kütüphanesindeki stream işlemleri de thread güvenlidir. Yukarıda vermiş olduğumuz örneğin UNIX/Linux
+	karşılığı da aşağıdaki gibidir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void exit_sys_errno(const char *msg, int eno);
+
+FILE *g_f;
+
+int main(void)
+{
+	pthread_t tid1, tid2;
+	int result;
+
+    if ((g_f = fopen("test.txt", "w")) == NULL) {
+		fprintf(stderr, "cannot open file!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
+
+	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
+
+    if ((result = pthread_join(tid1, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
+
+	if ((result = pthread_join(tid2, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
+
+	return 0;
+}
+
+void *thread_proc1(void *param)
+{
+    int i;
+
+	for (i = 0; i < 10000; ++i)
+		fprintf(g_f, "Thread-1\n");
+
+    return NULL;
+}
+
+void *thread_proc2(void *param)
+{
+   	int i;
+
+	for (i = 0; i < 10000; ++i)
+		fprintf(g_f, "Thread-2\n");
+	
+    return NULL;
+}
+
+void exit_sys_errno(const char *msg, int eno)
+{
+	fprintf(stderr, "%s: %s\n", msg, strerror(eno));
+
+	exit(EXIT_FAILURE);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
 	C++'ın iostream kütüphanesi de genel olarak Microsoft ve UNIX/Linux sistemlerinde thread güvenli yazılmıştır. Ancak standartlar bağlamında 
 	bunun için bir garanti bulunmamaktadır.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
@@ -36176,30 +36841,102 @@ int main(void)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Öte yandan Windows sistemlerindeki ReadFile ve WriteFile API fonksiyonları, UNIX/Linux sistemlerindeki read ve write POSIX fonksiyonları
-	işletim sisteminin sistem fonksiyonlarını doğrudan çağırmaktadır. İşletim s,isteminin sistem fonksiyonalrı da okuma ve yazma bağlamında sistem 
-	genelinde atomiltir. Bunun anlamı şudur: Biz iki farklı thread'ten ya da prosesten aynı dosyaya, dosyanın aynı yerine aynı anda yazma ya da okuma 
-	yapsak bile iç içe geçme asla oluşmaz. Bu durum kernel tarafından senkronize edilmektedir. Örneğin thread ya da proseslerden biri tam bir dosyanın
-	belli bir offset'ine WriteFile ya da write fonksiyonuyla 100 byte yazıyor olsun. Tam o sırada aynı offset'ten başka bir thread ya da proses 100 byte
-	okuyaacak olsun. Bu durumda okuyan taraf ya 100 yazılmadan önceki 100 byte'ı okur ya da diğerinin yazdığı 100 byte'ı okur. Ancak asla yarısı eski 100
-	byte'tan yarısı diğerinin yazdığı 100 byte'tan oluşan bir 100 byte okumaz. Benzer biçimde iki thread ya da proses WriteFile ya da write ile aynı dosyanın aynı offset'ine
-	yazıyor bile olsa iç içe geçme olmaz. Nihai durumda ya birinin ya da diğerinin tam yazdığı şeyle dosyada gözükür. Tabii birden fazla read ya da write işlemi
-	sırasında bu işlemler iç içe geçebilir. Örneğin:
+	Daha önceden de belirttiğimiz gibi Windows sistemlerindeki ReadFile ve WriteFile API fonksiyonları, UNIX/Linux sistemlerindeki read ve 
+	write POSIX fonksiyonları işletim sisteminin sistem fonksiyonlarını doğrudan çağırmaktadır. İşletim sisteminin sistem fonksiyonaları da 
+	okuma ve yazma bağlamında sistem genelinde atomiktir. Bunun anlamı şudur: Biz iki farklı thread'ten ya da prosesten aynı dosyaya, dosyanın 
+	aynı yerine aynı anda yazma ya da okuma yapsak bile iç içe geçme asla oluşmaz. Bu durum kernel tarafından senkronize edilmektedir. Örneğin 
+	thread ya da proseslerden biri tam bir dosyanın	belli bir offset'ine WriteFile ya da write fonksiyonuyla 100 byte yazıyor olsun. Tam o 
+	sırada da aynı offset'ten başka bir thread ya da proses 100 byte okuyaacak olsun. Bu durumda okuyan taraf ya 100 yazılmadan önceki 100 
+	byte'ı okur ya da diğerinin yazdığı 100 byte'ı okur. Ancak asla yarısı eski 100	byte'tan yarısı diğerinin yazdığı 100 byte'tan oluşan bir 
+	100 byte okumaz. Benzer biçimde iki thread ya da proses WriteFile ya da write ile aynı dosyanın aynı offset'ine	yazıyor olsalar bile 
+	iç içe geçme oluşmamaktadır. Nihai durumda ya birinin ya da diğerinin tam yazdığı şeyler dosyada gözükür. Tabii birden fazla read ya da 
+	write işlemi sırasında bu işlemler iç içe geçebilir. Örneğin:
 
 	thread-1
-
-	write(..)
+	--------
+	write(...)
 	write(...)
 
 	thread-2
-	
+	---------
 	write(...)
 	write(...)
 
+	Burada write çapırmaları atomşktir. Ancak thread!in iki write çağrısı arasına thread2'nin write çağrıları gerebilir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	C++'da C++11 ile birlikte standart bir thread kütüphanesi oluşturulmuştur. Tabii aslında bu kütüphane Windows sistemlerinde Windows API
+	fonksiyonlarını, UNIX/Linux sistemlerinde POSIX'in pthread fonksiyonalrını kullanmaktadır. Yalnızca arayüz standart hale getirilmiştir. 
+
+	Aşağıda C++'da thread yaratımına bir örnek verilmiştir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <iostream>
+#include <string>
+#include <thread>
+
+using namespace std;
+
+class Sample {
+public:
+	Sample(const char *name) : m_name(name)
+	{}
+	void operator()()
+	{
+		cout << m_name + "\n";
+	}
+private:
+	string m_name;
+};
+
+void thread_proc1()
+{
+	cout << "thread-1 running...\n";
+}
+
+void thread_proc2()
+{
+	cout << "thread-2 running...\n";;
+}
+
+int main(void)
+{
+	Sample s1("thread-1"), s2("thread-2");
+
+	thread t1(s1);
+	thread t2(s2);
+	thread t3(thread_proc1);
+	thread t4(thread_proc1);
+
+	t1.join();
+	t2.join();
+	t3.join();
+	t4.join();
+
+	return 0;
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Genel olarak C++'ın sınıfları aynı nesne üzerinde okuma konusunda thread güvenli ancak yazma konusunda thread güvenli değildir. Fakat 
+	farklı nesneler üzerinde okuma ve yazma işlemleri thread güvenlidir. Bunların standartlarda bu anlamda thread güvenli versionları yoktur.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Windows'ta Thread Local Storage kullanımına bir örnek
+	Thread'e özgü global değişkenler olabilir mi? Yani örneğin iki thread akışı bir global değişkeni kullanırken aslında bunlar farklı global 
+	değişkenler olabilir mi? İşte işletim sistemleri uzun süredir bunu sağlamak için mekanizmalar bulundurmaktadır. Windows sistemlerinde 
+	thread'e özgü global değişken oluşturma mekanizmasına "Thread Local Storage (TLS)", UNIX/Linux sistemlerinde ise "Thread Specific Data
+	(TSD)" denilmektedir. Hatta C11 ile birlikte C standartlarına _Thread_local isimli, C++11 ile C++ standartlarına thread_local isimli 
+	yer belirleyici (storage class specifier) anahtar sözcükler sokulmuştur. Yani artık C ve C++'ta işletim sisteminin API fonksiyonlarını
+	ve POSIX fonksiyonlarını kullanmadan da thread'e özgü global dğeişkenler kullanılabilmektedir. Örneğin:
+
+	_Thread_local int g_tl;
+
+	Burada aslında bir g_tl nesnesi yoktur. Yaratılmış olan ve yaratılacak olan tüm thread'lerin birbirinden ayrı birer g_tl nesneleri vardır. 
+
+	Aşağıdaki örnekte C11 ile C'e sokulan _Thread_local belirleyicisi kullanılarak bir global değişken oluşturulmuştur. Bu global değişkenin 
+	her thread için ayrı bir kopyası bulunmaktadır. Aşağıdaki örnekte bu durum görülmektedir. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -36207,26 +36944,17 @@ int main(void)
 #include <time.h>
 #include <windows.h>
 
-void ExitSys(LPCSTR lpszMsg);
+void Foo(const char *str);
 DWORD __stdcall ThreadProc1(LPVOID lpvParam);
 DWORD __stdcall ThreadProc2(LPVOID lpvParam);
-BOOL InitTls(int val, const char *buf);
-void Foo(void);
+void ExitSys(LPCSTR lpszMsg);
 
-DWORD g_tlsSlot;
-
-typedef struct tagSTATIC_DATA {
-	int val;
-	char buf[32];
-} STATIC_DATA;
+ _Thread_local int g_tl;
 
 int main(void)
 {
 	HANDLE hThread1, hThread2;
 	DWORD dwThreadID1, dwThreadID2;
-
-	if ((g_tlsSlot = TlsAlloc()) == TLS_OUT_OF_INDEXES)
-		ExitSys("TlsAlloc");
 
 	if ((hThread1 = CreateThread(NULL, 0, ThreadProc1, NULL, 0, &dwThreadID1)) == NULL)
 		ExitSys("CreateThread");
@@ -36237,55 +36965,32 @@ int main(void)
 	WaitForSingleObject(hThread1, INFINITE);
 	WaitForSingleObject(hThread2, INFINITE);
 
-	TlsFree(g_tlsSlot);
+	Foo("Main Thread");		/* Main Thread: 0 */
 
 	return 0;
 }
 
+void Foo(const char *str)
+{
+	printf("%s: %d\n", str, g_tl);
+}
+
 DWORD __stdcall ThreadProc1(LPVOID lpvParam)
 {
-	if (!InitTls(100, "Thread-1"))
-		ExitSys("InitTls");
+	g_tl = 10;
 
-	Foo();
-
+	Sleep(5000);
+	Foo("Thread1");				/* THread: 10 */
+	
 	return 0;
 }
 
 DWORD __stdcall ThreadProc2(LPVOID lpvParam)
 {
-	if (!InitTls(200, "Thread-2"))
-		ExitSys("InitTls");
-
-	Foo();
+	g_tl = 20;
+	Foo("Thread2");				/* Thread2: 20 */
 
 	return 0;
-}
-
-BOOL InitTls(int val, const char *buf)
-{
-	STATIC_DATA *psd;
-
-	if ((psd = (STATIC_DATA *)malloc(sizeof(STATIC_DATA))) == NULL)
-		return FALSE;
-
-	psd->val = val;
-	strcpy(psd->buf, buf);
-
-	if (!TlsSetValue(g_tlsSlot, psd))
-		return FALSE;
-
-	return TRUE;
-}
-
-void Foo(void)
-{
-	STATIC_DATA *psd;
-
-	if ((psd = (STATIC_DATA *)TlsGetValue(g_tlsSlot)) == NULL)
-		ExitSys("TlsGetValue");
-
-	printf("%d %s\n", psd->val, psd->buf);
 }
 
 void ExitSys(LPCSTR lpszMsg)
@@ -36303,18 +37008,330 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	Standart C kütüphanesi fonksiyonların parametrik yapılarını değiştirmeden nasıl thread güvenli hale getirilir? 
-	İşte böyle bir faaliyette bazı fonksiyonlar statik nesneleri kullanmak yerine TLS içerisindeki nesneleri kullanmalıdırlar. Aşağıdaki örnekte
-	bu işlemin mantıksal olarak nasıl yapılabileceği gösterilmiştir. Bu örnekte thread güvenli kütüphanee için programın başında ve sonunda, her thread'in
-	başında ve sonunda init ve exit fonksiyonların çağrılması gerekmektedir. Aslında bu çağrılar programcıdan gizlenebilir. Şöyle ki: Eğer dinamik kütüphane söz
-	konusuysa dinamik kütüphanenin bazı fonksiyonları bu tür durumlarda otomatik olarak çağrılmaktadır. İşte programcı da bu kodları aslında kendi kütüphanesinin
-	içerine alabilmektedir. Ancak statik kütüphanelerde böyle bir callback mekanizması yoktur. Microsoft bunun için standart C kütüphanesinin
-	statik versiyonunu yazarken mecburen sarma thread fonksiyonları kullanmıştır. _beginthreadex fonksiyonu statik standart C kütüphanesi kullanılacaksa
-	thread yaratmak için tercih edilmelidir.Bu fonksiyon aslında arka planda CreateThread API fonksiyonunı zaten çağırmaktadır. Ancak threda yaratılmadan önce ve
-	thread sonlanırken aşağıdaki kodda bulunan init exit fonksiyonları bu sarma fonksiyon tarafından çağrılır. Benzer biçimde eğer Microsoft sistemlerinde
-	eğer statik kütüphane kullanılıyorsa thread sonlanırken _endthreadex fonksiyonu çağrılmalıdır. Dinamik kütüphanelerde bu sarma fonksiyonların 
-	kullanılmasına gerek yoktur. Ayrıca gcc derleyicilerinde standart C fonksiyonlarının thread güvenli olmadığını bunların thread güvenli versiyonlarının 
-	farklı parametrik yapılarla statik nesne kullanamayack biçimde xxxxx_r ismiyle yazıldığını anımsayınız. 
+	Yukarıda da belirttiğimiz gibi aslında thread'e özgü global alanlar işletim sisteminin desteğiyle oluşturulmaktadır. C ve C++ derleyicileri 
+	de arka planda aslında izleyen paragraflarda ele alacağımız gibi işletim sisteminin bu mekanizmalarını kullanarak thread'e özgü global
+	değişkenler oluşturabilmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Windows'ta her thread için işletim sistemi TLS adı altında slotlardan oluşan bir dizi ayırmaktadır. Slotların indeksleri DWORD türüyle
+	temsil edilmektedir. Belli bir slot indeksi her thread'te ayrı bir alan belirtir. 
+	
+	Windows'ta TLS (Thread Local Storage) kullanımı şu adımlardan geçilerek sağlanmaktadır:
+
+	1) Önce henüz thread'ler yaratılmadan TlsAlloc API fonksiyonuyla bir TLS slotu yaratılır. TlsAlloc fonksiyonunun prototipi şöyledir:
+
+	DWORD TlsAlloc(void);
+
+	Fonksiyon parametre almamaktadır. Geri dönüş değeri olarak TLS alanında bir slot indeksi vermektedir. Bu slot indeksi yaratılmış olan ve 
+	yaratılacak olan her thread için kullanılabilir ve farklı bir alan belirtmektedir. Programcı tipik olarak bu slot indeksini global 
+	nesnede saklar. Fonksiyon başarısızlık durumunda TLS_OUT_OF_INDEXES özel değerine geri dönmektedir. Windows sistemlerinde toplam 1086
+	slot bulunmaktadır. Örneğin:
+
+	DWORD g_slot;
+	...
+
+	if ((g_slot = TlsAlloc()) == TLS_OUT_OF_INDEXES)
+		ExitSys("TlsAlloc");
+
+	2) Artık her thread aynı slot indeksini kullanarak slota bir adres yerleştirebilir. Slot indeksleri aynı olsa da aslında bu slotlar 
+	farklı thread'lerde olduğu için her thread kendi slotunu kullanıyor olacaktır. Slota adres yerleştiren TlsSetValue fonksiyonunun prototipi
+	şöyledir:
+
+	BOOL TlsSetValue(
+		DWORD  dwTlsIndex,
+		LPVOID lpTlsValue
+	);
+	
+	Fonksiyonun birinci parametresi TLS slot indeksini, ikinci parametresi ise slota yerleştirilecek adres belirtmektedir. Fonksiyon başarı 
+	durumunda sıfır dışı bir değer başarısızlık durumunda 0 değerine geri dönmektedir. Biz aslında malloc ile tahsisat yapıp slota tahsis 
+	ettiğimiz alanın adresini yerleştirebiliriz. Böylece tek bir slot ile istediğimiz kadar thread'e özgü global nesne oluşturmuş oluruz. 
+	Örneğin:
+
+	struct THREAD_LOCAL_DATA {
+		int a;
+		int b;
+		ibt c;
+	};
+
+	struct THREAD_LOCAL_DATA *tld;
+	...
+
+	if ((tld = (struct THREAD_LOCAL_DATA *)malloc(sizeof(struct THREAD_LOCAL_DATA))) == NULL) {
+		fprintf(stderr, "cannot allocate memory!...\n");
+		exit(EXIT_FAILURE);
+	}
+	tld->a = 10;
+	tld->b = 20;
+	tld->c = 30;
+
+	if (!TlsSetValue(g_slot, tld))
+		ExitSys("TlsSetValue");
+
+	3) Değer TLS slotundan geri almak için TLSGetValue fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+	LPVOID TlsGetValue(
+		DWORD dwTlsIndex
+	);
+
+	Fonsiyon TLS slot indeksini parametre olarak alır ve oraya set edilmiş adresi geri dönüş değeri olarak verir. Fonksiyon başarısızlık 
+	durumunda NULL adrese geri dönmektedir. Tabii yaratılmamış bir slot adresi geçmedikten sonra fonksiyonun başarısız olma olasılığı yoktur. 
+	Dolayısyla fonksiyonun geri dönüş değerini kontrol etmeyebilirsiniz. Örneğin:
+
+	struct THREAD_LOCAL_DATA *tld;
+	...
+
+	if ((tld = (struct THREAD_LOCAL_DATA *)TlsGetValue(g_slot)) == NULL)
+		ExitSys("TlsGetValue");
+
+	Ancak gerçekten solota NULL adres de yerleştirilebilir. Bu durumda fonksiyon NULL adrese geri döndüğünde GetLastError değerine bakılmalıdır. 
+	Eğer GetLastError ERROR_SUCESS değerindeyse işlem başarılıdır ve gerçekten slota yerleştirilen NULL adres geri alınmıştır. Ancak GetLastError 
+	başka bir değer geri döndürürse işlemin başarısız olduğu sonucu çıkartılmalıdır.  
+
+	4) Slot kullanımı bittikten sonra slotun TlsFree fonksiyonu ile serbest hale getirilmesi gerekir. TlsFree fonksiyonunun prototipi şöyledir:
+
+	BOOL TlsFree(
+		DWORD dwTlsIndex
+	);
+
+	Fonksiyon başarı durumunda sıfır dışı bir değere, başarısızlık durumunda sıfır değerine geri dönmektedir. Tabii her şey doğrıu yapılmışsa
+	fonksiyonun başarısız olma olsaılığı da yoktur. 
+
+	Aşağıda bir örnek verilmiştir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <windows.h>
+
+void Foo(const char *str);
+DWORD __stdcall ThreadProc1(LPVOID lpvParam);
+DWORD __stdcall ThreadProc2(LPVOID lpvParam);
+void ExitSys(LPCSTR lpszMsg);
+
+DWORD g_slot;
+
+int main(void)
+{
+	HANDLE hThread1, hThread2;
+	DWORD dwThreadID1, dwThreadID2;
+
+	if ((g_slot = TlsAlloc()) == TLS_OUT_OF_INDEXES)
+		ExitSys("TlsAlloc");
+
+	if ((hThread1 = CreateThread(NULL, 0, ThreadProc1, NULL, 0, &dwThreadID1)) == NULL)
+		ExitSys("CreateThread");
+
+	if ((hThread2 = CreateThread(NULL, 0, ThreadProc2, NULL, 0, &dwThreadID2)) == NULL)
+		ExitSys("CreateThread");
+
+	WaitForSingleObject(hThread1, INFINITE);
+	WaitForSingleObject(hThread2, INFINITE);
+
+	Foo("Main Thread");
+
+	TlsFree(g_slot);
+
+	return 0;
+}
+
+void Foo(const char *str)
+{
+	int *pVal;
+
+	if ((pVal = (int *)TlsGetValue(g_slot)) == NULL && GetLastError() != ERROR_SUCCESS)
+		ExitSys("TlsGetValue");
+
+	printf("%d\n", (int)pVal);
+}
+
+DWORD __stdcall ThreadProc1(LPVOID lpvParam)
+{
+	if (!TlsSetValue(g_slot, (LPVOID)10))		/* g_tl = 10 */
+		ExitSys("TlsSetValue");
+
+	Sleep(5000);
+	Foo("Thread1");
+	
+	return 0;
+}
+
+DWORD __stdcall ThreadProc2(LPVOID lpvParam)
+{
+	if (!TlsSetValue(g_slot, (LPVOID)20))		/* g_tl = 20 */
+		ExitSys("TlsSetValue");
+
+	Foo("Thread2");
+
+	return 0;
+}
+
+void ExitSys(LPCSTR lpszMsg)
+{
+	DWORD dwLastErr = GetLastError();
+	LPTSTR lpszErr;
+
+	if (FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, dwLastErr,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpszErr, 0, NULL)) {
+		fprintf(stderr, "%s: %s", lpszMsg, lpszErr);
+		LocalFree(lpszErr);
+	}
+
+	exit(EXIT_FAILURE);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+												89. Ders 18/05/2024 - Cumartesi
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Her ne kadar TlsSetValue ile slota yalnızca bir adres yerleştirebiliyorsak da aslında dinamik tahsisat yapıp bu alanın adresini slota 
+	yerleştirebiliriz. Böylece istediğimiz kadar çok bilgiyi thread'e özgü biçimde kullanabiliriz. Örneğin:
+
+	struct THREAD_DATA {
+		int a;
+		int b;
+		int c;
+	};
+	...
+	struct THREAD_DATA *td;
+
+	td = (struct THREAD_DATA *)malloc(sizeof(struct THREAD_DATA));
+	td->a = 10;
+	td->b = 20;
+	td->c = 30;
+
+	TlsSetValue(g_slot, td);
+
+	Aşağıda bu yöntemle birden fazla bilginin slota yerleştirilmesine ilişkin bir örnek verilmiştir.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <windows.h>
+
+void Foo(const char *str);
+DWORD __stdcall ThreadProc1(LPVOID lpvParam);
+DWORD __stdcall ThreadProc2(LPVOID lpvParam);
+void ExitSys(LPCSTR lpszMsg);
+
+DWORD g_slot;
+
+struct THREAD_DATA {
+	int a;
+	int b;
+	int c;
+};
+
+int main(void)
+{
+	HANDLE hThread1, hThread2;
+	DWORD dwThreadID1, dwThreadID2;
+
+	if ((g_slot = TlsAlloc()) == TLS_OUT_OF_INDEXES)
+		ExitSys("TlsAlloc");
+
+	if ((hThread1 = CreateThread(NULL, 0, ThreadProc1, NULL, 0, &dwThreadID1)) == NULL)
+		ExitSys("CreateThread");
+
+	if ((hThread2 = CreateThread(NULL, 0, ThreadProc2, NULL, 0, &dwThreadID2)) == NULL)
+		ExitSys("CreateThread");
+
+	WaitForSingleObject(hThread1, INFINITE);
+	WaitForSingleObject(hThread2, INFINITE);
+
+	Foo("Main Thread");
+
+	TlsFree(g_slot);
+
+	return 0;
+}
+
+void Foo(const char *str)
+{
+	struct THREAD_DATA* td;
+
+	if ((td = (struct THREAD_DATA *)TlsGetValue(g_slot)) == NULL && GetLastError() != ERROR_SUCCESS)
+		ExitSys("TlsGetValue");
+
+	printf("%s: %d, %d, %d\n", str, td->a, td->b, td->c);
+}
+
+DWORD __stdcall ThreadProc1(LPVOID lpvParam)
+{
+	struct THREAD_DATA* td;
+
+	if ((td = (struct THREAD_DATA*)malloc(sizeof(struct THREAD_DATA))) == NULL) {
+		fprintf(stderr, "cannot allocate memory!..\n");
+		exit(EXIT_FAILURE);
+	}
+	td->a = 10;
+	td->b = 20;
+	td->c = 30;
+
+	if (!TlsSetValue(g_slot, td))		
+		ExitSys("TlsSetValue");
+
+	Sleep(5000);
+	Foo("Thread1");
+
+	free(td);
+	
+	return 0;
+}
+
+DWORD __stdcall ThreadProc2(LPVOID lpvParam)
+{
+	struct THREAD_DATA* td;
+
+	if ((td = (struct THREAD_DATA*)malloc(sizeof(struct THREAD_DATA))) == NULL) {
+		fprintf(stderr, "cannot allocate memory!..\n");
+		exit(EXIT_FAILURE);
+	}
+	td->a = 100;
+	td->b = 200;
+	td->c = 300;
+
+	if (!TlsSetValue(g_slot, td))
+		ExitSys("TlsSetValue");
+
+	Foo("Thread2");
+
+	free(td);
+
+	return 0;
+}
+
+void ExitSys(LPCSTR lpszMsg)
+{
+	DWORD dwLastErr = GetLastError();
+	LPTSTR lpszErr;
+
+	if (FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, dwLastErr,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpszErr, 0, NULL)) {
+		fprintf(stderr, "%s: %s", lpszMsg, lpszErr);
+		LocalFree(lpszErr);
+	}
+
+	exit(EXIT_FAILURE);
+}
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Standart C kütüphanesi fonksiyonların parametrik yapılarını değiştirmeden nasıl thread güvenli hale getirilir? İşte böyle bir faaliyette 
+	bazı fonksiyonlar statik nesneleri kullanmak yerine TLS içerisindeki nesneleri kullanmalıdır. Aşağıdaki örnekte bu işlemin mantıksal olarak
+	nasıl yapılabileceği gösterilmiştir. Bu örnekte thread güvenli kütüphane için programın başında ve sonunda, her thread'in başında ve sonunda 
+	init ve exit fonksiyonlarının çağrılması gerekmektedir. Aslında bu çağrılar programcıdan gizlenebilir. Şöyle ki: Eğer dinamik kütüphane söz
+	konusuysa dinamik kütüphanenin bazı fonksiyonları bu tür durumlarda otomatik olarak çağrılmaktadır. İşte programcı da bu kodları aslında 
+	kendi kütüphanesinin içerine alabilmektedir. Ancak statik kütüphanelerde böyle bir callback mekanizması yoktur. Microsoft bunun için standart 
+	C kütüphanesinin statik versiyonunu yazarken mecburen sarma thread fonksiyonları kullanmıştır. _beginthreadex fonksiyonu statik standart C 
+	kütüphanesi kullanılacaksa thread yaratmak için tercih edilmelidir. Bu fonksiyon aslında arka planda CreateThread API fonksiyonunu zaten 
+	çağırmaktadır. Ancak threda yaratılmadan önce ve thread sonlanırken aşağıdaki kodda bulunan init ve exit gibi fonksiyonlar bu sarma fonksiyon 
+	tarafından çağrılır. Benzer biçimde eğer Microsoft sistemlerinde statik kütüphane kullanılıyorsa thread sonlanırken _endthreadex fonksiyonu 
+	çağrılmalıdır. Dinamik kütüphanelerde bu sarma fonksiyonların kullanılmasına gerek yoktur. Ayrıca gcc derleyicilerinde standart C
+	fonksiyonlarının thread güvenli olmadığını bunların thread güvenli versiyonlarının farklı parametrik yapılarla statik nesne kullanmayack 
+	biçimde xxxxx_r ismiyle yazıldığını anımsayınız. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /* cstdlib.h */
@@ -36539,112 +37556,207 @@ void ExitSys(LPCSTR lpszMsg)
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
-	UNIX/Linux sistemlerinde thread'e özgü statik alanlara Thread Specific Data (TSD) denilmektedir. Genel kullanım biçimi Windows sistemlerindekilere
-	oldukça benzemektedir. Önce pthread_key_create fonksiyonu ile bir slot yaratılır. Burada slot yerine anahtar (key) terimni kullanılmaktadır.
-	Sonra bu anahtar ile pthread_setspecific fonksiyonu ile set işlemi, pthread_getspecific fonksiyonu ile de get işlemi yapılır. En sonunda oluşturulan
-	anahtar pthread_key_delete fonksiyonuyla yok edilir. pthread_key_create fonksiyonunda bir destructor fonksiyonu da verilebilmektedir. Bu fonksiyon
-	thread yok edilirken anahtara set edilmiş olan değerle çağrılmaktadır. 
+	UNIX/Linux sistemlerinde thread'e özgü statik alanlara "Thread Specific Data (TSD)" denilmektedir. Genel kullanım biçimi Windows 
+	sistemlerindekilere	oldukça benzemektedir. Sırasıyla şunlar yapılmalıdır:
+
+	1) Önce pthread_key_create fonksiyonu ile TSD için bir slot yaratılır. pthread_key_create fonksiyonunu işlev olarak TlsAlloc fonksiyonuna
+	benzetebiliriz. Fonksiyonun prototipi şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
+
+	Fonksiyonun birinci parametresi slot anahtarının yerleştirileceği pthread_key_t türünden nesnenin adresini almaktadır. Fonksiyon slot anahtar
+	bilgisini bu nesnenin içerisine yerleştirmektedir. Tipik olarak programcı bu türden global bir nesne tanımlar. Onun adresini fonksiyona geçirir. 
+	Fonksiyonun ikinci parametresi thread sonlandığında çağrılacak callback fonksiyonun adresini almaktadır. Bu parametre NULL geçilebilir. 
+	Bu durumda sonlanma sırasında fonksiyon çağrılmaz. Fonksiyon başarı durumunda sıfır değerine başarısızlık durumunda errno değerine geri dönmektedir.
+	
+	2) TSD slotuna yerleştirme yapmak için pthread_setspecific slottan değer almak için ise pthread_getspecific fonksiyonları kullanılmaktadır.
+	Fonksiyonların prototipleri şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_setspecific(pthread_key_t key, const void *value);
+	void *pthread_getspecific(pthread_key_t key);
+
+	pthread_setspecific fonksiyonunun birinci parametresi slotu belirten pthread_key_t türünden nesneyi ikinci parametresi ise o slota yerleştirilecek 
+	adresi almaktadır. pthread_getspecific fonksiyonu da slota yerleştirilmiş olan adres değerini vermektedir.Bu fonksiyonları Windows'taki 
+	TlsSetValue ve TlsGetValue fonksiyonlarına benzetebiliriz. pthread_setspecific fonksiyonu başarı durumunda 0 değerine başarısızlık durumunda 
+	ise errno değerine geri dönmektedir. pthread_getspecific fonksiyonu başarısızlık durumunda NULL adrese geri dönmektedir. 
+
+	3) Kullanım bittikten sonra elde edilen slot pthread_key_delete fonksiyonu ile isteme iade edilir. Fonksiyonun prototipi şöyledir:
+
+	#include <pthread.h>
+
+	int pthread_key_delete(pthread_key_t key);
+
+	Fonksiyon slota ilişkin pthread_key_t türünden nesneyi parametre olarak alır. Başarı durumunda sıfır değerine, başarısızlık durumunda 
+	errno değerine geri döner.
+
+	pthread_key_create fonksiyonunun ikinci parametresine geçirilecek destructor fonksiyonunun parametrik yapısı şöyle olmalıdır:
+
+	void destructor(void *value);
+
+	Fonksiyona TSD alanına yerleştirilmiş olan slottaki adres parametre olarak geirilmektedir. Tipik olarak programcılar bu fonksiyonda 
+	dinamik tahsis edilen alanları free hale getirirler.
+
+	Aşağıda UNIX/Linux sistemlerinde TSD kullanımına ilişkin bir örnek verilmiştir.
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <pthread.h>
 
-void* thread_proc1(void* param);
-void* thread_proc2(void* param);
-void init_tsd(int val, const char* buf);
-void foo(void);
-void exit_errno(const char* msg, int result);
-void key_destructor(void* value);
+void foo(const char *str);
+void destructor(void *value);
+void *thread_proc1(void *param);
+void *thread_proc2(void *param);
+void exit_sys_errno(const char *msg, int eno);
 
-typedef struct tagSTATIC_DATA {
-	int val;
-	char buf[32];
-} STATIC_DATA;
+struct THREAD_DATA {
+	int a;
+	int b;
+	int c;
+};
 
 pthread_key_t g_tsdkey;
 
 int main(void)
 {
-	int result;
 	pthread_t tid1, tid2;
+	int result;
 
-	if ((result = pthread_key_create(&g_tsdkey, key_destructor)) != 0)
-		exit_errno("pthread_key_create", result);
+    if ((result = pthread_key_create(&g_tsdkey, destructor)) != 0)
+        exit_sys_errno("pthread_key_create", result);
 
-	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0)
-		exit_errno("pthread_create", result);
+	if ((result = pthread_create(&tid1, NULL, thread_proc1, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
 
-	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0)
-		exit_errno("pthread_create", result);
+	if ((result = pthread_create(&tid2, NULL, thread_proc2, NULL)) != 0) 
+		exit_sys_errno("pthread_create", result);
 
-	pthread_join(tid1, NULL);
-	pthread_join(tid2, NULL);
+    if ((result = pthread_join(tid1, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
 
-	pthread_key_delete(g_tsdkey);
+	if ((result = pthread_join(tid2, NULL)) != 0)
+		exit_sys_errno("pthread_join", result);
+
+    if ((result = pthread_key_delete(g_tsdkey)) != 0)
+        exit_sys_errno("pthread_key_delete", result);
 
 	return 0;
 }
 
-void* thread_proc1(void* param)
+void foo(const char *str)
 {
-	init_tsd(100, "Thread-1");
+	struct THREAD_DATA *td;
 
-	foo();
+    if ((td = (struct THREAD_DATA *)pthread_getspecific(g_tsdkey)) == NULL) {
+        fprintf(stderr, "cannot get key value!..\n");
+        exit(EXIT_FAILURE);
+    }
 
-	return NULL;
+	printf("%s: %d, %d, %d\n", str, td->a, td->b, td->c);
 }
 
-void* thread_proc2(void* param)
-{
-	init_tsd(200, "Thread-2");;
-
-	foo();
-
-	return NULL;
+void destructor(void *value)
+{   
+    free(value);
 }
 
-void init_tsd(int val, const char* buf)
+void *thread_proc1(void *param)
 {
-	STATIC_DATA* psd;
-	int result;
+    struct THREAD_DATA* td;
+    int result;
 
-	if ((psd = (STATIC_DATA*)malloc(sizeof(STATIC_DATA))) == NULL) {
-		fprintf(stderr, "cannot allocate memory!..\n");
-		exit(EXIT_FAILURE);
-	}
+    if ((td = (struct THREAD_DATA*)malloc(sizeof(struct THREAD_DATA))) == NULL) {
+        fprintf(stderr, "cannot allocate memory!..\n");
+        exit(EXIT_FAILURE);
+    }
+    td->a = 10;
+    td->b = 20;
+    td->c = 30;
 
-	psd->val = val;
-	strcpy(psd->buf, buf);
+    if ((result = pthread_setspecific(g_tsdkey, td)) != 0)
+ 		exit_sys_errno("pthread_setspecific", result);
 
-	if ((result = pthread_setspecific(g_tsdkey, psd)) != 0)
-		exit_errno("pthread_setspecific", result);
+    sleep(5);
+    foo("Thread1");
+
+    return NULL;
 }
 
-void foo(void)
+void *thread_proc2(void *param)
 {
-	STATIC_DATA* psd;
+    struct THREAD_DATA* td;
+    int result;
 
-	if ((psd = (STATIC_DATA*)pthread_getspecific(g_tsdkey)) == NULL) {
-		fprintf(stderr, "cannot get thread specific data!..\n");
-		exit(EXIT_FAILURE);
-	}
+    if ((td = (struct THREAD_DATA*)malloc(sizeof(struct THREAD_DATA))) == NULL) {
+        fprintf(stderr, "cannot allocate memory!..\n");
+        exit(EXIT_FAILURE);
+    }
+    td->a = 100;
+    td->b = 200;
+    td->c = 300;
+  
+     if ((result = pthread_setspecific(g_tsdkey, td)) != 0)
+ 		exit_sys_errno("pthread_setspecific", result);
 
-	printf("%d %s\n", psd->val, psd->buf);
+    foo("Thread2");
+
+    return NULL;
 }
 
-void key_destructor(void* value)
-{
-	free(value);
-}
 
-void exit_errno(const char* msg, int result)
+void exit_sys_errno(const char *msg, int eno)
 {
-	fprintf(stderr, "%s: %s\n", msg, strerror(result));
+	fprintf(stderr, "%s: %s\n", msg, strerror(eno));
 
 	exit(EXIT_FAILURE);
 }
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Thread'li işletim sistemlerinde thread'lerin zaman paylaşımlı biçimde çizelgelendiğini belirtmiştik. Ancak bu sistemlerde sisteme bağlı 
+	olarak thread'lere öncelik dereceleri atanabilmektedir. Böylece yksek öncelikli thread'lerin CPU'dan daha fazla zaman alması sağlanabilmektedir. 
+	Thread öncelikleri konusu yukarıda da belirttiğimiz gibi işletim sistemine özgü farklılıklar içermektedir. Biz burada önce Windows sistemlerindeki
+	durumu sonra da UNIX/Linux sistemlerindeki durumu kabaca ele alacağız. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+	Windows sistemlerinin kullandığı thread izelgeeleme algoritmasına "öncelik sınıflarıyla döngüsel çizelgeleme (priority class based round 
+	robin scheduling )" denilmektedir. Windows'ta her thread'in [0, 31] arasında bir öncelik derecesi vardır. Şimdiye kadar yaratmış olduğumuz
+	thread'lerin default öncelik dereceleri 8'dir. 
+
+	Windows'ta thread'ler şöyle çizelgelenmektedir: Önce en yüksek önceliğe sahip thread'lerden bir grup oluşturulur. Sanki diğer thread'ler
+	hiç yokmuş gibi yalnızca bu thread'ler zaman paylaşımlı biçimde çalıştırılır. Bu thread'ler sonlanırsa ya da bloke olursa bu kez daha 
+	düşük öncelikli en yüksek grup aynı biçimde kendi aralarında izelgelenir. Bu yöntemde düşük öncelikli thread'lerin çalışabilmesi için
+	yüksek öncelikli thread'lerin sonlanması ya da bloke olması gerekmektedir. Yüksek öncelikli bir thread'in blokesi çözüldüğünde işletim 
+	sistemi düşük öncelikli thread'in çalışmasına ara vererek yeniden bu yüksek öncelikli thread grubunu çizelgelemejtedir. Örneğin sistemde 
+	aşağıdaki öncelikte thread'ler bulunuyor olsun:
+
+	T1 -> 12
+	T2 -> 12
+	T3 -> 10
+	T4 -> 9
+	T5 -> 9
+	T6 -> 8
+	T7 -> 8
+	T8 -> 8
+
+	Burada sistem sanki diğer thread'ler yokmuş gibi T1 ve T2 thread'lerini kendi aralarında zaman paylaşımlı olarak çalıştırmaktadır. 
+	Bu thread'ler sonlanırsa ya da bloke olursa T3 thread'i çalışma imlanı bulacaktır. T3 thread'i de sonlanırsa ya da bloke olursa bu durumda
+	T4 thread'i, o da sonlanırsa ya da bloke olursa T5, T6, T7 ve T8 thread'leri kendi aralarında zaman paylaşımlı olarak çizelgelenecektir. 
+	Görüldüğü gibi bu sistemde düşük öncelikli bir thread'in çalışanilmesi için yüksek öncelikli thread'lerin bloke olması ya da sonlanması 
+	gerekmektedir. 
+
+	Windows'un çizelgeleme algoritması kabaca yukarıdaki gibi olsa da aslında oludukça ayrıntılar içermektedir. Çok işlemcili ya da çok çekirdekli
+	sistemlerde eeğer boşta işlemci ya da çekirdek varsa işletim sistemi daha düşük öncelikli sınıfları da bu işlemci ya da çekirdeklere atayabilmektedir. 
+
+	<BURADA KALDIK>
+
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------------------------------------------------------------------------------------------------------
 	Windows'ta bir thread'in [0-31] arasındaki önceliği iki değerin toplamıyla elde edilir. Taban değer prosesin önceli,k sınıfıyla belirlenir.
