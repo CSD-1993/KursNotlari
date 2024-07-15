@@ -40339,12 +40339,986 @@ double divide(double a, double b)
 	aynı zamanda birer POSIX fonksiyonudur. 
 -------------------------------------------------------------------------------------------------------------------------------------------*/
 
-<BURADA KALDIk>
+/*------------------------------------------------------------------------------------------------------------------------------------------
+									96. Ders 16/06/2024 - Pazar
+-------------------------------------------------------------------------------------------------------------------------------------------*/
 
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    Bir TCP/IP uygulamasında iki ayrı program yazılır: "TCP Server Program" ve "TCP Client Program". Biz önce TCP server programın 
+	daha sonra da TCP client programın yazımı üzerinde duracağız. Tabii TCP server programın üzerinde dururken zaten bazı ortak 
+	soket fonksiyonlarını da göreceğiz. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    Bir TCP server program tipik olarak aşağıdaki soket API'lerinin sırayla çağrılmasıyla gerçekleştirilmektedir:
+
+    (Windows'ta WSAStartup --->)  socket ---> bind ---> listen ---> accept ---> send/recv (ya da UNIC/Linux'ta read/write)
+	---> shutdown ---> close (Windows'ta closesocket) (---> Windows'ta WSACleanup)
+
+	Buradan da gördüğünüz gibi her ne kadar Windows UNIX tarzı Bekeley soket kütüphanesini destekliyorsa da şu küçük 
+	farklılıklara sahiptir:
+
+	1) Windows'ta soket sistemini başlatmak ve sonlandırmak için WSAStartup ve WSACleanup API fonksiyonları kullanılmaktadır.
+	
+	2) Windows'ta soket nesnesini yok etmek için close yerine closesocket API fonksiyonu bulunmaktadır. 
+	
+	3) Windows'ta bazı istisnalar dışında bir soket fonksiyonu başarısız olduğunda başarısızlığın nedeni GetLastError fonksiyonuyla değil 
+	WSAGetLastError fonksiyonuyla elde edilmektedir. Bu nedenle Windows örneğimizde hataları rapor etmek için ExitSys fonksiyonunu aşağıdaki 
+	biçimde tanımlayacağız:
+
+	void ExitSys(LPCSTR lpszMsg, DWORD dwLastErr)
+	{
+		LPTSTR lpszErr;
+
+		if (FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, dwLastErr,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpszErr, 0, NULL)) {
+			fprintf(stderr, "%s: %s", lpszMsg, lpszErr);
+			LocalFree(lpszErr);
+		}
+
+		exit(EXIT_FAILURE);
+	}
+
+	4) Windows'ta soket kütüphanesi API fonksiyonlarının bulunduğu kütüphaneler içerisinde değildir. Bu nedenle link amasında soket API'lerinin 
+	bulunduğu dinamik kütüphanenin import kütüphanesi ("Ws2_32.lib") linker ayarlarında belirtilmelidir. 
+
+	5) Windows sistemlerinde soket fonksiyonlarının protoipleri <winsock2.h> dosyası içerisindedir. Halbuki UNIX/Linux sistemlerinde fonksiyonların
+	prototipleri farklı başlık dosyalarında bulunabilmektedir. Eğer <windows.h> dosyası da include edilecekse önce <winsock2.h> dosyası sonra 
+	<windows.h> dosyası include edilmelidir.
+	
+	Windows'ta soket sistemini başlatmak için WSAStartup fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	int WSAStartup(
+		WORD      wVersionRequired,
+		LPWSADATA lpWSAData
+	);
+
+	Fonksiyonun birinci parametresi talep edilen soket kütüphanesinin versiyonunu belirtmektedir. Buradaki WORD değer iki ayrı byte'ın birleşiminden 
+	oluşmaktadır. MAKEWORD(high, low) makrosu ile bu parametre için argüman oluşturulabilir. Windows soket kütüphanesinin son versiyonu 2.2 versiyonudur. 
+	Dolayısıyla bu parametre için argümanı MAKEWORD(2, 2) biçiminde geçebiliriz. Eğer talep edilen versiyon yüksekse bu durum hataya yol açmamakta 
+	talep edilenden küçük olan en yüksek versiyon kullanıma hazır hale getirilmektedir. Fonksiyonun ikinci parametresi WSADATA isimli bir yapı 
+	nesnesinin adresini almaktadır. Fonksiyon bu yapıya bazı bilgiler yerleştirmektedir. Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda 
+	hata kodunun kendisine geri dönmektedir. (Yani bu fonksiyon için WSAGetLastError çağrısına gerek yoktur.) Fonksiyon tipik olarak şöyle kullanılır:
+
+	WSADATA wsaData;
+	int result;
+	...
+
+	if ((result = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0)
+		ExitSys("WSAStartup", result);
+
+	Windows'ta WSACleaanup fonksiyonun prototipi ise şöyledir:
+
+	#include <winsock2.h>
+
+	int WSACleanup(void);
+
+	Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda SOCKET_ERROR özel değerine (bu değer genellikle -1 olarak define edilmektedir) 
+	geri dönmektedir. Hatanın nedeni için WSAGetLastError fonksiyonuna başvurulmalıdır. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    Haberleşme için öncelikle bir soket nesnesinin yaratılması gerekmektedir. Bu işlem socket isimli fonksiyonla yapılmaktadır. socket fonksiyonu 
+	bir soket nesnesi (handle alanı) yaratır ve bize handle değeri verir. Windows sistemlerinde socket fonksiyonunun geri döndürdüğü handle 
+	değeri SOCKET isimli bir türdendir. Ancak UNIX/Linux sistemlerinde bir dosya betimleyicisi biçimindedir. Yani UNIX/Linux sistemlerinde 
+	socket nesneleri tamamen bir dosya gibi kullanılmaktadır.  Windows sistemlerinde socket fonksiyonunun prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	SOCKET socket(
+		int af,
+		int type,
+		int protocol
+	);
+		
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    int socket(int domain, int type, int protocol);
+
+	Fonksiyonların parametreleri her iki sistemde de aynıdır. Yukarıda da gördüğünüz gibi tek fark Windows sistemlerinde soketin handle değerinin 
+	SOCKET türüyle UNIX/Linux sistemlerinde ise int türüyle temsil edilmesidir. 
+
+    socket fonksiyonunun birinci parametresi kullanılacak protokol ailesini belirtir. Bu parametre AF_XXX (Address Family) biçimindeki sembolik 
+	sabitlerden biri olarak girilir. IPv4 için bu parametreye AF_INET, IPv6 için AF_INET6 girilmelidir. UNIX domain soketler için bu parametre 
+	AF_UNIX olarak girilmelidir.
+
+    Fonksiyonun ikinci parametresi kullanılacak protokolün stream tabanlı mı yoksa datagram tabanlı mı olacağını belirtmektedir. Stream soketler 
+	için SOCK_STREAM, datagram soketler için SOCK_DGRAM kullanılmalıdır. Ancak başka soket türleri de vardır. TCP protokolünde bu parametre 
+	SOCK_STREAM biçiminde UDP protokülünde ise bu parametre SOCK_DGRAM biçiminde girilmelidir. 
+
+    Fonksiyonun üçüncü parametresi aktarım (transport) katmanındaki protokolü belirtmektedir. Ancak zaten ikinci parametreden aktarım protokolü 
+	anlaşılıyorsa üçüncü parametre 0 olarak geçilebilmektedir. Örneğin IP protokol ailesinde üçüncü parametreye gerek duyulmamaktadır. Çünkü ikinci 
+	parametredeki SOCK_STREAM zaten TCP'yi, SOCK_DGRAM ise zaten UDP'yi anlatmaktadır. Fakat yine de bu parametreye istenirse IP ailesi için 
+	IPPROTO_TCP ya da IPPROTO_UDP girilebilir. (Bu sembolik sabitler UNIX/Linux sistemlerinde <netinet/in.h> içerisindedir.) 
+
+    socket fonksiyonu başarı durumunda Windows'ta soket handle değerine UNIX/Linux sistemlerinde ise soket betimeleyicisine geri dönemktedir. 
+	Fonksiyon başarısızlık durumunda Windows'ta SOCKT_ERROR değerine UNIX/Linux sistemlerinde ise -1 değerine geri dönmektedir. Windows sistemlerindeki
+	SOCKET_ERROR sembolik sabiti de zaten -1 biçiminde define edilmiştir. Ancak Windows sistemlerinde SOCKET_ERROR sembolik sabitinin kullanılması 
+	gerekir. 
+	
+	Örneğin Windows sistemlerinde socket nesnesi şöyle yaratılabilir:
+
+	SOCKET serverSock;
+	...
+
+	if ((serverSock = socket(AF_INET, SOCK_STREAM, 0)) == SOCKET_ERROR)
+		ExitSys("socket", WSAGetLastError());
+
+    Aynı işlem UNIX/Linux sistemlerinde şöyle yapılabilir:
+
+    int server_sock;
+	...
+
+    if ((server_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+        exit_sys("socket");
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    Server program soketi yarattıktan sonra onu bağlamalıdır (bind etmelidir). bind işlemi sırasında server'ın hangi portu dinleyeceği ve 
+	hangi network arayüzünden (kartından) gelen bağlantı isteklerini kabul edeceği belirlenir. Ancak bind fonksiyonu dinleme işlemini başlatmaz. 
+	Yalnızca soket nesnesine bu bilgileri yerleştirir. Fonksiyonun Windows sistemlerindeki prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	int bind(
+  		SOCKET         s,
+        const sockaddr *addr,
+  		int            namelen
+	);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    int bind(int socket, const struct sockaddr *addr, socklen_t addrlen);
+
+	Görüldüğü gibi fonksiyonların iki sistemde de prototipi aynıdır. Ancak Windows sistemlerinde soket nesnesi SOCKET türüyle temsil edilmektedir.
+	Biz kursumuzda anlatımı kolaylaştırmak için her iki sistemde de socket handle değerine soket betimelyicisi diyeceğiz. 
+
+    bind fonksiyonunun birinci parametresi yaratılmış olan soket betimleyicisini belirtir. İkinci parametre her ne kadar sockaddr isimli bir yapı 
+	türünden gösterici ise de de aslında her protokol için ayrı bir yapı nesnesinin adresini almaktadır. Yani sockaddr yapısı burada genelliği 
+	(void gösterici gibi) temsil etmek için kullanılmıştır. IPv4 için kullanılacak yapı sockaddr_in, IPv6 için sockaddr_in6 ve örneğin UNIX 
+    domain soketler için ise sockaddr_un biçiminde olmalıdır. Üçüncü parametre, ikinci parametredeki yapının uzunluğu olarak 
+    girilmelidir. 
+
+    sockaddr_in yapısı UNIX/Linux sistemlerinde <netinet/in.h> dosyası içerisindedir. Windows sistemlerinde bu yapı şöyle bildirilmiştir:
+	
+	#include <winsock2.h>
+
+	typedef struct sockaddr_in {
+		short          sin_family;
+		u_short        sin_port;
+		struct in_addr sin_addr;
+		char           sin_zero[8];
+	} SOCKADDR_IN, *PSOCKADDR_IN, *LPSOCKADDR_IN;
+	
+	UNIX/Linux sistemlerinde ise bu yapı şöyle bildirilmiştir:
+
+    #include <netinet/in.h>
+
+    struct sockaddr_in {
+        sa_family_t     sin_family;
+        in_port_t       sin_port;
+        struct in_addr  sin_addr;
+    };
+
+	Yapı elemanlarının türleri için iki sistemde farklı typedef isimleri kullanılmış olasa da elemanlar aynı anlamdadır. Yapının sin_family 
+	elemanına protokol ailesini belirten AF_XXX değeri girilmelidir. Bu eleman tipik olarak short biçimde bildirilmiştir. Yapının sin_port 
+	elemanı her iki sistemde de unsigned short türdendir. Server programın hangi portu dinleyeceği bu elemanla belirlenmektedir. Yapının 
+	sin_addr elemanı IP numarası belirten bir elemandır. Bu eleman in_addr isimli bir yapı türündendir. Bu yapı Windows sistemlerinde şöyle 
+	bildirilmiştir:
+
+	struct in_addr {
+		union {
+			struct {
+			u_char s_b1;
+			u_char s_b2;
+			u_char s_b3;
+			u_char s_b4;
+			} S_un_b;
+			struct {
+			u_short s_w1;
+			u_short s_w2;
+			} S_un_w;
+			u_long S_addr;
+		} S_un;
+	};
+
+	#define s_addr S_un.S_addr	
+	
+	UNIX/Linux sistemlerinde ise in_addr yapısı <netint/in.h> dosyası içerisinde şöyle bildirilmiştir:
+
+    #include <netinet/in.h>
+
+    struct in_addr {
+        in_addr_t s_addr;
+    };
+	
+    Aslında her iki sistemde de yapının s_addr elemanı IPV4 için 4 byte'lık işaretsiz tamsayı türü belirtmektedir. İşte bu 4 byte'lık işaretsiz
+	tamsayı türü IPV4 için IP adresini belirtmektedir. Eğer buradaki IP adresi INADDR_ANY biçiminde geçilirse bu durum "herhangi bir network 
+	kartından gelen bağlantı isteklerinin kabul edileceği" anlamına gelmektedir. 
+
+    Yukarıda da belirttiğimiz gibi IP ailesinde tüm sayısal değerler "big endian" formatıyla belirtilmek zorundadır. Bu ailede 
+    "network byte ordering" denildiğinde "big endian" format anlaşılır. Oysa makinelerin belli bir bölümü (örneğin Intel ve default ARM) 
+    "little endian" kullanmaktadır. İşte elimizdeki makinenin endian'lığı ne olursa olsun onu big endian formata dönüştüren htons 
+    (host to network byte ordering short) ve htonl (host to network byte ordering long) isimli iki fonksiyon vardır. Bu işlemlerin tersini 
+    yapan da ntohs (network byte ordering to host short) ve ntohl (network byte ordering to host long) fonksiyonları da bulunmaktadır. 
+	Fonksiyonların Windows sistemlerindeki prototipleri şöyledir:
+
+	#include <winsock2.h>
+
+	u_short htons(
+  		u_short hostshort
+	);
+
+	u_long htonl(
+  		u_long hostlong
+	);
+
+	u_short ntohs(
+  		u_short netshort
+	);
+
+	u_long ntohl(
+  		u_long netlong
+	);
+
+    Fonksiyonların UNIX/Linux sistemlerindeki prototipleri şöyledir:
+
+    #include <arpa/inet.h>
+
+    uint32_t htonl(uint32_t hostlong);
+    uint16_t htons(uint16_t hostshort);
+    uint32_t ntohl(uint32_t netlong);
+    uint16_t ntohs(uint16_t netshort);
+
+    Bu durumda sockaddr_in yapısı her iki sistemde de tipik olarak şöyle doldurulabilir:
+
+    struct sockaddr_in sinaddr;
+
+    sinaddr.sin_family = AF_INET;
+    sinaddr.sin_port = htons(SERVER_PORT);
+    sinaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    bind fonksiyonu başarı durumunda sıfır değerine, başarısızlık durumunda Windows sistemlerinde SOCKET_ERROR değerine, UNIX/Linux sistemlerinde 
+	ise -1 değerine geri dönmektedir. Örneğin Windows sistemlerinde fonksiyon şöyle çağrılabilir:
+
+	if (bind(serverSock, (struct sockaddr *)&sin_server, sizeof(sin_server)) == SOCKET_ERROR)
+        ExitSys("bind", WSAGetLastError());
+
+	UNIX/Linux sistemlerinde de çağrı şöyle olabilir:
+
+    if (bind(server_sock, (struct sockaddr *)&sin_server, sizeof(sin_server)) == -1)
+        exit_sys("bind");
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    server program bind işleminden sonra soketi aktif dinleme konumuna sokmak için listen fonkiyonunu çağırmalıdır. Fonksiyonun Windows 
+	sistemlerindeki prototipi şöyledir:
+
+	#include <windows.h>
+
+	int listen(
+  		SOCKET s,
+  		int backlog
+	);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    int listen(int socket, int backlog);
+
+    Fonksiyonun birinci parametresi soket betimleyicisini, ikinci parametresi kuyruk uzunluğunu belirtir. listen işlemi blokeye yol açmamaktadır. 
+	İşletim sistemi listen işleminden sonra ilgili porta gelen bağlantı isteklerini uygulama için oluşturduğu bir bağlantı kuyruğuna yerleştirmektedir. 
+	Kuyruk uzunluğunu yüksek tutmak meşgul server'larda bağlantı isteklerinin kaçırılmamasını sağlayabilir. Linux'ta default durumda verilebilecek 
+	en yüksek değer 128'dir. Ancak "/proc/sys/net/core/somaxconn" dosyasındaki değer değiştirilerek bu default uzunluk artırılabilir. Fonksiyon 
+	başarı durumunda 0 değerine, başarısızlık durumunda Windows sistelerinde SOCKET_ERROR değerine, UNIX/Linux sistemlerinde ise -1 değerine 
+	geri dönmektedir. Örneğin Windows sistemlerinde fonksiyon şöyle çağrılabilir:
+
+    if (listen(serverSock, 8) == SOCKET_ERROR)
+        ExitSys("listen", WSAGetLastError());
+
+	UNIX/Linux sistemlerinde de çağrı şöyle yapılabilir:
+
+    if (listen(server_sock, 8) == -1)
+        exit_sys("listen");
+
+    Bu fonksiyon işletim sistemlerinin "firewall mekanizması" tarafından denetlenebilmektedir. Eğer çalıştığınız sistemde söz konusu port 
+	firewall tarafından kapatılmışsa bunu açmanız gerekir. (Windows sistemlerinde listen fonksiyonu bir pop pencere çıkartarak uyarı mesajı 
+	görüntülemektedir.)
+
+	Yukarıda da belirttiğimiz gibi listen fonksiyonu herhangi bir blokeye yol açmaz. Bu fonksiyon çağrıldıktan sonra işletim sistemi ilgili 
+	porta gelecek bağlantı isteklerini prosese özgü bir bağlantı kuyruğuna yerleştirmektedir. Bu bağlantı kuyruğundan bağlantı isteklerini 
+	alarak bağlantısıyı sağlayan asıl fonksiyon accept fonksiyonudur.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+												97. Ders 22/06/2024 - Cumartesi
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*------------------------------------------------------------------------------------------------------------------------------------------
+    accept fonksiyonu bağlantı kuyruğuna bakar. Eğer kuyrukta bir bağlantı isteği varsa onu alır ve hemen geri döner. Eğer orada bir bağlantı 
+	isteği yoksa default durumda blokede bekler. Ancak accept fonksiyonu blokesiz modda da kullanılabilmektedir. Fonksiyonun Windows 
+	sistemlerindeki prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	SOCKET accept(
+		SOCKET   s,
+		struct sockaddr *addr,
+		int *addrlen
+	);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    int accept(int socket, struct sockaddr *address, socklen_t *address_len);
+
+    Fonksiyonların birinci parametreleri dinleme soketinin dosya betimleyicisini almaktadır. İkinci parametre bağlanılan client'a ilişkin bilgilerin 
+	yerleştirileceği sockaddr_in yapısının adresini almaktadır. Bu parametre yine genel bir sockaddr yapısı türünden gösterici ile temsil edilmiştir. 
+	Bizim bu parametre için IPv4'te sockaddr_in türünden, IPv6'da sockaddr_in6 türünden bir yapı nesnesinin adresini argüman olarak vermemiz gerekir. 
+	sockaddr_in yapısının üç elemanı olduğunu anımsayınız. Biz bu parametre sayesinde bağlanan client programın IP adresini ve client makinedeki 
+	port numarasını elde edebilmekteyiz. Client program server programa bağlanırken bir IP adresi ve port numarası belirtir. Ancak kendisinin de bir 
+	IP adresi ve port numarası vardır. Client'ın port numarası kendi makinesindeki (host'undaki) port numarasıdır. Client'ın IP adresine ve oradaki 
+	port numarasına "remote end point" de denilmektedir. Örneğin 178.231.152.127 IP adresinden bir client programın 52310 port'u ile server'ın bulunduğu 
+	176.234.135.196 adresi ve 55555 numaralı portuna bağlandığını varsayalım. Burada remote endpoint "178.231.152.127:52310" biçiminde ifade edilmektedir. 
+	İşte biz accept fonksiyonunun ikinci parametresinden client hakkında bu bilgileri almaktayız.
+
+    Client (178.231.152.127:52310) ---> Server (176.234.135.196:55555)
+
+    accept fonksiyonunun üçüncü parametresi yine ikinci parametredeki yapının (yani sockaddr_in yapısının) byte uzunluğunu belirtmektedir. Ancak bu 
+	parametre bir adres olarak alınmaktadır. Yani programcı Windows'ta int türünden UNIX(Linux sistemlerinde socklen_t türünden bir nesne tanımlamalı, 
+	bu nesneye bu sizeof değerini yerleştirmeli ve nesnenin adresini de fonksiyonun üçüncü parametresine geçirmelidir. Fonksiyon bağlanılan client'a 
+	ilişkin soket bilgilerinin byte uzunluğunu yine bu adrese yerleştirmektedir. Tabii IP protokol ailesinde her iki taraf da aynı yapıyı kullanıyorsa 
+	fonksiyon çıkışında bu sizeof değerinde bir değişiklik olmayacaktır. Ancak tasarım genel yapıldığı için böyle bir yola gidilmiştir.
+
+    accept fonksiyonu başarı durumunda bağlanılan client'a ilişkin yeni bir soket betimleyicisine geri dönmektedir. Artık bağlanılan client ile bu 
+	soket yoluyla konuşulacaktır. accept fonksiyonu başarısızlık durumunda Windows sistemlerinde SOCKET_ERROR değerine UNIC/Linux sistemlerinde ise -1 
+	değeri ile geri dönmektedir. Örneğin Windows sistemlerine accpet fonksiyonu şöyle kullanılabilir:
+
+	struct sockaddr_in sin_client;
+    int sin_len;
+    SOCKET serverSock;
+	...
+
+	sin_len = sizeof(sin_client);
+	if ((clientSock = accept(serverSock, (struct sockaddr *)&sin_client, &sin_len)) == SOCKET_ERROR) 
+		ExitSys("accept", WSAGetLastError());
+
+	UNIX/Linux sistemlerinde de fonksiyon şöyle kullanılabilir:
+
+    struct sockaddr_in sin_client;
+    socklen_t sin_len;
+    int client_sock;
+    ...
+
+    sin_len = sizeof(sin_client);
+    if ((client_sock = accept(server_sock, (struct sockaddr *)&sin_client, &sin_len)) == -1)
+        exit_sys("accept");
+
+    Server tarafta temelde iki soket bulunmaktadır. Birincisi bind, listen, accept işlemini yapmakta kullanılan sokettir. Bu sokete TCP/IP 
+	terminolojisinde ""pasif soket (passive socket)" ya da "dinleme soketi (listening socket)" denilmektedir. İkinci soket ise client ile 
+	konuşmakta kullanılan accept fonksiyonunun geri döndürdüğü sokettir. Buna da "aktif soket (active socket)" denilmektedir. Tabii server 
+	program birden fazla client ile konuşacaksa accept fonksiyonunu bir kez değil, çok kez uygulamalıdır. Her accept o anda bağlanılan client 
+	ile konuşmakta kullanılabilecek yeni bir soket vermektedir. bind, listen işlemleri bir kez yapılmaktadır. Halbuki accept işlemi her client 
+	bağlantısı için ayrıca uygulanmalıdır.
+
+    accept fonksiyonu default durumda blokeli modda çalışmaktadır. Eğer accept çağrıldığında o anda bağlantı kuyruğunda hiç bir client isteği 
+	yoksa accept fonksiyonu blokeye yol açmaktadır. Eğer accept çağrıldığında zaten bağlantı kuyruğunda bağlantı için bekleyen client varsa 
+	accept bloke olmadan bağlantıyı gerçekleştirir ve geri döner.
+
+    accept fonksiyonu ile elde edilen client bilgilerindeki IP adresini ve port numaraları "big endian" formatında yani "network byte ordering" 
+	formatındadır. Bunları sayısal olarak görüntülemek için ntohl ve ntohs fonksiyonlarının kullanılması gerekir. Tabii izleyen paragrafta ele 
+	alacağımız gibi aslında IP adresleri genellikle "noktalı desimal format (dotted decimal format)" denilen bir format ile yazı biçiminde 
+	görüntülenmektedir.
+	
+	IPV4 adresini alarak noktalı desimal formata dönüştüren inet_ntoa isimli bir fonksiyon vardır. Fonksiyonun prototipi her iki sistemde de 
+	şöyledir:
+
+	#include <winsock2.h>
+	#include <arpa/inet.h>
+
+	char *inet_ntoa(struct in_addr in);
+
+	Fonksiyon parametre olarak sockaddr_in yapısının içerisindeki IP adresinin bulunduğu in_addr yapısını (adresini değil) parametre olarak 
+	alır ve noktalı desimal format yazısının adresiyle geri döner. Bu durumda accept işlemindne elde edilen client bilgileri aşağıdaki gibi 
+	ekrana yazdırabilir:
+
+	printf("waiting for client...\n");
+	sin_len = sizeof(sin_client);
+	if ((clientSock = accept(serverSock, (struct sockaddr *)&sin_client, &sin_len)) == SOCKET_ERROR) 
+		ExitSys("accept", WSAGetLastError());
+
+	printf("Connected %s:%d\n", inet_ntoa(sin_client.sin_addr), ntohs(sin_client.sin_port));
+
+	inet_nto fonksiyonunun tersini yapan inet_aton isimli bir fonksiyon da bulunmaktadır. Bu fonksiyon noktalı desimal formattaki ip adresini
+	in_addr yapısınn içerisine yerleştirmektedir. Bu fonksiyon Windows sistemlerinde yoktur. Yalonızca UNIX/Linux sistemlerinde bulunmaktadır:
+
+	#include <arpa/inet.h>
+
+	int inet_aton(const char *cp, struct in_addr *inp);
+
+	Fonksiyonun birinci parametresi noktalı desimal formattaki ip adresini almaktadır. İkinci paranetresi ise ip adresinin yerleştirileceği 
+	in_addr yapısının adresini almaktadır. Fonksiyon başarı durumunda 0 değerine başarısızlık durumunda ise -1 değerine geri dönmektedir. 
+	
+	inet_ntoa ve inet_aton fonksiyonlarının inet_ntop ve inet_pton isimli versiyonları da vardır. Aslında artık inet_ntoa ve inet_aton fonksiyonları
+	"deprecated" yapılmıştır. Ancak inet_ntop ve inet_pton fonksiyonlarının kullanımı biraz zordur. Biz kursumuzda "deprecated" olmasına karşın 
+	kolaylığı nedeniyle inet_ntoa ve inet_aton fonksiyonlarını kullanacağız. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+	Aşağıda Windows ve UNIX/Linux sistemlerinde geldiğimiz noktaya kadar server programların kodları bir bütün olarak verilmiştir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* Windows ""server.c" */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <winsock2.h>
+#include <windows.h>
+
+#define PORT_NO			55555
+
+void ExitSys(LPCSTR lpszMsg, DWORD dwLastErr);
+
+int main(void)
+{
+	WSADATA wsaData;
+	int result; 
+	SOCKET serverSock, clientSock;
+	struct sockaddr_in sinServer, sinClient;
+	int sin_len;
+
+	if ((result = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0)
+		ExitSys("WSAStartup", result);
+
+	if ((serverSock = socket(AF_INET, SOCK_STREAM, 0)) == SOCKET_ERROR)
+		ExitSys("socket", WSAGetLastError());
+
+	sinServer.sin_family = AF_INET;
+	sinServer.sin_port = htons(PORT_NO);
+	sinServer.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	if (bind(serverSock, (struct sockaddr *)&sinServer, sizeof(sinServer)) == SOCKET_ERROR)
+		ExitSys("bind", WSAGetLastError());
+
+	if (listen(serverSock, 8) == SOCKET_ERROR)
+		ExitSys("listen", WSAGetLastError());
+
+	printf("waiting for client...\n");
+	sin_len = sizeof(sinClient);
+	if ((clientSock = accept(serverSock, (struct sockaddr *)&sinClient, &sin_len)) == SOCKET_ERROR) 
+		ExitSys("accept", WSAGetLastError());
+
+	printf("Connected %s:%d\n", inet_ntoa(sinClient.sin_addr), ntohs(sinClient.sin_port));
+	
+	WSACleanup();
+
+	printf("Ok\n");
+
+	return 0;
+}
+
+void ExitSys(LPCSTR lpszMsg, DWORD dwLastErr)
+{
+	LPTSTR lpszErr;
+
+	if (FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, dwLastErr,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpszErr, 0, NULL)) {
+		fprintf(stderr, "%s: %s", lpszMsg, lpszErr);
+		LocalFree(lpszErr);
+	}
+
+	exit(EXIT_FAILURE);
+}
+
+/* UNIX/Linux "server.c" */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+#define PORT_NO     55555
+
+void exit_sys(const char* msg);
+
+int main(void)
+{
+    int server_sock, client_sock;
+    struct sockaddr_in sin_server, sin_client;
+    socklen_t sin_len;
+
+    if ((server_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)    
+        exit_sys("socket");
+
+    sin_server.sin_family = AF_INET;
+    sin_server.sin_port = htons(PORT_NO);
+    sin_server.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(server_sock, (struct sockaddr *)&sin_server, sizeof(sin_server)) == -1)
+        exit_sys("bind");
+
+    if (listen(server_sock, 8) == -1)
+		 exit_sys("listen");
+
+    printf("waiting for client..\n");
+    sin_len = sizeof(sin_client);
+    if ((client_sock = accept(server_sock, (struct sockaddr *)&sin_client, &sin_len)) == -1)
+        exit_sys("accept");
+    printf("Client connected %s:%d\n", inet_ntoa(sin_client.sin_addr), ntohs(sin_client.sin_port));
+
+	return 0;
+}
+
+void exit_sys(const char* msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+	TCP client program, server programa bağlanabilmek için tipik bazı adımları uygulamak zorundadır. Bu adımlar sırasında çağrılacak fonksiyonlar 
+	şunlardır:
+
+    (Windows'ta WSAStartup) ---> socket ---> bind (isteğe bağlı) ---> gethostbyname (isteğe bağlı) ---> connect ---> send/recv (ya da read/write)
+    ---> shutdown ---> close (Windows'ta closesocket) (---> Windows'ta WSACleanup)
+
+    Client taraf önce yine socket fonksiyonuyla bir soket yaratır. Soketin bind edilmesi gerekmez. Zaten genellikle client taraf soketi bind etmez. 
+	Eğer client taraf belli bir port'tan bağlanmak istiyorsa bu durumda bind işlemini uygulayabilir. Eğer client bind işlemi yapmazsa zaten işletim 
+	sistemi connect işlemi sırasında sokete boş bir port numarasını atamaktadır. İşletim sisteminin bind edilmemiş client programa connect işlemi 
+	sırasında atadığı bu port numarasına İngilizce "ephemeral port (ömrü kısa olan port)"" denilmektedir. Seyrek olarak bazı server programlar 
+	client için belli bir remote port numarası talep edebilmektedir. Bu durumda client'ın bu remote port'a sahip olabilmesi için bind işlemini 
+	uygulaması gerekir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+    Client bağlantı için server'ın IP adresini ve port numarasını bilmek zorundadır. IP adreslerinin akılda tutulması zordur. Bu nedenle IP 
+	adresleri ile eşleşen "host isimleri" oluşturulmuştur. Ancak IP protokol ailesi host isimleriyle değil, IP numaralarıyla çalışmaktadır. 
+	İşte host isimleriyle IP numaralarını eşleştiren ismine DNS (Domain Name Server) denilen özel server'lar bulunmaktadır. Bu server'lar 
+	IP protokol ailesindeki DNS isimli bir protokol ile çalışmaktadır. Dolayısıyla client programın elinde IP adresi yerine host ismi varsa 
+	DNS işlemi yaparak o host ismine karşı gelen IP numarasını elde etmesi gerekir. DNS server'lar dağıtık biçimde bulunmaktadır. Bir kayıt
+	bir DNS server'da yoksa başka bir DNS server'a referans edilmektedir.
+
+    DNS server'larda host isimleriyle IP numaraları bire bir karşılık gelmemektedir. Belli bir host ismine birden fazla IP numarası eşleştirilmiş 
+	olabileceği gibi belli bir IP numarasına da birden fazla host ismi eşleştirilmiş olabilmektedir.
+
+    DNS işlemleri yapan iki geleneksel fonksiyon vardır: gethostbyname ve gethostbyaddr. Bu fonksiyonların kullanımları kolaydır. Ancak bu 
+	fonksiyonlar artık "deprecated" yapılmış ve POSIX standartlarından da silinmiştir. Bunların yerine getnameinfo ve getaddrinfo fonksiyonları 
+	oluşturulmuştur. Bu fonksiyonlar POSIX standartlarında bulunmaktadır. Biz kursumuzda artık "deprecated" hale getirilmiş "gethostbyname"
+	ve "gethostbyaddress" kullanmayacağız. Bunun yerine "getaddrinfo" fonksiyonunu açıklayıp onu kullanacağız. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+	getaddrinfo isimli fonksiyon inet_addr ve gethosybyname fonksiyonlarının IPv6'yı da içerecek biçimde genişletilmiş bir biçimidir. Yani 
+	getaddrinfo hem noktalı desimal formatı nümerik adrese dönüştürür hem de eğer geçersiz bir noktalı desimal format söz konusuysa (bu durumda 
+	server isimsel olarak girilmiş olabilir) DNS işlemi yaparak ilgili host'un IP adresini elde eder. Maalesef fonksiyon biraz karışık tasarlanmıştır. 
+	Fonksiyonun Windows sistemlerindeki prototipi şöyledir:
+
+	#include <ws2tcpip.h>
+
+	INT getaddrinfo(
+		PCSTR				pNodeName,
+		PCSTR				pServiceName,
+		const ADDRINFOA		*pHints,
+		PADDRINFOA			*ppResult
+	);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <netdb.h>
+
+    int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
+
+	Aslında her iki sistemde de typedef isimleri farklı olmasına karşın fonksiyon aynı biçimde kullanılmaktadır. Fonksiyonun birinci parametresi 
+	"noktalı desimal formatlı IP adresi" ya da "host ismini" belirtmektedir. İkinci parametre NULL geçilebilir ya da buraya port numarası girilebilir. 
+	Ancak bu parametreye port numarası girilecekse yazısal biçimde girilmelidir. Fonksiyon bu port numarasını htons yaparak "big endian" formata 
+	dönüştürüp bize verecektir. Bu parametreye aynı zamanda IP ailesinin uygulama katmanına ilişkin spesifik bir protokolün ismi de girilebilmektedir 
+	(Örneğin "http" gibi, "ftp" gibi). Bu durumda bu protokollerin port numaraları bilindiği için sanki o port numaraları girilmiş gibi işlem 
+	yapılır. Eğer bu parametreye NULL girilirse bize port olarak 0 verilecektir. Port numarasını biz yerleştiriyorsak bu parametreye NULL girebiliriz. 
+	Fonksiyonun üçüncü parametresi nasıl bir adres istediğimizi anlatan filtreleme seçeneklerini belirtir. Bu parametre addrinfo isimli bir yapı 
+	türündendir. Bu yapının yalnızca ilk dört elemanı programcı tarafından girilebilmektedir. Ancak POSIX standartları bu yapının elemanlarının 
+	sıfırlanmasını öngörmektedir (buradaki sıfırlanmak terimi normal türdeki elemanlar için 0 değerini, göstericiler için NULL adres değerini 
+	belirtmektedir). addrinfo yapısı şöyledir:
+
+    struct addrinfo {
+        int              ai_flags;
+        int              ai_family;
+        int              ai_socktype;
+        int              ai_protocol;
+        socklen_t        ai_addrlen;
+        struct sockaddr *ai_addr;
+        char            *ai_canonname;
+        struct addrinfo *ai_next;
+    };
+
+    Yapının ai_flags elemanı pek çok bayrak değeri alabilmektedir. Bu değer 0 olarak da geçilebilir. Yapının ai_family elemanı AF_INET girilirse 
+	host'a ilişkin IPv4 adresleri, AF_INET6 girilirse host'a ilişkin IPv6 adresleri, AF_UNSPEC girilirse hem IPv4 hem de IPv6 adresleri elde edilir. 
+	Yapının ai_socktype elemanı 0 girilebilir ya da SOCK_STREAM veya SOCK_DGRAM girilebilir. Fonksiyonun ayrıntılı açıklaması için dokümanlara başvurunuz. 
+	Bu parametre NULL adres de girilebilir. Bu durumda ilgili host'a ilişkin tüm adresler elde edilir. 
+
+    getaddrinfo fonksiyonunun son parametresine bir bağlı listenin ilk elemanını gösteren adres yerleştirilmektedir. Buradaki bağlı listenin bağ 
+	elemanı addrinfo yapısının ai_next elemanıdır. Bu bağlı listenin boşaltımı freeaddrinfo fonksiyonu tarafından yapılmaktadır. 
+
+    getaddrinfo fonksiyonu başarı durumunda 0 değerine, başarısızlık durumunda doğrudan hata koduna geri döner. Bu hata kodları Windows şistemlerinde
+	WSAGetLastError fonksiyonuyla elde ettiğimiz hata kodlarıdır. Ancak UNIX/Linux sistemlerinde bu hata kodları errno kodları değildir. Bu hata kodlarının
+	UNIX/Linux sistemlerinde gai_strerror fonksiyonuyla yazıya dönüştürülmesi gerekir. 
+
+    Bağlı listenin düğümlerini free hale getirmek için freeaddrinfo fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <netdb.h>
+
+    void freeaddrinfo(struct addrinfo *ai);
+
+    Fonksiyon getaddrinfo fonksiyonunun verdiği bağlı listenin ilk düğümünün (head pointer) adresini parametre olarak alır ve tüm bağlı listeyi boşaltır. 
+	gai_strerror fonksiyonunun prototipi de şöyledir:
+
+    #include <netdb.h>
+
+    const char *gai_strerror(int ecode);
+
+    getaddrinfo fonksiyonunun client programda tipik kullanımı aşağıda verilmiştir.
+
+    Bu fonksiyon bize connect için gereken sockaddr_in ya da sockadd_in6 yapı nesnelerini kendisi oluşturup sockaddr türünden bir adres gibi vermektedir. 
+	Örneğin biz "microsoft.com" host isminin bütün IPV4 AIP adreslerini aşağıdaki gibi elde edebiliriz:
+
+	struct addrinfo *ainfoHead, *ainfo;
+	struct sockaddr_in *sinHost;
+	struct addrinfo hints = {0, AF_INET, SOCK_STREAM};
+	...
+
+    if ((result = getaddrinfo(HOST_NAME, "55555", &hints, &ainfoHead)) != 0)
+		ExitSys("bind", result);
+
+	for (ainfo = ainfoHead; ainfo != NULL; ainfo = ainfo->ai_next) {
+		sinHost = (struct sockaddr_in *)ainfo->ai_addr;
+		printf("%s\n", inet_ntoa(sinHost->sin_addr));
+	}
+
+	freeaddrinfo(ainfoHead);
+
+	Programcı host isminden elde ettiği tüm IP numaralarını bağlantı için deneyebilir. 
+  
+    getaddrinfo fonksiyonunun tersini yapan getnameinfo isminde bir fonksiyon da sonraları soket kütüphanesine eklenmiştir. Fonksiyon temel 
+	olarak ilgili host'un IP adresini alıp bize aynı biçimde host isimlerini vermektedir. Biz burada bu fonksiyonu açıklamayacağız.
+
+	Eğer elimizde zaten server'ın IP adresi noktalı desimal formatta varsa biz getaddrinfo fonksiyonunu kullanmak yerine inet_addr ile de bu 
+	noktalı desimal formatı IP adresine dönüştürebiliriz. Ancak genel olarak getaadrinfo fonksiyonu daha genel ve daha yeteneklidir. Bu 
+	fonksiyonun kullanılması tavsiye edilebilir. inet_addr fonksiyonunun Windows sistemlerindeki prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	unsigned long inet_addr(const char *cp);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+	#include <arpa/inet.h>
+
+	in_addr_t inet_addr(const char *cp);
+
+	Fonksiyonlar noktasıl desimal formattaki IP adresini 4 byte'lık IPV4 adresine dönüştürmektedir. Fonksiyon başarısızlık durumunda Windows
+	sistemlerinde INADDR_NONE değerine, UNIX/Linux sistemlrinde ise -1 değerine geri dönmektedir. 
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+	Artık client program connect fonksiyonuyla TCP bağlantısını sağlayabilir. connect fonksiyonunun Windows sistemlerindeki prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	int WSAAPI connect(
+		SOCKET         s,
+		const sockaddr *name,	
+		int            namelen
+	);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    int connect(int socket, const struct sockaddr *address, socklen_t address_len);
+
+    Fonksiyonun birinci parametresi soket betimleyicisini belirtir. İkinci parametre bağlanılacak server'a ilişkin sockaddr_in
+    yapı nesnesinin adresini belirtmektedir. Fonksiyonun üçüncü parametresi, ikinci parametredeki yapının uzunluğunu almaktadır. 
+    Fonksiyon başarı durumunda sıfır değerine, başarısızlık durumunda -1 değerine geri dönmektedir. 
+
+    Eğer connect fonksiyonu çağrıldığında server program çalışmıyorsa ya da server programın bağlantı kuyruğu doluysa connect
+    belli bir zaman aşımı süresi kadar bekler ve sonra başarısız olur ve errno değeri ECONNREFUSED ("Connection refused") ile
+    set edilir. Örneğin:
+
+    if (connect(client_sock, (struct sockaddr *)&sin_server, sizeof(sin_server)) == -1)
+        exit_sys("connect");
+
+    Aşağıda örnektlerde bağlantı için gereken minimum client program verilmiştir. Burada henüz görmediğimiz işlemleri hiç uygulamadık.
+	Client programda bind işlemini yorum satırı içerisine aldık. Yukarıda da belirttiğimiz gibi eğer client program bind işlemi yapmazsa 
+	(ki genellikle yapmaz) bu durumda işletim sistemi client program için o programın çalıştığı makinede boş bir port numarası atamaktadır.
+	Ayrıca biz bu örneklerde inet_addr fonksiyonunun nasıl kullanılacağını da yorum satırları içerisinde gösterdik.
+-------------------------------------------------------------------------------------------------------------------------------------------*/
+
+/* Windows "client.c" */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
+#define PORT_NO				"55555"
+#define HOST_NAME			"127.0.0.1"
+
+void ExitSys(LPCSTR lpszMsg, DWORD dwLastErr);
+
+int main(void)
+{
+	WSADATA wsaData;
+	int result;
+	SOCKET clientSock;
+	struct addrinfo *ainfoHead, *ainfo;
+	struct addrinfo hints = {0, AF_INET, SOCK_STREAM};
+	
+	if ((result = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0)
+		ExitSys("WSAStartup", result);
+
+	if ((clientSock = socket(AF_INET, SOCK_STREAM, 0)) == SOCKET_ERROR)
+		ExitSys("socket", WSAGetLastError());
+	
+	/*
+	{
+		#define CLIENT_PORT_NO		50000
+
+		struct sockaddr_in sinClient;
+
+		sinClient.sin_family = AF_INET;
+		sinClient.sin_port = htons(CLIENT_PORT_NO);
+		sinClient.sin_addr.s_addr = htonl(INADDR_ANY);
+
+		if (bind(clientSock, (struct sockaddr *)&sinClient, sizeof(sinClient)) == SOCKET_ERROR)
+			ExitSys("bind", WSAGetLastError());
+	}
+	*/
+	
+		
+	if ((result = getaddrinfo(HOST_NAME, PORT_NO, &hints, &ainfoHead)) != 0)
+		ExitSys("getaddrinfo", result);
+
+	for (ainfo = ainfoHead; ainfo != NULL; ainfo = ainfo->ai_next) 
+		if (connect(clientSock, ainfo->ai_addr, sizeof(struct sockaddr_in)) == 0)
+			break;
+
+	if (ainfo == NULL)
+		ExitSys("connect", WSAGetLastError());
+
+	freeaddrinfo(ainfoHead);
+	
+	/*
+	{
+		struct sockaddr_in sinServer;
+
+		sinServer.sin_family = AF_INET;
+		sinServer.sin_port = htons(55555);
+		if ((sinServer.sin_addr.s_addr = inet_addr(HOST_NAME)) == INADDR_NONE)
+			ExitSys("inet_addr", WSAGetLastError());
+		if (connect(clientSock, (struct sockaddr *)&sinServer, sizeof(sinServer)) == SOCKET_ERROR)
+			ExitSys("connect", WSAGetLastError());
+	}
+	*/
+	
+	printf("connected...\n");
+
+	WSACleanup();
+
+	return 0;
+}
+
+void ExitSys(LPCSTR lpszMsg, DWORD dwLastErr)
+{
+	LPTSTR lpszErr;
+
+	if (FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, dwLastErr,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpszErr, 0, NULL)) {
+		fprintf(stderr, "%s: %s", lpszMsg, lpszErr);
+		LocalFree(lpszErr);
+	}
+
+	exit(EXIT_FAILURE);
+}
+
+/* Unix/Linux "client.c" */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+
+#define PORT_NO     	"55555"
+#define HOST_NAME		"127.0.0.1"
+
+void exit_sys(const char* msg);
+
+int main(void)
+{
+	int client_sock;
+	struct addrinfo *ainfo_head, *ainfo;
+	struct addrinfo hints = {0, AF_INET, SOCK_STREAM};
+	int result;
+
+	if ((client_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)    
+        exit_sys("socket");
+
+	/*
+	{
+		#define CLIENT_PORT_NO		50000
+
+		struct sockaddr_in sin_client;
+
+		sin_client.sin_family = AF_INET;
+		sin_client.sin_port = htons(CLIENT_PORT_NO);
+		sin_client.sin_addr.s_addr = htonl(INADDR_ANY);
+
+		if (bind(client_sock, (struct sockaddr *)&sin_client, sizeof(sin_client)) == -1)
+			exit_sys("bind");
+	}
+	*/
+
+	if ((result = getaddrinfo(HOST_NAME, PORT_NO, &hints, &ainfo_head)) != 0)
+		exit_sys("getaddrinfo");
+
+	for (ainfo = ainfo_head; ainfo != NULL; ainfo = ainfo->ai_next) 
+		if (connect(client_sock, ainfo->ai_addr, sizeof(struct sockaddr_in)) == 0)
+			break;
+
+	if (ainfo == NULL)
+		exit_sys("connect");
+
+	freeaddrinfo(ainfo_head);
+	/*
+	{
+		struct sockaddr_in sin_server;
+
+		sin_server.sin_family = AF_INET;
+		sin_server.sin_port = htons(55555);
+		if ((sin_server.sin_addr.s_addr = inet_addr(HOST_NAME)) == -1)
+			exit_sys("inet_addr");
+		if (connect(client_sock, (struct sockaddr *)&sin_server, sizeof(sin_server)) == -1)
+			exit_sys("connect");
+	}
+	*/
+
+	printf("connected...\n");
+
+	return 0;
+}
+
+void exit_sys(const char* msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*-------------------------------------------------------------------------------------------------------------------------------------------
+	Bağlantı sağlandıktan sonra artık gönderme ve alma işlemleri yapılabilir. Soketten karşı tarafa byte göndermek için send karşı taraftan 
+	byte okumak için recv fonksiyonları kullanılmaktadır. UNIX/Linux sistemlerinde soketler de dosya gibi betimleyici oldukları için bu 
+	sistemlerde send yerine write, recv yerine read POSIX fonksiyonları da kullanılabilir. TCP full duplex bir haberleşme sunmaktadır. Yani 
+	client ve server programlar aynı soket ile hem bilgi gönderip hem de bilgi alabilmektedir.
+
+    recv fonksiyonunun Windows sistemlerindeki prototipi şöyledir:
+
+	#include <winsock2.h>
+
+	int recv(
+		SOCKET s,
+		char   *buf,
+		int    len,
+		int    flags
+	);
+
+	UNIX/linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    ssize_t recv(int socket, void *buffer, size_t length, int flags);
+
+    Fonksiyonların birinci parametresi aktif soketin betimleyicisini belirtmektedir. İkinci parametre alınacak bilginin yerleştirileceği dizinin 
+	adresini almaktadır. Üçüncü parametre ise okunmak istenen byte sayısını belirtmektedir.  Fonksiyonun son parametresi aşağıdaki üç sembolik 
+	sabitin bit OR işlemine sokulmasıyla oluşturulabilir:
+
+    MSG_PEEK
+    MSG_OOB
+    MSG_WAITALL
+
+    Biz şimdilik bu değerlerin anlamlarını açıklamayacağız. Ancak MSG_PEEK değeri bilginin network tamponundan alındıktan sonra oradan atılmayacağını 
+	belirtmektedir. Bu parametre 0 da geçilebilir. Zaten recv fonksiyonunun read fonksiyonundan tek farkı bu son parametredir. Bu son parametrenin 
+	0 geçilmesiyle read kullanılması arasında hiçbir farklılık yoktur.
+
+    recv fonksiyonu blokeli modda (default durum blokeli moddur) tıpkı borularda olduğu gibi eğer hazırda en az 1 byte varsa okuyabildiği kadar 
+	bilgiyi okur ve okuyabildiği byte sayısına geri döner. Eğer o anda network tamponunda hiç byte yoksa recv fonksiyonu en az 1 byte okuyana 
+	kadar blokede bekler. (Yani başka bir deyişle recv tıpkı borularda olduğu gibi eğer okunacak bir şey yoksa blokede bekler, ancak okunacak 
+	en az 1 byte varsa okuyabildiğini okur ve beklemeden geri döner.)
+
+    recv fonksiyonu başarı durumunda okunabilen byte sayısına, başarısızlık durumunda Windows sistemlerinde SOCKET_ERROR, UNIX/Linux sistemlerinde
+	-1 değerine geri dönmektedir. Eğer karşı taraf soketi (peer socket) kapatmışsa bu durumda tıpkı borularda olduğu gibi recv fonksiyonu 0 
+	ile geri dönmektedir. Soketlerle boruların kullanımlarının birbirlerine çok benzediğine dikkat ediniz.
+
+	Soketten bilgi göndermek için send ya da UNIX/Linux sistemleribde write fonksiyonu kullanılmaktadır. send fonksiyonunun Windows sistemlerindeki
+	prototipi şöyledir:
+	
+	#include <winsock2.h>
+
+	int send(
+		SOCKET     s,
+		const char *buf,
+		int        len,
+		int        flags
+	);
+
+	UNIX/Linux sistemlerindeki prototipi ise şöyledir:
+
+    #include <sys/socket.h>
+
+    ssize_t send(int socket, const void *buffer, size_t length, int flags);
+
+    Fonksiyoların birinci parametresi aktif soketin betimleyicisini belirtmektedir. İkinci parametre gönderilecek bilgilerin bulunduğu dizinin adresini 
+	belirtir. Üçüncü parametre ise gönderilecek byte miktarını belirtmektedir. Son parametre aşağıdaki sembolik sabitlerin bit düzeyinde OR işlemine 
+	sokulmasıyla oluşturulabilir:
+
+    MSG_EOR
+    MSG_OOB
+    MSG_NOSIGNAL
+
+    Bu parametre 0 da geçilebilir. Biz şimdilik bu bayraklar üzerinde durmayacağız.
+
+    send fonksiyonu bilgileri karşı tarafa o anda göndermez. Onu önce network tamponuna yerleştirir. İşletim sistemi o tampondan TCP (dolayısıyla 
+	IP) paketleri oluşturarak mesajı göndermektedir. Yani send fonksiyonu geri döndüğünde bilgiler network tamponuna yazılmıştır, ancak henüz 
+	karşı tarafa gönderilmemiş olabilir. Pekiyi o anda network tamponu doluysa ne olacaktır? İşte UNIX/Linux sistemlerinde send fonksiyonu, 
+	gönderilecek bilginin tamamı network tamponuna aktarılana kadar blokede beklemektedir. Ancak bu konuda işletim sistemleri arasında farklılıklar 
+	olabilmektedir. Örneğin Windows sistemlerinde send fonksiyonu eğer network tamponununda gönderilmek istenen kadar yer yoksa ancak en az 
+	bir byte'lık boş bir yer varsa tampona yazabildiği kadar byte'ı yazıp hemen geri dönmektedir. Diğer UNIX/Linux sistemleri arasında da 
+	send fonksiyonunun davranışı bakımından bu yönde farklılıklar olabilmektedir. Ancak POSIX standartları blokeli modda tüm bilginin network 
+	tamponuna yazılana kadar send fonksiyonunun bloke olacağını belirtmektedir. Linux çekirdeği de buna uygun biçimde çalışmaktadır. 
+
+    send fonksiyonu network tamponuna yazılan byte sayısı ile geri dönmektedir. Blokeli modda bu değer UNIX/Linux sistemlerinde yazılmak istenen 
+	değerle aynı olur. Ancak Windows sistemlerinde daha az olabilmektedir. send fonksiyonu Windows'ta başarısızlık durumunda SOCKET_ERROR değeri 
+	ile UNIX/Linux sistemlerinde ise -1 değeri ile geri döner.Tıpkı borularda olduğu gibi UNIX/Linux sistemlerinde send fonksiyonunda da eğer 
+	karşı taraf soketi kapatmışsa send fonksiyonu default durumda SIGPIPE sinyalinin oluşmasına yol açmaktadır. Eğer bu sinyalin oluşturulması 
+	istenmiyorsa bu durumda send fonksiyonunun son parametresi (flags) MSG_NOSIGNAL olarak geçilmelidir. Bu durumda karşı taraf soketi kapatmışsa 
+	send fonksiyonu başarısız olur ve errno değeri EPIPE olarak set edilir. send fonksiyonunun soketlerdeki davranışının borulardaki davranışa 
+	çok benzediğine dikkat ediniz. 
+
+    send fonksiyonunun son parametresi 0 geçildiğinde bu fonksiyonun davranışı tamamen write fonksiyonunda olduğu gibidir. 
+------------------------------------------------------------------------------------------------------------------------------------------*/
+<BURADA KALDIK>
 /*------------------------------------------------------------------------------------------------------------------------------------------
 	Aşağıdaki iskelet bir TCP/IP client-server uygulama verilmiştir. Burada client klavyeden birtakım yazılar girer. Bunu server'a gönderir. 
 	Server da bu yazının tersini client'a geri yollamaktadır. Client "exit" yazdığında her iki taraf da işlemini sonlandırmaktadır.
--------------------------------------------------------------------------------------------------------------------------------------------*/
+------------------------------------------------------------------------------------------------------------------------------------------*/
 
 /* Server.c */
 
