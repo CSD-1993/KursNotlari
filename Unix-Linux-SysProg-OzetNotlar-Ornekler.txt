@@ -63550,7 +63550,7 @@ clean:
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaan Aslan");
-MODULE_DESCRIPTION("Kernel Thread Driver");
+MODULE_DESCRIPTION("Kernel Thread Module");
 
 static int kernel_thread_proc(void *param);
 
@@ -63632,74 +63632,116 @@ chmod $mode $module
     programcının program kodyla oluşturduğu kesmelerdir. Her türlü CPU'da yazılım kesmesi oluşturulamamaktadır. 
 
     Bir kesme oluştuğunda çalışıtırılan koda "kesme kodu (interrupt handler)" denilmektedir. 
-
-    <BURADA KALDIK>
+   
+    Donanım kesmesi oluşturan elektronik birimlerin hepsi doğrudan CPU'nın INT ucuna bağlanmamaktadır. Çünkü bunun pek çok 
+    sakıncası vardır. Genellikle bu amaçla bu işe aracılık eden daha akıllı bir işlemciler kullanılmaktadır. Bu işlemcilere 
+    genel olarak "kesme denetelecileri (interrupt controllers)" denilmektedir. Bazı mimarilerde kesme denetleyicisi işlemci
+    işlemcinin içerisinde bulunmakıtadır. Bazı mimarilerde ise dışarıda ayrı bir entegre devre olarak bulunmaktadır. Tabii artık
+    pek çok entegre devre SoC (System on Chip) adı altında tek bir entegre devrenin içersine yerleşirilmiş durumdadır. Kesme
+    denetleyicilerinin temel işlevi şöyledir:
     
-    Donanım kesmesi oluşturan elektronik birimlerin hepsi doğrudan CPU'nın INT ucuna bağlanmamaktadır. Genellikle bu işe aracılık eden daha akıllı
-    bir işlemci kullanılır. Bu işlemcilere "kesme denetelyecileri (interrupt controller)" denilmektedir. Bazı mimarilerde kesme denetleyicisi işlemciin
-    içerisine taşınmıştır. Bazı mimarilerde dışarıda ayrı bir entegre devre olarak bulunur. Bazı mimarilerde her iki durum da söz konusudur. Kesme denetleyicilerinin
-    şu faydaları vardır:
-
-    1) Birden fazla donanım biriminin aynı anda kesme oluşturması durumunda bunları sıraya dizebilme
-    2) Birden fazla donanım biriminin aynı anda kesme oluşturması durumunda bunlara öncelik verebilme
-    3) Belli birimlerden gelen kesme isteklerini disable edebilme, ya da tümden tüm uçlardan gelen istekleri disable edebilme
-    4) Multicore sistemlerde kesmenin belli bir core'da çalışttırılabilmesini sağlama
-
-    Bugün kullandığımız PC'lerde (laptop ve notebook'lar da dahil olmak üzere) eskiden kesme denetleyicisi olarak bir tane 8259 (PIC) devresi vardı. 
-    Bunun 8 girişi bulunuyordu. Yani bu denetleyicinin uçları 8 ayrı donanım birimine bağlanabiliyordu. Sonra bunun sayısı ikiye çıkartıldı. 
-    Ancak bir uç ikisini bağlamak için kullanıldığından toplam 15 uç elde edildi. Bu uçlara IRQ Interrupt Request) denildi ve bunlara numaralar
-    verildi (IRQ-0, IRQ-1, ...) Ancak bu 8259 denetleyicisinin zamanla yetersizliği görüldü. Özellikle birden fazla çekirdek ile çalışmalar başlayınca
-    bu denetleyici yetersiz kalmıştır. Çünkü bu denetleyici tek bir çekirdeğe bağlanabilmektedir. İşte daha sonraları 8259 yerine ismine
-    IOAPIC (82801) denilen daha gelişmiş bir kesme denetleyicisi kullanılmaya başlanmıştır. Bu yeni kesme denetleyicisinin 24 ucu vardır. Aynı zamanda bu
-    kesme denetleyicisi birden fazla çekirdeğin bulunduğu ortamda çekirdeklerin istenen bir tanesinde kesme oluşturabilmektedir. Kesme denetleyicilerinin
-    bazı uçlarına zaten üretimden bazı birimler bağlanmıştır. Ancak bunların bazıları boştadır. Genişleme yuvalarına takılan kartlar bu boştaki kesme uçlarını
-    kullanabilmektedir. Bugün PC'lerde kullanılan modern genişleme yuvalarına PCI ve PCI-X denilmektedir. 
-
-    Bugün Pentium ve eşdeğer AMD ieşlemcilerinin içerisinde de ismine "Local APIC" denilen bir kesme denetleyicisi vardır. Bu local APIC iki uca sahiptir.
-    Aynı zamanda bir timer devresi de bulundurmaktadır. Bu local APIC içerisindeki timer devresi o işlemcide jiffy oluşturulmasında ve context switch
-    yapılmasında kullanılmaktadır. Local APIC'in en önemli özelliklerinden birisi "data bus" yoluyla kesme alabilmesidir. Bu özellik sayesinde hiç işlemcinin
-    INT uyarılmadan çok fazla sayıda kesme sanki belleğe bir değer yazıyormuş gibi oluşturulabilmektedir. Gerçekten de bugün PCI slotlara takılan bazı
-    kartlar kesmeleri bu biçimde oluşturmaktadır. Bu tekniğe "Message Signaled Intterpt (MSI)" denilmektedir. 
-
-    O halde bugünkü durum şöyledir:
-
-    - Bazı donanım birimleri built-in biçimde IOAPIC'in uçlarına bağlı durumdadır. Bu uçlar eskiye uyumu korumak için 8259'un uçlarıyla aynıdır.
-    - Bazı PCI kartlar slot üzerindeki 4 IRQ hattından (INTA, INTB, INTC, INTD) birini kullanarak kesme oluşturmaktadır. Bu hatlar IOAPIC'in bazı uçlarına
-    bağlıdır. 
-    - Bazı PCI kartlar ise doğurdan MSI biçiminde IOAPIC'i pass geçerek memory işlemleriyle ilgili çekirdekte kesme oluşturabilmektedir. 
-
-    Bir aygıt sürücü programcısı mademki birtakım kartlar için onu işler hale getiren temel yazılımları da yazma iddiasındadır. O halde o kartın
-    kullanacağı kesme için kesme kodu yazabilmelidir. Tabii işletim sisteminin aygıt sürücü mimarisinde bu işlemler de özel kernel fonksiyonlarıyla
-    yapılır. Yani kesme kodu yazmanın belli bir kuralı vardır. Eskiden ve hala bazı kesmeler birden fazla donanım tarafından ortak kullanılabilmektedir. 
-    Örneğin kesme denetleyicisinin belli bir ucunu birden fazla donanım uyarabilir. Bu durumda işletim sisteminin bir kesme oluştuğunda birden fazla 
-    kesme kodunu kuyruğa alıp çalıştırabilmesi beklenir. Böylece aygıt sürücüyü yazan programcı kesmenin kendi kartından gelip gelmediğini anlamak
-    zorundadır. Eğer kesme kendi kartından gelmemişse programcı kesme kodundan hemen çıkar, kesme kendi kartından gelmişse onu işler. 
-
-    Pekiyi çok çekirdekli bilgisayar sistemlerinde oluşan bir kesme hangi çekirdek tarafından işlenecektir? Bugün kullanılan IOAPIC devreleri bu bakımdan 
-    şu özelliklere sahiptir:
-
-    1) Kesme IOAPIC tarafından donanım birimi tarafından istenilen bir çekirdekte oluşturulabilir. 
-    2) IOAPIC en az yüklü çekirdeğe karar vererek kesmenin orada oluşturulmasını sağlayabilir. 
-    3) IOAPIC döngüsel bir biçimde çekirdeklere kesme oluşturabilmektedir. 
-
-    IOAPIC'in en az yüklü işlemciyi bilmesi mümkün değildir. Onu işletim sistemi bilebilir. İşte işlemcilerin Local APIC'leri içerisinde özel bazı yazmaçlar
-    vardır. Aslında IOAPIC bu yazmaçtaki değerlere bakıp en düşüğünü seçmektedir. Bu değerleri de işletim sistemi set eder. İşletim sisteminin yaptığı
-    bu faaliyete "kesme dengeleme (IRQ balancing)" denilmektedir. Linux sistemlerinde bir süredir kesme dengeleyicisi bir kernel thread (irqbalance) olarak 
-    çalıştırılmaktadır. Böylece Linux sistemlerinde aslında donanım kesmeleri her defasında farklı çekirdeklerde çalıştırışıyor olabilir. 
-
-    Pek çok CPU ailesinde donanım kesmelerinin teorik maksimum bir limiti vardır. Örneğin Intel mimarisinde toplam kesme sayısı 256'yı geçememektedir. 
-    Bu mimaride her kesmenin bir numarası vardır. IRQ numarası ile kesme numarasının bir ilgisi yoktur. Biz örneğin PIC ya da IOAPIC'i programlayarak belli bir kesmenin
-    belli bir IRQ için belli numaralı bir kesmenin oluşmasını sağlayabiliriz. Örneğin timer (IRQ-0) için 8 numaralı kesmenin çalışmasını sağlayabiliriz. 
-    Pekiyi bir IRQ oluşturulduğunda çekirdek kaç numaralı kesme kodunun çalıştırılacağını nereden anlamaktadır? İşte PIC ya da IOAPIC CPU'nun INT ucunu uyararak 
-    kesme oluşturuken Data Bus'ın ilk 8 ucundan kesme numarasını da CPU'ya bildirmektedir. 
-
+    1) Birden fazla donanım biriminin aynı anda kesme oluşturması durumunda kesme denetleyicisi bunları sıraya dizebilmektedir.
+    2) Birden fazla donanım biriminin aynı anda kesme oluşturması durumunda kesme denetleyicisi bunlara öncelik verebilmektedir.
+    3) Belli birimlerden gelen kesme isteklerini kesme denetleyicisi görmezden gelebilmektedir. Buna ilgili IR!'nun disable edilmesi
+    denilmektedir. 
+    4) Kesme denetleyicileri çok çekirdekli donanımlarda kesmenin belli bir çekirdekte çalışttırılabilmesini sağlayabilmektedir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Bir aygıt sürücüsü bir kesme oluştuğunda kendi fonksiyonunun çağrılmasını istiyorsa onu request_irq isimli kernel fonksiyonuyla 
-    register ettirmelidir. 
+    Bugün kullandığımız PC'lerde (laptop ve notebook'lar da dahil olmak üzere) eskiden kesme denetleyicisi olarak bir tane 
+    Intel'in 8259 (PIC) denilen entegre devresi kullanılıyordu. Bunun 8 girişi bulunuyordu. Yani bu kesme denetleyicisinin 
+    uçları 8 ayrı donanım birimine bağlanabiliyordu. 
+    
+    | (INT ucu CPU'ya baplanır)
+      <8259 (PIC)>
+    | | | | | | | |
+    0 1 2 3 4 5 6 7 
+    
+    Bu uçlara IRQ uçları deniliyordu ve bu uçlar değişik donanım birimlerine bağlıydı. Böylece bir donanım birimi kesme oluşturmak
+    isterse kesme denetleyicisinin igili ucunu uyarıyordu. Kesme deetleyicisi de CPU'nın INT ucunu uuarıyordu. İlk PC'lerde 
+    toplam 8 IRQ vardı. Ancak 80'li yılların ortalarında PC mimarisinde değişikler yapılarak kesme denetleyicisinin sayısı iki'ye 
+    yükseltildi. Böylece IRQ uçlarının sayısı da 15'e yükseltilmiş oldu. Intel'in iki 8259 işlemcisini katkat bağlayabilmek için 
+    birinci kesme kesme denetleyicisinin (Master PIC) bir ucunun ikinci kesme denetleyicsinin INGT ucuna bağlanması gerekmektedir. 
+    İşte PC mimarsinde birinci kesme denetleyicisinin 2 numaralı ucu ikinci kesme denetleyicisine bağlanmıştır. Böylece toplam
+    IRQ'ların sayısı 16 değil 15 olmaktadır. 
 
-    static int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags, const char *name, void *dev_id);
+    | (INT ucu CPU'ya baplanır)     | 
+      <8259 (PIC)>                     <8259 (PIC)>
+    | | X | | | | |                 | | | | | | | |
+
+    0 1 2 3 4 5 6 7                 8 9 10 11 12 13 14 15 
+
+    Ancak zamanla 15 IRQ ucu da yetersiz kalmaya başlamıştır. Çok çekirdekli sistemlerde her çekirdeğin (yani CPU'nun) ayrı bir
+    INT ucu vardır. Yani bu çekirdekler diğerlerinden bağımsız kesme alabilmektedir. İşte zamanla Intel'in klasik 8259 kesme 
+    denetleyicisi daha gelişmiş olam ve ismine IOAPIC denilen kesme denetleyicisi ile değiştirilmiştir. Bugün kullandığımız 
+    Intel tabanlı bilgisayar mimarisinde artık IOAPIC kesme denetleyicileri bulunmaktadır. Bu yeni kesme denetleyicisinin 24 IRQ 
+    ucu vardır. IOAPIC birden fazla çekirdeğin bulunduğu durumda tek bir çekirdeğe değil tüm çekirdeklere bağlanmaktadır. Dolayısıyla
+    istenilen bir çekirdekte kesme oluşturabilmektedir. IOAPIC devresinin bazı uçları bazı donanım birimelrine bağlı biçimdedir. Ancak 
+    bazı uçları boştadır. Bugün kullanılan ve ismine PCI ya da PCI-X denilen genişleme yuvaalarının bazı uçları bu IOAPIC ile 
+    balandılıdır. Dolayısıyla genişleme yuvalarına takılan kartlar da IRQ oluşturabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------    
+    Bugün Pentium ve eşdeğer AMD ieşlemcilerinin içerisinde (her çekirdeğin içeisidne) aynı zamanda ismine "Local APIC" denilen 
+    bir kesme denetleyicisi de vardır. Bu local APIC iki uca sahiptir. Local APIC içerisinde aynı zamanda bir timer devresi de 
+    bulunmaktadır. Bu timer devresi periyodik donanım kesmesi oluşturmak için kullanılmaktadır. Intel ve AMD çekirdeklerinin 
+    içerisinde bulunan APIC devresinin en önemli özelliği kesmeleri artık uçlarla değil veri yoluyla (data bus) oluşturabilmesidir.
+    Buu özellik sayesinde hiç işlemcinin INT uyarılmadan çok fazla sayıda kesme sanki belleğe bir değer yazıyormuş gibi 
+    oluşturulabilmektedir. Bu tekniğe "Message Signaled Intterpt (MSI)" denilmektedir. Gerçekten de bugün PCI slotlara takılan 
+    bazı kartlar kesmeleri doğrudan belli bir çekirdekte MSI kullanarak oluşturmaktadır.
+
+    O halde kullanığımız Intel taabanlı PC mimarisideki bugünkü durum şöyledir:
+
+    - Bazı donanım birimleri built-in biçimde IOAPIC'in uçlarına bağlı durumdadır. Bu uçlar eskiye uyumu korumak için 8259'un 
+    uçlarıyla aynı biçimde bağlı gibi IRQ oluşturmaktadır. 
+
+    - Bazı PCI kartlar slot üzerindeki 4 IRQ hattından (INTA, INTB, INTC, INTD) birini kullanarak kesme oluşturmaktadır. Bu hatlar 
+    IOAPIC'in bazı uçlarına bağlıdır. 
+    
+    - Bazı PCI kartlar ise doğurdan modern MSI sistemini kullanarak IOAPIC'i pass geçerek bellek işlemleriyle doğrudan ilgili 
+    çekirdekte kesme oluşturabilmektedir. 
+
+    Bir aygıt sürücü programcısı mademki birtakım kartlar için onu işler hale getiren temel yazılımları da yazma iddiasındadır. 
+    O halde o kartın kullanacağı kesme için kesme kodlarını (interrupt handlers) yazabilmelidir. Tabii işletim sisteminin aygıt sürücü 
+    mimarisinde bu işlemler de özel zernel fonksiyonlarıyla yapılır. Yani kesme kodu yazmanın belli bir kuralı vardır. 
+    
+    Pekiyi çok çekirdekli bilgisayar sistemlerinde oluşan bir kesme Intel taabanlı PC mimariisnde hangi çekirdek tarafından 
+    işlenmektedir? İşte bugün kullanılan IOAPIC devreleri bu bakımdan şu özelliklere sahiptir:
+
+    1) Kesme IOAPIC tarafından donanım biriminin istediği bir çekirdekte oluşturulabilir. 
+    2) Kesme IOAPIC tarafından en az yüklü çekirdeğe karar verilerek orada oluşturulabilmektedir. 
+    3) Kesme IOAPIC tarafından döngüsel bir biçimde (yani sırasıyla her bir çekirdekte) oluşturulabilmektedir. 
+
+    IOAPIC'in en az yüklü işlemciyi bilmesi mümkün değildir. Onu ancak işletim sistemi bilebilir. İşte işlemcilerin Local 
+    APIC'leri içerisinde özel bazı yazmaçlar vardır. Aslında IOAPIC bu yazmaçtaki değerlere bakıp en düşüğünü seçmektedir. Bu 
+    değerleri de işletim sistemi set eder. İşletim sisteminin yaptığı bu faaliyete "kesme dengeleme (IRQ balancing)" denilmektedir. 
+    Linux sistemlerinde bir süredir kesme dengelemesi işletim sisteminin kernel thread'i (irqbalance) tarafından yapılmaktadır. 
+    Böylece Linux sistemlerinde aslında donanım kesmeleri her defasında farklı çekirdeklerde çalıştırılıyor olabilir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+---------------------------------------------------------------------------------------------------------------------------*/
+    Pek çok CPU ailesinde donanım kesmelerinin teorik maksimum bir limiti vardır. Örneğin Intel mimarisinde toplam kesme sayısı 
+    256'yı geçememektedir. Yani bu mimaride en fazla 256 farklı kesme oluşturulabilmektedir. Bu mimaride her kesmenin bir 
+    numarası vardır. IRQ numarası ile kesme numarasının bir ilgisi yoktur. Biz örneğin PIC ya da IOAPIC'i programlayarak belli 
+    bir kesmenin belli bir IRQ için belli numaralı bir kesmenin oluşmasını sağlayabiliriz. Örneğin timer (IRQ-0) için 8 numaralı 
+    kesmenin çalışmasını sağlayabiliriz. Pekiyi bir IRQ oluşturulduğunda çekirdek kaç numaralı kesme kodunun çalıştırılacağını 
+    nereden anlamaktadır? İşte PIC ya da IOAPIC CPU'nun INT ucunu uyararak kesme oluşturuken veri yolunun ilk 8 ucundan kesme 
+    numarasını da CPU'ya bildirmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Şimdi de aygıt sürücüler içerisinde kesmelerin nasıl ele alınacağı üzerinde duralım. Bir donanım kesmesi oluştuğunda 
+    aslında işletim sisteminin kesme kodu (interrupt handler) devreye girmektedir. Ancak işletim sisteminin kesme kodu istek 
+    doğrultusunda aygıt sürücülerin içerisindeki fonksiyonları çağırabilmektedir. Farklı aygıt sürücüleri aynı IRQ için istekte
+    bulunabilir. Bu durumda işletim sistemi IRQ oluştuğunda farklı aygıt sürücülerdeki fonksiyonları belli bir düzen içerisinde
+    çağırmaktadır. 
+    
+    Aygıt sürücü programcısı bir kesme oluştuğunda aygıt sürücüsünün içerisindeki bir fonksiyonunun çağrılmasını istiyorsa önce 
+    onu request_irq isimli kernel fonksiyonuyla register ettirmelidir. 
+
+    #include <linux/interrupt.h>
+
+    int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags, const char *name, void *dev_id);
 
     Fonksiyonun birinci parametresi IRQ numarasıdır. İkinci parametresi IRQ oluştuğunda çağrılacak fonksiyonu belirtmektedir. Bu fonksiyonun 
     geri dönüş değeri irqreturn_t üründen (bu bir tamsayı türüdür) parametreleri de sırasıyla int ve void * türündendir. Örneğin:
@@ -63709,12 +63751,14 @@ chmod $mode $module
         ...
     }
 
-    Fonksiyonun üçüncü parametresi bazı bayraklardan oluşur. Bu bayrak 0 geçilebilir ya da örneğin IRQF_SHARED geçilebilir. Diğer seçenkler için dokümanlara başvurabilirsiniz. 
-    IRQF_SHARED aynı kesmenin birden fazla aygıt sürücü tarafından kullanılabileceği anlamına gelmektedir. (Tabii biz ilk register ettiren değilsek daha önce resgister ettirenlerin
-    bu bayrağı kullanmış olması gerekir. Aksi halde biz de bu bayrağı kullanamayız.) Fonksiyonun dördüncü parametresiş /proc/interrupts dosyasına görüntülenecek ismi belirtir. Son parametre
-    sistem genelinde tek olan bir nesnenin adresi olarak girilmelidir. Aygıt sürücü programcıları bu parametreye tipik olarak aygıt yapısını ya da çağrılacal foksiyonu girerler. irq_request fonksiyonu
-    başarı durumunda 0 değerine başarısızlık durumunda negatif hata değerine geri dönmektedir. 
-
+    Fonksiyonun üçüncü parametresi bazı bayraklardan oluşur. Bu bayrak 0 geçilebilir ya da örneğin IRQF_SHARED geçilebilir. Diğer 
+    seçenkler için dokümanlara başvurabilirsiniz. IRQF_SHARED aynı kesmenin birden fazla aygıt sürücü tarafından kullanılabileceği 
+    anlamına gelmektedir. (Tabii biz ilk register ettiren değilsek daha önce resgister ettirenlerin bu bayrağı kullanmış olması 
+    gerekir. Aksi halde biz de bu bayrağı kullanamayız.) Fonksiyonun dördüncü parametresi "/proc/interrupts" dosyasına görüntülenecek 
+    ismi belirtir. Son parametre  ise sistem genelinde tek olan bir nesnenin adresi olarak girilmelidir. Aygıt sürücü programcıları 
+    bu parametreye tipik olarak aygıt yapısını ya da çağrılacak foksiyonu girerler. irq_request fonksiyonu başarı durumunda 0 değerine 
+    başarısızlık durumunda negatif hata değerine geri dönmektedir. 
+    zBURADA KALDIK>
     Bir kesme kodu request_irq fonksiyonuyla register ettirilmişse bunun geri alınması free_irq fonksiyonuyla yapılmaktadır:
 
     const void *free_irq(unsigned int irq, void *dev_id);
