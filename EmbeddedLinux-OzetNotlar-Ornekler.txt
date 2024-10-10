@@ -5269,7 +5269,6 @@ int main(int argc, char *argv[])
     Bir dosyayı blok aygıt sürücüsü biçiminde kullanabilmek için önce "losetup" programı ile bir hazırlık işleminin yapılması 
     gerekir. Hazırlık işleminde "loop" aygıt sürücüsüne ilişkin aygıt dosyası ve blok aygıt sürücüsü olarak gösterilecek dosya 
     belirtilir. Bu işlemin sudo ile yapılması gerekmektedir. Örneğin:
-
    
     $ sudo losetup /dev/loop0 mydisk.dat
 
@@ -6786,7 +6785,7 @@ int main(int argc, char *argv[])
 
     Burada aslında boot işlemini asıl yapan script "uenvcmd" isimli script'tir. O halde bu çevre değişken listesi U-Boot'ta
     dahil edilip "uenvcmd" isimli script çalıştırılırsa boot işlemi otomatik gerçekleşecektir. 
-
+"
     2) Şimdi de U-Boot komut satırına düşüp "bootcmd" çevre değişkenini uygun biçimde set edelim:
 
     => setenv bootcmd "load mmc 0:1 0x8A000000 /uEnv.txt;env import -t 0x8A000000;run uenvcmd"
@@ -7319,11 +7318,12 @@ int main(int argc, char *argv[])
         sbin
     var
         log
+    mnt
 
     Dizinleri şöyle yaratabiliriz:
 
     $ cd rootfs
-    $ mkdir bin sbin lib etc home dev proc sys tmp boot root usr var 
+    $ mkdir bin sbin lib etc home dev proc sys tmp boot root usr var mnt
     $ mkdir usr/bin usr/lib usr/sbin var/log
 
     Buradaki dizinlerin kullanıcı ve grup id'lerinin "root" olması güvenlik bakımından şiddetle tavsiye edilmektedir:
@@ -7420,35 +7420,23 @@ int main(int argc, char *argv[])
     Buradaki aygıtların majör ve minör numaralarının gelişigüzel biçimde verilmediğine önceden tespit edilmiş olan numaraların 
     kullanıldığına dikkat ediniz.
 
-    6) Sistemin açılması için BusyBox "init" sisteminin "/etc" dizini altında başvurduğu bazı dosyaların da yaratılması gerekmektedir. 
-    Bunlardan biri "/etc/fstab" isimli dosyadır. Bu dosyada sistem açılırken otomatik mount edilecek dosya sistemleri belirtilmektedir. 
-    Burada en azından bizim "proc" ve "sys" dosya sistemlerini belirtmemiz gerekir. "/etc/fstab" dosyasının minimal içeriği 
-    aşağıdaki gibi olabilir. Bu içeriği editörde oluştururken editörünüzü "sudo" ile çalıştırmayı unutmayınız:
+    6) Sistemin açılması için BusyBox "init" sisteminin "/etc" dizini altında başvurduğu "inittab" isimli dosyadır. Bu dosyada 
+    çeşitli işlemlerde çalıştırılacak programlar ve onların "çalıştırma seviyeleri (run level)" belirtilmektedir. (BusyBox 
+    "çalıştırma seviyelerini desteklememektedir,) Bu dosyanın minimal içeriği de şöyle oluşturulabilir:
+
+    ::sysinit:/bin/mount -a
+    ::sysinit:/bin/hostname -F /etc/hostname
+    ::respawn:/bin/cttyhack /bin/ash
+    
+    "/etc/inittab" dosyası klasik System 5 init sistemleri ("SysVinit" biçiminde de ifade edilmektedir) ve BusyBox init sistemi 
+    tarafından okunmaktadır. Modern "systemd" init sistemi bu dosyaya başvurmamaktadır. Buradaki "mount -a" komutu "/etc/fstab" 
+    isimli dosyayı okuyarak orada belirtilen mount işlemlerini yapmaktadır. Örneğimizde "/etc/fstab" dosyasında aşağıdaki mount 
+    direktiflerini de yerleştirmeliyiz:
 
     proc    /proc    proc   defaults  0 0
     sysfs   /sys     sysfs  defaults  0 0
 
-    Aslında "/etc/fstab" (file system table) dosyasına yalnızca BusyBox init sistemi tarafından değil modern "systemd" init 
-    sistemi tarafından da bakılmaktadır. "/etc/fstab" dosyasının içeriği başka bölümlerde daha sonra ele alınacaktır. 
-
-    "/etc" dizinin içerisinde yaratılması gereken diğer bir dosya da "inittab" isimli dosyadır. Bu dosyada çeşitli işlemlerde 
-    çalıştırılacak programlar ve onların "çalıştırma seviyeleri (run level)" belirtilmektedir. Bu dosyanın minimal içeriği de
-    şöyle oluşturulabilir:
-
-    ::sysinit:/etc/init.d/rcS 
-
-    # console::askfirst:-/bin/ash
-    ::restart:/sbin/init
-
-    ::sysinit:/bin/mount -a
-    ::sysinit:/bin/hostname -F /etc/hostname
-    ::respawn:/bin/cttyhack /bin/login root
-    ::restart:/sbin/reboot
-
-    "/etc/inittab" dosyası klasik System 5 init sistemleri ("SysVinit" biçiminde de ifade edilmektedir) ve BusyBox init sistemi 
-    tarafından okunmaktadır. Modern "systemd" init sistemi bu dosyaya başvurmamaktadır. Bu dosyada # ile devre dışı bıraktığımız 
-    satır açılışta "giriş istemek iç,n (yani user-name/password istemek için)" kullanılmaktadır. Bu satır olmazsa otomatik giriş 
-    yapılacaktır. 
+    Böylece "init" prgramı çalıştırıldığında "proc" ve "sys" dosya sistemleri de mount edilmiş olacaktır.
 
     BusyBox'ta "ash" isimli kabuk programı (shell programı) kullanılmaktadır. ash (Almquist shell) bourne shell benzeri kompakt
     bir kabuk programıdır. Özellikle gömülü sistemlerde az yer kaplaması nedeniyle tercih edilmektedir. BusyBox'ta bu "ash" isimli
@@ -7472,7 +7460,7 @@ int main(int argc, char *argv[])
 
     root::0:
 
-    Ayrıca zornlu olmamakla birlikte "/etc" dizininde "hostname" isimli bir dosya oluşturup o dosyanın içerisine network haberleşmeleri
+    Ayrıca zorunlu olmamakla birlikte "/etc" dizininde "hostname" isimli bir dosya oluşturup o dosyanın içerisine network haberleşmeleri
     için "host ismini" yazabiliriz. Dosya içeriği şöyle olabilir:
 
     busybox-test   
@@ -7914,7 +7902,7 @@ void exit_sys(const char *msg)
 
 /*-----------------------------------------------------------------------------------------------------------------------------
     Şimdi de boot loader'dan sonraki aşamalar üzerinde duralım. Boot loader'ın işi ne zaman bitmektedir ve sonra neler olmaktadır?
-    Anımsayacağınız gibi biz U-Boot'ta çekirdek imajını, aygıt ağacı dosyasını belleğe yükledikten sonra bu adresleri kullanarak 
+    Anımsayacağınız gibi biz U-Boot'ta çekirdek imajını ve aygıt ağacı dosyasını belleğe yükledikten sonra bu adresleri kullanarak 
     "bootz" komutu ile boot işlemini başlatıyorduk. "bootz" komutunda geçici kök dosya sistemi için kullanılan imajın (initial 
     ramdisk) bellek adresi de komutta belirtilebilmektedir. Ancak biz geçici kök dosya sistemi kullanmadığımızdan dolayı burada 
     geçici kök dosya sisteminin imaj adresini "-" ile geçmiştik. U-Boot'un boot loader'lık işlevi "bootz" komutuyla sona ermektedir. 
@@ -7941,9 +7929,10 @@ void exit_sys(const char *msg)
     belirtilen dosya sistemini mount et.
 
     Eğer sistemde geçici kök dosya sistemi varsa (bu konunun bazı ayrıntıları izleyen paragraflarda açıklanacaktır) bu proses
-    "/init" isimli ya da "/linuxrc" isimli program dosyasını exec yaparak çalıştırmaktadır. Eğer geçici kök dosya sistemi yoksa 
-    kernel_init fonksiyonu "root" çekirdek parametresi ile belirtilen ve mount edilen aygıttaki "/sbin/init" programını çalıştırmaktadır. 
-    Aslında çekirdeğin bu kısmı (kernel_init fonksiyonun sonu) aşağıdaki gibidir:
+    yeni "initramfs" sisteminde "/init" isimli programı eski "initrd sisteminde" ya da "/linuxrc" isimli program dosyasını exec 
+    yaparak çalıştırmaktadır. Eğer geçici kök dosya sistemi yoksa kernel_init fonksiyonu "root" çekirdek parametresi ile belirtilen 
+    ve mount edilen aygıttaki "/sbin/init" programını çalıştırmaktadır. Aslında çekirdeğin bu kısmı (kernel_init fonksiyonun sonu) 
+    aşağıdaki gibidir:
 
     if (!try_to_run_init_process("/sbin/init") ||
 	    !try_to_run_init_process("/etc/init") ||
@@ -7952,7 +7941,8 @@ void exit_sys(const char *msg)
 		return 0;
 
     Burada gerçek kök dosya sistemindeki "/sbin/init" çalıştırılmazsa sırasıyla "/etc/init", "/bin/init", "/bin/sh" programlarının 
-    çalıştırılması sağlanmıştır. 
+    çalıştırılması sağlanmıştır. Eğer boot işlemi sırasında geçici kök dosya sistemi varsa çekirdeğin bu kök dosya sistemini mount 
+    ettiğine dikkat ediniz. Bu durumda gerçek kök dosya sisteminin mount edilmesi artık geçici kök dosya sisteminin sorumluluğundadır.
 
     Bir Linux sistemindeki çekirdeğin çalıştırdığı bu "init" programları başka proje grupları tarafından yazılmış programlardır. 
     Bu programların çekirdekle bir ilgisi yoktur. Çekirdek bu programı çalıştırdıktan sonra artık kendi işlevine devam etmektedir. 
@@ -8033,10 +8023,9 @@ void exit_sys(const char *msg)
     Modern sisteme "initramfs" denilmektedir. Bu sistemde ramdisk "tmpfs" dosya sistemi yardımıyla oluşturulmaktadır. Eski "initrd"
     yöntemi neredeyse kullanım dışı kalmıştır. Artık hep "initramfs" yöntemi kullanılmaktadır. Ancak her iki yöntemde de henüz 
     işletim sisteminin çekirdeği yüklenmeden geçici kök dosya sistemine ilişkin dosyalar önce RAM'e yüklenir (tabii bu işlem 
-    boot loader tarafından yapılmaktadır) sonra yüklenen yerin adresi çekirdeğe çekirdek boot parametreleriyle aktarılır. Ancak 
-    bu eski yöntemle yeni yöntem arasında geçici kök dosya sisteminin nasıl bir biçiminde oluşturulacağı konusunda farklılıklar
-    vardır. Biz burada eski "initrd" yöntemini açıklamayacağız. Doğrudan "initramfs" biçiminde isimlendirilen yeni sistemi 
-    açıklayacağız. 
+    boot loader tarafından yapılmaktadır) sonra yüklenen yerin adresi çekirdeğe çekirdek boot parametreleriyle aktarılır. Bu eski 
+    yöntemle yeni yöntem arasında geçici kök dosya sisteminin nasıl bir biçiminde oluşturulacağı konusunda farklılıklar vardır. 
+    Biz burada eski "initrd" yöntemini açıklamayacağız. Doğrudan "initramfs" biçiminde isimlendirilen yeni sistemi açıklayacağız. 
 
     Geçici kök dosya sistemini "initramfs" yöntemiyle oluşturmak için sırasıyla şunlar yapılmalıdır:
 
@@ -8059,15 +8048,29 @@ void exit_sys(const char *msg)
     yöntemiyle belirtilen geçici kök dosya sistemine sonra "initrd" yöntemiyle belirtiken geçici kök dosya sistemine bakmaktadır. 
     Ayrıca eğer geçici kök dosya sistemi kullanılacaksa artık çekirdeğin "root" parametresi çekirdek tarafından kullanılmamaktadır. 
     Geçici kök dosya sisteminin kök dizinideki "/init" programının oluşturulması ve işlevi maddeler bittiğinde ayrı bir paragrafta 
-    ele alınacaktır. Biz bu noktada böyle bir init programının kabuk komutunu çalıştıracak biçimde aşağıdaki gibi oluşturuldğunu 
+    ele alınacaktır. Biz bu noktada böyle bir "init" programının kabuk komutunu çalıştıracak biçimde aşağıdaki gibi oluşturuldğunu 
     varsayalım:
 
     #!/bin/sh
     mount -t proc proc /proc
     mount -t sysfs sys /sys
     mount -t devtmpfs dev /dev
-    echo "BusyBox initramfs is now running"
+    exec setsid cttyhack /bin/sh
+    
+    Burada önce önemli dosya sistemleri mount edilmiştir. Sonra "/bin/sh" programı yani "ash" çalıştırılmıştır. Ancak bu kabuk 
+    programının doğrudan çalıştırılmadığına setsid komutu ile çalıştırıldığında sikkat ediniz:
+
+    exec setsid cttyhack /bin/sh
+
+    Burada setsid bir oturum (session) oluşturur ve oturumun terminalini (controlling terminal) ayarlar. cttyhack programı aslında
+    kabuk programını çalıştırmaktadır. Biz doğrudan kabuk programını aşağıdaki gibi de çalıştırabilirdik:
+
     exec /bin/sh
+
+    Ancak bu durumda kabuk programı terminala erişemeyeceği için "job control" özelliğini pasif hale getirirdi. Buradaki "cttyhack" 
+    BusyBox'a özgü bir programdır.  Tabii bizim "/init" dosyasını çalıştırılabilir yapmamız gerekir:
+
+    $ sudo chmod +x init
 
     3) Linux çekirdeğinde geçici kök dosya sisteminin sistem boot edilirken ".cpio.gz" formatında olması gerekmektedir. Yani önce
     kök dosya sistemini oluşturan dosyalar "cpio" formatı denilen bir formatta uç uca eklenir sonra bu uç uca eklenmiş olan 
@@ -8113,49 +8116,375 @@ void exit_sys(const char *msg)
     kök dosya sisteminin "/boot" dizinine kopyalanır. Biz örneğimizde bu dosyayı "ext4" disk bölümündeki "/boot" dizinine yerleştirelim. 
     Bizim örneklerimizde çekirdek imajı, aygıt ağacı dosyası "ext4" disk bölümündeki "/boot" dizinindeydi. Aslında "çekirdek 
     imajını", "aygıt ağacı dosyasını" ve "geçici kök dosya sistemine ilişkin dosyayı" FAT disk bölümüne yerleştirmek daha uygundur. 
-
     
-    5) 
+    5) Artık geçici kök dosya sistemi ile boot işlemini yapabiliriz. Önce bu işlemi manuel bir biçimde yapalım. Bunun için 
+    önce U-Boot'un komut satırında önce çekirdek imaj dosyasını, sonra aygıt ağacı dosyasını sonra da geçici kök dosya sistemi 
+    dosyasını yükleyelim:
+
+    => load mmc 0:2 0x82000000 /boot/vmlinuz-5.10.168-ti-r71
+    11342336 bytes read in 748 ms (14.5 MiB/s)
+    => load mmc 0:2 0x88000000 /boot/dtbs/5.10.168-ti-r71/am335x-boneblack.dtb
+    93494 bytes read in 13 ms (6.9 MiB/s)
+    => load mmc 0:2 0x90000000 /boot/uinitrd                                  
+    26516276 bytes read in 1718 ms (14.7 MiB/s)
+    => bootz 0x82000000 0x90000000 0x88000000
+
+    Burada biz artık kök dosya sisteminde kabuğun komut satırına düşmüş olacağız. Default bulunulan dizin "/root" dizini olacaktır. 
+
+    Bu işlem daha önce gördüğümüz "uEnv.txt" dosyası yoluyla otomatize edilebilir. Bu durumda "uEnv.txt" dosyasının içeriği 
+    şöyle olacaktır:
+
+    loadkernel=load mmc 0:2 0x82000000 /boot/vmlinuz-5.10.168-ti-r71
+    loadfdt=load mmc 0:2 0x88000000 /boot/dtbs/5.10.168-ti-r71/am335x-boneblack.dtb
+    loadinitrd=load mmc 0:2 0x90000000 /boot/uinitrd
+    bootargs=console=ttyS0,115200 root=/dev/mmcblk0p2 rw
+    bootsys=bootz 0x82000000 0x90000000 0x88000000
+    uenvcmd=run loadkernel;run loadfdt;run loadinitrd; run bootsys
+
+    Daha sonra U-Boot'un komut satırına geçip aşağıdaki çevre değişkenini set edip tüm çevre değişkenlerini saklamak gerekir:
+
+    => setenv bootcmd "load mmc 0:1 0x8A000000 /uEnv.txt;env import -t 0x8A000000;run uenvcmd"
+
+    Artık işlem otomzatize edilmiştir. 
+
+    Boot işlemi sırasında "init" sistemlerinin ilk çalıştıracağı program aslında "rdinit" ve "init" isimli çekirdek komut satırı
+    argümanlarıyla belirlenebilmektedir. Anımsanacağı gibi biz geçici kök dosya sistemini kullanıyorsak ilk çalıştırılacak 
+    program "/init" programıydı. İşte "rdinit" komut satırı argümanı ile bunu değiştirebiliriz. Örneğin:
+
+    => setenv bootargs console=ttyS0,115200 rdinit=/bin/sh root=/dev/mmcblk0p2 rw
+
+    Artık boot işleminde "/init" programı yerine "/bin/sh" programı çalıştırılacaktır. Tabii biz kök dizinde oluşturduğumuz 
+    "init" script dosyasında "proc" ve "sys" dosya sistemlerini mount etmiştik. O halde biz "rdinit=/bin/sh" çekirdek parametresi 
+    ile boot işlemi yaptığımızda bu dosya sistemleri mount edilmemiş olacaktır. İşte aslında bu dosya sistemleri heniz "/init"
+    ya da "rdinit" çekirdek parametresi ile belirtilen program çalıştırılmadan okunan script dosyalarında mount edilebilir.  
+
+    "init" isimli çekirdek parametresi de benzer amaçla kullanılmaktadır. Ancak bu parametre geçici kök dosya sistemi için değil 
+    "root" parametresi ile mount edilen dosya sistemindeki çalıştırılacak ilk programı belirtir. Anımsanacağı default durumda 
+    önce "/sbin/init" dosyası çalıştırılmaya çalışılıyordu.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                        49. Ders 03/10/2024 - Perşembe
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    6) Pekiyi biz geçici kök dosya sistemine düşğp birtakıp işlemleri yaptıktan sonra gerçek kök dosya sistemine nasıl geçeceğiz?
+    Geçici kök dosya sisteminde kök dizin ramdisk biçiminde RAM'de bulunmaktadır. Bizim bir biçimde diskteki gerçek dosya sistemine
+    geçmemiz gerekir. Biz daha önce bir prosesin kök dizinini chroot fonksiyonuyla ya da "chroot" komutuyla değiştirmiştik. Ancak
+    geçici kök dosya sisteminden gerçek kök dosya sistemine geçilirken "chroot" komutu uygun değildir. Çünkü "chroot" komutu 
+    (anımsanacağı gibi bu komut chroot isimli sistem fonksiyonunu çağırmaktadır) tek bir prosesin kök dizinini değiştiri. Halbuki
+    bu noktaya gelinene kadar başka programlar ve deamon'lar çalıştırılmış olabilir. Bu nedenle bu geçişin "pivot_root" ya da
+    "switch_root" komutlarıyla yapılması uygun olur. 
+    
+    pivot_root komutu aslında sys_pivot_root isimli sistem fonksiyonu çağrılarak yazılmıştır. sys_pivot_root sistem fonksiyonunun 
+    parametrik yapısı şöyledir:
+
+    #include <sys/syscall.h>      /* Definition of SYS_* constants */
+    #include <unistd.h>
+
+    int syscall(SYS_pivot_root, const char *new_root, const char *put_old);
+
+    libc kütüphanesinde bu sistem fonksiyonunu çağıran bir kütüphane fonksiyonu (wrapper) bulunmamaktadır. Fonksiyonun birinci 
+    parametresi mount edilmiş yeni kök dosya sistemine ilişkin dizini belirtmektedir. İkinci parametre ise eski kök dosya sisteminin
+    yeni kök dosya sisteminde taşınacağı dizini belirtmektedir. Yani bu fonksiyon proseslerin kök dosya sistemlerini değiştirirken 
+    aynı zamanda eski kök dosya sistemini de yeni kök dosya sistemi içerisinde erişilebilir yapmaktadır. Tabii programcı isterse
+    bu eski kök dosya sistemini umount fonksiyonu ile unmount edebilir. Tabii pivot_root sistem fonksiyonunu çağıran bir kabuk 
+    komutu da vardır. Komutun kullanımı şöyledir:
+
+    pivot_root <yeni_kök_dizin> <eski_kök_dizin>
+
+    Burada yeni_kök_dizin mount edilmiş gerçek kök dosya sisteminin yol ifadesini belirtmektedir. eski_kök_dizin ise geçici kök 
+    dosya sisteminin kök dizininin (/ dezininin) yeni kök dosya sistemindeki yerini belirtir. Örneğin:
+
+    $ sudo pivot_root /mnt/new_root /mnt/old_root
+
+    Burada gerçek kök dosya sistemi "/mmt/new_root" dizinine mount edilmiştir. Yani artık bu işlemden sonra kök dizin bu dizin 
+    olacaktır. Ancak yeni kök dizine geçildiğinde o kök dizinin "/mnt/old_root" dizini eski yani geçici kök dosya sistemi 
+    olacaktır. Yani biz bu komutla gerçek kök dosya sistemine geçtiğimizde gerçek kök dosya sisteminin "/mnt/old_root" dizini 
+    artık geçici kök dosya sisteminin kök dizini gibi olacaktır. Tabii programcı bu eski kök dizini hiç kullanmak istemeyebilir. 
+    O zaman bu işlemden sonra aşağıdaki gibi onu unmount edebilir:
+
+    $ sudo umount /mnt/old_root
+
+    switch_root komutu daha basit ve kullanışlı bir komuttur. Komutun kullanımı şöyledir:
+
+    switch_root <yeni_kök_dizin> <yeni_kök_dizinde_çalıştırılacak_program>
+
+    Komutun birinci parametresi yeni kök dizinin yerini, ikinci parametresi ise yeni kök dizine geçildikten sonra orada çalıştırılacak 
+    programın yol ifadesini belirtmektedir. Kullanımının chroot komutuna benzediğine dikkat ediniz. Ancak pivot_root ve switch_root
+    komutları tek bir prosesin değil tüm proseslerin (aslında mount isim alanındaki tüm proseslerin) kök dizinlerini değiştirmektedir.   
+    switch_root komutu eski kök dosya sistemini (yani geçici kök dosya sistemini) kendisi unmount etmektedir. Bu nedenle geçiş için
+    pivot_root komutu yerine switch_root komutu tercih edilebilir. 
+
+    switch_root komutunu kullanırken bu komut prosesin proses id'sinin 1 olup olmadığını kontrol etmektedir. Dolayısıyla 
+    bizim geçici kök dosya sistemindeki "/init" programında exec ile switch_root uygulamamız gerekir. Çünkü exec yapmazsak 
+    shell programı (örneğimizde "ash") switch_rook komutu için önce fork yapacaktır. Bu durumda komutu uygulayan prosesin proses
+    id değeri 1 olmayacaktır. 
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            50. Ders 08/10/2024 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+    
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bizim switch_root uygulayabilmemiz için önce gerçek kök dosya sistemini "mount" etmemiz gerekir. Örneğin geçmek istediğimiz
+    gerçek kök dosya sistemi micro SD karttaki "/dev/mmcblk0p2" Ext4 dosya sistemi olsun. Bizim şöyle switch_root yapmamız gerekir:
+
+    $ mkdir newroot
+    $ mount /dev/mmcblk0p2 newroot
+    $ switch_root /dev/mmcblk0p2 /sbin/init
+
+    Tabii switch_root yaptığımızda gerçek kök dosya sisteminin hazır olarak bulunuyor olması gerekir. 
+
+    Bu işlemi otomatize edebilmek için geçici kök dosya sistemindeki "/init" dosyasını aşağıdaki gibi güncelleyebiliriz:
+
+    #!/bin/sh
+    mount -t proc proc /proc
+    mount -t sysfs sys /sys
+    mount -t devtmpfs dev /dev
+    mkdir newroot
+    mount /dev/mmcblk0p2 newroot
+    exec switch_root newroot /sbin/init
+
+    Artık biz sistemi önce geçici kök dosya sistemi ile boot ettik. Oradan da gerçek kök dosya sistemine geçtik. Ancak yine de
+    şöyle bir sorun da vardır: Biz geçici kök dosya sistemindeki "/init" script'inde gerçek kök dosya sistemini "/dev/mmcblk0p2"
+    olarak aldık. Bu durumda gerçek kök dosya sistemi kullanıcı tarafından değiştirilemez. Bizim bu gerçek kök dosya sistemini 
+    çekirdeğin "root" parametresinden alıp mount işlemini ona göre yapmamız daha esnek bir kullanım sunacaktır. Pekiyi biz 
+    "/init" script'i içerisinde çekirdeğin "root" parametresini nasıl elde edebiliriz? Bunu elde etmenin tek yolu "proc" dosya 
+    sistemi içerisindeki "cmdline" dosyasını parse etmektir. Çekirdeğin bütün komut satırı "/proc/cmdline" dosyasının içerisinde
+    bulunmaktadır. Biz bu dosyayı okuyup "root=...." çekersek elde edersek bu parametreyi elde edebiliriz. Bu dosyanın parse
+    edilmesi bir C programıyla yapılabilir ya da doğrudan bir shell script ile de yapılabilir.
+
+    <BURADAN DEVAM EDECEĞİZ>
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Daha önceden de belirttiğimiz gibi Linux sistemlerinde tarih boyunca üç init sistemi kullanılmıştır:
+
+    1) Klasik System 5 init sistemi (Buna "SysVinit" de denilmektedir.)
+    2) Upstart init sistemi
+    3) systemd init sistemi
+
+    BusyBox ve toybox kendi init sistemlerini kullanmaktadır. Burada kullanılan init sistemi daha önce de belirttiğimiz gibi 
+    SysVinit sistemine oldukça benzemektedir. Onun daraltılmış hafifletilmiş bir versiyonu gibidir. Bu nedenle biz kursumuzda
+    SysVinit sistemini ve systemd init sistemlerini inceleyeceğiz. Klasik SysVinit sistemi artık Linux sistemlerinde kullanılmıyor 
+    olsa da gömülü sistemlerde kullanılabilmektedir. Upstart arada kalmış bir sistemdir. Zaten çok kısa bir süre kullanılmıştır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi çekirdek boot işleminin son aşamasında kök dosya sisteminde "/init" ya da "/sbin/init" programlarını 
+    çalıştırıyordu. ("/init" programının geçici kök dosya sistemi için "/sbin/init" programının geçici kök dosya sistemi olmayan
+    sistemlerde gerçek kök dosya sistemi için çalıştırıldığını anımsayınız.) Pekiyi çekirdek akışı bu "init" programlarına 
+    devrettiğinde neler olaktadır? 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Klasik "System 5 init" programı çalışmaya başladığında bu program önce "/etc/inittab" dosyasına başvurup oradaki yönergeleri
+    elde edip gerekli ilk işlemleri yapmaktadır. Bu dosya aşağıdaki gibi formata sahip satırlardan oluşmaktadır:
+
+    id:runlevel:action:executable [command_line_args]
+
+    "inittab" dosyası "hangi durumlarda hangi programların çalıştırılacağını" belirten bir dosyadır. Burada "id" o satıra özgü 
+    herhangi bir belirteçtir. Kullanılmayabilir. "runlevel" sistemin çalışma düzeyini belirtmektedir. İzleyen paragraflarda 
+    açıklanacaktır. "action" ilgili programın nasıl ve ne zaman çalıştırılacağını belirtir. Nihayet executable çalıştırılacak
+    programın yol ifadesini belirtmektedir. Örnek bir satır şöyle olabilir:
+
+    tty1:2345:respawn:/sbin/getty -L tty1
+
+    Buradaki "tty1" satırı temsil eden id değeridir. Bu ismin işleyişte bir önemi yoktur. run level için 2, 3, 4, 5 değerleri 
+    girilmiştir. Run level tek bir sayıdan oluşmaktadır. Dolayısıyla burada dört farklı run level belirtilmiştir. Çalıştırma 
+    biçimi (action) "respawn" olarak belirtilmiştir. Nihayet çalıştırılacak program "/sbin/getty" isimli terminal programıdır. 
+    "-L tty" bu programın komut satırı argümanlarıdır. Satırdkai "action" belirten belirteçler şunlardan biri olabilir:
+
+    sysinit: init çalıştığında toplamda bir kez çalıştırılacak programları belirtir. Çalışma düzeyi (run level) bu eylemde 
+    etkili olmamaktadır.
+  
+    respawn: Eğer ilgili proses bir biçimde sonlanırsa init bunu izleyerek yeniden çalıştırmaktadır. Bu da belli çalışma 
+    düzeyleri için belirtilmektedir. 
+    
+    wait: Belli çalışma düzeylerinde çalıştırılacak prgramları belirtir. Ancak programın çalışması bitene kadar init başka 
+    program çalıştırmdan bekler. 
+
+    boot: Sistem reboot edilirken çalışrırılacak programları belirtmektedir. Çalışma düzeyleri etkilidir. 
+
+    Pekiyi çalışma düzeyi (run level) ne anlama gelmektedir? Aslında çalışma düzeyi "init" başlatıldığında çalıştırılacak 
+    script grubunu belirtmektedir. Tabii bu script'ler belli senaryoları sağlamak için oluşturulmuştur. "init" programı aslında 
+    çalışma düzeylerine özel bir anlam vermemektedir. Ancak Linux'ta hazır "ysVinit paketleri kullanıldığında çalışma düzeylerinin
+    nasıl bir sistemi başlatacağı belirlenmiştir. Aşağıda Linux'un SysVinit paketinin tanımladığı çalışma düzeylerinin anlamlarını
+    listeliyoruz:
+
+    0: Sistemin tamamen kapatıldığı durumdur. Güç düğmesine basmak gibi.
+    1: Tek kullanıcı modu. Sadece root kullanıcısı giriş yapabilir.
+    2: Çok kullanıcı modu, ancak ağ hizmetleri etkin değil.
+    3: Tam çok kullanıcı modu. Tüm ağ hizmetleri aktiftir ve grafiksel arayüz genellikle bu seviyede aktif hale getirilir. 
+    4: Kullanıcıların kendilerinin konfigüre ettiği çalışma düzeyi
+    5: Grafiksel arayüzün varsayılan olarak çalıştırıldığı seviyedir.
+    6: Sistemi yeniden başlatır.
+
+    İşte "inittab" dosyasındaki satırlar "hangi çalışma düzeyi aktif ise hangi programların çalıştırılacağını" belirtmektedir. 
+    Default çalışma düzeyi yine genellikle bu "inittab" dosyasının tepesinde bir satırda aşağıdaki gibi belirtilmektedir:
+
+    id:5:initdefault:
+
+    Burada eylem (action) olarak "initdefault" default çalışma düzeyini belirtmektedir. Pekiyi bir dolu bir "inittab" dosyası 
+    neye benzemektedir? Aşağıda örnek bir "inittab" dosyası verilmiştir:
+
+    ****************************************************** 
+    # Varsayılan runlevel
+    id:3:initdefault:
+
+    # Sistem başlatma script'i
+    si::sysinit:/etc/rc.d/rc.sysinit
+
+    # Runlevel geçiş script'leri
+
+    l0:0:wait:/etc/rc.d/rc 0
+    l1:1:wait:/etc/rc.d/rc 1
+    l2:2:wait:/etc/rc.d/rc 2
+    l3:3:wait:/etc/rc.d/rc 3
+    l4:4:wait:/etc/rc.d/rc 4
+    l5:5:wait:/etc/rc.d/rc 5
+    l6:6:wait:/etc/rc.d/rc 6
+
+    # Konsol getty süreçleri
+    1:2345:respawn:/sbin/getty --noclear tty1 linux
+    2:2345:respawn:/sbin/getty tty2 linux
+    3:2345:respawn:/sbin/getty tty3 linux
+    4:2345:respawn:/sbin/getty tty4 linux
+    5:2345:respawn:/sbin/getty tty5 linux
+    6:2345:respawn:/sbin/getty tty6 linux
+
+    # Ctrl+Alt+Del tuş kombinasyonu için
+    ca::ctrlaltdel:/sbin/shutdown -r now
+
+    # Güç kesintisi durumunda
+    pf::powerfail:/sbin/shutdown -h +2 "Güç kesintisi algılandı, sistem 2 dakika içinde kapanacak."
+
+    # Sistem kapanırken
+    sh:0123456:shutdown:/sbin/killall5 -15
+    ****************************************************** 
+    
+    SysVinit sistemindeki "init" programı aslında "/etc/inittab" dosyasını parse edip belli çalışma düzeylerinde burada belirtilen 
+    programları çalıştırmaktadır. Ancak bu "init" paketi kurulduğunda aslında pek çok script dosyası da "/etc/rc.d" dizininin
+    içerisine yerleştirilmektedir. Bu dizindeki script'ler çeşitli çalışma düzeylerine geçildiğinde çalıştırılırlar. Yukarıdaki 
+    örnekte bu çalıştırmayı "/etc/rc.d/rc" programı yapmaktadır. Böylece sistem yöneticisi "/etc/inittab" dosyasına hiç dokunmadan 
+    belli bir çalışma düzeyinde çalıştırılacak olan programları bir script olarak hazırlayıp "/etc/rc.d" dizinindeki dizinlerin 
+    içerisinde aşağıda belirtildiği gibi yerleştirir. 
+
+    "/etc/rc.d" dizini içerisinde "rcN.d" isimli (burada N çalışma düzeyini belirtiyor) dizinler bulundurulmaktadır:
+
+    /etc/rc.d/rc0.d/: Runlevel 0 için (sistemin kapanması)
+    /etc/rc.d/rc1.d/: Runlevel 1 için (tek kullanıcı modu)
+    /etc/rc.d/rc2.d/: Runlevel 2 için
+    /etc/rc.d/rc3.d/: Runlevel 3 için (çok kullanıcılı mod, ağ ile)
+    /etc/rc.d/rc4.d/: Runlevel 4 için (kullanıcı tanımlı)
+    /etc/rc.d/rc5.d/: Runlevel 5 için (grafik arayüz ile)
+    /etc/rc.d/rc6.d/: Runlevel 6 için (sistemin yeniden başlatılması)
+
+    Örneğin biz 3 numaralı çalışma düzeyi için kendi script'lerimizi çalıştıracak olalım. Bunun için yapacağımız şey "/etc/rc.d/rc3.d" 
+    dizinine script'lerimizi çalıştırılabilir dosya olarak kopyalamaktır. Böylece bu script'ler otomatik olarak çalıştırılacak ve 
+    bizim servislerimiz da sistem boot edildiğine otomatik devreye girmiş olacaktır. "/etc/rc.d/rcN.d" dizinlerindeki script'ler 
+    aşağıdaki gibi isimlendirilmelidir:
+
+    SXXservisadı: Servisin çalışma düzeyine girerken başlatılacağını belirtir.
+    KXXservisadı: Servisin çalışma düzeyinden çıkarken durdurulacağını belirtir.
+    XX: İki basamaklı sıra numarasıdır ve script'lerin hangi sırayla çalıştırılacağını belirler.
+
+    Görüldüğü gibi script isimlerinin ilk karakteri 'S' ya da 'K' biçimindedir. 'S' scriptleri çalışma düzeyine girilirken 'K' 
+    script'leri ise çalışma düzeyinden çıkılırken çalıştırılmaktadır. XX burada iki basamaklı sayı belirtmektedir. Buradaki 
+    'S' script'leri düşük sayıdan yüksek sayıya doğru 'K' scriptleri ise yüksek sayıdan düşük sayıya doğru çalıştırılırlar. Nihayet 
+    XX sayılarından sonra çalıştırılacak programın ismi belirtilir. Tabii aslında bu script'ler bazen doğurdan bazı servislere 
+    sembolik link de yapılmış olabilirler. Örnek bir dizin içeriği şöyle verilebilir:
+
+    /etc/rc.d/rc3.d/S10network
+    /etc/rc.d/rc3.d/S50apache
+    /etc/rc.d/rc3.d/K20nfs
+
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. Burada bütün çalıştırmalar "/etc/inittab" dosyasındaki script'ler tarafından
+    yapılmaktadır. Eğer bu script'ler "/etc/inittab" dosyası içerisinde çalıştırılmazsa bu durumda "/etc/rc.s/rcN.d" dizinlerindeki
+    script'ler de çalıştırılmayacaktır.
+
+    Klasik System 5 init sisteminde sistem açıldığında bazı aygıtların otomatik mount edilmesini sağlamak için "/etc/fstab" 
+    dosyası kullanılmaktadır. Biz bu dosyanın formatını daha önce belirtmiştik. "mount" komutu "-a" ile çalıştırıldığında 
+    bu komut "/etc/fstab" dosaysına bakarak oradaki bilgilerden hareketle mount işlemini yapmaktadır. SysVinit sisteminde
+    genellikle bu "mount -a" komutu "/etc/initab" içerisindeki bir script tarafından çalıştırılmaktadır.
+
+    Aslında Sysvinit init programı komut satırı argümanı da alabilmektedir. Komut satırı argümanı ile başlangıç çalışma düzeyi 
+    belirtilebilmektedir. 
+
+    Eski SysVinit sistemlerinde o andaki çalışma düzeyi "runlevel" komutuyla elde edilebilir. "init" programı aynı zamanda 
+    RUNLEVEL isimli bir çevre değişkenini de default çalışma düzeyi olarak set etmektedir. Mevcut çalışma düzeyi "telinit" 
+    komutuyla değiştirilebilmektedir. 
+
+    SysVinit sistemi belli bir süredir artık kullanılmadığı için bunun hakkında Internet'te kaynak bulmak da zorlaşmıştır. 
+    Daha ayrıntılı bilgi için "man init 8" aramasını yapabilirsiniz. Projenin eski kodlarını inceleyebilirsiniz. Aşağıdaki
+    dokğman nispeten diğerlerinden daha iyidir:
+
+    https://wiki.gentoo.org/wiki/Sysvinit
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Pekiyi BusyBox init sistemi nasıldır? Yukarıda da belirttiğimiz gibi BusyBox init programı SysVinit'teki init programına 
+    benzemektedir. Ancak önemli bazı farklılıkalr şunlardır:
+
+    - BusyBox'ta "çalışma düzeyi (runlevel)" kavramı yoktur. Dolayısıyla BusyBox'ta "/etc/inittab" dosyasındaki satırlarda 
+    çalışma düzeyi alanına bir şey girilmemektedir. 
+    - BusyBox'ta SysVinit sistemindeki eylemlerin (action) hepsi yoktur.
+
+    Ancak BusyBox init programı yine "/etc/inittab" dosyasını okumaktadır. Bu dosyanın satırları SysVinit sistemiyle aynı 
+    formattadır. (Çalışma düzeyi alanının kullanılmadığını anımsayınız.)   Burada dikkat edilmesi gereken bir nokta şudur: 
+    BusyBox ve toybox gibi araçlar bize minimal bir kök dosya sistemi sunmaktadır. Dolayısıyla bu araçlarla oluşturduğumuz 
+    kök dosya sistemlerinde hazır bir "/etc/inittab" dosyası da yoktur. Yani uygulamacının bu dosyaı da kendisinin hazırlaması 
+    gerekir. 
+
+    Pekiyi BusyBox için gerçek kök dosya sistemindeki "/etc/inittab" dosyasını nasıl hazırlamalıyız? Genellikle uyguşamacılar 
+    SysVinit sistemlerine benzeterek işin başında aşağıdaki "rcS" isimli bir script'i çalıştırmaktadır:
+
+    ::sysinit:/etc/init.d/rcS 
+
+    Böylece artık bu dosyaya dokunmadan sistem açıldığında çalıştırılacak öğeleri bu script'in içerisine yerleştirebiliriz. 
+    "/etc/fstab" dosyasındaki mount yönergelerinin işleme sokulması isteniyorsa aşağıdaki gibi bir satırın bulundurulması 
+    uygun olur:
+
+    ::sysinit:/bin/mount -a
+
+    Sistem restart edildiğinde reboot programının çalıştırılması için aşağıdaki satır bulundurulabilir:
+
+    ::restart:/sbin/reboot
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
     
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-
 /*-----------------------------------------------------------------------------------------------------------------------------
-    start_kernel ---> rest_init ---> kernel_init ---> kernel_init_freeable ---> prepare_namespace (mount işlemlerini yapıyor)
 
-    1) initramfs'ye bakılıyor (ilk çalıştırılan program ("/init")
-    2) initrd'ye bakılıyor (ilk çalıştırılan program "/linuxrc")
-    3) Çekirdek root parametresine bakılıyor (ilk çalıştırılan program "/sbin/init")
------------------------------------------------------------------------------------------------------------------------------*/
-   
------------------------------------------------------------------------------------------------------------------------------*/
-cat << 'EOF' > /tmp/initramfs/init
-#!/bin/sh
-mount -t proc proc /proc
-mount -t sysfs sys /sys
-mount -t devtmpfs dev /dev
-echo "BusyBox initramfs is now running"
-exec /bin/sh
-EOF
-chmod +x /tmp/initramfs/init
+    BusyBox init sisteminin işleyişi:
 
-cd /tmp/initramfs
-find . | cpio -H newc -o > /tmp/initrd.cpio
-gzip /tmp/initrd.cpio
-mkimage -A arm -O linux -T ramdisk -C gzip -n 'Initrd' -d initrd.cpio.gz uInitrd
+    1) Çekirdek geçici kök dosya sistemi olarak modern "initramfs" kullanılıyorsa "/init", eski "imitrd" kullanılıyorsa "/linuxrc"
+    programlarını, geçici kök dosya sistemi kullanılmıyorsa "/sbin/init" programını çalıştırır. 
 
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount /dev/mmcblk0p2 /mnt
-mkdir -p /mnt/initramfs
-pivot_root /mnt /mnt/initramfs
-umount /initramfs/proc
-umount /initramfs/sys
-exec chroot . /sbin/init < /dev/console > /dev/console 2>&1
-exec /bin/sh
+    2) Akış BusyBox'ın "init" programına aktarılır.  
+
+    3) BusyBox "init" programı "/etc/inittab" dosyasını okur ve oradaki yönergeleri çalıştırır. 
+
+    "/etc/inittab" dosyasının içeriği şöyledir:
+
+    <id>:<runlevels>:<action>:<process>
+
+    Burada genellikle "/etc/init.d/rcS" isimli bir script çalıştırılır. Bu script de "/etc/rcS.d" dizinindeki diğer script'leri
+    çalıştırır. Tabii bunların hiçbiri zorunlu değildir. Yani "/etc/inittab" içerisinde "rcS" script'i çalıştırılmayabilir. 
+    "rcS" script'i de"/etc/rcS.d" dizinindeki scriptleri çalıştırmayabilir. 
+
+    ::respawn:/sbin/getty -L ttyUSB0 115200 vt100
+    exec setsid cttyhack /bin/sh
+    exec /bin/sh
+
+    Bunlardan biri "/etc/fstab" isimli dosyadır. Bu dosyada sistem açılırken otomatik mount edilecek dosya sistemleri belirtilmektedir. 
+    Burada en azından bizim "proc" ve "sys" dosya sistemlerini belirtmemiz gerekir. "/etc/fstab" dosyasının minimal içeriği 
+    aşağıdaki gibi olabilir. Bu içeriği editörde oluştururken editörünüzü "sudo" ile çalıştırmayı unutmayınız:
+
+    proc    /proc    proc   defaults  0 0
+    sysfs   /sys     sysfs  defaults  0 0
+
 
 /*-----------------------------------------------------------------------------------------------------------------------------
 
