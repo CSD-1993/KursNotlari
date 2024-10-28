@@ -17535,15 +17535,162 @@ for presult in predict_result[:, 0]:
     df['Hour-Minute'] = df['Date Time'].str[11:16]
 
     df.drop(['Date Time'], axis=1, inplace=True)
-    df = pd.get_dummies(df, columns=['Month', 'Hour-Minute'],  dtype='int8')
+    from sklearn.preprocessing import OneHotEncoder
 
-    dataset = df.to_numpy('float32')
+    ohe = OneHotEncoder(sparse_output=False)
+
+    ohe.fit(df[['Month', 'Hour-Minute']])
+    ohe_result = ohe.transform(df[['Month', 'Hour-Minute']])
+
+    df = pd.concat([df, pd.DataFrame(ohe_result)], axis=1)
+    df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+    x = df.to_numpy('float32') 
+    y = df['T (degC)'].to_numpy('float32')
 
     Bir günün kaç 10 dakikadan oluştuğunu aşağıdaki gibi bir değişkenle ifade edebiliriz:
 
     PREDICTION_INTERVAL = 24 * 60 // 10         # 144
+
+    Biz burada dataset_x ve dataset_y verilerini aşağıdaki ayırabiliriz:
+
+    dataset_x = x[:-PREDICTION_INTERVAL]
+    dataset_y = y[PREDICTION_INTERVAL:]
+
+    Burada her satır PREDICTION_INTERVAL kadar ileridki satırda bulunan y değeri ile eşleştirilmiştir. Veri kümesi ayrıştırıldıktan
+    sonra artık özellik ölçeklemesi yapabiliriz:
+
+    from sklearn.model_selection import train_test_split
+
+    training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y, test_size=0.2, shuffle=False)
+
+    from sklearn.preprocessing import StandardScaler
+
+    ss = StandardScaler()
+    ss.fit(training_dataset_x)
+    scaled_training_dataset_x = ss.transform(training_dataset_x)
+    scaled_test_dataset_x = ss.transform(test_dataset_x)
+
+    Modelimiz aşağıdaki gibi olabilir:
+
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input,  Dense
+
+    model = Sequential(name='Jena-Climate')
+    model.add(Input((scaled_training_dataset_x.shape[1], ),  name='Input'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
+    model.summary()
+
+    Örnek bir bütün olarak aşağıda verilmiştir.
+#----------------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+
+PREDICTION_INTERVAL = 24 * 60 // 10         # 144
+
+df = pd.read_csv('jena_climate_2009_2016.csv')
+
+df['Month'] = df['Date Time'].str[3:5]
+df['Hour-Minute'] = df['Date Time'].str[11:16]
+
+df.drop(['Date Time'], axis=1, inplace=True)
+
+from sklearn.preprocessing import OneHotEncoder
+
+ohe = OneHotEncoder(sparse_output=False)
+
+ohe.fit(df[['Month', 'Hour-Minute']])
+ohe_result = ohe.transform(df[['Month', 'Hour-Minute']])
+
+df = pd.concat([df, pd.DataFrame(ohe_result)], axis=1)
+df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+x = df.to_numpy('float32') 
+y = df['T (degC)'].to_numpy('float32')
+
+dataset_x = x[:-PREDICTION_INTERVAL]
+dataset_y = y[PREDICTION_INTERVAL:]
+
+from sklearn.model_selection import train_test_split
+
+training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y, test_size=0.2, shuffle=False)
+
+from sklearn.preprocessing import StandardScaler
+
+ss = StandardScaler()
+ss.fit(training_dataset_x)
+scaled_training_dataset_x = ss.transform(training_dataset_x)
+scaled_test_dataset_x = ss.transform(test_dataset_x)
    
-    Biz evirişim katmanı olarak tek boyutlu Conv1D katmanını kullanacağız. Ancak bu katman bizden girdiyi iki boyutlu 
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Input,  Dense
+
+model = Sequential(name='Jena-Climate')
+model.add(Input((scaled_training_dataset_x.shape[1], ),  name='Input'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dense(1, activation='linear', name='Output'))
+model.summary()
+
+model.compile(optimizer='rmsprop', loss='mean_squared_error', metrics=['mean_absolute_error'])
+
+from tensorflow.keras.callbacks import EarlyStopping
+
+esc = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
+
+hist = model.fit(scaled_training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['loss'])
+plt.plot(hist.epoch, hist.history['val_loss'])
+plt.legend(['Loss', 'Validation Loss'])
+plt.show()
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Mean Squared Error', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['mean_absolute_error'])
+plt.plot(hist.epoch, hist.history['val_mean_absolute_error'])
+plt.legend(['MSE', 'Validation MSE'])
+plt.show()
+
+# evaluation
+
+eval_result = model.evaluate(scaled_test_dataset_x, test_dataset_y)
+
+for i in range(len(eval_result)):
+    print(f'{model.metrics_names[i]}: {eval_result[i]}')
+
+# prediction
+
+predict_df = pd.read_csv('predict.csv')
+
+predict_df['Month'] = predict_df['Date Time'].str[3:5]
+predict_df['Hour-Minute'] = predict_df['Date Time'].str[11:16]
+
+predict_df.drop(['Date Time'], axis=1, inplace=True)
+
+ohe_result = ohe.transform(predict_df[['Month', 'Hour-Minute']])
+
+predict_df = pd.concat([predict_df, pd.DataFrame(ohe_result)], axis=1)
+predict_df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+predict_dataset = predict_df.to_numpy('float32')
+scaled_predict_dataset = ss.transform(predict_dataset)
+
+predict_result = model.predict(scaled_predict_dataset)
+
+for presult in predict_result[:, 0]:
+    print(presult)
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Jena Climate örneğini tek boyutlu evrişim katmanı ile gerçekleştirelim. Ancak bu katman bizden girdiyi iki boyutlu 
     matrisler biçiminde istemektedir. Yani bizim sinir ağına girdileri 144'lük (PREDICTION_INTERVAL) matrisler biçiminde vermemiz
     gerekir. dataset_x ve dataset_y veri kümelerini hazırlarken bizim 144'lük peşi sıra giden kaydırmalı bir veri kümesi oluşturmamız
     gerekir. Tabii burada kaydırma miktarını istediğimiz gibi alabilir. dataset_x veri kümesinin aşağıdaki gibi bir yapıya sahip
@@ -17560,7 +17707,7 @@ for presult in predict_result[:, 0]:
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
-                                    70. Ders - 12/10/2024 - Cumartesi
+                                        70. Ders - 12/10/2024 - Cumartesi
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
@@ -17674,7 +17821,6 @@ for presult in predict_result[:, 0]:
     eval_result = model.evaluate(scaled_test_dataset_x, test_dataset_y)
     for i in range(len(eval_result)):
         print(f'{model.metrics_names[i]}: {eval_result[i]}')
-
 
     Kestirim işleminde bir günlük veri (WINDOW_SIZE kadar veri) "predict.csv" dosyasında bulundurulmuştur. Bu dosyadan verileri 
     okuyup yine aynı sayıllaştırmaları ve ölçeklemeyi uygulamamaız gereir:
@@ -18072,63 +18218,145 @@ for presult in predict_result[:, 0]:
     hafıza sistemine de benzemektedir. Biz bir bilgiyi kalıcı hale getirmek için sürekli tekrarlarız. Tekrarlanmayan bilgi 
     kısa süreli hafızandan (short term memory) uçup gitmektedir. Pekiyi bu geri besleme fikri bu haliyle ağa hafıza kazandırmakta 
     yeterli olmakta mıdır? Geri beslemeli ağlar bu anlamda hafıza kazandırmaya önemli bir katkı sunmuştur. Ancak bu haliyle 
-    ağ eski bilgileri uzun süre hafızasında tutamaktadır. Bu probleme İngilizce "vanishing gradient problem" deniilmektedir.
-    Son on sendeir bu problem üzerinde çokça çalışılmış ve geri beslemeli ağlar bu problemi tam olarak ortadan kaldırmasa da 
-    azaltacak biçimde evrimleşmiştir. 
-
-
-
-#----------------------------------------------------------------------------------------------------------------------------
-
-
-
+    ağ eski bilgileri uzun süre hafızasında tutamamaktadır. Bu probleme genel olarak İngilizce İngilizce " vanishing gradient 
+    problem (gradyan kaybolması)" denilmektedir. Son on sendeir bu problem üzerinde çokça çalışılmış ve geri beslemeli ağlar 
+    bu problemi tam olarak ortadan kaldırmasa da azaltacak biçimde evrimleşmiştir. Gradyan kaybolması (vanishing gradient) 
+    hakkında ileride bilgiler verilecektir. 
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
-
-
-#----------------------------------------------------------------------------------------------------------------------------
-    Yukarıda zamansal (temporal) verilerden bahsetmiştik. Belli periyotlarda toplanan veriler, yazıdaki sözcükler, bir videodaki
-    frame'ler tipik zamansal verilerdir. Biz yukarıda zamansal veriler üzerinde tek boyutlu evrişim işlemi yaparak bağlamsal bir etki 
-    yaratmaya çalıştık. İşte bağlamsal etki yaratmanın diğer bir yolu da "geri beslemeli ağlardır (recurrent neural network kısaca RNN)". 
-    Geri beslemeli ağlar aslında bir hafıza oluşturmaya çalışır. Bu ağların temel fikri çıkışın girişle işleme sokularak 
-    ağa uygulanmasıdır. Örneğin zamansal verilerde bir sonraki giriş ile bir önceki çıkış işleme sokulur ve yeni giriş olarak uygulanır. 
-    Çıkış ile giriş sürekli bir biçimde işleme sokulup girdi oluşturulursa bu durum bir hazfızanın oluşmasını sağlamaktadır. 
-    Örneğin bir yazıda "adam mağazaya girdi, sonra bir kitap aldı" cümlesinde kitabı alanın mağazaya giren kişi olduğu sonucunun çıkartılması 
-    için bir hafıza gerekmektedir. Çıkışın girişe uygulanması Markov zincirlerini de çağrıştırmaktadır. 
-#----------------------------------------------------------------------------------------------------------------------------
-
-#----------------------------------------------------------------------------------------------------------------------------
-    Şimdiye kadar üzerinde çalıştığımız ağlara "ileri beslemeli ağlar (feed forward netwoks)" diyebiliriz. Halbuki biz bu bölümde 
-    "geri beslemeli ağlar (feed backword networks)" üzerinde duracağız. Buradaki "geri besleme" İngilizce daha çok "recurrent" sözcüğü 
-    ile ifade edilmektedir. Bu nedenle geri beslemeli ağlar için genellikle İngilizce "recurrent newural networks" terimi kullanılmaktadır. 
-    Bu da "RNN" biçiminde kısaltılmaktadır. 
-#----------------------------------------------------------------------------------------------------------------------------
-
-#----------------------------------------------------------------------------------------------------------------------------
-    Geri beslemeli ağlardaki geri besleme bir katman biçiminde oluşturulmaktadır. Bu katmanda yine n tane nörun bulunur. Ancak bu katmana 
-    girdiler tek hamede değil parça parça verilir. Girdinin her parçasından bir çıktı elde edilir. Sonra bu çıktı girdinin sonraki 
+    Geri beslemeli ağlardaki geri besleme bir katman biçiminde oluşturulmaktadır. Bu katmanda yine n tane nörun bulunur. Ancak 
+    bu katmana girdiler tek hamede değil  verilir. Girdinin her parçasından bir çıktı elde edilir. Sonra bu çıktı girdinin sonraki 
     parçasıyla işleme sokularak yine geri besleme katmanına sokulur. Böylece katmanın her çıktısı sonraki girişle işleme sokularak 
-    bir hafıza oluşturulmaya çalışılır. Tabii geri besleme katmanı genellikle tek başına kullanılmaz. Bu katmanın çıktısı daha öncedeleri yaptığımız 
-    gibi dense katmanlara verilir. Yani geri besleme katmanı genellikle derin ağlardaki ilk katmanları oluşturmaktadır. 
+    bir hafıza oluşturulmaya çalışılır. Tabii geri besleme katmanı genellikle tek başına kullanılmaz. Bu katmanın çıktısı daha 
+    önceleri yaptığımız gibi Dense katmanlara verilir. Yani geri besleme katmanı genellikle derin ağlardaki ilk katmanları oluşturmaktadır. 
 
-    Geri besleme katmanında önceki çıktı sonraki girdi ile işleme sokulurken yine ağırlık değerleriyle dot-product yapılmaktadır. 
-    Biz parçalı girdilerin geri besleme katmanına sokulması sırasında kullanılan ağırlık değerlerin W ile, çıktıların gidilerle 
-    işleme sokulmasında kullanılan ağırlık değerlerini U ile gösterebiliriz. Bu durumda geri besleme katmanındaki nöronların çıkış
-    değerleri şöyle olacaktır:
+    Bir Dense katmandaki bir nöronu düşünelim. Bu nörona o katmanın girdisi kadar giriş uygulanmaktadır. Aynı zamanda bu nöronda 
+    bir bias değeri de vardır. Anımsanacağı gibi bu nöronun çıktısı şöyle oluşturulmaktadır:
 
-    geri besleme katmanındaki nöronların çıkış değerleri = activation(dot(W, xi+1) + dot(U, Oi) + b)
+    activation(dot(W, X) + b) ---> çıktı
 
-    Pekiyi girdi katmanına her 32'lik vektörlerden oluşan zamansal değerler uygulanmış olsun. Geri besleme katmanında da toplam 64 nöronun bulunduğunu düşünelim. 
-    Bu durumda 32'lik giriş uygulandığında geri besleme katmanının çıktısından 64 değer elde edilecektir. Bu 64 çıkış sonraki 32'lik girişle yukarıdaki 
-    gibi işleme sokulacaktır. Pekiyi bu katmanda tahmin edilecek parametrelerin sayısı ne olacaktır? Her zamansal veri 64 tane nöronla dense 
-    bağlandığına göre 32 * 64 tane W değeri söz konusu olacaktır. Öte yandan her 64'lük çıktı yeniden 64 nörona girdi yapılacağına göre 64 tane U değeri 
-    söz konusu olacaktır. Nihayet 64 nöronun her birinin bir bias değeri olduğuna göre toplam bu katmandaki tahmin edilecek parametrelerin sayısı
-    32 * 64 + 64 * 64 + 64 = 6208 tane olacaktır. 
+    Bizim bu nöronda konumlandırmaya çalıştığımız değerler W ve b değerleridir. Örneğin 5 girdiye sahip olan bir Dense katmandaki
+    nörounun çıktısı şöyle hesaplanmaktadır:
 
-    Aşağıdaki örnekte bböyle bir katmanın nasıl hesap yaptığı rastgele verilerle oluşturulmuştur. Bu programda TIMESPEC parçalı verilerin sayısını (yani 
-    kaç parça olduğunu), INPUT_FEATURES parçalı verilerin kaç elemanlı vektörler olduğunu, RECURRENT_LAYER_SIZE ise geri besleme katmanındaki nöron sayısını belirtmektedir. 
-    Bu programda zamansal her veri uygulandığında katmandan elde edilen her çıktı biriktirilmiştir. 
+    activation(w0x0 + w1x1 + w2x2 + w3x3 + w4x4 + b) ---> çıktı
+
+    Bu nöronda toplam 6 tane eğitilebilir parametre olduğuna dikkat ediniz. Eğer Dense katmanda bunun gibi N tane nöron varsa 
+    bu durumda eğitilebilir parametrelerin sayısı N * 6 olacaktır. Katmanın girdi nöronlarının sayısı K tane olmak üzere Dense 
+    katmandaki eğitilebilir parametrelerin sayısının K * N + N olduğunu anımsayınız. 
+    
+    Şimdi bir zaman serisi veri kümesindeki satırları geri besleme (recurrent) katmanına uygulayalım. Yine katmandaki belli bir 
+    nörounu dikkate alalım. Katmanda toplam 10 tane nöron olsun. Katmanın girisi de (özelliklerin sayısı) 5 tane olsun. İşte geri 
+    besleme katmanında her yeni girdi değerleri bu nörona aynı zamanda bir önceki çıktı değerleriyle birlikte verilir. Yani nöronun 
+    girdileri yalnızca gerçek girdilerden değil aynı zamanda bir önceki çıktılardan da oluşmaktadır. Bu örneimizde nöronun toplam 
+    5 tane girdisi vardır. Katmanda da 10 nöron vardır. O halde katmandaki bir önceki çıktı da 10 tane olacaktır. İşte yeni girdi 
+    (sıradaki satır) ile katmanın bir önceki çıktı nöronlarının değeri bu nörona girdi yapılmaktadır. Bu durumda katmanın girdisi 
+    K tane nörondan oluşuyorsa ve katmanda N tane nöron varsa bu nöronun girdisi K + N tane olacaktır. Tabii bir de bias değeri 
+    vardır. Bu durumda bu nörondaki eğitilebilir parametrelerin sayısı K + N + 1 tane olacaktır. Örneğimizde nöroa 5 + 10 = 15
+    giriş uygulanacaktır. Bu 15 giriş ağırlık değerleriyle dot product yapılacak ve buna bir de bias değeri toplanacaktır. Sonra 
+    da elde edilen bu değere aktivasyon fonksiyonu uygulanacaktır. 
+
+    Geri beslemeli ağlardaki katmanlarda bulunan nöronların çıktılarını aşağıdaki gibi formülüze edebiliri:
+   
+    ht = activation(dot(W, xt) + dot(U, ht-1) + b)
+
+    Burada ht nöronun çıktısını belirtmektedir. xt uygulanan girdiyi belirtmektedir. ht-1 ise katmanın bir önceki çıktısını temsil 
+    etmektedir. W değeri girdiler için konumlandırılacak ağırlık değerlerini U ise geri besleme için konumlandırılacak ağırlık 
+    değerlerini belirtmektedir. 
+
+    Geri besleme katmanı Keras'ta SimpleRNN isimli katman sınıfıyla temsil edilmektedir. Bu katman değerleri satır satır ele alıp 
+    yukarıda belirttiğimiz gibi bir işlem yapmaktadır. 
+
+    Pekiyi geri besleme katmanındaki toplam eğitilebilir parametrelerin sayısı nasıl hesaplanmaktadır? Bu katmana K tane girdi 
+    uygulandığını katmanda da N tane nöron olduğunu düşünelim. Bu durumda katmandaki her nöronda yukarıda belirttiğimiz gibi 
+    K + N + 1 tane eğitilebilir parametre bulunacaktır. Bu nörondan toplam N tane olduğunda göre katmandaki toplam eğitilebilir 
+    parametrelerin sayısı (K + N + 1) * N tane olacaktır. 
+
+    SimpleRNN sınıfının __init__ metodunun parametrik yapısı şöyledir:
+
+    tf.keras.layers.SimpleRNN(
+        units,
+        activation='tanh',
+        use_bias=True,
+        kernel_initializer='glorot_uniform',
+        recurrent_initializer='orthogonal',
+        bias_initializer='zeros',
+        kernel_regularizer=None,
+        recurrent_regularizer=None,
+        bias_regularizer=None,
+        activity_regularizer=None,
+        kernel_constraint=None,
+        recurrent_constraint=None,
+        bias_constraint=None,
+        dropout=0.0,
+        recurrent_dropout=0.0,
+        return_sequences=False,
+        return_state=False,
+        go_backwards=False,
+        stateful=False,
+        unroll=False,
+        seed=None,
+        **kwargs
+    )
+
+    Metodun ilk parametresi katmandaki nöron sayısını belirtmektedir. Aktivasyon fonksiyonunun default olarak 'tanh' biçiminde 
+    alındığına dikkat ediniz. Geri besleme katmanlarında ReLU fonksiyonu yerine tanh (hiperbolik tanjant) fonksiyonu tercih 
+    edilmektedir. Bu fonksiyo bu katmanda "vanishing gradient" problemine nispeten bir direnç oluşturmaktadır.
+
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+    model = Sequential(name='SimpleRNN-Test')
+    model.add(Input((100, 10),  name='Input'))
+    model.add(SimpleRNN(128,  activation='tanh', name='SimpleRNN'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
+    model.summary()
+
+    Bu modeldeki özet bilgi şöyle elde edilmiştir:
+
+    Model: "SimpleRNN-Test"
+    ┌─────────────────────────────────┬────────────────────────┬───────────────┐
+    │ Layer (type)                    │ Output Shape           │       Param # │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ SimpleRNN (SimpleRNN)           │ (None, 128)            │        17,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Reshape (Reshape)               │ (None, 128)            │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-1 (Dense)                │ (None, 256)            │        33,024 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-2 (Dense)                │ (None, 256)            │        65,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Output (Dense)                  │ (None, 1)              │           257 │
+    └─────────────────────────────────┴────────────────────────┴───────────────┘
+    Total params: 116,865 (456.50 KB)
+    Trainable params: 116,865 (456.50 KB)
+    Non-trainable params: 0 (0.00 B)
+
+    Biz Dense katmanlardaki eğitilebilir parametrelerin nasıl hesaplandığını zaten görmüştük. SimpleRNN katmanınında girdi 
+    olarak 10 nöron uygulanmaktadır. Katmanda toplam 128 nöron vardır. Bu durumda katmandaki her nörona aslında 10 + 128
+    girdi uygulanmaktadır. Bir nörondaki toplam eğitilebilir parametrelerin sayısı 10 + 128 + 1 tane olacaktır. Katmanda toplam 
+    128 nöron olduğuna göre eğitilebilir parametrelerin toplam sayısı 128 * (10 + 128 + 1) = 17792 tanedir. 
+#----------------------------------------------------------------------------------------------------------------------------
+
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+model = Sequential(name='SimpleRNN-Test')
+model.add(Input((100, 10),  name='Input'))
+model.add(SimpleRNN(128,  activation='tanh', name='SimpleRNN'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dense(1, activation='linear', name='Output'))
+model.summary()
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Aşağıdaki örnekte SimpleRNN katmanının bir simülasyonu yapılmıştır. Bu örnekte girdiler staırlardan oluşmaktadır. Her 
+    stır bir önceki çıktı ile dot-product yapılmaktadır. Ayrıca örnekte her satır için elde edilen çıktıların biriktirildiğini 
+    de görüyorsunuz. Bu biriktirme hakkında izleyen paragrafta açıklamalar yapacağız.
 #----------------------------------------------------------------------------------------------------------------------------
 
 import numpy as np
@@ -18157,14 +18385,12 @@ total_outputs = np.concatenate(outputs, axis=0)
 print(total_outputs)
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Pekiyi yukarıdaki gibi bir geri besleme katmanının çıktısı nasıl diğer dense katmanlara bağlanacaktır? Burada iki durum söz konusu olabilir. 
-    Bu geri besleme katmanının nihai tek bir çıktısı sonraki dense katmana bağlanabilir. Ya da her zamansal girdinin çıktıları briktirilip
-    düzleştirildikten sonra dense katmana bağlanabilir. Yalnızca son parçalı girdinin dense katana bağlanması bilgi kayıplarına yol açmaktadır. 
-    Dolayısıyla bunların biriktirilip düzleştirildikten sonra dense katmana verilmesi daha uygun bir yöntemdir. 
-
-    Aslında Keras'ta yukarıdaki işlemin aynısını yapan SimpleRNN isimli bir katman zaten hzaır biçimde bulunmaktadır. SimpleRNN sınıfının 
-    __init__ metodunun parametrik yapısı şöyledir:
-
+    Pekiyi yukarıdaki gibi bir geri besleme katmanının çıktısı nasıl diğer Dense katmanlara bağlanacaktır? Burada iki durum söz 
+    konusu olabilir. Bu geri besleme katmanının nihai tek bir çıktısı sonraki Dense katmana bağlanabilir. Ya da her zamansal 
+    girdinin çıktıları briktirilip düzleştirildikten sonra Densedense katmana bağlanabilir. Yalnızca son parçalı girdinin Dense 
+    katmana bağlanması bilgi kayıplarına yol açmaktadır. Dolayısıyla bunların biriktirilip düzleştirildikten sonra dense katmana 
+    verilmesi daha uygun bir yöntemdir. SimpleRNN katmanının parametrik yapısına bir daha dikkat ediniz:
+    
     tf.keras.layers.SimpleRNN(
         units,
         activation='tanh',
@@ -18189,52 +18415,700 @@ print(total_outputs)
         **kwargs
     )
 
-    Buradaki nunits geri besleme katmanındaki nöron sayısını belirtir. Geri besleme katmanlarının default aktivasyon fonksiyonu "tanh" 
-    biçiminde alınmıştır. Hiperbolik tanjant fonksiyonu bu katmanlarda en çok tercih edilen aktivasyon fonksiyonudur. Fonksiyonun diğer önemli parametresi 
-    return_sequences isimli parametredir. Bu parametre True geçilirse (default durum False biçimdedir) bu durumda katman her zamansal girişin çıktılarını 
-    biriktirir. Eğer bu parametre True geçilmezse bu biriktirme yapılmaz. Dolayısıyla sonraki katmana yalnızca son zamansal verinin çıktısı sokulur. 
+    Buradaki nunits geri besleme katmanındaki nöron sayısını belirtmektedir. Geri besleme katmanlarının default aktivasyon 
+    fonksiyonun "tanh" biçiminde olduğunu belirtmiştik. Hiperbolik tanjant fonksiyonu bu katmanlarda en çok tercih edilen 
+    aktivasyon fonksiyonudur. Fonksiyonun diğer önemli parametresi return_sequences isimli parametredir. Bu parametre True 
+    geçilirse (default durum False biçimdedir) bu durumda katman her zamansal girişin (satırların) çıktılarını biriktirir. 
+    Eğer bu parametre True geçilmezse bu biriktirme yapılmaz. Dolayısıyla sonraki katmana yalnızca son zamansal verinin çıktısı 
+    sokulur. 
 
-    Pekiyi SimpleRNN katmanının girdisi nasıl olmalıdır? İşte bu katmanın girdisi bir matris olmalıdır. Matrisin her satırı zaman veriyi belirtmektedir. 
-    Keras bu durumda bu matrisib her bir satırını zamansal veri biçiminde ele alır ve önceki çıktıyla işlkeme sokar. 
-#----------------------------------------------------------------------------------------------------------------------------
+    Pekiyi SimpleRNN katmanının girdisi nasıl olmalıdır? İşte bu katmanın girdisi bir matris olmalıdır. Matrisin her satırı 
+    zamanal veriyi belirtmektedir. Keras bu durumda bu matrisin her bir satırını zamansal veri biçiminde ele alır ve önceki 
+    çıktıyla işleme sokar. (Tabii Keras paralel programlama teknikleri ile daha karmışık bir gerçekleştirime sahiptir. Ancak 
+    SimpleRNN katmanı satırları tek tek ele alıp kendi içerisinde yukarıda belirttiğimiz gibi işleme sokmaktadır.)
 
-#----------------------------------------------------------------------------------------------------------------------------
-    Yukarıda da belirtildiği gibi geri ebeslemeli ağlar aslında zamansal girdiler için kullanılmaktadır. Bir yazıyı anlamaya çalışan 
-    ağlar da aslında yukarıda da belirtitğimiz gibi zamansal girdi biçimindedir. Tabii buradaki zamansal veriler aslında yazıdaki sözcüklerdir. 
-    Bu sözcükler de bir vektörle ifade edilmelidir. Biz her sözcüğü bir vektörle ifade edebilmemiz gerekir. Bunun için ise akla word embedding 
-    yöntemi gelmektedir. O halde yazsal örneklerde tipik olarak SimpleRNN katmanının girdisi Embedding katmanının çıktısı yapılır. Başka bir 
-    deyişle yazı önce Embedding katmanına sokulur. Bu katmanın çıktısı SimpleRNN katmanına verilir. O zaman modelin katman yapısı 
-    şöyle olacaktır:
-
-    Embedding --> SimpleRNN --> Dense ---> Dense ---> Dense (output)
-#----------------------------------------------------------------------------------------------------------------------------
-
-#----------------------------------------------------------------------------------------------------------------------------
-    Daha önce üzerinde çalıştığımız IMDB veri kümesi için aşağıdaki gibi bir geri beslemeli model kullanılabilir:
+    Şimdi SimpleRNN katmanındaki return_sequences parametresinin True geçilmesi durumundaki çıktının nasıl olacağı üzerinde 
+    duralım. Normalde bu katmanın çıktısı katmandaki nöron sayısı kadardır. Ancak return_sequences parametresi True yapıldığı 
+    zaman her bir satırın çıktısı biriktirilecektir. Katmandaki nöron sayısı N ve zamansal verilerdeki satır sayısı R olmak 
+    üzere çıktı da RxN'lik bir matris haline gelecektir. 
+    
+    Şimdi de daha önce yapmış olduğumuz örnek modeldeki return_sequences parametresini True yaparak elde edilen modelin örnek 
+    çıktısını inceleyelim. Anımsanacağı gibi bu modelde her satırda toplam 10 tane özellik, SimpleRNN kkatmanında da 128 nöron 
+    bulunuyordu:
 
     from tensorflow.keras import Sequential
-    from tensorflow.keras.layers import Embedding, SimpleRNN, Flatten, Dense
+    from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
 
-    model = Sequential(name='IMDB-SimpleRNN')
-    model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-    model.add(SimpleRNN(64, name='SimpleRNN', return_sequences=True))
-    model.add(Flatten(name='Flatten'))
-    model.add(Dense(128, activation='relu', name='Dense-1'))
-    model.add(Dense(128, activation='relu', name='Dense-2'))
-    model.add(Dense(1, activation='sigmoid', name='Output'))
-
+    model = Sequential(name='SimpleRNN-Test')
+    model.add(Input((100, 10),  name='Input'))
+    model.add(SimpleRNN(128,  activation='tanh', return_sequences=True, name='SimpleRNN'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
     model.summary()
 
-    Burada önce bir Embedding katman kullanılmıştır. Bu katmandan çıktı olarak her biri 64 sütundan, TExT_SIZE kadar satırdan oluşan 
-    64'lü zamansal değerler elde edilmiştir. Bu 64'lü girişler 64 nörondan oluşan SimpleRNN katmanına zamansal girdi yapıkmıştır. SimpleRNN 
-    katmanında return sequences=True parametresinin girildiğine dikkat ediniz. Bu durumda her bir sözcüğün çıktısı olan 64'lük vektörler 
-    bir matris biçiminde biriktirilmiştir. Sonra bunlar Flatten katmanı ile düzleştirilip Dense katmanlara verilmiştir. Burada eğer SimpleRNN 
-    katmanında return_sequences=True girilmezse Dense katmana en son elde edilen 64'lük çıktı verilir ki bu durum bu model için uygun değildir. 
+    Modelin özet çıktısı şöyledir:
+
+    Model: "SimpleRNN-Test"
+    ┌─────────────────────────────────┬────────────────────────┬───────────────┐
+    │ Layer (type)                    │ Output Shape           │       Param # │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ SimpleRNN (SimpleRNN)           │ (None, 100, 128)       │        17,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Reshape (Reshape)               │ (None, 12800)          │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-1 (Dense)                │ (None, 256)            │     3,277,056 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-2 (Dense)                │ (None, 256)            │        65,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Output (Dense)                  │ (None, 1)              │           257 │
+    └─────────────────────────────────┴────────────────────────┴───────────────┘
+    Total params: 3,360,897 (12.82 MB)
+    Trainable params: 3,360,897 (12.82 MB)
+    Non-trainable params: 0 (0.00 B)
+
+    Burada her veri 100 satır 10 sütundan oluşmaktadır. Bu 100 satır SimpleRNN katmanına yukarıda açıkladığımız gibi peşi 
+    sıra uygulanacaktır. Ancak toplamda bu 100 satır uygulandığında tek bir çıkış elde edilmeyecek bu çıkışlar biriktirilecektir.
+    Bu durumda SimpleRNN katmanının çıktısı 128 değil 100 * 128 = 12800 tane olacaktır. Biz bu matrisi reshape yaparak sonraki 
+    Dense katmana uygulayacağız. Örneğimizde birinci saklı katmandaki eğitilebilir parametrelerin sayısının da arttığını 
+    görüyorsunuz. Bu katmandaki eğitilebilir parametrelerin sayısı artık 12800 * 256 + 256 = 3277056 tane olacaktır. 
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Şimdi Jena Climate örneğini SimpleRNN katmanını kullanarak yeniden yapalım. Modelimiz şöyle olabilir:
+
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+    model = Sequential(name='Jena-Climate')
+    model.add(Input((WINDOW_SIZE, raw_training_dataset_x.shape[1]),  name='Input'))
+
+    model.add(SimpleRNN(128, activation='tanh', name='SimpleRNN'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
+    model.summary()
+
+    Daha önce yapmış olduğumuz modeldeki Conv1D ve MaxPooling1D katmanlarını kaldırarak onların yerine SimpleRNN katmanını 
+    yerleştirdik. Modlein özet çıktısı da şöyledir:
+
+        Model: "Jena-Climate"
+    ┌─────────────────────────────────┬────────────────────────┬───────────────┐
+    │ Layer (type)                    │ Output Shape           │       Param # │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ SimpleRNN (SimpleRNN)           │ (None, 128)            │        38,272 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Reshape (Reshape)               │ (None, 128)            │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-1 (Dense)                │ (None, 256)            │        33,024 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-2 (Dense)                │ (None, 256)            │        65,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Output (Dense)                  │ (None, 1)              │           257 │
+    └─────────────────────────────────┴────────────────────────┴───────────────┘
+    Total params: 137,345 (536.50 KB)
+    Trainable params: 137,345 (536.50 KB)
+    Non-trainable params: 0 (0.00 B)
+    
+    Aşağıda örneği bir bütün olarak veriyoruz.
+#----------------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+import numpy as np
+
+PREDICTION_INTERVAL = 24 * 60 // 10         # 144
+WINDOW_SIZE = 24 * 60 // 10                 # 144
+SLIDING_SIZE = 5
+
+BATCH_SIZE = 32
+EPOCHS = 200
+
+df = pd.read_csv('jena_climate_2009_2016.csv')
+
+df['Month'] = df['Date Time'].str[3:5]
+df['Hour-Minute'] = df['Date Time'].str[11:16]
+
+df.drop(['Date Time'], axis=1, inplace=True)
+
+from sklearn.preprocessing import OneHotEncoder
+
+ohe = OneHotEncoder(sparse_output=False)
+
+ohe.fit(df[['Month', 'Hour-Minute']])
+ohe_result = ohe.transform(df[['Month', 'Hour-Minute']])
+
+df = pd.concat([df, pd.DataFrame(ohe_result)], axis=1)
+df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+raw_dataset_x = df.to_numpy('float32') 
+raw_dataset_y = df['T (degC)'].to_numpy('float32')
+
+from sklearn.model_selection import train_test_split
+
+raw_temp_dataset_x, raw_test_dataset_x, raw_temp_dataset_y, raw_test_dataset_y =  train_test_split(raw_dataset_x, 
+        raw_dataset_y, test_size=0.1, shuffle=False)
+
+raw_training_dataset_x, raw_validation_dataset_x, raw_training_dataset_y, raw_validation_dataset_y =  train_test_split(raw_temp_dataset_x, 
+        raw_temp_dataset_y, test_size=0.1, shuffle=False)
+
+from sklearn.preprocessing import StandardScaler
+
+ss = StandardScaler()
+ss.fit(raw_training_dataset_x)
+raw_scaled_training_dataset_x = ss.transform(raw_training_dataset_x)
+raw_scaled_validation_dataset_x = ss.transform(raw_validation_dataset_x)
+raw_scaled_test_dataset_x = ss.transform(raw_test_dataset_x)
+
+import tensorflow as tf
+from tensorflow.keras.utils import PyDataset
+
+class DataGenerator(PyDataset):
+    def __init__(self, raw_x, raw_y, batch_size, pi, ws, ss, *, shuffle=True):
+        super().__init__() 
+        self.raw_x = raw_x
+        self.raw_y = raw_y
+        self.batch_size = batch_size
+        self.pi = pi
+        self.ws = ws
+        self.ss = ss
+        self.shuffle = shuffle
+        self.nbatches = (len(raw_x) - pi - ws) // batch_size // ss
+        self.index_list = list(range((len(raw_x) - pi - ws) // ss))  
+        
+    def __len__(self):
+        return self.nbatches
+    
+    def __getitem__(self, batch_no):               
+        x = np.zeros((self.batch_size, self.ws, self.raw_x.shape[1]))
+        y = np.zeros(self.batch_size)
+        
+        for i in range(self.batch_size):
+            offset = self.index_list[batch_no * self.batch_size + i] * self.ss 
+            
+            x[i] = self.raw_x[offset:offset + self.ws]
+            y[i] = self.raw_y[offset + self.ws + self.pi - 1]
+     
+        return tf.convert_to_tensor(x), tf.convert_to_tensor(y)
+    
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.index_list)      
+   
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+model = Sequential(name='Jena-Climate')
+model.add(Input((WINDOW_SIZE, raw_training_dataset_x.shape[1]),  name='Input'))
+
+model.add(SimpleRNN(128, activation='tanh', name='SimpleRNN'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dense(1, activation='linear', name='Output'))
+model.summary()
+
+model.compile(optimizer='rmsprop', loss='mean_squared_error', metrics=['mean_absolute_error'])
+
+from tensorflow.keras.callbacks import EarlyStopping
+
+esc = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+
+dg_training = DataGenerator(raw_scaled_training_dataset_x, raw_training_dataset_y, BATCH_SIZE, PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+dg_validation = DataGenerator(raw_scaled_validation_dataset_x, raw_validation_dataset_y, BATCH_SIZE, PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+hist = model.fit(dg_training, validation_data = dg_validation, epochs=EPOCHS, verbose=1, callbacks=[esc]) 
+                 
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['loss'])
+plt.plot(hist.epoch, hist.history['val_loss'])
+plt.legend(['Loss', 'Validation Loss'])
+plt.show()
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Mean Squared Error', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['mean_absolute_error'])
+plt.plot(hist.epoch, hist.history['val_mean_absolute_error'])
+plt.legend(['MSE', 'Validation MSE'])
+plt.show()
+
+# evaluation
+
+dg_test = DataGenerator(raw_scaled_test_dataset_x, raw_test_dataset_y, BATCH_SIZE, PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+eval_result = model.evaluate(dg_test)
+
+for i in range(len(eval_result)):
+    print(f'{model.metrics_names[i]}: {eval_result[i]}')
+
+# prediction
+
+predict_df = pd.read_csv('predict.csv')
+
+predict_df['Month'] = predict_df['Date Time'].str[3:5]
+predict_df['Hour-Minute'] = predict_df['Date Time'].str[11:16]
+
+predict_df.drop(['Date Time'], axis=1, inplace=True)
+
+ohe_result = ohe.transform(predict_df[['Month', 'Hour-Minute']])
+
+predict_df = pd.concat([predict_df, pd.DataFrame(ohe_result)], axis=1)
+predict_df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+predict_dataset = predict_df.to_numpy('float32')
+scaled_predict_dataset = ss.transform(predict_dataset)
+
+predict_result = model.predict(scaled_predict_dataset.reshape(1, predict_dataset.shape[0], predict_dataset.shape[1]))
+
+for presult in predict_result[:, 0]:
+    print(presult)
+
+
+#----------------------------------------------------------------------------------------------------------------------------
+                                            73. Ders - 20/10/2024 - Pazar
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de aynı örneği return_sequences parametresini True geçerek yapalım:
+
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+    model = Sequential(name='Jena-Climate')
+    model.add(Input((WINDOW_SIZE, raw_training_dataset_x.shape[1]),  name='Input'))
+
+    model.add(SimpleRNN(128, activation='tanh', return_sequences=True, name='SimpleRNN'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
+    model.summary()
+
+    Modelin özet çıktısı şöyledir:
+
+    Aşağıdaki örnek yukarıdaki örneğin return_sequences=True dışında tamamen aynısıdır.
+ #----------------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+import numpy as np
+
+PREDICTION_INTERVAL = 24 * 60 // 10         # 144
+WINDOW_SIZE = 24 * 60 // 10                 # 144
+SLIDING_SIZE = 5
+
+BATCH_SIZE = 32
+EPOCHS = 200
+
+df = pd.read_csv('jena_climate_2009_2016.csv')
+
+df['Month'] = df['Date Time'].str[3:5]
+df['Hour-Minute'] = df['Date Time'].str[11:16]
+
+df.drop(['Date Time'], axis=1, inplace=True)
+
+from sklearn.preprocessing import OneHotEncoder
+
+ohe = OneHotEncoder(sparse_output=False)
+
+ohe.fit(df[['Month', 'Hour-Minute']])
+ohe_result = ohe.transform(df[['Month', 'Hour-Minute']])
+
+df = pd.concat([df, pd.DataFrame(ohe_result)], axis=1)
+df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+raw_dataset_x = df.to_numpy('float32') 
+raw_dataset_y = df['T (degC)'].to_numpy('float32')
+
+from sklearn.model_selection import train_test_split
+
+raw_temp_dataset_x, raw_test_dataset_x, raw_temp_dataset_y, raw_test_dataset_y =  train_test_split(raw_dataset_x, 
+        raw_dataset_y, test_size=0.1, shuffle=False)
+
+raw_training_dataset_x, raw_validation_dataset_x, raw_training_dataset_y, raw_validation_dataset_y =  train_test_split(raw_temp_dataset_x, 
+        raw_temp_dataset_y, test_size=0.1, shuffle=False)
+
+from sklearn.preprocessing import StandardScaler
+
+ss = StandardScaler()
+ss.fit(raw_training_dataset_x)
+raw_scaled_training_dataset_x = ss.transform(raw_training_dataset_x)
+raw_scaled_validation_dataset_x = ss.transform(raw_validation_dataset_x)
+raw_scaled_test_dataset_x = ss.transform(raw_test_dataset_x)
+
+import tensorflow as tf
+from tensorflow.keras.utils import PyDataset
+
+class DataGenerator(PyDataset):
+    def __init__(self, raw_x, raw_y, batch_size, pi, ws, ss, *, shuffle=True):
+        super().__init__() 
+        self.raw_x = raw_x
+        self.raw_y = raw_y
+        self.batch_size = batch_size
+        self.pi = pi
+        self.ws = ws
+        self.ss = ss
+        self.shuffle = shuffle
+        self.nbatches = (len(raw_x) - pi - ws) // batch_size // ss
+        self.index_list = list(range((len(raw_x) - pi - ws) // ss))  
+        
+    def __len__(self):
+        return self.nbatches
+    
+    def __getitem__(self, batch_no):               
+        x = np.zeros((self.batch_size, self.ws, self.raw_x.shape[1]))
+        y = np.zeros(self.batch_size)
+        
+        for i in range(self.batch_size):
+            offset = self.index_list[batch_no * self.batch_size + i] * self.ss 
+            
+            x[i] = self.raw_x[offset:offset + self.ws]
+            y[i] = self.raw_y[offset + self.ws + self.pi - 1]
+     
+        return tf.convert_to_tensor(x), tf.convert_to_tensor(y)
+    
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.index_list)      
+   
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+model = Sequential(name='Jena-Climate')
+model.add(Input((WINDOW_SIZE, raw_training_dataset_x.shape[1]),  name='Input'))
+model.add(SimpleRNN(128, activation='tanh', return_sequences=True, name='SimpleRNN'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dense(1, activation='linear', name='Output'))
+model.summary()
+
+model.compile(optimizer='rmsprop', loss='mean_squared_error', metrics=['mean_absolute_error'])
+
+from tensorflow.keras.callbacks import EarlyStopping
+
+esc = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+
+dg_training = DataGenerator(raw_scaled_training_dataset_x, raw_training_dataset_y, BATCH_SIZE, PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+dg_validation = DataGenerator(raw_scaled_validation_dataset_x, raw_validation_dataset_y, BATCH_SIZE, PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+hist = model.fit(dg_training, validation_data = dg_validation, epochs=EPOCHS, verbose=1, callbacks=[esc]) 
+                 
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['loss'])
+plt.plot(hist.epoch, hist.history['val_loss'])
+plt.legend(['Loss', 'Validation Loss'])
+plt.show()
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Mean Squared Error', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['mean_absolute_error'])
+plt.plot(hist.epoch, hist.history['val_mean_absolute_error'])
+plt.legend(['MSE', 'Validation MSE'])
+plt.show()
+
+# evaluation
+
+dg_test = DataGenerator(raw_scaled_test_dataset_x, raw_test_dataset_y, BATCH_SIZE, PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+eval_result = model.evaluate(dg_test)
+
+for i in range(len(eval_result)):
+    print(f'{model.metrics_names[i]}: {eval_result[i]}')
+
+# prediction
+
+predict_df = pd.read_csv('predict.csv')
+
+predict_df['Month'] = predict_df['Date Time'].str[3:5]
+predict_df['Hour-Minute'] = predict_df['Date Time'].str[11:16]
+
+predict_df.drop(['Date Time'], axis=1, inplace=True)
+
+ohe_result = ohe.transform(predict_df[['Month', 'Hour-Minute']])
+
+predict_df = pd.concat([predict_df, pd.DataFrame(ohe_result)], axis=1)
+predict_df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+predict_dataset = predict_df.to_numpy('float32')
+scaled_predict_dataset = ss.transform(predict_dataset)
+
+predict_result = model.predict(scaled_predict_dataset.reshape(1, predict_dataset.shape[0], predict_dataset.shape[1]))
+
+for presult in predict_result[:, 0]:
+    print(presult)
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Aslında geri besleme katmanları genellikle bir kez değil üst üste birkaç kez uygulanmaktadır. Tıpkı üst üste evrişim 
+    uygulamak gibi üst üste geri besleme uygulamak hafızanın güçlendirilmesine fayda sağlamaktadır. Tabii SimpleRNN katmanını
+    birden fazla kez uygulayacaksak bir önceki katmanın çıktısının bir matris olması gerekir. Bu da önceki SimpleRNN katmanının 
+    return_sequences parametresinin True geçilmesiyle sağlanabilir. Aşağıda birden fazla kez SimpleRNN katmanının kullanıldığı 
+    bir model örneğini görüyorsunuz:
+
+      from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+    model = Sequential(name='Jena-Climate')
+    model.add(Input((WINDOW_SIZE, raw_training_dataset_x.shape[1]),  name='Input'))
+
+    model.add(SimpleRNN(128, activation='tanh', return_sequences=True, name='SimpleRNN-1'))
+    model.add(SimpleRNN(128, activation='tanh', return_sequences=True, name='SimpleRNN-2'))
+    model.add(SimpleRNN(128, activation='tanh', return_sequences=True, name='SimpleRNN-3'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
+    model.summary()
+
+    Burada birinci SimpleRNN katmanın çıktısı artık bir matristir. Bu matris ikinci SimpleRNN katmanına sanki zaman serisi 
+    gibi uygulanmıştır. İkinci SimpleRNN katmanının çıktısı da üçüncü SimpleRNN katmanına zaman serisi biçiminde uygulanmıştır.
+    Buradaki SimpleRNN katmanlarının return_sequences parametrelerinin True geçildiğine dikkat ediniz. 
+
+    Üst üste birden fazla kez geri besleme katmanı kullanıldığında modeldeki eğitilebilir parametrelerin sayısı artmaktadır. 
+    Eğitilebilir parametrelerin sayısının artması "overfitting" ya da "underfitting" oluşturabilmektedir. Yukarıdaki modelin özet 
+    çıktısı şöyledir:
+
+    Model: "Jena-Climate"
+    ┌─────────────────────────────────┬────────────────────────┬───────────────┐
+    │ Layer (type)                    │ Output Shape           │       Param # │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ SimpleRNN-1 (SimpleRNN)         │ (None, 144, 128)       │        38,272 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ SimpleRNN-2 (SimpleRNN)         │ (None, 144, 128)       │        32,896 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ SimpleRNN-3 (SimpleRNN)         │ (None, 144, 128)       │        32,896 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Reshape (Reshape)               │ (None, 18432)          │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-1 (Dense)                │ (None, 256)            │     4,718,848 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-2 (Dense)                │ (None, 256)            │        65,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Output (Dense)                  │ (None, 1)              │           257 │
+    └─────────────────────────────────┴────────────────────────┴───────────────┘
+    Total params: 4,888,961 (18.65 MB)
+    Trainable params: 4,888,961 (18.65 MB)
+    Non-trainable params: 0 (0.00 B)
+
+    Burada toplam eğitilebilir parametrelerin sayısının 5 milyona yakın olduğu görülmektedir. 
+
+    Aşağıda Jena Climate örneğinin üst üste üç kez SimpleRNN katmanının uygulandığı biçimi verilmiştir. 
+#----------------------------------------------------------------------------------------------------------------------------
+
+import pandas as pd
+import numpy as np
+
+PREDICTION_INTERVAL = 24 * 60 // 10         # 144
+WINDOW_SIZE = 24 * 60 // 10                 # 144
+SLIDING_SIZE = 5
+
+BATCH_SIZE = 32
+EPOCHS = 200
+
+df = pd.read_csv('jena_climate_2009_2016.csv')
+
+df['Month'] = df['Date Time'].str[3:5]
+df['Hour-Minute'] = df['Date Time'].str[11:16]
+
+df.drop(['Date Time'], axis=1, inplace=True)
+
+from sklearn.preprocessing import OneHotEncoder
+
+ohe = OneHotEncoder(sparse_output=False)
+
+ohe.fit(df[['Month', 'Hour-Minute']])
+ohe_result = ohe.transform(df[['Month', 'Hour-Minute']])
+
+df = pd.concat([df, pd.DataFrame(ohe_result)], axis=1)
+df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+raw_dataset_x = df.to_numpy('float32') 
+raw_dataset_y = df['T (degC)'].to_numpy('float32')
+
+from sklearn.model_selection import train_test_split
+
+raw_temp_dataset_x, raw_test_dataset_x, raw_temp_dataset_y, raw_test_dataset_y =  train_test_split(raw_dataset_x, 
+        raw_dataset_y, test_size=0.1, shuffle=False)
+
+raw_training_dataset_x, raw_validation_dataset_x, raw_training_dataset_y, raw_validation_dataset_y =  \
+        train_test_split(raw_temp_dataset_x, raw_temp_dataset_y, test_size=0.1, shuffle=False)
+
+from sklearn.preprocessing import StandardScaler
+
+ss = StandardScaler()
+ss.fit(raw_training_dataset_x)
+raw_scaled_training_dataset_x = ss.transform(raw_training_dataset_x)
+raw_scaled_validation_dataset_x = ss.transform(raw_validation_dataset_x)
+raw_scaled_test_dataset_x = ss.transform(raw_test_dataset_x)
+
+import tensorflow as tf
+from tensorflow.keras.utils import PyDataset
+
+class DataGenerator(PyDataset):
+    def __init__(self, raw_x, raw_y, batch_size, pi, ws, ss, *, shuffle=True):
+        super().__init__() 
+        self.raw_x = raw_x
+        self.raw_y = raw_y
+        self.batch_size = batch_size
+        self.pi = pi
+        self.ws = ws
+        self.ss = ss
+        self.shuffle = shuffle
+        self.nbatches = (len(raw_x) - pi - ws) // batch_size // ss
+        self.index_list = list(range((len(raw_x) - pi - ws) // ss))  
+        
+    def __len__(self):
+        return self.nbatches
+    
+    def __getitem__(self, batch_no):               
+        x = np.zeros((self.batch_size, self.ws, self.raw_x.shape[1]))
+        y = np.zeros(self.batch_size)
+        
+        for i in range(self.batch_size):
+            offset = self.index_list[batch_no * self.batch_size + i] * self.ss 
+            
+            x[i] = self.raw_x[offset:offset + self.ws]
+            y[i] = self.raw_y[offset + self.ws + self.pi - 1]
+     
+        return tf.convert_to_tensor(x), tf.convert_to_tensor(y)
+    
+    def on_epoch_end(self):
+        if self.shuffle:
+            np.random.shuffle(self.index_list)      
+   
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Input, SimpleRNN, Reshape, Dense
+
+model = Sequential(name='Jena-Climate')
+model.add(Input((WINDOW_SIZE, raw_training_dataset_x.shape[1]),  name='Input'))
+
+model.add(SimpleRNN(128, activation='tanh', return_sequences=True, name='SimpleRNN'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dense(1, activation='linear', name='Output'))
+model.summary()
+
+model.compile(optimizer='rmsprop', loss='mean_squared_error', metrics=['mean_absolute_error'])
+
+from tensorflow.keras.callbacks import EarlyStopping
+
+esc = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+
+dg_training = DataGenerator(raw_scaled_training_dataset_x, raw_training_dataset_y, BATCH_SIZE, 
+        PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+dg_validation = DataGenerator(raw_scaled_validation_dataset_x, raw_validation_dataset_y, BATCH_SIZE, 
+        PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+hist = model.fit(dg_training, validation_data = dg_validation, epochs=EPOCHS, verbose=1, callbacks=[esc]) 
+                 
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['loss'])
+plt.plot(hist.epoch, hist.history['val_loss'])
+plt.legend(['Loss', 'Validation Loss'])
+plt.show()
+
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Mean Squared Error', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
+plt.plot(hist.epoch, hist.history['mean_absolute_error'])
+plt.plot(hist.epoch, hist.history['val_mean_absolute_error'])
+plt.legend(['MSE', 'Validation MSE'])
+plt.show()
+
+# evaluation
+
+dg_test = DataGenerator(raw_scaled_test_dataset_x, raw_test_dataset_y, BATCH_SIZE, 
+        PREDICTION_INTERVAL, WINDOW_SIZE, SLIDING_SIZE, shuffle=False)
+
+eval_result = model.evaluate(dg_test)
+
+for i in range(len(eval_result)):
+    print(f'{model.metrics_names[i]}: {eval_result[i]}')
+
+# prediction
+
+predict_df = pd.read_csv('predict.csv')
+
+predict_df['Month'] = predict_df['Date Time'].str[3:5]
+predict_df['Hour-Minute'] = predict_df['Date Time'].str[11:16]
+
+predict_df.drop(['Date Time'], axis=1, inplace=True)
+
+ohe_result = ohe.transform(predict_df[['Month', 'Hour-Minute']])
+
+predict_df = pd.concat([predict_df, pd.DataFrame(ohe_result)], axis=1)
+predict_df.drop(['Month', 'Hour-Minute'], axis=1, inplace=True)
+
+predict_dataset = predict_df.to_numpy('float32')
+scaled_predict_dataset = ss.transform(predict_dataset)
+
+predict_result = model.predict(scaled_predict_dataset.reshape(1, predict_dataset.shape[0], predict_dataset.shape[1]))
+
+for presult in predict_result[:, 0]:
+    print(presult)
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Yazısal verilerin zaman serilerine benzediğinden bahsetmiştik. Her ne kadar yazılarda sözcüklerin bir zaman bilgisi (time 
+    stamp) yoksa da sözcüklerin peşi sıra birbirini izelemesi onların zaman serilerine benzemesine yol açmaktadır. İşte bu nedenle 
+    geri beslemeli ağlar yalnızca zaman serilerinde değil aynı zamanda metinlerin anlamlandırılmasında da kullanılmaktadır. 
+    
+    Biz metinler üzerinde işlemler yaparken Embedding katmanıyla sözcükleri vektörlerle ifade etmiştik. Her sözcük bir vektör
+    (bir satır olarak düşünebiliriz) ile ifade edildiğine göre yazı da aslında vektörlerden oluşan bir matris biçiminde ele 
+    alınabilir. O halde biz yazılar üzerinde işlemler yapan sinir ağlarında önce yazıları Embedding katmanına sokup bu katmanın 
+    çıktısını da geri besleme katmanlarına verebiliriz. Böylece modelimizin katman yapısı aşağıdaki gibi olabilir:
+
+    Yazı ---> Embedding ---> SimpleRNN ---> Dense ---> Dense ---> Çıktı
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Şimdi daha önce üzerinde çalıştığımız IMDB örneğini SimpleRNN katmanını kullanarak yeniden tasarlayalım. Modelin katman 
+    yapısı şöyle olabilir:
+
+    TEXT_SIZE = 250
+    WORD_VECT_SIZE = 64
+    # ....
+
+    model = Sequential(name='IMBD-WordEmbedding')
+    model.add(Input((TEXT_SIZE, ), name='Input'))
+    model.add(Embedding(len(cv.vocabulary_) + 1, WORD_VECT_SIZE, name='Embedding'))
+    model.add(SimpleRNN(64, activation='tanh', return_sequences=True, name='SimpleRNN-1'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='sigmoid', name='Output'))
+    model.summary()
+
+    Burada önce bir Embedding katman kullanılmıştır. Bu katmandan çıktı olarak her biri 64 sütundan, TEXT_SIZE kadar satırdan 
+    oluşan 64'lü sırasal değerler elde edilmiştir. Bu 64'lü girişler 64 nörondan oluşan SimpleRNN katmanına girdi yapılmıştır. 
+    SimpleRNN katmanında return sequences=True parametresinin girildiğine dikkat ediniz. Bu durumda her bir sözcüğün çıktısı 
+    olan 64'lük vektörler bir matris biçiminde biriktirilmektedir. Sonra bunlar  Reshape katmanı ile düzleştirilip Dense katmanlara 
+    verilmiştir. Bu örnekte biz yalnızca tek bir SimpleRNN katmanı kullandık. Burada birden fazla SimpleRNN katmanın kullanılması 
+    parametre sayısının aşırı artması nedeniyle bir "underfitting" olgusuna yol açabilmektedir. İzleyen paragraflarda eğitilebilir
+    parametrelerin sayısının azaltılması için Dropbox regülasyonu ele alınmaktadır.
 
     Aşağıda bu uygulamanın tüm kodları verilmiştir.
 #----------------------------------------------------------------------------------------------------------------------------
 
-TExT_SIZE = 250
+TEXT_SIZE = 250
+WORD_VECT_SIZE = 64
 
 import pandas as pd
 
@@ -18246,207 +19120,110 @@ cv = CountVectorizer()
 
 cv.fit(df['review'])
 
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
 import re
 
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
+text_vectors = [[cv.vocabulary_[word] + 1  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
 
 from tensorflow.keras.utils import pad_sequences
 
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
+dataset_x = pad_sequences(text_vectors, TEXT_SIZE, dtype='float32')
+dataset_y = (df['sentiment'] == 'positive').to_numpy(dtype='uint8')
 
 from sklearn.model_selection import train_test_split
 
 training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
 
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, SimpleRNN, Flatten, Dense
+from tensorflow.keras.layers import Input, Embedding, SimpleRNN, Reshape, Dense
 
-model = Sequential(name='IMDB-SimpleRNN')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-model.add(SimpleRNN(64, name='SimpleRNN', return_sequences=True))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(128, activation='relu', name='Dense-1'))
-model.add(Dense(128, activation='relu', name='Dense-2'))
+model = Sequential(name='IMBD-WordEmbedding')
+model.add(Input((TEXT_SIZE, ), name='Input'))
+model.add(Embedding(len(cv.vocabulary_) + 1, WORD_VECT_SIZE, name='Embedding'))
+model.add(SimpleRNN(64, activation='tanh', return_sequences=True, name='SimpleRNN-1'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
 model.add(Dense(1, activation='sigmoid', name='Output'))
-
 model.summary()
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
 from tensorflow.keras.callbacks import EarlyStopping
 
-esc = EarlyStopping(patience=5, restore_best_weights=True)
+esc = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
 hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['loss'])
 plt.plot(hist.epoch, hist.history['val_loss'])
 plt.legend(['Loss', 'Validation Loss'])
 plt.show()
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Binary Accuracy Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['binary_accuracy'])
 plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
+plt.legend(['Accuracy', 'Validation Accuracy'])
 plt.show()
 
 eval_result = model.evaluate(test_dataset_x, test_dataset_y)
+
 for i in range(len(eval_result)):
     print(f'{model.metrics_names[i]}: {eval_result[i]}')
 
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
+predict_df = pd.read_csv('predict-imdb.csv')
 
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
+predict_text_vectors = [[cv.vocabulary_[word] + 1  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_df['review']]
 
-for result in predict_result[:, 0]:
-    if result > 0.5:
+predict_dataset_x = pad_sequences(predict_text_vectors, TEXT_SIZE, dtype='float32')
+
+predict_result = model.predict(predict_dataset_x)
+for presult in predict_result[:, 0]:
+    if (presult > 0.5):
         print('Positive')
     else:
         print('Negative')
-          
-#----------------------------------------------------------------------------------------------------------------------------
-    Aslında uygulamada geri besleme katmanı yalnızca bir tane değil birden fazla kullanılmaktadır. Her geri besleme hafızayı 
-    biraz daha güçlendirebilmektedir. Tabii bir SimpleRNN katmanını başka bir SimpleRNN katmanına bağlayacaksak önceki SimpleRNN katmanında
-    return_sequences=True yapılmalıdır. Çünkü sonraki SimpleRNN katmanı öncekinde olduğu gibi zamansal (yani matris biçiminde) bir girdi 
-    bekleyecektir. Birden fazla SimpleRNN katmanı kullanıldığında Dense katmanların sayısı azaltılabilir. Örneğin:
-
-    SimpleRNN --> SimpleRNN --> Dense(output)
-
-    Burada İkinci SimpleRNN katmanının çıktısı doğrudan çıktı katmanına verilmiştir. 
-
-    Aşağıda IMDB örneğinde İki SimpleRNN katmanı bir de çıktı için Dense katman kullanılmıştır. 
-#----------------------------------------------------------------------------------------------------------------------------
-
-TExT_SIZE = 250
-
-import pandas as pd
-
-df = pd.read_csv('IMDB Dataset.csv')
-
-from sklearn.feature_extraction.text import CountVectorizer
-
-cv = CountVectorizer()
-
-cv.fit(df['review'])
-
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
-import re
-
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
-
-from tensorflow.keras.utils import pad_sequences
-
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-
-from sklearn.model_selection import train_test_split
-
-training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
-
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, SimpleRNN, Flatten, Dense
-
-model = Sequential(name='IMDB-SimpleRNN')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-model.add(SimpleRNN(32, name='SimpleRNN-1', return_sequences=True))
-model.add(SimpleRNN(32, name='SimpleRNN-2', return_sequences=True))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(1, activation='sigmoid', name='Output'))
-
-model.summary()
-
-model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
-
-from tensorflow.keras.callbacks import EarlyStopping
-
-esc = EarlyStopping(patience=5, restore_best_weights=True)
-
-hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
-
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['loss'])
-plt.plot(hist.epoch, hist.history['val_loss'])
-plt.legend(['Loss', 'Validation Loss'])
-plt.show()
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['binary_accuracy'])
-plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
-plt.show()
-
-eval_result = model.evaluate(test_dataset_x, test_dataset_y)
-for i in range(len(eval_result)):
-    print(f'{model.metrics_names[i]}: {eval_result[i]}')
-
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
-
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
-
-for result in predict_result[:, 0]:
-    if result > 0.5:
-        print('Positive')
-    else:
-        print('Negative')
-
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Yukarıdaki örneklerden elde edilen sonuçlar aslında bu hali ile SimpleRNN katmanının model üzerinde ciddi bir iyileşme sağlamadığı
-    yönündedir. Daha çnce yapmış olduğumuz evrişim işlemi daha iyi bir sonucun elde edilmesine yol açmıştır. Pekiyi bu durumda 
-    geri besleme IMDB örneğinde fayda sağlamayacak mıdır? Aslında geri besleme bir hazfıza oluşturmaktadır. Ancak SimpleRNN tek başına 
-    bu hafıza oluşumu için yeterli olmamaktadır. 
+    Yukarıdaki örneklerden elde edilen sonuçlar aslında bu hali ile SimpleRNN katmanının model üzerinde ciddi bir iyileşme 
+    sağlamadığı yönündedir. Daha önce yapmış olduğumuz evrişim işlemi daha iyi bir sonucun elde edilmesine yol açmıştır. Pekiyi 
+    bu durumda geri besleme IMDB örneğinde fayda sağlamayacak mıdır? Aslında geri besleme bir hazfıza oluşturmaktadır. Ancak 
+    SimpleRNN tek başına bu hafıza oluşumu için yeterli olamamaktadır. 
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Yapay sinir ağlarında "overfitting" durumunu azaltmak için kullanılan teniklere "düzenleme (regularization)" teknikleri denilmektedir. 
-    Bu bağlamda çeşitli düzenleme teknikleri geliştirilmiştir. En yaygın tekinikler "L1 düzenlemesei", "L2 düzenlemesi" ve "dropout"
-    düzenlemeleridir. Biz burada dropout düzenlemeleri üzerinde duracağız. L1 ve L2 düzenlemeleri başka başlıklarda ele alınacaktır. 
+    Yapay sinir ağlarında "overfitting" ve "underfitting" durumunu azaltmak için kullanılan teniklere "düzenleme (regularization)" 
+    teknikleri denilmektedir. Bu bağlamda çeşitli düzenleme teknikleri geliştirilmiştir. Bunalrdan önemli olanları şunlardır:
 
-    Dropout düzenlemesi 2014 yılında bazı deneysel çalışmalar eşliğinde bulunmuştur. Bu teknikte bir katmandaki nöronların bazıları 
-    rastgele biçimde katmandan atılmaktadır. Böylece ağın zeberlediği yanlış şeylerin unutturulması sağlanmaktadır. Dropout uygularken
-    belli bir olasılık belirtilir. Bu olasılık o katmandaki nöronların atılma olasılığıdır. Tipik olarak 0.2 ile 0.5 arasındaki 
-    değerler çok kullanılmaktadır. Bazı uygulamacılar girdi katmanlarında 0.8'e varan daha yüksek olasılıkları kullanmaktadır. 
-    Buradaki atılma olasılığı bir yüzde belirtmemektedir. Buradaki olasılık katmandaki her nöron için ayrı ayrı uygulanan olasılıktır. 
-    Yani örneğin biz dropout olsılığını 0.1 yaptığımızda bu katmanın öncesindeki katmanda 10 böron varsa bu durum bu 10 nöronun 
-    kesinlikle bir tanesinin atılacağı anlamına gelmemektedir. Dropout tüm çıktı katmanı dışındaki tüm katmanlara uygulanabilir. 
+    - L1 (Lasso) ve L2 (Ridge) Düzenlemeleri
+    - Dropout Düzelnemesi
+    - Batch Normalization Düzenlemesi
+    - Erken Sonlandırma (Early Stopping) Düzenlemesi
+    - Verilen Çoğaltılması (Data Augmentation)
+    - Model Karmaşıklığını Azaltma 
+
+    Biz bu yöntemlerden "erken sonlandırma (early stopping)" ve verilern çolğaltılması (data augmentation)" konularını görmüştük. 
+    Anımsanacağı gibi erken sonlandırma eğitimdeki metrik değerlerle sınama değerlerinin birbirinden kopması durumunda epoch kaynaklı 
+    overfitting durumunu engellemek için kullanılıyordu. Verilerin çoğaltılması veri kümesinin büyütülmesi yoluyla "overfitting" 
+    ve "undefitting" olgusunun azaltılmasına katkı sağlıyordu. Biz L1 ve L2 düzenlemelerini daha sonra göreceğiz. 
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------  
+    Dropout düzenlemesi 2014 yılında bazı deneysel çalışmalar eşliğinde bulunmuştur. Bu teknikte bir katmandaki nöronların 
+    bazıları rastgele biçimde katmandan atılmaktadır. Böylece ağın ezberlediği yanlış şeylerin unutturulması sağlanmaktadır. 
+    Dropout uygularken belli bir olasılık belirtilir. Bu olasılık o katmandaki nöronların atılma olasılığıdır. Tipik olarak 0.2 
+    ile 0.5 arasındaki değerler çok kullanılmaktadır. Bazı uygulamacılar girdi katmanlarında 0.8'e varan daha yüksek olasılıkları 
+    kullanmaktadır. Buradaki atılma olasılığı bir yüzde belirtmemektedir. Buradaki olasılık katmandaki her nöron için ayrı ayrı 
+    uygulanan olasılıktır. Yani örneğin biz dropout olasılığını 0.1 yaptığımızda bu katmanın öncesindeki katmanda 100 nöron varsa 
+    bu durum bu 100 nöronun kesinlikle 10 tanesinin atılacağı anlamına gelmemektedir. Dropout düzenlemesi çıktı katmanı dışındaki 
+    tüm katmanlara uygulanabilmektedir. 
 
     Keras'ta dropout işlemi Dropout isimli bir katman ile temsil edilmiştir. Dropout sınıfının __init__ metdounun parametrik 
     yapısı şöyledir:
@@ -18454,18 +19231,23 @@ for result in predict_result[:, 0]:
     tf.keras.layers.Dropout(rate, noise_shape=None, seed=None, **kwargs)
 
     Metodun birinci parametresi droput olasılığını belirtmektedir. Droput katmanı ondan önceki katmanın nöronlarını atmaktadır. 
-    Eğitim sırasında hep batch işleminde katmandaki aynı nöronlar atılmamaktadır. Eğitim sırasında katmanın farklı nöronları atılarak 
-    işlemler yapılmaktadır. 
+    Eğitim sırasında hep batch işleminde katmandaki aynı nöronlar atılmamaktadır. Eğitim sırasında katmanın farklı nöronları 
+    atılarak işlemler yapılmaktadır. Yani Keras'ın Dropout katmanı nöron atmayı epoch temelinde değil batch temelinde yapmaktadır. 
+    Tabii aslında nöronlar gerçek anlamda modelden atılmamaktadır. Yalnızca onların çıktıları 0'a çekilmektedir. Böylece dot-product
+    işleminde işlemden 0 elde edilmektedir. Bu da nöron atılmış gibi bir etki oluşturmaktadır. 
 
     Katmandaki nöronların bir kısmı dropout işlemiyle atıldığında dot product sonucunda elde edilen değer toplamı azalır. Bu durumu 
-    ortadan kaldırmak için genellikle uygulamacılar dropout işleminde atılmayan nöronların çıktılarını atılan nöronların olsılığı 
-    kadar artırırlar. Yani örneğin bir katmandaki dropout olasılığı 0.20 ise bu katmanda atılmayan nöronların çıktıları da o oranda 
-    artırılmaktadır. Matematiksel olarak bu işlem 1 / (1 - rate) olarak yapılmaktadır. Keras'ın Dropout katmanı böyle davranmaktadır. 
+    ortadan kaldırmak için genellikle uygulamacılar dropout işleminde atılmayan nöronların çıktılarını atılan nöronların oranı kadar 
+    artırırlar. Yani örneğin bir katmandaki dropout olasılığı 0.20 ise bu katmanda atılmayan nöronların çıktıları da o oranda artırılmaktadır. 
+    rate atılma oranını belirtmek üzere matematiksel olarak bu artırma 1 / (1 - rate)  işlemindne elde edilen değer kullanılarak 
+    yapılmaktadır. Tabii Keras'ta biz bu işlemi manuel olarak yapmayız. Zaten Keras'ın Dropout katmanı böyle davranmaktadır. 
 
     Dropout işlemi yalnızca eğitimde uygulanan bir işlemdir. Ağ eğitildikten sonra test ve kestirim işlemlerinde dropout uygulanmaz.
+    Burada dikkat edilmesi gereken bir nokta şudur: Dropout işlemi nöron'un çıktısını sıfırlamamaktadır. Bir batch'lik işlemde 
+    0 gibi göstermektedir. (Zaten Dropout katmanı önceki katmanın çıkışına uygulandığına göre önceki katmandaki nöronların 
+    ağırlıkları üzerinde bir değişiklik yapamamaktadır.)
 
     Aşağıda dropout işleminin etkisine yönelik bir örnek verilmiştir. 
-
 #----------------------------------------------------------------------------------------------------------------------------
 
 from tensorflow.keras.layers import Dropout
@@ -18473,7 +19255,7 @@ import numpy as np
 
 data = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype='float')
 
-dropout_layer = Dropout(0.8, input_dim=10)
+dropout_layer = Dropout(0.8)
 
 result = dropout_layer(data, training=True)
 print(result)
@@ -18482,14 +19264,20 @@ result = dropout_layer(data, training=True)
 print(result)
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Şimdi de IMDB örneğinde Dropout kullanalım. Aşağıdaki örnekte katman mimarisi şyle uygulanmıştır:
-
-    Embedding --> SimpleRNN --> Dropout(0.3) --> Dense ---> Dropout (0.3) --> Dense (output)
-
-    Buradaki dropout olasılıkları deneme yanılma yöntemiyle belirlenmiştir. 
+                                    74. Ders - 26/10/2024 - Cumartesi
 #----------------------------------------------------------------------------------------------------------------------------
 
-TExT_SIZE = 250
+#----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de IMDB örneğinde Dropout düzenlemesinden faydalanalım. Modelimiz şöyle olabilir:
+
+    Input --> Embedding --> Dropout (0.3) --> SimpleRNN --> Reshape --> Dropout(0.3) --> Dense ---> Dropout (0.3) --> 
+    Dropout (0.3) --> Dense (output)
+
+    Model aşağıda verilmiştir.
+#----------------------------------------------------------------------------------------------------------------------------
+
+TEXT_SIZE = 250
+WORD_VECT_SIZE = 64
 
 import pandas as pd
 
@@ -18501,593 +19289,522 @@ cv = CountVectorizer()
 
 cv.fit(df['review'])
 
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
 import re
 
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
+text_vectors = [[cv.vocabulary_[word] + 1  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
 
 from tensorflow.keras.utils import pad_sequences
 
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
+dataset_x = pad_sequences(text_vectors, TEXT_SIZE, dtype='float32')
+dataset_y = (df['sentiment'] == 'positive').to_numpy(dtype='uint8')
 
 from sklearn.model_selection import train_test_split
 
 training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
 
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, Dropout, SimpleRNN, Flatten, Dense
+from tensorflow.keras.layers import Input, Embedding, Dropout, SimpleRNN, Reshape, Dense
 
-model = Sequential(name='IMDB-SimpleRNN')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-
-model.add(SimpleRNN(64, name='SimpleRNN', return_sequences=True))
+model = Sequential(name='IMBD-WordEmbedding')
+model.add(Input((TEXT_SIZE, ), name='Input'))
+model.add(Embedding(len(cv.vocabulary_) + 1, WORD_VECT_SIZE, name='Embedding'))
 model.add(Dropout(0.3, name='Dropout-1'))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(128, activation='relu', name='Dense-1'))
+model.add(SimpleRNN(64, activation='tanh', return_sequences=True, name='SimpleRNN-1'))
+model.add(Reshape((-1, ), name='Reshape'))
 model.add(Dropout(0.3, name='Dropout-2'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dropout(0.3, name='Dropout-3'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dropout(0.3, name='Dropout-4'))
 model.add(Dense(1, activation='sigmoid', name='Output'))
-
 model.summary()
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
 from tensorflow.keras.callbacks import EarlyStopping
 
-esc = EarlyStopping(patience=5, restore_best_weights=True)
+esc = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
 hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['loss'])
 plt.plot(hist.epoch, hist.history['val_loss'])
 plt.legend(['Loss', 'Validation Loss'])
 plt.show()
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Binary Accuracy Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['binary_accuracy'])
 plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
+plt.legend(['Accuracy', 'Validation Accuracy'])
 plt.show()
 
 eval_result = model.evaluate(test_dataset_x, test_dataset_y)
+
 for i in range(len(eval_result)):
     print(f'{model.metrics_names[i]}: {eval_result[i]}')
 
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
+predict_df = pd.read_csv('predict-imdb.csv')
 
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
+predict_text_vectors = [[cv.vocabulary_[word] + 1  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_df['review']]
 
-for result in predict_result[:, 0]:
-    if result > 0.5:
+predict_dataset_x = pad_sequences(predict_text_vectors, TEXT_SIZE, dtype='float32')
+
+predict_result = model.predict(predict_dataset_x)
+for presult in predict_result[:, 0]:
+    if (presult > 0.5):
         print('Positive')
     else:
         print('Negative')
-         
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Zamansal verilerle ilgili bir örnek "hava sıcaklığının tahmin edilmesi" olabilir. Hava sıcaklığı birtakım faktörlere bağlıdır. 
-    Belli veriler eşliğinde o andaki ya da belli zaman sonrasındaki hava durumu tahmin edilmeye çalışabilir. Örneğin biz birtakım 
-    ölümleri alıp yarınki hava sıcaklığını bugünden tahmin etmeye çalışabiliriz. Tabii hava sıcaklığı bir anda değişmemektedir. 
-    Birbirini izleyen birtakım olaylar bunda etkilidir. Aynı dırım örneğin borsalarda da benzerdir. Bir kağıdın fiyatı birtakım 
-    olaylar sonucunda bir bağlam içerisinde değişmektedir. 
+    Geri beslemeli ağlarda (Recurrent Neural Networks) çıktının bir sonraki girdi ile işlemi sokulması ağa belli bir hafıza 
+    kazandırmaktadır. Ancak bu hafıza "gradyen kaybolması (vanishing gradient)" denilen problem yüzünden yüzeyselleşmektedir. 
+    Başka bir deyişle ağ eğitim sırasında öncekileri unutup son veriler üzerinde hafıza oluşturmaktadır. Ya da başka bir deyişle 
+    oluşturulan hafıza "kısa süreli (short term)" olmaktadır. Çıktının sürekli girdiye verilmesi ilk girdilerin belli bir zaman 
+    sonra unutulmasına yol açmaktadır. Daha önce de bahsettiğimiz gibi "gradyen kaybolması" ağın derinleşmesi sonucunda oluşan 
+    genel bir problemdir. Geri beslemeli ağlar aslında ağı derinleştirmektedir. Bunun sonucu olarak da bu ağlarda gradyen kaybolması
+    daha açık bir biçimde kendini göstermektedir. İşte geçmişin ağda daha iyi hatırlanması için ve "gradyen kaybolması" denilen 
+    problemi azaltmak için bazı modeller önerilmiştir. Bunlardan en önemlilerinden biri LSTM (Long Short Term Memory) denilen modeldir. 
 
-    Hava durumu tahmini için "Jena Climate" isimli bir veri kümesi vardır. Bu veri kümesi aşağıdaki bağlantıdan indirilebilir:
+    LSTM modelinde yine SimpleRNN modelinde olduğu gibi bir önceki çıktı bir sonraki girdi ile işleme sokulmaktadır. Ancak ağa başka 
+    bir girdi bileşeni daha eklenmiştir. Bu girdi bileşeni ağın geçmiş bilgileri unutmasını engellemesini (gradyen kaybolmasını 
+    azaltmayı) hedeflemektedir. LSTM katmanındaki ağa eklenen ilave "carry" girişinin nasıl olup da "gradyen kaybolmasını" azalttığı 
+    konusu biraz karmaşıktır.    
 
-    https://www.kaggle.com/datasets/mnassrib/jena-climate?resource=download
+    LSTM katmanında her zamansal girdi önceki çıktı ve önceki carry değeri ile işleme sokulmaktadır. Dolayısıyla katmanın bir 
+    hücresindeki dot product işlemi şöyle yapılmaktadır:
 
-    Bu veri kümesi 10'ar dakikalık periyotlarla havaya ilişkin birtkaım değerlerin ölçülerek saklanmasıyla oluşturulmuştur. 
-    Veri sütunlardan biri (üçüncü sütun) hava sıcaklığını belirtmektedir. Bu veri kümesi çeşitli amaçlarla kullanılabilmektedir. 
-    Örneğin tipik olarak "gelecek kestirimi" yani şimdiki değerlerden hareketle belli bir zaman sonraki hava sıcaklığının tahmin 
-    edilmesi gibi örneklerde bu veri kümesinden deneme amaçlı faydalanılmaktadır. 
+    output_t = activation(np.dot(input_new, W) + np.dot(output_prev, U) + np.dot(carry_prev, V) + b)
 
-    Jena Climate örneğinde bizim amacımız belli bir zamandaki ölçüm değerinden hareketle bir gün sonraki hava ısısını tahmim etmek 
-    olsun. Böyle bir modelin eğitimi için bizim bazı düzenlemeler yapmamız geekir. Burada eğitimde kullanılacak x değerlerine karşı 
-    gelen y değerleri (havanın ısısı) bir gün sonraki değerler olmalıdır. Veri kümesinde bir gün sonraki değerler 24 * 60 // 10 = 144 
-    ilerideki değerlerdir. O halde bizim  eğitim verilerini oluştururken her x için 144 ilerideki y değerini eşleştirmemiz gerekir. 
-    Bu işlemler çeşitli biçimlerde yapılabilir. Ayrıca veri kğmesinde ölümün yapıldığı tarih ve zaman bilgisi de vardır. Tarih 
-    bilgisinin bizim için önemi yoktur. Ancak ölçümün yapıldığı zaman önemli bir özellik olabilir. Bundan faydalanmamız uygun 
-    olabilir. Pekiyi zamansal veri hangi ölçek türündendir? İşte tarih ve zaman bilgileri uygulamaya göre aralık ölçeğinde (nümerik) 
-    ya da nominal (kategorik) ölçekte değerlendirilebilir. Eğer zaman bilgisi kategorik bir bilgi olarak ele alınacaksa "one-hot 
-    encoding" yapılmalıdır. Nümerik olarak ele alınacaksa örneğin gece saat 12'den itibaren geçen dakika sayısı gibi bir değer 
-    kullanılabilir. Bu işlemler aşağıdaki gibi yapılabilir:
+    Buradaki dot product işleminin SimpleRNN'deki işlemden farkı np.dot(carry_prev, V) terimiyle temsil ettiğimiz carry girişidir. 
+    Bu carry girişi aslında 3 farklı terimin birleşimiyle oluşturulmaktadır:
 
-    TIME_PERIOD = 24 * 60 // 10         # 144
+    carry_next = = i * k + carry_prev * f
 
-    import pandas as pd
+    Burada aslında bizim carry ile belirttiğimiz girdi bir tane girdinin değil üç tane girdinin birleşimidir. Bu girdileri biz i, 
+    k ve f ile gösterdik. şte bu i, k ve f girdileri de şöyle oluşturulmaktadır:
 
-    df = pd.read_csv('jena_climate_2009_2016.csv')
+    i = activation(np.dot(output_prev, Ui) + np.dot(input_prev, Wi) + bi)
+    f = activation(np.dot(output_prev, Uf) + np.dot(input_prev, Wf) + bf)
+    k = activation(np.dot(output_prev, Uk) + np.dot(input_prev, Wk) + bk)
 
-    dttm = df.iloc[:, 0]
-    df.iloc[:, 0] = dttm.str[10:]
+    Görüldüğü gibi aslında LSTM katmanınında i, j ve k biçiminde temsil ettiğimiz üç vardır. Bu i, k ve f girişleri modele 
+    Ui, Uf, Uk, Wi, Wf ve Wk ağırlık değerlerini eklemektedir. Pekiyi bu durumda böyle bir LSTM katmanında eğitilebilir. kaç 
+    parametre bulunacaktır? n LSTM katmanına giren nöron sayısı, m de LSTM katmanındaki nöron sayısı olsun. Bu durumda:
 
-    df = pd.get_dummies(df, columns=['Date Time'], dtype='int8')
-
-    dataset_df_y = df.iloc[:, 1]
-    dataset_df_x = df.drop('T (degC)', axis=1)
-
-    dataset_x = dataset_df_x.iloc[:-TIME_PERIOD].to_numpy()
-    dataset_y = dataset_df_y.iloc[TIME_PERIOD:].to_numpy()
-
-
-    Tabii bu işlemin yapılmasının başka alternatif yolları da vardır. Aşağıda örnek bir bütün olarak verilmiştir.
-#----------------------------------------------------------------------------------------------------------------------------
-
-TIME_PERIOD = 24 * 60 // 10
-
-import pandas as pd
-
-df = pd.read_csv('jena_climate_2009_2016.csv')
-
-dttm = df.iloc[:, 0]
-df.iloc[:, 0] = dttm.str[10:]
-
-df = pd.get_dummies(df, columns=['Date Time'], dtype='int8')
-
-dataset_df_y = df.iloc[:, 1]
-dataset_df_x = df.drop('T (degC)', axis=1)
-
-dataset_x = dataset_df_x.iloc[:-TIME_PERIOD].to_numpy()
-dataset_y = dataset_df_y.iloc[TIME_PERIOD:].to_numpy()
-
-from sklearn.model_selection import train_test_split
-
-training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y, test_size=0.2)
-
-from sklearn.preprocessing import StandardScaler
-
-mms = StandardScaler()
-mms.fit(training_dataset_x)
-scaled_training_dataset_x = mms.transform(training_dataset_x)
-scaled_test_dataset_x = mms.transform(test_dataset_x)
-
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Dense, Dropout
-
-model = Sequential(name='Boston-Housing-Price')
-model.add(Dense(128, activation='relu', input_dim=training_dataset_x.shape[1], name='Hidden-1'))
-model.add(Dropout(0.2, name='Dropout-1'))
-model.add(Dense(128, activation='relu', name='Hidden-2'))
-model.add(Dropout(0.2, name='Dropout-2'))
-model.add(Dense(1, activation='linear', name='Output'))
-model.summary()
-
-model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-
-from tensorflow.keras.callbacks import EarlyStopping
-
-esc = EarlyStopping(patience=10, restore_best_weights=True)
-
-hist = model.fit(scaled_training_dataset_x, training_dataset_y, batch_size=32, epochs=200, validation_split=0.2, callbacks=[esc])
-
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['loss'])
-plt.plot(hist.epoch, hist.history['val_loss'])
-plt.legend(['Loss', 'Validation Loss'])
-plt.show()
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Mean Absolute Error Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['mae'])
-plt.plot(hist.epoch, hist.history['val_mae'])
-plt.legend(['Mean Absolute Error', 'Validation Mean Absolute Error'])
-plt.show()
-
-eval_result = model.evaluate(scaled_test_dataset_x, test_dataset_y)
-
-for i in range(len(eval_result)):
-    print(f'{model.metrics_names[i]}: {eval_result[i]}')
-
-#----------------------------------------------------------------------------------------------------------------------------
-    Yukarıdaki Jena Climate örneğini şimdi de SimplRNN katmanıyla geri beslemeli ağ ile yapalım. Burada RECURRENT_TIME_PERIOD 
-    isimli sembolik sabitimiz son kaç ölçümün değerinin geri beslemeye sokulacağını belirtmektedir. PREDICT_TIME_PERIOD ise ne 
-    kadar sonraki hava sıcaklığının tahmin edileceğini belirtmektedir. Biz bu örnekte ardışık RECURRENT_TIME_PERIOD kadar bilgileri 
-    birere birer kaydırarak oluşturmak isterssekbu çok fazla belleğin harcanmasına yol açacaktır. Bu tür durumlarda parçalı 
-    verilerle eğitim denenmelidir. Biz de aşağıdaki örnekte DataGenerator isimli sınıf yoluyla parçalı eğitim uyguladık. Eğitim 
-    sırasında her defasında bizim sınıfımızın __getitem__ metodu çağrılacak ve biz de bu meotta bir batch kadar bilgiyi verceğiz. 
-    Bu durumda bizim bu mettotta x verisi olarak (BATCH_SIZE, RECURRENT_TIME_PERIOD, x.shape[1]) boyutunda bir bilgiyle geri 
-    dönmemiz gerekir. Benzer biçimde y verisi için de BATCH_SIZE kadar veri oluşturmamız gerekmektedir. Buradaki örnekte örneğin 
-    biz saat 10:00'dan itibaren 10'ar dakika aralıklarla son 50 veriyi oluşturarak yarınki hava ısısını tahmin etmek istemekteyiz. 
-    Yukarıdaki örnekte biz yalnızca tek bir veriden tahmin yapmıştık. Halbuki bu örnekte peşi sıra giden bir grup veriyi 
-    kullanarak tahmin yapmak istemekteyiz. 
-#----------------------------------------------------------------------------------------------------------------------------
-
-PREDICT_TIME_PERIOD = 24 * 60 // 10     # 144
-RECURRENT_TIME_PERIOD = 50
-BATCH_SIZE = 32
-
-import pandas as pd
-
-df = pd.read_csv('jena_climate_2009_2016.csv')
-
-dttm = df.iloc[:, 0]
-df.iloc[:, 0] = dttm.str[10:]
-
-df = pd.get_dummies(df, columns=['Date Time'], dtype='int8')
-
-dataset_y = df.iloc[:, 1].to_numpy()
-dataset_x = df.drop('T (degC)', axis=1).to_numpy()
-
-from sklearn.model_selection import train_test_split
-
-temp_training_dataset_x, test_dataset_x, temp_training_dataset_y, test_dataset_y = train_test_split(dataset_x, 
-            dataset_y, test_size=0.2, shuffle=False)
-
-from sklearn.preprocessing import StandardScaler
-
-mms = StandardScaler()
-mms.fit(temp_training_dataset_x)
-temp_scaled_training_dataset_x = mms.transform(temp_training_dataset_x)
-scaled_test_dataset_x = mms.transform(test_dataset_x)
-
-training_dataset_x, validation_dataset_x, training_dataset_y, validation_dataset_y = train_test_split(temp_scaled_training_dataset_x, 
-            temp_training_dataset_y, test_size=0.2, shuffle=False)
-
-import numpy as np
-from tensorflow.keras.utils import Sequence
-
-class DataGenerator(Sequence):
-    def __init__(self, x, y, batch_size, shuffle=True):
-        super().__init__()
-        self.x = x
-        self.y = y
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.total_batch = (len(x) - (PREDICT_TIME_PERIOD + RECURRENT_TIME_PERIOD)) // self.batch_size
-        self.indexes = list(range(self.total_batch))
-   
-    def __len__(self):
-        return self.total_batch
+    - W matrisinin eleman sayısı n * m tanedir. 
+    - U matrisinin eleman sayısı m * m tanedir 
+    - Ui, Uf ve Uk matrislerinin eleman sayıları ise m * m tanedir. 
+    - Wi, Wf ve Wk matrislerinin eleman sayıları ise n * m tanedir.
+    - Bu katmandaki toplam bias değerlerinin sayısının da m * b + m * bi + m * bf + m * bk tanedir. 
     
-    def __getitem__(self, batch_no):
-        start_index_x = self.indexes[batch_no] * self.batch_size;
-                
-        start_index_y = start_index_x + RECURRENT_TIME_PERIOD + PREDICT_TIME_PERIOD  
-        stop_index_y = start_index_x + RECURRENT_TIME_PERIOD + PREDICT_TIME_PERIOD + self.batch_size
-        y = np.zeros(self.batch_size)
-        x = np.zeros((self.batch_size, RECURRENT_TIME_PERIOD, self.x.shape[1]))
-        for i in range(self.batch_size):
-            x[i] = self.x[start_index_x + i:start_index_x + RECURRENT_TIME_PERIOD + i]
-        
-        y = self.y[start_index_y: stop_index_y]
-        
-        return x, y
-        
-    def on_epoch_end(self):
-        if self.shuffle:
-            np.random.shuffle(self.indexes)
+    Yukarıdaki tüm değerler toplandığında ve 4 parantezine alındığında LSTM katmanındaki eğitilebilir parametrelerin sayısı da 
+    4 * (n * m + m * m + m) olacaktır.
+    
+    Keras'taki LSTM sınıfının __init__ metodunun parametrik yapısı şöyledir:
 
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import SimpleRNN, Flatten, Dense, Dropout
+    tf.keras.layers.LSTM(
+        units,
+        activation='tanh',
+        recurrent_activation='sigmoid',
+        use_bias=True,
+        kernel_initializer='glorot_uniform',
+        recurrent_initializer='orthogonal',
+        bias_initializer='zeros',
+        unit_forget_bias=True,
+        kernel_regularizer=None,
+        recurrent_regularizer=None,
+        bias_regularizer=None,
+        activity_regularizer=None,
+        kernel_constraint=None,
+        recurrent_constraint=None,
+        bias_constraint=None,
+        dropout=0.0,
+        recurrent_dropout=0.0,
+        seed=None,
+        return_sequences=False,
+        return_state=False,
+        go_backwards=False,
+        stateful=False,
+        unroll=False,
+        use_cudnn='auto',
+        **kwargs
+    )
 
-model = Sequential(name='Jena-Climate')
-model.add(SimpleRNN(32, name='SimpleRNN-1', input_shape=(RECURRENT_TIME_PERIOD, training_dataset_x.shape[1]), return_sequences=True))
-model.add(Flatten(name='Flatten'))
-
-model.add(Dropout(0.2, name='Dropout-1'))
-model.add(Dense(128, activation='relu', input_dim=training_dataset_x.shape[1], name='Hidden-1'))
-model.add(Dropout(0.2, name='Dropout-2'))
-model.add(Dense(1, activation='linear', name='Output'))
-model.summary()
-
-model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-
-from tensorflow.keras.callbacks import EarlyStopping
-
-esc = EarlyStopping(patience=10, restore_best_weights=True)
-
-hist = model.fit(DataGenerator(training_dataset_x, dataset_y, BATCH_SIZE), 
-        validation_data=DataGenerator(validation_dataset_x, validation_dataset_y, BATCH_SIZE, False), 
-        batch_size=BATCH_SIZE, epochs=200, callbacks=[esc])
-
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['loss'])
-plt.plot(hist.epoch, hist.history['val_loss'])
-plt.legend(['Loss', 'Validation Loss'])
-plt.show()
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Mean Absolute Error Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['mae'])
-plt.plot(hist.epoch, hist.history['val_mae'])
-plt.legend(['Mean Absolute Error', 'Validation Mean Absolute Error'])
-plt.show()
-
-eval_result = model.evaluate(DataGenerator(scaled_test_dataset_x, test_dataset_y, BATCH_SIZE))
-
-for i in range(len(eval_result)):
-    print(f'{model.metrics_names[i]}: {eval_result[i]}')
-
-predict_data = test_dataset_x[1000:1000 + RECURRENT_TIME_PERIOD].reshape(1, RECURRENT_TIME_PERIOD, -1)
-predict_result = model.predict(predict_data)
-print(predict_result)
-
-#----------------------------------------------------------------------------------------------------------------------------
-    Geri beslemeli ağlarda (RNN) çıktnın bir sonraki girdi ile işlemi sokulması ağa belli bir hafıza kazandırmaktadır. Ancak bu hafıza
-    "vanishing gradient" denilen matematiksel problem yüzünden yüzeyselleşmektedir. Başka bir deyişle ağ eğitim sırasında öncekileri unutup son 
-    veriler üzerinde hafıza oluşturabilmektedir. Başka bir deyişle oluşturulan hafıza "kısa süreli (short term)" olmaktadır. 
-    Çıktının sürekli girdiye verilmesi ilk girdilerin belli bir zaman sonra unutulmasına yol açmaktadır. "Vanishing gradient" problemi 
-    bunun matematiksel açıklmasına denilmektedir. Böylece geri beslemeli ağlar SimplRNN katmanıyla ancak kısa dönemli bir hafıza oluşturabilmektedir. 
-    İşte geçmişin ağda daha iyi hatırlanması için "vanishing gradient" denilen problemi engellemek amacıyla ağda çeşitli değişiklikler önerilmiştir. 
-    Bunlardan en önemlilerinden biri LSTM (Long Short Term Memory) modeldir. 
-
-    LSTM modelinde yine SimpleRNN modelinde olduğu gibi bir önceki çıktı bir sonraki girdi ile işleme sokulmaktadır. Ancak ağa başka bir girdi 
-    bileşeni daha eklenmiştir. Bu girdi bileşeni ağın geçmiş bilgileri unutmasını engellemeyi hedeflemektedir. LSTM katmanındaki 
-    ağa eklenen ilave "carry" girişinin nasıl olup da "vanishing gradient" denilen probleme iyi geldiği konusu biraz karmaşıktır. 
-    Ancak ağa eklenen bu yeni giriş ağın tahmin edilecek parametre sayısını da artrmaktadır. Keras'ta LSTM ağları için tensorflow.keras.layers
-    modülünde LSTM isimli bir sınıf bulundurulmuştur. Bu sınıfın genel kullanımı SimpleRNN sınıfına çok benzemektedir. LSTM katmanının 
-    ağa eklediği eğitilebilir parametrelerin sayısı katmanın girdisi n tane nörondan çıktısı da m tane nörondan oluşmak üzere 4 * (n * m + m * m + m) 
-    kadar olmaktadır. 
-
-    Aşağıda daha önce yapmış olduğumuz IMDB örneğinin LSTM ile yeniden gerçekleştirimi verilmişti. Bu ağın başarısını diğer modellerle karşılaştırabilirsiniz. 
-
+    Burada yine ilk parametre katmandaki nöron sayısını belirtmektedir. Aktivasyon fonksiyonu yine default olarak "tanh" 
+    biçiminde alınmıştır. Yine katmandaki çıktıların biriktirilmesi için kullanılan return_sequences parametresi vardır. 
+    Yani katmanın kullanımı SimpleRNN katmanına oldukça benzemektedir. 
 #----------------------------------------------------------------------------------------------------------------------------
 
-TExT_SIZE = 250
+#----------------------------------------------------------------------------------------------------------------------------
+    Şimdi LSTM katmanındaki toplam eğitilebilir parametrelerin sayısına basit bir modelle bakalım. Modelimiz şöyle olsun:
+
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, LSTM, Reshape, Dense
+
+    model = Sequential(name='SimpleRNN-Test')
+    model.add(Input((100, 10),  name='Input'))
+    model.add(LSTM(128,  return_sequences=True, name='LSTM'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dense(1, activation='linear', name='Output'))
+    model.summary()
+
+    Model elde edilen özet çıktı şöyledir:
+
+        Model: "SimpleRNN-Test"
+    ┌─────────────────────────────────┬────────────────────────┬───────────────┐
+    │ Layer (type)                    │ Output Shape           │       Param # │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ LSTM (LSTM)                     │ (None, 100, 128)       │        71,168 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Reshape (Reshape)               │ (None, 12800)          │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-1 (Dense)                │ (None, 256)            │     3,277,056 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-2 (Dense)                │ (None, 256)            │        65,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Output (Dense)                  │ (None, 1)              │           257 │
+    └─────────────────────────────────┴────────────────────────┴───────────────┘
+    Total params: 3,414,273 (13.02 MB)
+    Trainable params: 3,414,273 (13.02 MB)
+    Non-trainable params: 0 (0.00 B)
+
+    Biz yukarıda LSTM katmanındaki toplam eğitilebilir parametrelerin sayısının n katmana giren nöron sayısı m de katmandan 
+    çıkan nöron sayısı olmak üzere  4 * (n * m + m * m + m) biçiminde olduğunu belirtmiştik. Bu örnekte n = 10, m = 128'dir. 
+    O halde 4 * (10 * 128 + 128 * 128 + 128) = 71168'dir. Diğer katmalardaki eğitilebilir parametrelerin sayısı daha önceleri 
+    yaptığımız biçimde hesaplanmaktadır. 
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Aşağıda daha önce yapmış olduğumuz IMDB örneğinin LSTM ile yeniden gerçekleştirimi verilmişti. Modeli şöyle oluşturduk:
+
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, TextVectorization, Embedding, LSTM, Dropout, Dense, Reshape
+
+    tv = TextVectorization(output_sequence_length=TEXT_SIZE, output_mode='int')
+    tv.adapt(dataset_x)
+
+    model = Sequential(name='IMBD-LSTM')
+    model.add(Input((1, ), dtype='string', name='Input'))
+    model.add(tv)
+    model.add(Embedding(tv.vocabulary_size(), WORD_VECT_SIZE, name='Embedding'))
+    model.add(Dropout(0.3, name='Dropout-1'))
+    model.add(LSTM(64, return_sequences=True, name='LSTM'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dropout(0.3, name='Dropout-2'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dropout(0.3, name='Dropout-3'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dropout(0.3, name='Dropout-4'))
+    model.add(Dense(1, activation='sigmoid', name='Output'))
+    model.summary()
+
+    Burada TextVectorization katmanı kullanılmıştır. LSTM katmanında toplam 128 nöron kullandık. Overfitting problemini azaltmak 
+    için katmanların aralarına Dropout katmanlarını da yerleştirdik. Modelin özet çıktısı şöyledir:
+
+   Model: "IMBD-LSTM"
+    ┌─────────────────────────────────┬────────────────────────┬───────────────┐
+    │ Layer (type)                    │ Output Shape           │       Param # │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ text_vectorization_4            │ (None, 150)            │             0 │
+    │ (TextVectorization)             │                        │               │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Embedding (Embedding)           │ (None, 150, 64)        │    11,630,208 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Dropout-1 (Dropout)             │ (None, 150, 64)        │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ LSTM (LSTM)                     │ (None, 150, 64)        │        33,024 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Reshape (Reshape)               │ (None, 9600)           │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Dropout-2 (Dropout)             │ (None, 9600)           │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-1 (Dense)                │ (None, 256)            │     2,457,856 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Dropout-3 (Dropout)             │ (None, 256)            │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Hidden-2 (Dense)                │ (None, 256)            │        65,792 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Dropout-4 (Dropout)             │ (None, 256)            │             0 │
+    ├─────────────────────────────────┼────────────────────────┼───────────────┤
+    │ Output (Dense)                  │ (None, 1)              │           257 │
+    └─────────────────────────────────┴────────────────────────┴───────────────┘
+    Total params: 14,187,137 (54.12 MB)
+    Trainable params: 14,187,137 (54.12 MB)
+        
+    Program bir bütün olarak aşağıda verilmiştir.
+#----------------------------------------------------------------------------------------------------------------------------
+
+TEXT_SIZE = 150
+WORD_VECT_SIZE = 64
 
 import pandas as pd
 
 df = pd.read_csv('IMDB Dataset.csv')
 
-from sklearn.feature_extraction.text import CountVectorizer
-
-cv = CountVectorizer()
-
-cv.fit(df['review'])
-
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
-import re
-
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
-
-from tensorflow.keras.utils import pad_sequences
-
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
+dataset_x = df['review']
+dataset_y = (df['sentiment'] == 'positive').to_numpy(dtype='uint8')
 
 from sklearn.model_selection import train_test_split
 
 training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
 
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dropout, Flatten, Dense
+from tensorflow.keras.layers import Input, TextVectorization, Embedding, LSTM, Dropout, Dense, Reshape
 
-model = Sequential(name='IMDB-SimpleRNN')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-model.add(LSTM(64, name='LSTM', return_sequences=True))
-model.add(Dropout(0.2, name='Dropout-1'))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(64, activation='relu', name='Dense-1'))
-model.add(Dropout(0.2, name='Dropout-21'))
+tv = TextVectorization(output_sequence_length=TEXT_SIZE, output_mode='int')
+tv.adapt(dataset_x)
 
+model = Sequential(name='IMBD-LSTM')
+model.add(Input((1, ), dtype='string', name='Input'))
+model.add(tv)
+model.add(Embedding(tv.vocabulary_size(), WORD_VECT_SIZE, name='Embedding'))
+model.add(Dropout(0.3, name='Dropout-1'))
+model.add(LSTM(64, return_sequences=True, name='LSTM'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dropout(0.3, name='Dropout-2'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dropout(0.3, name='Dropout-3'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dropout(0.3, name='Dropout-4'))
 model.add(Dense(1, activation='sigmoid', name='Output'))
-
 model.summary()
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
 from tensorflow.keras.callbacks import EarlyStopping
 
-esc = EarlyStopping(patience=5, restore_best_weights=True)
+esc = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
 hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['loss'])
 plt.plot(hist.epoch, hist.history['val_loss'])
 plt.legend(['Loss', 'Validation Loss'])
 plt.show()
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Binary Accuracy Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['binary_accuracy'])
 plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
+plt.legend(['Accuracy', 'Validation Accuracy'])
 plt.show()
 
 eval_result = model.evaluate(test_dataset_x, test_dataset_y)
+
 for i in range(len(eval_result)):
     print(f'{model.metrics_names[i]}: {eval_result[i]}')
 
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
+predict_df = pd.read_csv('predict-imdb.csv')
 
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
-
-for result in predict_result[:, 0]:
-    if result > 0.5:
+predict_result = model.predict(predict_df['review'])
+for presult in predict_result[:, 0]:
+    if (presult > 0.5):
         print('Positive')
     else:
         print('Negative')
-          
+
 #----------------------------------------------------------------------------------------------------------------------------
-    Ağa uzun dönem hafıza kazandırmaya çalışan diğer bir yöntem de GRU (Gated Recurrent Unit) isimli yöntemdir. Bu yöntemde de yine 
-    ağa üçüncü bir giriş uygulanmaktadır. GRU yöntemi de Keras'ta tensorflow.keras.layers modülündeki GRU katman sınıfıyla temsil edilmiştir. 
-    Dolayısıyla uygulamacı LSTM yerine GRU katmanını kullandığında yöntemi değiştirmiş olur. GRU sınıfının parametrik yapısı da LSTM sınıfına benzemektedir. 
+                                            75. Ders - 27/10/2024 - Pazar
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Ağa uzun dönem hafıza kazandırmaya çalışan diğer bir yöntem de GRU (Gated Recurrent Unit) isimli yöntemdir. Bu yöntemde de 
+    yine ağa üçüncü bir giriş uygulanmaktadır. GRU yöntemi de Keras'ta tensorflow.keras.layers modülündeki GRU katman sınıfıyla 
+    temsil edilmiştir. Dolayısıyla uygulamacı LSTM yerine GRU katmanını kullandığında yöntemi değiştirmiş olur. GRU sınıfının 
+    __init__ metodunun parametrik yapısı da LSTM sınıfına benzemektedir:
+
+    tf.keras.layers.GRU(
+        units,
+        activation='tanh',
+        recurrent_activation='sigmoid',
+        use_bias=True,
+        kernel_initializer='glorot_uniform',
+        recurrent_initializer='orthogonal',
+        bias_initializer='zeros',
+        kernel_regularizer=None,
+        recurrent_regularizer=None,
+        bias_regularizer=None,
+        activity_regularizer=None,
+        kernel_constraint=None,
+        recurrent_constraint=None,
+        bias_constraint=None,
+        dropout=0.0,
+        recurrent_dropout=0.0,
+        seed=None,
+        return_sequences=False,
+        return_state=False,
+        go_backwards=False,
+        stateful=False,
+        unroll=False,
+        reset_after=True,
+        use_cudnn='auto',
+        **kwargs
+    )
+    
+    Yine metodun birinci parametresi katmandaki nöron sayısını, ikinci parametresi ise aktivasyon fonksiyonunu belirtmektedir. 
+    
     LSTM ile GRU arasında şu farklılıklar söz konusudur:
 
-    - GRU katmanında uzun dönem hafıza kazandırmak için uygulanan üçüncü giriş 2 bileşene saipken, LSTM'de 3 bileşene sahiptir. 
-    Solayısıyla GRU katmanı LSTM katmanına göre daha az eğitilebilir parametreye sahiptir. Genel GRU olarak katmanı LSTM katmanından daha 
-    yalın görünümdedir.
+    - LSTM'de ağa uzun dönem hafıza kazandırmak için uygulanan giriş üç bileşene sahipken GRU katmanında iki bileşene sahiptir.  
+    Dolayısıyla GRU katmanı LSTM katmanına göre daha az eğitilebilir parametreye sahiptir. Genel GRU olarak katmanı LSTM 
+    katmanından daha yalın görünümdedir.
 
-    - GRU katmanında daha az bileşen olduğu için bu katmanın eğitimi LSTM katmanına göre daha hızlı yapılabilmektedir. Ayrıca GRU katmanıdaha düşük miktardaki 
-    eğitim verileri için bu nedenden dolayı daha uygun olabilmektedir. 
+    - GRU katmanında daha az bileşen olduğu için bu katmanın eğitimi LSTM katmanına göre daha hızlı yapılabilmektedir. Ayrıca 
+    GRU katmanı daha düşük miktardaki eğitim verileri için bu nedenden dolayı daha uygun olabilmektedir. 
 
-    - LSTM katmanı GRU katmanına göre daha iyi performans gösterme eğilimindedir. Yani ikisi arasındaki tercih hız ve duyarlılık ihtiyacına göre
-    değişebilmektedir. 
+    - LSTM katmanı GRU katmanına göre daha iyi performans gösterme eğilimindedir. Yani ikisi arasındaki tercih hız ve duyarlılık 
+    ihtiyacına göre değişebilmektedir. 
 
-    Yukarıdaki IMDB örneğini aşağıda GRU katmanıyla yeniden veriyoruz.
+    Yukarıdaki IMDB veri kümesi için verdiğimiz LSTM örneğini GRU için aşağıdaki gibi yeniden düzenleyebiliriz. Buradaki tek
+    yaptığımız şey LSTM yerine GRU katmanını kullanmaktır. Bu iki katmanın içsel çalışması farklı olsa da arayüz olarak 
+    aynıdır:
 
+    from tensorflow.keras import Sequential
+    from tensorflow.keras.layers import Input, TextVectorization, Embedding, GRU, Dropout, Dense, Reshape
+
+    tv = TextVectorization(output_sequence_length=TEXT_SIZE, output_mode='int')
+    tv.adapt(dataset_x)
+
+    model = Sequential(name='IMBD-LSTM')
+    model.add(Input((1, ), dtype='string', name='Input'))
+    model.add(tv)
+    model.add(Embedding(tv.vocabulary_size(), WORD_VECT_SIZE, name='Embedding'))
+    model.add(Dropout(0.3, name='Dropout-1'))
+    model.add(GRU(64, return_sequences=True, name='GRU'))
+    model.add(Reshape((-1, ), name='Reshape'))
+    model.add(Dropout(0.3, name='Dropout-2'))
+    model.add(Dense(256, activation='relu', name='Hidden-1'))
+    model.add(Dropout(0.3, name='Dropout-3'))
+    model.add(Dense(256, activation='relu', name='Hidden-2'))
+    model.add(Dropout(0.3, name='Dropout-4'))
+    model.add(Dense(1, activation='sigmoid', name='Output'))
+    model.summary()
+
+    Aşağıda örnek bir bütün olarak verilmiştir.
 #----------------------------------------------------------------------------------------------------------------------------
 
-TExT_SIZE = 250
+TEXT_SIZE = 150
+WORD_VECT_SIZE = 64
 
 import pandas as pd
 
 df = pd.read_csv('IMDB Dataset.csv')
 
-from sklearn.feature_extraction.text import CountVectorizer
-
-cv = CountVectorizer()
-
-cv.fit(df['review'])
-
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
-import re
-
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
-
-from tensorflow.keras.utils import pad_sequences
-
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
+dataset_x = df['review']
+dataset_y = (df['sentiment'] == 'positive').to_numpy(dtype='uint8')
 
 from sklearn.model_selection import train_test_split
 
 training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
 
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, GRU, Dropout, Flatten, Dense
+from tensorflow.keras.layers import Input, TextVectorization, Embedding, GRU, Dropout, Dense, Reshape
 
-model = Sequential(name='IMDB-GRU')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-model.add(GRU(64, name='GRU', return_sequences=True))
-model.add(Dropout(0.2, name='Dropout-1'))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(64, activation='relu', name='Dense-1'))
-model.add(Dropout(0.2, name='Dropout-21'))
+tv = TextVectorization(output_sequence_length=TEXT_SIZE, output_mode='int')
+tv.adapt(dataset_x)
 
+model = Sequential(name='IMBD-LSTM')
+model.add(Input((1, ), dtype='string', name='Input'))
+model.add(tv)
+model.add(Embedding(tv.vocabulary_size(), WORD_VECT_SIZE, name='Embedding'))
+model.add(Dropout(0.3, name='Dropout-1'))
+model.add(GRU(64, return_sequences=True, name='GRU'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dropout(0.3, name='Dropout-2'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dropout(0.3, name='Dropout-3'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dropout(0.3, name='Dropout-4'))
 model.add(Dense(1, activation='sigmoid', name='Output'))
-
 model.summary()
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
 from tensorflow.keras.callbacks import EarlyStopping
 
-esc = EarlyStopping(patience=5, restore_best_weights=True)
+esc = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
 hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['loss'])
 plt.plot(hist.epoch, hist.history['val_loss'])
 plt.legend(['Loss', 'Validation Loss'])
 plt.show()
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Binary Accuracy Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['binary_accuracy'])
 plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
+plt.legend(['Accuracy', 'Validation Accuracy'])
 plt.show()
 
 eval_result = model.evaluate(test_dataset_x, test_dataset_y)
+
 for i in range(len(eval_result)):
     print(f'{model.metrics_names[i]}: {eval_result[i]}')
 
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
+predict_df = pd.read_csv('predict-imdb.csv')
 
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
-
-for result in predict_result[:, 0]:
-    if result > 0.5:
+predict_result = model.predict(predict_df['review'])
+for presult in predict_result[:, 0]:
+    if (presult > 0.5):
         print('Positive')
     else:
         print('Negative')
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Geri beslemeli ağlarda biz önceki çıktıyı sonraki girdi ile ilişkilendiriyorduk. SimpleRNN katmanında "vanishing gradient" denilen 
-    problem yüzünden geçmişe ilişkin hafıza bozuluyordu. Bunun için LSTM ve GRU geri beslemesi kullanılıyordu. Bu geri besleme modellerinde 
-    geçmişin daha iyi anımsanması sağlanıyordu. Ancak önceki çıktının sonraki girdiyle işleme sokulması bazı durumlarda yeterli olmamaktadır. 
-    Örneğin metinlerin anlamlandırılmasında önce bir şeyden bahsedilip sonra o şey hakkında bilgi verildiğinde önce bahsedilen şeyin ne olduğu ancak 
-    sonradan anlaşılmaktadır. Örneğin bir kişinin bir dükkana girdiği belirtilmiş olabilir. Sonra da bu dükkanın eczane olduğu söylenmiş olabilir. 
-    Bu durumda eğer o dükannın baştan eczane olduğu bilinse daha iyi bir çıkarım yapılabilir. Bazı dillerin gramerleri bu biçimde oluşturulmuştur. 
-    Örneğin İngilizce'de "the book on the table ..." biçimindeki bir cümlede kitabın masanın üzerinde olduğu sonradan anlaşılmaktadır. 
-    Ancak "masanın üzerindeki kitap ..." cümlesinde kitabın masaüstünde olduğu baştan anlaşılmaktadır. Tabii zamansal verilerin söz konusu olduğu bazı uygulamalarda çift yönlü geri beslemenin bir faydası olmamakta hatta modelin başarısını düşürmektedir. Örnein Jena Cliamate veri kümesinde çift yönlü bir beslemenin 
-    açık bir faydası olmayacaktır. 
-    
-    İşte geri beslemenin önceki çıkışın sonraki girişle ilişkilendirilmesinin yanı sıra bunun tersinin de yapılması yani sonraki çıkışın önceki girişle 
-    ilişkilendirilmesi daha iyi bir öğrenmeye yol açabilektedir. Bu tür geri beslemeli ağlara "çift yönlü (bidriectional)" geri beslemeli ağlar 
-    denilmektedir. Çift yönlü geri besleme ağı daha karmaşık bir hale getirmektedr. Dolayısıyla eğitilebilir parametrelerin sayısını artırmaktadır. 
-    Ancak bazı uygulamalarda daha iyi bir sonucun elde edilmesine olanak vermektedir. 
+    Geri beslemeli ağlarda biz önceki çıktıyı sonraki girdi ile ilişkilendiriyorduk. SimpleRNN katmanında "gradyen kaybolması 
+    (vanishing gradient)" denilen problem yüzünden geçmişe ilişkin iyi bir biçimde tutulamıyordu. Bunun için LSTM ve GRU geri 
+    beslemesi kullanılıyordu. Bu geri besleme modellerinde geçmişin daha iyi anımsanması sağlanıyordu. Ancak önceki çıktının 
+    sonraki girdiyle işleme sokulması bazı durumlarda yeterli olamamaktadır. Örneğin metinlerin anlamlandırılmasında önce bir 
+    şeyden bahsedilip sonra o şey hakkında bilgi verildiğinde önce bahsedilen şeyin ne olduğu ancak sonradan anlaşılmaktadır. 
+    Örneğin bir kişinin bir dükkana girdiği belirtilmiş olabilir. Sonra da bu dükkanın eczane olduğu söylenmiş olabilir. Bu 
+    durumda eğer o dükanın baştan eczane olduğu bilinse daha iyi bir çıkarım yapılabilir. (Bazı doğal dillerin dillerin gramerleri 
+    de bu biçimde gelişmiştir. Örneğin İngilizce'de "the book on the table ..." biçimindeki bir cümlede kitabın masanın üzerinde 
+    olduğu sonradan anlaşılmaktadır. Ancak "masanın üzerindeki kitap ..." cümlesinde kitabın masanın üzerinde olduğu baştan 
+    anlaşılmaktadır. Ancak İngilizce'de de yüklem hemen özneden sonra gelir. Böylece bir kişinin ne yaptığı baştan anlaşılmaktadır.)
 
-    Çift yönlü geri beslemenin her zaman tek yönlü geri beslemeden daha iyi sonuç vereceği söylenemez. Uygulamacının iki yöntemi de 
-    denemesi tavsiye edilmektedir. 
+    İşte geri beslemede önceki çıkışın sonraki girişle ilişkilendirilmesinin yanı sıra bunun tersinin de yapılması yani sonraki 
+    çıkışın önceki girişle ilişkilendirilmesinin de sağlanması daha iyi bir öğrenmeye yol açabilektedir. Bu tür geri beslemeli 
+    ağlara "çift yönlü (bidriectional)" geri beslemeli ağlar denilmektedir. Mimari olarak çift yönlü geri beslemeli ağlar tek 
+    yönlü ağlara geri doğru aynı biçimde bir besleme eklenmesiyle oluşturulmaktadır. Ancak çift yönlü geri besleme ağı daha 
+    karmaşık bir hale getirmektedr. Dolayısıyla eğitilebilir parametrelerin sayısını da artırmaktadır. Ancak bazı uygulamalarda 
+    daha iyi bir sonucun elde edilmesine olanak sağlamaktadır. Tabii zamansal verilerin söz konusu olduğu bazı uygulamalarda 
+    çift yönlü geri besleme bir fayda sağlamadığı gibi modelin başarısını bile düşürmektedir. Örneğin Jena Cliamate veri kümesinde 
+    çift yönlü bir geri beslemenin açık bir faydası olmayacaktır. Çünkü Jena Climate veri kümesinde gelecekteki bilginin geçmiş 
+    ile yeniden ilişkilendirilmesinin açık bir yaydası yoktur. Dolayısıyla çift yönlü geri beslemenin her zaman tek yönlü geri 
+    beslemeden daha iyi sonuç vereceği söylenemez. Uygulamacının gerektiğinde her iki yöntemi de denemesi tavsiye edilmektedir. 
+    Yukarıda da belirttiğimiz gibi Jena Climate örneğinde olduğu gibi pek çok zaman serisi tarzındaki veri kümelerinde çift 
+    yönlü geri besleme açık bir fayda sağlamamaktadır. Çift yönlü geri beslemenin en sık kullanıldığı alan "makine çevirisi", 
+    "metinden anlam çıkartma" gibi metinsel işlemlerdir. 
+#----------------------------------------------------------------------------------------------------------------------------
 
-    Keras'ta çift yönlü geri besleme işlemi tensorflow.keras.layers modülündeki Bidirectional sınıfı ile yapılmaktadır. Bu sınıf dekoratör kallıbı biçiminde 
-    oluşturulmuştur. Biz bu sınıfa LSTM ya da GRU katman nesnelerini veririz. Sınıf da onu çift yönlü hale getirir. Sınıfın __init__ 
-    metodunun parametrik yapısı şöyledir:
+#----------------------------------------------------------------------------------------------------------------------------
+    Keras'ta çift yönlü geri besleme işlemi tensorflow.keras.layers modülündeki Bidirectional sınıfı ile yapılmaktadır. Bu sınıf 
+    dekoratör kalıbı (decorator pattern) biçiminde oluşturulmuştur. Biz bu sınıfa SimpleRNN, LSTM ya da GRU katman nesnelerini 
+    veririz. Sınıf da onu çift yönlü hale getirir. Sınıfın __init__ metodunun parametrik yapısı şöyledir:
 
     tf.keras.layers.Bidirectional(
         layer,
@@ -19097,8 +19814,18 @@ for result in predict_result[:, 0]:
         **kwargs
     )
 
-    Bu durumda bizim ağı çift yönlü yapmak için tek yapacağımız şey LSTM ya da GRU katmanını Bidirectional katmanına vermektir. Örneğin:
+    Metodun birinci parametresi kullanılacak geri tek yönlü geri besleme katman nesnesini almaktadır. Aslında Keras'ın içsel 
+    tasarımında SimpleRNN, LSTM ve GRU katmanları RNN isimli bir sınıftan türetilmiştir. Dolayısıyla bu parametre için RNN 
+    sınıfından türetilmiş bir katmana ilişkin katman nesnesi girilmelidir. Örneğin:
 
+    model.add(Bidirectional(LSTM(64, name='LSTM', return_sequences=True), name='Bidirectional'))
+
+    Burada Bidirectional fonksiyonun birinci parametresi LSTM nesnesi olarak girilmiştir. Yani Bidirectional sınıfı tek yönlü 
+    geri beslemeli sınıfların çift yönlü çalışmasını sağlamaktadır. 
+
+    Bu durumda bizim ağı çift yönlü yapmak için tek yapacağımız şey SimpleRNN, LSTM ya da GRU katman nesnesini Bidirectional 
+    katmanına vermektir.
+    
     from tensorflow.keras import Sequential
     from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, Dropout, Flatten, Dense
 
@@ -19111,220 +19838,184 @@ for result in predict_result[:, 0]:
     model.add(Dropout(0.2, name='Dropout-2'))
 
     model.add(Dense(1, activation='sigmoid', name='Output'))
-
     model.summary()
 
+    Aşağıda daha önce yapmış olduğumuz LSTM geri beslemeli IMDB örneğinin çift yönlü hale getirilmiş biçimi verilmiştir.
+    Aynı örneği ilgili satırı aşağıdaki hale getirip GRU için de kullanabilirsiniz:
 
-    Aşağıdaki örnekte IMDB veri kümesinde LSTM katmanı çift yönlü hale getirilmiştir.
+    model.add(Bidirectional(GRU(64, return_sequences=True, name='LSTM'), name='Bidrectional'))
 #----------------------------------------------------------------------------------------------------------------------------
 
-TExT_SIZE = 250
+TEXT_SIZE = 150
+WORD_VECT_SIZE = 64
 
 import pandas as pd
 
 df = pd.read_csv('IMDB Dataset.csv')
 
-from sklearn.feature_extraction.text import CountVectorizer
-
-cv = CountVectorizer()
-
-cv.fit(df['review'])
-
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
-import re
-
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
-
-from tensorflow.keras.utils import pad_sequences
-
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
+dataset_x = df['review']
+dataset_y = (df['sentiment'] == 'positive').to_numpy(dtype='uint8')
 
 from sklearn.model_selection import train_test_split
 
 training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
 
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, Dropout, Flatten, Dense
+from tensorflow.keras.layers import Input, TextVectorization, Embedding, Bidirectional, LSTM, Dropout, Dense, Reshape
 
-model = Sequential(name='IMDB-LSTM-Bidirectional')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-model.add(Bidirectional(LSTM(64, name='LSTM', return_sequences=True), name='Bidirectional'))
-model.add(Dropout(0.2, name='Dropout-1'))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(64, activation='relu', name='Dense-1'))
-model.add(Dropout(0.2, name='Dropout-2'))
+tv = TextVectorization(output_sequence_length=TEXT_SIZE, output_mode='int')
+tv.adapt(dataset_x)
 
+model = Sequential(name='IMBD-LSTM')
+model.add(Input((1, ), dtype='string', name='Input'))
+model.add(tv)
+model.add(Embedding(tv.vocabulary_size(), WORD_VECT_SIZE, name='Embedding'))
+model.add(Dropout(0.3, name='Dropout-1'))
+model.add(Bidirectional(LSTM(64, return_sequences=True, name='LSTM'), name='Bidrectional'))
+model.add(Reshape((-1, ), name='Reshape'))
+model.add(Dropout(0.3, name='Dropout-2'))
+model.add(Dense(256, activation='relu', name='Hidden-1'))
+model.add(Dropout(0.3, name='Dropout-3'))
+model.add(Dense(256, activation='relu', name='Hidden-2'))
+model.add(Dropout(0.3, name='Dropout-4'))
 model.add(Dense(1, activation='sigmoid', name='Output'))
-
 model.summary()
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
 from tensorflow.keras.callbacks import EarlyStopping
 
-esc = EarlyStopping(patience=5, restore_best_weights=True)
+esc = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
 
 hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Loss Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['loss'])
 plt.plot(hist.epoch, hist.history['val_loss'])
 plt.legend(['Loss', 'Validation Loss'])
 plt.show()
 
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
+plt.figure(figsize=(14, 6))
+plt.title('Epoch - Binary Accuracy Graph', pad=10, fontsize=14)
+plt.xticks(range(0, 300, 10))
 plt.plot(hist.epoch, hist.history['binary_accuracy'])
 plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
+plt.legend(['Accuracy', 'Validation Accuracy'])
 plt.show()
 
 eval_result = model.evaluate(test_dataset_x, test_dataset_y)
+
 for i in range(len(eval_result)):
     print(f'{model.metrics_names[i]}: {eval_result[i]}')
 
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
+predict_df = pd.read_csv('predict-imdb.csv')
 
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
-
-for result in predict_result[:, 0]:
-    if result > 0.5:
+predict_result = model.predict(predict_df['review'])
+for presult in predict_result[:, 0]:
+    if (presult > 0.5):
         print('Positive')
     else:
         print('Negative')
  
 #----------------------------------------------------------------------------------------------------------------------------
-    Aşağıdaki örnekte IMDB veri kğmesinde GRU katmanı çift yönlü hale getirilmiştir. 
+    Biz kursumuzda daha önce "aktarımsal öğrenme (transfer learning)" konusuna bir giriş yapmıştık. Aktarımsal öğrenme "daha 
+    önceden eğitilmiş olan modellerden faydalanılması" anlamına geliyordu. İşte makine öğrenmesi alanında framewrok'ler ve 
+    birtakım topluluklar önceden hazırlanmış ve eğitilmiş çeşitli modelleri bulundurabilmektedir. Böylece uygulamacı başarısı 
+    kanıtlanmış olan modelleri sıfırdan oluşturmak yerine zaten oluşturulmuş ve eğitilmiş bu modellerden faydalanabilmektedir. 
+    
+    Başkaları tarafından oluşturulmuş modeller yalnızca model olarak (yani eğitilmemiş bir biçimde) karşımıza çıkabileceği gibi 
+    eğitilmiş bir biçimde de karşımıza çıkabilir. Yani biz başkaları tarafından hazırlanmış modelleri yalnızca model olarak 
+    kullanabiliriz ya da onlar zaten eğitilmişse onların eğitim sonucunda oluşturulmuş olan ağırlıklarını da kullanabiliriz. 
+
+    Başkaları tarafından hazırlanmış olan modelleri kullanırken modellerin sunum biçimine dikkat edilmesi gerekir. Modeller 
+    genellikle framework'e özgü bir biçimde oluşturulmaktadır. Örneğin biz PyTorch için oluşturulmuş bir modeli Tensorflow'da
+    kullanamayız. Dış dünyaya sunulmuş modellerde dosya formatlarına da dikkat etmek gerekir. Farklı framework'ler farklı dosya 
+    formatlarını kullanmaktadır. Dolayısıyla bu dosyaların Python'da kullanıma hazır hale getirilmesinde de framework'e özgü 
+    sınıflar ve fonksiyonlardan faydalanılmaktadır. Biz kursumuzda şimdiye kadar Keras kullandık. Keras eskiden birden fazla 
+    backend ile çalışabiliyordu. Ancak daha sonra tamamen Tensorflow ile entegre edildi. Fakat Keras aynı zamanda bağımsız bir 
+    proje olarak da devam ettirilmektedir. Maalesef bağımsız Keras projesi ile Tensorflow içerisine entegre edilmiş olan Keras 
+    projesi arasında uyumsuzluklar da oluşmaya başlamıştır. 
 #----------------------------------------------------------------------------------------------------------------------------
 
-TExT_SIZE = 250
-
-import pandas as pd
-
-df = pd.read_csv('IMDB Dataset.csv')
-
-from sklearn.feature_extraction.text import CountVectorizer
-
-cv = CountVectorizer()
-
-cv.fit(df['review'])
-
-import numpy as np
-
-dataset_y = np.zeros(len(df), dtype='int8')
-dataset_y[df['sentiment'] == 'positive'] = 1
-
-import re
-
-text_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in df['review']]
-
-from tensorflow.keras.utils import pad_sequences
-
-dataset_x = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-
-from sklearn.model_selection import train_test_split
-
-training_dataset_x, test_dataset_x, training_dataset_y, test_dataset_y = train_test_split(dataset_x, dataset_y)
-
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Embedding, Bidirectional, GRU, Dropout, Flatten, Dense
-
-model = Sequential(name='IMDB-GRU')
-model.add(Embedding(len(cv.vocabulary_), 64, input_length=TExT_SIZE, name='Embedding'))
-model.add(Bidirectional(GRU(64, name='GRU', return_sequences=True), name='Bidirectional'))
-model.add(Dropout(0.2, name='Dropout-1'))
-model.add(Flatten(name='Flatten'))
-model.add(Dense(64, activation='relu', name='Dense-1'))
-model.add(Dropout(0.2, name='Dropout-21'))
-
-model.add(Dense(1, activation='sigmoid', name='Output'))
-
-model.summary()
-
-model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['binary_accuracy'])
-
-from tensorflow.keras.callbacks import EarlyStopping
-
-esc = EarlyStopping(patience=5, restore_best_weights=True)
-
-hist = model.fit(training_dataset_x, training_dataset_y, epochs=100, batch_size=32, validation_split=0.2, callbacks=[esc])
-
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Loss Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['loss'])
-plt.plot(hist.epoch, hist.history['val_loss'])
-plt.legend(['Loss', 'Validation Loss'])
-plt.show()
-
-plt.figure(figsize=(15, 5))
-plt.title('Epoch-Binary Accuracy Graph', fontsize=14, fontweight='bold')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.xticks(range(0, 210, 10))
-
-plt.plot(hist.epoch, hist.history['binary_accuracy'])
-plt.plot(hist.epoch, hist.history['val_binary_accuracy'])
-plt.legend(['Binary Accuracy', 'Validation Binary Accuracy'])
-plt.show()
-
-eval_result = model.evaluate(test_dataset_x, test_dataset_y)
-for i in range(len(eval_result)):
-    print(f'{model.metrics_names[i]}: {eval_result[i]}')
-
-predict_texts = ['the movie was very good. The actors played perfectly. I would recommend it to everyone.', 'this film is awful. The worst film i have ever seen']
-
-predict_vectors = [[cv.vocabulary_[word]  for word in re.findall(r'(?u)\b\w\w+\b', text.lower())] for text in predict_texts]
-predict_data = pad_sequences(text_vectors, TExT_SIZE, padding='post', truncating='post')
-predict_result = model.predict(predict_data)     
-
-for result in predict_result[:, 0]:
-    if result > 0.5:
-        print('Positive')
-    else:
-        print('Negative')
-     
 #----------------------------------------------------------------------------------------------------------------------------
-    Metinsel çıktı üretimi (text generation) "yapay yaratıcılık (artificial creativity)" alanında önemli bir uygulama konusudur. 
-    Bu sayede belli bir tarza uygun yapay yazılar üretilebilmektedir. Bu tür uygulamalarda çeşitli modeller kullanılabilmektedir. 
-    Biz basit bir model üzerinde duracağız. Elimizde belli bir yazarın yazmış olduğu metinler bulunuyor olsun. Biz bu metinlerdeki 
-    harfleri tahmin edebilecek bir sinir ağı modeli oluşturabiliriz. Bunun için belli bir karakter uzunluğunda bir yazıdan sonra gelen karakterleri 
-    elde ederiz. Böylece problemi belli uzunlukta yazıdan sonra gelen karakterin tahmin edilmesi haline dönüştürebiliriz. Örneğin yazı parçalarını 
-    30 karakter olarak belirleyelim. Yazarın her 30 karakterden oluşan yazı parçalarını ve ondan sonra gelen karakterleri elde edip 
-    bunu bir veri kümesi biçimine dönülştürebiliriz. Böylece 30 karakter verildiğinde 31'inci karakteri tahmin edebilen bir 
-    model elde edilmiş olur. Biz de ilk 30 karakter uydurarak sürkli kaydırma yöntemiyle 31'inci karakteri tahmin ede ede yapay bir metin oluşturabiliriz. 
-    Buradaki model çok sınıflı lojistik regresyon problemidir. Tabii burada 30 karakterli yazıların her bir karakterinin one-hot encoding 
-    yöntemi ile sayısallaştırılması gerekmektedir. Benzer biçimde 30 karakterden sonra gelen ve y verilerini oluşturankarakterlerin de 
-    one-hot encoding yapılması gerekir. 
+    Pekiyi biz Tensorflow'daki Keras'ta çalışırken hazır modelleri nasıl elde edebiliriz? Hazır modellerin bazıları zaten 
+    framework'ün içerisinde sınıflar biçiminde bulundurulmuştur. En kolay yöntem bu sınıfların kullanılmasıdır. Çünkü bu sınıflar 
+    framework ile tam bir uyum içerisinde çalışmaktadır. Keras'ın hazır modelleri "tensorflow.keras.applications" paketi içerisindedir. 
+    (Eskiden bu paket Tensorflow'a resmi olarak dahil değildi. Sonra resmi olarak dahil edildi.) Ancak Keras'ın bu paketleri 
+    ağırlıklı olarak resimsel uygulamalara yöneliktir. 
 
-    Pekiyi yukarıdaki gibi bir uygulamayı karakter temelinde değil de sözcük temelinde yapabilir miyiz? Burada sözcük temelinde yapmak için önemli bir problem
-    lojistik regresyondaki sınıf sayılarının fazlalığı olacaktır. Çünkü bu modelde her sözcük ayrı bir kategoriyi temsil edecektir. Oysa her bir karakterin
-    ayrı bir kategoriyi temsil etmesi çok daha az sayıda sınfın oluşması anlamına gelir. Ancak yine de yeteri miktarda veri ve CPU güzü varsa 
-    bu uygulama sözcük temelinde de yürütülebilir. 
+    Framework'lerin kendi hazır model sınıflarının yanı sıra çeşitli toplulukların bünyesinde oluşturulmuş olan hazır modeller 
+    de bulunmaktadır. Örneğin Tensorflow (dolayısıyla Google) tarafından oluşturulmuş olan "Tensorflow Hub" denilen bir topluluk 
+    vardır. Bu topluluğun üyeleri kendi hazırladıkları modellerini dış dünyaya açmaktadır. Geçen yıl bu topluluk Kaggle'ın 
+    bünyesine dahil edilmiştir.  
+    
+    Kaggle zaman içerisinde Tensorflow dışında pek çok framework'e ilişkin modelleri barındıran vir topluluk haline gelmiştir. 
+    Dolayısıyla Kaggle bu tür hazır modeller için iyi bir kaynak oluşturmaktadır. Kaggle'ın modelleri barındıran bağlantısı 
+    aşağıda verilmiştir:
+
+    https://www.kaggle.com/models
 #----------------------------------------------------------------------------------------------------------------------------
 
+#----------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi bir framework için oluşturulmuş model başka bir framework'te kullanılamamaktadır. Bu nedenle 
+    Kaggle gibi topluluk sitelerinde model araştırırken modelin oluşturulduğu framework'e dikkat ediniz.  Bu tür topluluk 
+    sitelerinde modeller framework temelinde filtrelenerekaranabilmektedir. 
+
+    Model barındıran topluluk siteleri sitelerinde modellerin bir dosya biçiminde indirilip kullanılmasına olanak sağlamaktadır. 
+    Ancak kulanım kolaylığı oluşturabilmek bu tür sitelerimn bazıları URL temelli yüklemelere de izin verilebilmektedir. Böylece 
+    modelin indirilip yüklenmesi tek hamlede ilgili URL belirtilerek de yapılabilmektedir. 
+    
+    Kaggle topluluğu modelleri ve dosyaları uzaktan indirmek için ayrı bir kütüphane de sunmaktadır. Bu kütüphaneye "kagglehup" 
+    kütüphanesi denilmektedir. Ancak bu kütüphanenin kullanılabilmesi için "API Key" oluşturulması gerekmektedir. kagglehup 
+    kütüophanesinin genel kullanımı aaşağıdaki bağlantıda açıklanmaktadır:
+    
+    https://github.com/Kaggle/kagglehub
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Bir topluluktan (örneğin Kaggle) bir model indirecekseniz yalnızca onun oluşturulduğu framework'e değil aynı zamanda indirilecek
+    model dosyasının dosya formatına ve içeriğinde de dikkat etmeniz gerekir. Bazı dosya formatları genel amaçlıdır, içerisine 
+    değişik formatta bilgiler yerleştirilebilmektedir. Örneğin H5 formatı (Hierarchical Data Format)" genel amaçlı bir formattır. 
+    ".h5" uzantılı bir dosyanın içerisinde Keras uyumlu bir model bilgisinin bulunma zorunluluğu yoktur. Örneğin "protobuf formatı 
+    (Protocol Buffer Format)" da genel amaçlı bir formattır. ".pb" uzantılı bir dosyanın içinde ne olduğunun ayrıca biliniyor 
+    olması gerekir. 
+
+    Tensorflow dünyasında çok karşılaşılan dosyalar ve formatlar şunlardır:
+
+    - H5 Dosyaları: Genellikle  bu dosyalar içerisinde Tensorflow modelinin kendisi ve ağırlıkları ya da yalnızca ağırlıkları 
+    bulunabilmektedir. Bu dosyalar genellikle ".h5" ya da ".hdf5" uzantısıyla bulunur.
+
+    - Keras Dosyaları: Eskiden Keras'ta model saklamak için H5 formatı yoğun kullanılıyordu. Sonra Keras ekibi Keras'a özgü 
+    bir biçimde ".keras" uzantılı dosya formatını kullanmaya başladı. Aslınde ".keras" uzantılı dosyalar özel bir formata 
+    sahip değildir. Bu dosyalar bir dizin'in zip'lenmesinden oluşmaktadır. ".keras" dosyasının belirttiği dizin içerisinde 
+    H5 dosyasının yanı sıra bazı JSON dosyaları (ve duruma göre bazı grafik dosyalar vs.) da bulunur. Yani aslında model 
+    bilgilerini yine H5 dosyasında tutulmaktadır.
+    
+    - SavedModel Formatı: Bu format Tensorflow kütüphanesi tarafından kullanılan diğer bir model sakalama formatıdır. Genellikle
+    ".pb uzantılı (Protobcol Buffer Format)" dosyaların içerisine yerleştirilmektedir. 
+
+    - TFlite Formatı: Bu format ve dosya uzantısı Tensorflow modellerini ve ağırlık değerlerini saklamak için tasarlanmış 
+    diğer bir formattır.  Özellikle düşük kapasiteli mobil aygıtlarda ve gömülü sistemlerde tercih edilmektedir. Bu format 
+    yalnızca makine öğrenmesinde değil özellikle mobil aygıtlarda da başka amaçlarla kullanılabilmektedir. Format diskte daha 
+    az yer kaplayacak biçimde tasarlanmıştır.
+#----------------------------------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------------------------------------
+    Pekiyi yukarıdaki paragrafta açıkladığımız dosyalar ve formatlar Keras içerisinden nasıl kullanılmaktadır?
+
+    - Biz daha önce ".h5 dosyalarını ve .keras uzantılı dosyaları Sequential model sınıfının save metodu ile oluşturmuştuk. İşte 
+    bu dosyalar ve içerisindeki modeller tensorflow.keras.models modülündeki load_model fonksiyonuyla geri yüklenebilmektedir. 
+    Zaten biz bu fonksiyonu daha önce de kullanmıştır. O halde elimizde ".h5" uzantılı ya da ".keras" uzantılı bir model varsa
+    biz bunu bu load_model fonksiyonuyla yükeleyebiliriz. Bu fonksiyon bize bir Model nesnesi vermektedir. Örneğin:
+
+    model = load_model('iris.keras')
+
+    BURADA KALDIK
+#----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
     Resim tanıma ve resimsel işlemler ve metinsel işlemler işlemler için son 10 yılda "vanishing gradient" denilen problemi 
