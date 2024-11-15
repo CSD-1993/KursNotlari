@@ -67487,7 +67487,7 @@ void exit_sys(const char *msg)
 
     İlk cluster numarası bilinen dosyanın cluster zincirini elde eden fonksiyon da aşağıdaki gibi yazılabilir:
 
-    uint16_t *getclu_chain(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
+    uint16_t *getclu_chain16(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
     {
         uint16_t clu, n;
         uint16_t *chain, *temp;
@@ -67575,7 +67575,7 @@ FATSYS *open_fatsys(const char *path);
 int close_fatsys(FATSYS *fatsys);
 int read_cluster(FATSYS *fatsys, uint32_t clu, void *buf);
 int wite_cluster(FATSYS *fatsys, uint32_t clu, const void *buf);
-uint16_t *getclu_chain(FATSYS *fatsys, uint32_t firstclu, uint16_t *count);
+uint16_t *getclu_chain16(FATSYS *fatsys, uint32_t firstclu, uint16_t *count);
 void freeclu_chain(uint16_t *chain);
 
 #endif
@@ -67690,7 +67690,7 @@ int write_cluster(FATSYS *fatsys, uint32_t clu, const void *buf)
     return write(fatsys->fd, buf, fatsys->clulen);
 }
 
-uint16_t *getclu_chain(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
+uint16_t *getclu_chain16(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
 {
     uint16_t clu, n;
     uint16_t *chain, *temp;
@@ -67748,7 +67748,7 @@ int main(int argc, char *argv[])
     if ((fatsys = open_fatsys(argv[1])) == NULL) 
         exit_sys("open_fatsys");
 
-    if ((chain = getclu_chain(fatsys, 4, &count)) == NULL) {
+    if ((chain = getclu_chain16(fatsys, 4, &count)) == NULL) {
         fprintf(stderr, "cannot get cluster chain!..\n");
         exit(EXIT_FAILURE);
     }
@@ -67807,7 +67807,7 @@ int main(int argc, char *argv[])
     if ((fatsys = open_fatsys(argv[1])) == NULL) 
         exit_sys("open_fatsys");
 
-    if ((chain = getclu_chain(fatsys, 4, &count)) == NULL) {
+    if ((chain = getclu_chain16(fatsys, 4, &count)) == NULL) {
         fprintf(stderr, "cannot get cluster chain!..\n");
         exit(EXIT_FAILURE);
     }
@@ -67864,11 +67864,1082 @@ void exit_sys(const char *msg)
     00000260  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
     00000270  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
     
+    12 bit'in 3 hex digit yani 1.5 olduğuna dikkat ediniz. Buradaki 12 bit şöyle yapılmaktadır. Cluster numarası önce 1.5 ile 
+    çarpılır ve noktalı kısım atılır. (Bu işlem 3 ile çarpılıp 2'ye bölünme biçiminde yapılabilir.) Elde edilen offset'ten WORD 
+    bilgi çekilir. Eğer cluster numarası çifte yüksek anlamlı 4 bit atılır, eğer cluster numarası tek ise düşük anlamlı 4 bit 
+    atılır. Yüksek anlamlı 4 bit'in atılması 0x0FFF ile "bit and" işlemi uygulanarak, düşük anlamlı 4 bit'in elde edilmesi 
+    sayının 4 kez sağa ötelenerek yapılabilir. Örneğin yukarıdaki FAT bölümünde biz 4 numaralı cluster'ın değerini elde edecek 
+    olalım. 4 * 1.5 = 6'dır. 6'ıncı offset'ten WORD çekilirse 0x6005 değeri elde edilir. Yüksek anlamı 4 bit atıldığında ise 
+    0x005 değeri elde edilecektir. Şimdi 5 numaralı cluster'ın değerini elde etmek isteyelim. Bu durumda 5 * 1.5 = 7.5 olur. 
+    Noktadan sonraki kısım atılırsa 7 elde edilir. 7'inci offset'ten WORD öçekildiğinde 0x0060 değeri elde edilecektir. Bu 
+    değerin de düşük anlamlı 4 biti atıldığında 0x006 değeri elde edilir. 
+
+    12 Bit FAT sisteminde bir FAT elemanın alabileceği değerler de şöyledir:
+
+    000             Boş cluster
+    001             Kullanılmıyor   
+    002 - FEF       Geçerli, sonraki cluster
+    FF0H - FF6      Reserved cluster
+    FF7             Bozuk cluster, işletim sistemi bu cluster'a dosya parçası yerleştirmez
+    FF8 - FFF       Son cluster 
+
+    12 bit FAT tablosunda ilk cluster değeri bilinen dosyanın cluster zincirlerini elde etmek için aşağıdaki gibi bir fonksiyon 
+    yazılabilir. 
+
+    uint16_t *getclu_chain12(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
+    {
+        uint16_t clu, word, n;
+        uint16_t *chain, *temp;
+        uint32_t capacity;
+            
+        clu = firstclu;
+        capacity = CHAIN_DEF_CAPACITY;
+        n = 0;
+
+        if ((chain = (uint16_t *)malloc(sizeof(uint16_t) * CHAIN_DEF_CAPACITY)) == NULL)
+            return NULL;
+        do  {
+            chain[n++] = clu;
+            if (n == capacity) {
+                capacity *= 2;
+                if ((temp = realloc(chain, sizeof(uint16_t) * capacity )) == NULL) {
+                    free(chain);
+                    return NULL;
+                }
+                chain = temp;
+            }
+            word = *(uint16_t *)(fatsys->fat + clu * 3 / 2);
+            clu = clu % 2 == 0 ? word & 0x0FFF : word >> 4;
+        } while (clu < 0xFF8);
+        *count = n;
+
+        return chain;
+    }
+
+    Fonksiyonda 12 bit FAT değerinin elde edilmesi şöyle yapılmıştır:
+
+    clu = clu % 2 == 0 ? word & 0x0FFF : word >> 4;
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    FAT32 sisteminde her FAT elemanı 32 bittir. Ancak bu sistemde boot sektördeki BPB alanında da faklılıklar vardır. Bu nedenle
+    32 bit FAT sistemi FAT12 ve FAT16 ile tam uyumlu değildir. FAT32 için bazı fonksiyonların yeniden yazılması gerekir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Biz FAT doısya sisteminin boot sektörünü, FAT ve Data bölümlerini ele aldık. Ele almadığımız tek bölüm "Root Dir" bölümüdür. 
+    Şimdi "Root Dir" bölümü ve dosya bilgilerinin nasıl saklandığı konusu üzerinde duracağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Microsoft'un FAT dosya sisteminde ve UNIX/Linux sistemlerinde kullanılan i-node tabanlı dosya sistemlerinde dizinler de 
+    tamamen bir dosya gibi organize edilmektedir. Yani dizinler de aslında birer dosyadır. Bir dosyanın içerisinde o dosyanın 
+    bilgileri bulunurken bir dizin dosyasının içerisinde o dizindeki dosyalara ilişkin bilgiler bulunmaktadır. Yani dizinler 
+    aslında "o dizindeki dosyaların bilgilerini içeren dosyalar" gibidir. Bir dizin dosyası "dizin girişlerinden (directory 
+    entry) oluşmaktadır. FAt12 ve FAT16 dosya sistemlerinde bir dizin dosyasındaki dizin girişleri 32 byte uzunlupundaydı. 
+    Yani dizin ddosyaları 32 byte'lık kayıtların peşi sıra gelmesiyle oluşuyordu. O zamanalarda DOS sistemlerinde bir dosyanın 
+    ismi için en fazla 8 karakter, uzantısı için de en fazla 3 karakter kullanılabiliyordu. Dolayısıyla 32 byte'lık dizin 
+    girişlerinin 1 byte'ı dosyanın ismi için ayrılmıştı. Sonra Microsoft dosya isimlerini 8+3 formatından çıkartarak onların 
+    255'e kadar uzatılmasını sağladı. Ancak bu yaparken de geçmişe doğur uyumu korumak için birden fazla 32 byte'lık dizin
+    girişleri kullandı. Biz önce burada klasik 8+3'lük dizin girişlerinin formatını göreceğiz. 
+
+    32'lik klasik dizin girişi formatı şöyledir:
+
+    Offset (Hex)                    Uzunluk                     Anlamı
+
+    00                              8 Byte                      Dosya ismi (File Name)
+    08                              3 Byte                      Dosya Uzantısı (Extension)
+    0B                              1 Byte                      Dosya Özelliği (Attribute)
+    0C                              1 Byte                      Kullanılmıyor (Reserved)
+    0D                              BYTE                        Yaratılma Zamanının Milisaniyesi
+    0E                              WORD                        Dosyanın Yaratılma Zamanı (Creation Time)
+    10                              WORD                        Dosyanın Yaratılma Tarihi (Creation Date)
+    12                              WORD                        Son Okunma Zamanı (Last Access Time)
+    14                              WORD                        Kullanılmıyor (Reserved)
+    16                              WORD                        Son Yazma Zamanı (Last Write Time)
+    18                              WORD                        Son Yazma Tarihi (Last Write Date)
+    1A                              WORD                        İlk Cluster Numarası (First Cluster)
+    1C                              DWORD                       Dosyanın Uzunluğu (File Length)
+
+    Aşağıda "x.txt" dosyanın ve "mydir" dizinin 32 byte'lık dizin girişleri görülmektedir. 
+
+    58 20 20 20 20 20 20 20  54 58 54 20 00 0b 5d 92  |X       TXT ..].|
+    59 59 59 59 00 00 5d 92  59 59 0e 00 0f 00 00 00  |YYYY..].YY......|
+
+    4d 59 44 49 52 20 20 20  20 20 20 10 00 7a f0 96  |MYDIR      ..z..|
+    59 59 59 59 00 00 f0 96  59 59 10 00 00 00 00 00  |YYYY....YY......|
+
+    - Dosya İsmi: 32'lik dizin girişlerinin ilk 8'byte'ı dosya isminden oluşmaktadır. Eğer dosya ismi 8 karakterden kısa 
+    ise SPACE karakterleriyle (0x20) padding yapılmaktadır. Klasik FAT16 ve FAT12 sistemlerinde dosya isimlerinin ve uzantılarının
+    büyük harf-küçük harf duyarlılığı yoktur. Tüm dosyalar bu sistemlerde "büyük harfe dönüştürülerek" dizin girişlerinde 
+    tutulmaktadır. 
+
+    - Dosya Uzantısı: Dosya uzantısı en fazla 3 karakterden oluşmaktadır. Eğer 3 karakterden kısa ise SPACE (0x20) karakterleriyle
+    padding yapılmaktadır.
+
+    - Dosya Özelliği: Bu alanda dosyanın özleliklerine ilişkin bit bit alanı bulundurulmaktadır. Buradaki her bit'in bir 
+    anlamı vardır. Özellik byte'ı aşağıdaki bitlerden oluşmaktadır:
+
+       7           6          5        4        3          2        1           0
+    Reserved    Reserved    Archive   Dir     VLabel     System    Hidden    ReadOnly
+
+    Eğer ReadOnly biti 1 ise dosya "read-only" biçimdedir. Böyle dosyalara işletim sistemi yazma yapmaz. Hidden biti 1 ise 
+    dosya "dir" komutu uygulandığında görüntülenmez. DOS işletim sisteminin kendi dosyalarını System özelliği ile vurgulamaktadır. 
+    Yani eğer bir dosya işletim sistemine ilişkin bir dosya ise System biti 1 olur. 
+    
+    Volüm isimleri boot sektörün yanı sıra kök dizinde bir dosya ismi gibi de tutulmaktadır.  Böyle girişlerin VLabel biti 
+    1 olur. Eğer bir dizin söz konusu ise Dir biti 1 olmaktadır. FAT dosya sisteminde normal dosyalara "Archive" dosyaları 
+    denilmektedir. Bu nedenle bu bit hemen her zaman 1 olarak görülür. Aşağıda "x.txt" ve "mydir" dizin girişlerine ilişkin 
+    özellik byte'ınn bitleri görülmektedir:
+
+    x.txt (0x20)        0 0 1 0 0 0 0 0 
+    mydir (0x10)        0 0 0 1 0 0 0 0
+
+    "x.txt" dosyasının özellik bitlerinden yalnızca Archive biti set edilmiştir. "mydir" dizinin de yalnızca "Dir" biti set 
+    edilmiştir. İşletim sistemi bir dizin girişinin normal bir dosyaya mı yoksa bir dizin dosyasına mı ilikin olduğunu özellik
+    byte'ının 4 numaralı bitine bakarak tespit etmektedir. 
+
+    - Tarih ve Zaman Bilgileri FAT12 ve FAT16 dosya sistemlerinde 2 byte ile kodlanmaktadır. Eskiden DOS sistemlerinde dosyanın 
+    yaratılma tarihi ve zamanı ve son okunma tarihi tutulmazdı. Bu alanlar "reserved" durumdaydı. Sonra Microsoft bu alanları 
+    bu amaçla kullanmaya başladı. Tarih bilgisi byte içerisinde bitsel düzeyde tutulmaktadır. Tarih bilgisinin tutuluş formatı
+    şöyledir:
+
+    15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+    y  y  y  y  y  y  y m m m m d d d d d 
+
+    Burada WORD değerin düşük anlamlı 5 biti gün için, sonraki 4 biti ay için ve geri kalan 7 biti yıl için bulundurulmuştur. 
+    Tarih bilgisinin yıl alanı için 7 bit ayrıldığına göre buraya nasıl 2024 gibi bir tarih yerleştirilebilmektedir. İşte DOS
+    işletim sisteminin ilk versiyonu 1980 yılında oluşturulduğu için buradaki tarih bilgisi her zmana 1980 yılından itibaren 
+    bir offset belirtmektedir. Yani örneğin 2024 yılı için buradaki yıl bitlerine 44 kodlanmaktadır. Örneğin bir dosyanın 32'lik
+    dizin girişi şöyledir:
+
+    58 20 20 20 20 20 20 20 54 58 54 20 18 AB 03 B3 
+    59 59 59 59 00 00 09 B3 59 59 06 00 1B 00 00 00
+
+    Buaradk 0x18'inci offset'ten little endian formatta WORD çekersek 0x5959 değerini elde ederiz. Şimdi bu WORD değeri 2'lik
+    sistemde ifade edelim:
+
+    5         9       5       9
+    0101    1001    0101    1001
+
+    Şimdi de yukarıda belirttiğimiz gibi sayıyı bit'lerine ayrıştıralım:
+
+    0101100 => 44    1010 => 10     11001 => 25
+      yıl             ay             gün
+
+    O halde buradaki tarih 25/10/2024'tür.
+
+    16 bitle (WORD ile) zaman bilgisi de şöyşe kodlanmıştır:
+
+    15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+     h  h  h  h  h  m m m m m m s s s s s
+
+    Burada bir noktayaya dikkat ediniz: 0 ile 24 arasındaki saatler 5 bit ile tutulabilir. 0 ile 60 arasındaki dakikalar ise 
+    ancak 6 bit ile tutulabilir. Burada geriye 5 bit almıştır. Dolayısıyla saniyeleri tutmak için bu 5 bit yeterli değildir. 
+    İşte FAT dosya sistemini tasarlayanlar saniyedeki duyarlılığı azaltarak saniye değerinin yarısını buraya yazılması yoluna
+    gitmişlerdir. Yani zaman bilgisinin saniye kısmı eski FAT12 ve FAT16 sistemlerinde tam duyarlılıkla tutulamamaktadır. 
+    Örneğin yukarıdaki dizin girişinde dosyanın son değiştirilme zamanı için 0x16'ıncı offset'ten WORD çektiğimizde 0xB309
+    değerini elde ederiz. Şimdi bu değeri 2'lik sisteme dönüştürelim:
+
+     B       3       0       9
+    1011    0011    0000    1001
+
+    Şimdi de bit alanlarını ayrıştıralım:
+
+    10110 => 22     011000 => 24    01001 => 9
+      saat            dakika          saniye
+
+    Burada işletim sistemi saniye alanına mevcut saniyenin yarısını yazdığına göre bu dosyanın değiştirilme zamanı 22:24:18
+    olacaktır. 
+
+    Burada küçük bir noktaya dikkatinizi çekmek istiyoruz: Eskiden dizin girişinin 0x0D numaralı BYTE'ı da "reserved" durumdaydı
+    sonra bu byte'a dosyanın yaratılma zamanına ilişkin milisaniye değeri yerleştirildi. Dolayısıyla artık dosyanın yaratılma 
+    zamanı saniye duyarlılığında ifade edilebilmektedir. Bu durumda yaratılma zamanındaki saniye 2 ile çarpılıp buradaki 
+    milisaniye ile toplanmaktadır. Tabii genel olarak Microsoft'un arayüzü dosyaların zaman gilfgilerinin saniyelerini default
+    durumda zaten gmstermemektedir. Örneğin:
+
+    D:\>dir
+    Volume in drive D is YENI BIRIM
+    Volume Serial Number is 2C68-EBFD
+
+    Directory of D:\
+
+    25.10.2024  22:24                27 x.txt
+    25.10.2024  22:26                 8 con
+    25.10.2024  22:26                59 y.txt
+    25.10.2024  22:28    <DIR>          mydir
+                   3 File(s)             94 bytes
+                1 Dir(s)      52.194.304 bytes free
+
+    - İlk Cluster Numarası: Biz daha önce FAT bölümünü incelerken bir dosyanın cluster zincirini elde edebilmek için onun 
+    ilk cluster numarasının bilinmesi gerektiğini belirtmiştik. (Bir bağlı listeyi dolaşabilmek için onun ilk düğümünün yerinin
+    bilinmesi gerektiğini anımsayınız.) İşte bir dosyanın ilk cluster numaarası dizin girişinde saklanmaktadır. Yani işletim 
+    sistemi önce dosyanın dizin girişini bulmakta sonra FAT'ten onun cluster zincirini elde etmektedir. Yukarıdaki dosyasının 
+    dizin girişini yeniden veriyoruz:
+
+    58 20 20 20 20 20 20 20 54 58 54 20 18 AB 03 B3 
+    59 59 59 59 00 00 09 B3 59 59 06 00 1B 00 00 00
+
+    Burada söz konusu dosyanın ilk cluster numarası dizin girişinin 0x1A ofsfetinden başlayan WORD bilgidir. Bu bilgiyi örnek
+    dizin girişinden çektiğimizde 0x006 değerini elde ederiz. Bu durumda bu dosyanın ilk cluster numarası 6'dır. 
+    
+    - Dosyanın Uzunluğu: Dosyanın uzunluğu dizin girişindeki son 4 byte'lık (DWORD alan) alanda tutulmaktadır. İşletim sistemi
+    dosyanın son cluster'ındaki geçerli byte sayısını bu uzunluktan yararlanarak elde etmektedir. Örneğin yukarıdaki dizin 
+    girişine ilişkin dosya uzunluğu 0x0000001B = 27'dir. Dizin dosyalarına ilişkin uzunluklar için işletim sistemi hep 0 
+    değerini yazmaktadır. 
+
+    Dizinler de bir dosya gibi ele alınmaktadır. Dolayısıyla dizinlerin de bir cluster zinciri vardır. Ancak FAT12 ve FAT16
+    sistemlerinde kök dizinin yeri ve uzunluğu baştan bellidir. Kök dizin için bir cluster zinciri yoktur. FAT32 dosya sisteminde
+    kök dizin de normal bir dizin gibi büyüyebilmektedir. Yani kök dizinin de bir cluster zinciri vardır. 
+
+    32'lik bir dizin girişini aşağıdaki gibi bir yapıyla temsil edebiliriz:
+
+    #pragma pack(1)
+    
+    typedef struct tagDIR_ENTRY {
+        unsigned char name[8];
+        unsigned char ext[3];
+        uint8_t attr;
+        char reserved1[1];
+        uint8_t crtime_ms;
+        uint16_t crdate;
+        uint16_t crtime;
+        uint16_t rdtime;
+        char reserved2[2];
+        uint16_t wrtime;
+        uint16_t wrdate;
+        uint16_t fclu;
+        uint32_t size;
+    } DIR_ENTRY;
+
+    #pragma pack()
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
+    Pekiyi bir dosya silindiğinde ne olur? İşletim sistemi FAT dosya sisteminde bir dosya silindiğinde iki işlem yapar:
 
+    1) Dosyanın silindiğinin anlaşılması için dizin girişindeki dosya isminin ilk karakterini 0xE5 olarak değiştirir. Böylece 
+    dizin girişlerini tararken 32'lik girişin ilk karajkter 0xE5 ise o dizin girişini silindiği gerekçesiyle atlamaktadır. 
+    Ancak işletim sistemi bu 32'lik dizin girişinin diğer byte'larına dokunmamaktadır.
+
+    2) İşletim sistemi dosyanın cluster zincirini de sıfırlamaktadır. Böylece bu dosyanın FAT'te kapladığı alan artık "boş" 
+    gözükecektir. Ancak işletim sistemi dosyanın Data bölümündeki cluster'ları üzerinde herhangi bir işlem yapmaz.
+
+    Pekiyi FAT dosya sisteminde "undelete" yapan programlar nasıl çalışmaktadır? İşte bu programlar dosyanın dizin girişine 
+    bakıp onun ilk cluster'ının numarasını elde edip FAT bölümünde yersine bir algoritmayla onun cluster zincirini yenidne 
+    oluşturmaya çalışmaktadır. Ancak böyle bir kurtarmanın garantisi yoktur. Çünkü işletim sistemi boşaltılmış cluster'ları 
+    başka bir dosya için tahsis etmiş olabilir. Ya da FAT'teki cluster zincirini tahmin eden programlar bu konuda yanılabilmektedir. 
+    Ancak ne olursa olsun dosyanın ilk karakteri silindiği için bu karakter kurtarma sırasında kullanıcıya sorulmaktadır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+                                         176. Ders 01/11/2024 - Cuma
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    FAT12 ve FAT16 sistemlerinin orijinali yalnızca 8+3'lük dosya isimlerini destekliyordu. Yani bir dosyanın ismi en fazla 
+    8 karakterden uzantısı da en fazla 3 karakterden oluşabiliyordu. 90'lı yılların ortalarına doğru Microsoft FAT dosya 
+    sisteminde uzun dosya isimlerinin de kullanılmasına olanak sağlamıştır. Microsoft bunu yaparken geçmişe doğru uyumu 
+    mümkün olduğunca korumaya da çalışmıştır. Microsoft'un bu yeni düzenlemesinde 8+3'ten daha uzun dosya izimleri birden fazla
+    32'lik girişle temsil edilmektedir. Ancak Microsoft geçmişe doğru uyumumu korumak için her uzun dosya isminin bir de 8+3'lük
+    kısa ismini oluşturmak istemiştir. Bu durumda uzun dosya isimlerinin kullanıldığı FAT sistemlerinde 8+3'lük alan sığmayan 
+    dosya isimleri aşağıdaki formata göre dizin girişlerinde bulundurulmaktadır:
+
+    <32'lik giriş>
+    <32'lik giiriş>
+    ...
+    <32'lik giriş>
+    <dosyanın 8+3'lük kısa ismi>
+
+    Tabii eğer istenirse (örneğin Linux böyle yapmaktadır) 8+3'lük sınıfı aşmayana dosyalar da sanki uzun isimli dosyalarmış gibi 
+    saklanabilmektedir. Burada dosyanın 8+3'lük kısa isminin dışındaki uzun ismi de 32'lik girişlerde ASCII olarak değil UNICODE
+    olarak turulmaktadır. 
+
+    Uzun dosya isimlerine ilişkin girişlerin sonunda 8+3'lük kısa bir girişin de bulundurulduğunu belirtmiştik. Peki bu uzun dosya 
+    isminden kısa giriş nasıl elde edilmektedir?
+
+    Uzun dosya isimlerinin tutulduğu 32'lik girişlerin ilk byte'ında önemli bilgiler vardır. Bu byte'a "sıra numarası (sequence 
+    number)" denilmektedir. Bu byte bit bit anlamlandırılmaktadır. Byte'ın bitlerinin anlamları şöyledir:
+
+    D L X X  X X X X 
+
+    Burada en yükske anlamlı bit olan D biti 32'lik girişin silinip silinmeidğini anlatmaktadır. Eğer bu giriş silinmişse bu
+    bit 1, silinmemişse 0 olacaktır. 7 numaralı bit (L biti) 32'lik girişlerin aşağıdan yukarıya doğru son giriş olup olmadığını 
+    belirtmektedir. Ger kalan 6 bit 32'lik girişlerin sıra numarasını belirtir. Yani her 32'lik girişin bir sıra numarası vardır. 
+    Her 32'lik giriş uzun dosya isminin 13 UNICODE karakterini tutmaktadır. Pekiyi biz 32'lik bir girişin eski kısa ilişkin 
+    32'lik bir giriş mi yoksa uzun ismin 32'lik girişlerinden biri mi olduğunu nasıl anlayabiliriz? İşte bunun için 32'lik 
+    girişin 0x0B offset'inde bulunan özellik byte'ının düşük anlamlı 4 bitine bakmak gerekir. Eğer bu 4 bitin hepsi 1 ise 
+    bu 32'lik giriş uzun dosya isminin 32'lik girişlerinden biridir. 
+    
+    Aşağıda uzun dosya isimlerine ilişkin 32'lik girişlerin genel formatı verilmiştir. Ayrıntılı format için Microsoft'un 
+    "FAT File System Specification" dokümanına başvurabilirsiniz. 
+
+
+    Field name	    Offset	Size	Description
+    LDIR_Ord	    0	    1	    Sequence number (1-20) to identify where this entry is in the sequence of LFN entries to compose an LFN. One indicates the top part of the LFN and any value with LAST_LONG_ENTRY flag (0x40) indicates the last part of the LFN.
+    LDIR_Name1	    1	    10	    Part of LFN from 1st character to 5th character.
+    LDIR_Attr	    11	    1	    LFN attribute. Always ATTR_LONG_NAME and it indicates this is an LFN entry.
+    LDIR_Type	    12	    1	    Must be zero.
+    LDIR_Chksum	    13	    1	    Checksum of the SFN entry associated with this entry.
+    LDIR_Name2	    14	    12	    Part of LFN from 6th character to 11th character.
+    LDIR_FstClusLO	26	    2	    Must be zero to avoid any wrong repair by old disk utility.
+    LDIR_Name3	    28	    4	    Part of LFN from 12th character to 13th character.
+
+    Biz sonraki örneklerde uzun dosya isimlerini dikkate almayacağız. Onları geçeceğiz. Aşağıda kök uzun dosya isimlerinin 
+    ve silinmiş dosya isimlerinin geçilerek kök dosya sistemindeki dosyaların listesini elde eden bir fonksiyon verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* fatsys.h */
+
+#ifndef FATSYS_H_
+#define FATSYS_H_
+
+#include <stdint.h>
+
+#define FILE_INFO_LENGTH        32
+#define CHAIN_DEF_CAPACITY		8
+#define ROOT_DEF_CAPACITY		8
+#define DIR_ENTRY_SIZE			32
+
+/* Type Declarations */
+
+typedef struct tagBPB {
+	uint16_t fatlen;		/* number of sectors in FAT (A) */
+	uint16_t rootlen;		/* number of sectors in ROOT (NA) */
+	uint16_t nfats;	        /* number of copies of FAT (A) */
+	uint32_t tsects;		/* total sector (A) */
+	uint16_t bps;			/* byte per sector(A) */
+	uint16_t spc;			/* printf("%lu\n", )sector per cluster(A) */
+	uint16_t rsects;		/* reserved sectors(A) */
+	uint8_t mdes;			/* media descriptor byte(A) */
+	uint16_t spt;			/* sector per track(A) */
+	uint16_t rootents;		/* root entry (A) */
+	uint16_t nheads;		/* number of heads (A) */
+	uint16_t hsects;		/* number of hidden sector( A) */
+	uint16_t tph;			/* track per head (NA) */
+	uint16_t fatloc;		/* fat directory location (NA) */
+	uint16_t rootloc;		/* root directory location (NA) */
+	uint16_t dataloc;		/* first data sector location (NA) */
+    uint32_t datalen;       /* number of sectors in Data (NA) */
+	uint32_t serial;		/* Volume Serial Number (A) */
+	char vname[12];         /* Volume Name (A) */
+} BPB;
+
+typedef struct tagFATSYS {
+    int fd;             /* Volprintf("%lu\n", )ume file descriptor */
+    BPB bpb;            /* BPB info */
+    uint32_t fatoff;    /* offset of FAT */
+    uint32_t rootoff;   /* offset of root directory */
+    uint32_t dataoff;   /* offset of DATA */
+    uint32_t clulen;    /* cluster length as bytes */
+    uint8_t *fat;       /* FAT sectors */
+	uint8_t *rootdir;	/* Root sectors */
+    /* ... */
+} FATSYS;
+
+#pragma pack(1)
+
+typedef struct tagDIR_ENTRY {
+	unsigned char name[8];
+	unsigned char ext[3];
+	uint8_t attr;
+	char reserved1[1];
+	uint8_t crtime_ms;
+	uint16_t crdate;
+	uint16_t crtime;
+	uint16_t rdtime;
+	char reserved2[2];
+	uint16_t wrtime;
+	uint16_t wrdate;
+	uint16_t fclu;
+	uint32_t size;
+} DIR_ENTRY;
+
+#pragma pack()
+
+/* Function prototypes */
+
+int read_bpb(int fd, BPB *bpb);
+FATSYS *open_fatsys(const char *path);
+int close_fatsys(FATSYS *fatsys);
+int read_cluster(FATSYS *fatsys, uint32_t clu, void *buf);
+int wite_cluster(FATSYS *fatsys, uint32_t clu, const void *buf);
+uint16_t *getclu_chain16(FATSYS *fatsys, uint32_t firstclu, uint16_t *count);
+uint16_t *getclu_chain12(FATSYS *fatsys, uint32_t firstclu, uint16_t *count);
+void freeclu_chain(uint16_t *chain);
+DIR_ENTRY *get_rootents(FATSYS *fatsys, uint16_t *count);
+
+#endif
+
+/* fatsys.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include "fatsys.h"
+
+int read_bpb(int fd, BPB *bpb)
+{
+    uint8_t bsec[512];
+
+    if (read(fd, bsec, 512) == -1)
+        return -1;
+
+    bpb->bps = *(uint16_t *)(bsec + 0x0B);
+    bpb->spc = *(uint8_t *)(bsec + 0x0D);
+    bpb->rsects = *(uint16_t *)(bsec + 0x0E);
+    bpb->fatlen = *(uint16_t *)(bsec + 0x16);
+    bpb->rootlen = *(uint16_t *)(bsec + 0x11) * FILE_INFO_LENGTH / bpb->bps;
+    bpb->nfats = *(uint8_t *)(bsec + 0x10);
+	if (*(uint16_t *)(bsec + 0x13))
+		bpb->tsects = *(uint16_t *)(bsec + 0x13);
+	else
+		bpb->tsects = *(uint32_t *)(bsec + 0x20);
+    bpb->mdes = *(bsec + 0x15);
+    bpb->spt = *(uint16_t *)(bsec + 0x18);
+    bpb->rootents = *(uint16_t *)(bsec + 0x11);
+    bpb->nheads = *(uint16_t *)(bsec + 0x1A);
+    bpb->hsects = *(uint16_t *)(bsec + 0x1C);
+    bpb->tph = (uint16_t)(bpb->tsects / bpb->spt / bpb->nheads);
+    bpb->fatloc = bpb->rsects;
+    bpb->rootloc = bpb->rsects + bpb->fatlen *bpb->nfats;
+    bpb->dataloc = bpb->rootloc + bpb->rootlen;
+    bpb->datalen = bpb->tsects - bpb->dataloc;
+    bpb->serial = *(uint32_t *)(bsec + 0x27);
+    memcpy(bpb->vname, bsec + 0x2B, 11);
+    bpb->vname[11] = '\0';
+
+    return 0;
+}
+
+FATSYS *open_fatsys(const char *path)
+{
+    FATSYS *fatsys;
+    int fd;
+
+    if ((fatsys = (FATSYS *)malloc(sizeof(FATSYS))) == NULL)
+        return NULL;
+
+    if ((fd = open(path, O_RDWR)) == -1)
+        goto EXIT1;
+    
+    if (read_bpb(fd, &fatsys->bpb) == -1) 
+        goto EXIT2;
+
+    fatsys->fd = fd;
+    fatsys->fatoff = fatsys->bpb.fatloc * fatsys->bpb.bps;
+    fatsys->rootoff = fatsys->bpb.rootloc * fatsys->bpb.bps;
+    fatsys->dataoff = fatsys->bpb.dataloc * fatsys->bpb.bps;
+    fatsys->clulen = fatsys->bpb.bps * fatsys->bpb.spc;
+
+    if ((fatsys->fat = (uint8_t *)malloc(fatsys->bpb.fatlen * fatsys->bpb.bps)) == NULL) 
+        goto EXIT2;
+
+    if ((fatsys->rootdir = (uint8_t *)malloc(fatsys->bpb.rootlen * fatsys->bpb.bps)) == NULL) 
+        goto EXIT3;
+        
+    if (lseek(fatsys->fd, fatsys->fatoff, SEEK_SET) == -1)
+        goto EXIT4;
+
+    if (read(fd, fatsys->fat, fatsys->bpb.fatlen * fatsys->bpb.bps) == -1)
+        goto EXIT4;
+
+    if (lseek(fatsys->fd, fatsys->rootoff, SEEK_SET) == -1)
+        goto EXIT4;
+
+    if (read(fd, fatsys->rootdir, fatsys->bpb.rootlen * fatsys->bpb.bps) == -1)
+        goto EXIT4;
+
+    return fatsys;
+
+EXIT4:
+    free(fatsys->rootdir);
+EXIT3:
+    free(fatsys->fat);
+EXIT2:
+    close(fd);
+EXIT1:
+    free(fatsys);
+
+    return NULL;
+}
+
+int close_fatsys(FATSYS *fatsys)
+{
+    free(fatsys->fat);
+    if (close(fatsys->fd) == -1)
+        return -1;
+    free(fatsys);
+
+    return 0;
+}
+
+int read_cluster(FATSYS *fatsys, uint32_t clu, void *buf)
+{
+    if (lseek(fatsys->fd, fatsys->dataoff + (clu - 2) * fatsys->clulen, SEEK_SET) == -1)
+        return -1;
+
+    return read(fatsys->fd, buf, fatsys->clulen);
+}
+
+int write_cluster(FATSYS *fatsys, uint32_t clu, const void *buf)
+{
+    if (lseek(fatsys->fd, fatsys->dataoff + (clu - 2) * fatsys->clulen, SEEK_SET) == -1)
+        return -1;
+
+    return write(fatsys->fd, buf, fatsys->clulen);
+}
+
+uint16_t *getclu_chain16(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
+{
+    uint16_t clu, n;
+    uint16_t *chain, *temp;
+    uint32_t capacity;
+        
+    clu = firstclu;
+    capacity = CHAIN_DEF_CAPACITY;
+    n = 0;
+
+    if ((chain = (uint16_t *)malloc(sizeof(uint16_t) * CHAIN_DEF_CAPACITY)) == NULL)
+        return NULL;
+    do  {
+        chain[n++] = clu;
+        if (n == capacity) {
+            capacity *= 2;
+            if ((temp = realloc(chain, sizeof(uint16_t) * capacity )) == NULL) {
+                free(chain);
+                return NULL;
+            }
+            chain = temp;
+        }
+        clu = *(uint16_t *)(fatsys->fat + clu * 2);
+    } while (clu < 0xFFF8);
+    *count = n;
+
+    return chain;
+}
+
+uint16_t *getclu_chain12(FATSYS *fatsys, uint32_t firstclu, uint16_t *count)
+{
+    uint16_t clu, word, n;
+    uint16_t *chain, *temp;
+    uint32_t capacity;
+        
+    clu = firstclu;
+    capacity = CHAIN_DEF_CAPACITY;
+    n = 0;
+
+    if ((chain = (uint16_t *)malloc(sizeof(uint16_t) * CHAIN_DEF_CAPACITY)) == NULL)
+        return NULL;
+    do  {
+        chain[n++] = clu;
+        if (n == capacity) {
+            capacity *= 2;
+            if ((temp = realloc(chain, sizeof(uint16_t) * capacity )) == NULL) {
+                free(chain);
+                return NULL;
+            }
+            chain = temp;
+        }
+        word = *(uint16_t *)(fatsys->fat + clu * 3 / 2);
+        clu = clu % 2 == 0 ? word & 0x0FFF : word >> 4;
+    } while (clu < 0xFF8);
+    *count = n;
+
+    return chain;
+}
+
+void freeclu_chain(uint16_t *chain)
+{
+    free(chain);
+}
+
+DIR_ENTRY *get_rootents(FATSYS *fatsys, uint16_t *count)
+{
+    DIR_ENTRY *dent, *temp;
+    DIR_ENTRY *dents;
+    uint32_t capacity;
+    uint16_t n;
+    
+    if ((dents = (DIR_ENTRY *)malloc(DIR_ENTRY_SIZE * ROOT_DEF_CAPACITY)) == NULL)
+        return NULL;
+
+    n = 0;
+    capacity = ROOT_DEF_CAPACITY;
+    dent = (DIR_ENTRY *)fatsys->rootdir;
+    for (uint16_t i = 0; i < fatsys->bpb.rootents; ++i) {
+        if (dent[i].name[0] == 0)
+            break;
+        if (dent[i].name[0] == 0xE5 || (dent[i].attr & 0XF) == 0x0F)
+            continue;
+        
+        if (n == capacity) {
+            capacity *= 2;
+            if ((temp = realloc(dents,  DIR_ENTRY_SIZE * capacity )) == NULL) {
+                free(dents);
+                return NULL;
+            }
+            dents = temp;
+        }
+        dents[n++] = dent[i];
+    }
+    *count = n;
+
+     return dents;
+}
+
+/* app.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <inttypes.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include "fatsys.h"
+
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
+{
+    FATSYS *fatsys;
+    unsigned char buf[8192];
+    uint16_t count;
+    uint16_t *chain;
+    DIR_ENTRY *dents;
+
+    if (argc != 2) {
+        fprintf(stderr, "wrong number of arguments!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((fatsys = open_fatsys(argv[1])) == NULL) 
+        exit_sys("open_fatsys");
+
+    if ((dents = get_rootents(fatsys, &count)) == NULL) {
+        fprintf(stderr, "cannot get root entries!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < count; ++i) {
+        for (int k = 0; k < 8; ++k) 
+            if (dents[i].name[k] != ' ')
+                putchar(dents[i].name[k]);
+        
+        if (dents[i].ext[0] != ' ')
+                putchar('.');
+        for (int k = 0; k < 3; ++k) 
+            if (dents[i].ext[k] != ' ')
+                putchar(dents[i].ext[k]);
+
+        putchar('\n');
+    }
+
+    close_fatsys(fatsys);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    İşletim sistemi bir dizin dosyası içerisindeki 32'lik girişlerini gözden geçirirken dosya isminin ilk karakterini '\0' 
+    karakter olarak gördüğünde (yani sayısal 0 değeri) işlemini sonlandırmaktadır. Yani dizin dosyası içerisindeki bütün 
+    girişlerin gözden geçirilmesine gerek yoktur. Yukarıda da belirttiğimiz gibi dosya isminin ilk karakteri 0xE5 ise işletim 
+    sistemi bu 32'lik girişi de silinmiş dosya olduğu gerekçesiyle geçmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    İşletim sistemlerinde bir yol ifadesi verildiğinde o yol ifadesinin hedefindeki dosya ya da dizine ilişkin dizin girişinin 
+    elde edilmesine "yol ifadelerinin çözümlenmesi (pathname resolution)" denilmektedir. Yol ifadelerinin çözümlenmesi eğer 
+    yol ifadesi mutlaksa kök dizinden itibaren, göreli ise prosesin çalışma dizininden itibaren yapılmaktadır. Örneğin FAT 
+    dosya sistemine ilişkin "\a\b\c\d.dat" biçiminde bir yol ifadesi verilmiş olsun. Burada hedeflenen "d.dat" dosyasına ilişkin
+    dizin girişi bilgileridir. Ancak bunun için önce kök dizinde "a" girişi, sonra "a" dizininde "b" girişi, sonra "b" dizininde
+    "c" girişi sonra da "c" girişinde "d.dat" girişi bulunmalıdır. Tabii biz burada Windows'taki bir yol ifadesini temel aldık.
+    UNIX/Linux sistemlerinde dosya sistemleri mount edildiği için bu yol ifadesi aslında mount noktasına görelidir. 
+
+    İşletim sistemleri bir yol ifadesini çözümlerken yol ifadesindeki tüm yol bileşenlerine ilişkin dizin giriş bilgilerini de 
+    bir cache sisteminde saklamaktadır. İşletim sistemlerinin oluşturduğu bu cache sistemine "directory entry cache" ya da kısaca
+    "dentry cache" denilmektedir. Örneğin prgramcı aşağıdaki gibi bir yol ifadesi kullanmış olsun:
+
+    "\a\b\c\d.dat"
+
+    İşletim sisteni buaradaki "a", "b", "c" ve "d.dat" dosyaarına ilişkin dizin giriş bilgilerini bir cache sisteminde saklamaktadır. 
+    Böylece benzer yol ifadeleri için hiç disk okuması yapılmadan bu cache sisteminden bu bilgiler elde edilebilmektedir. 
+ ---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+                                                177. Ders 03/11/2024 - Pazar
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Pekiyi FAT dosya sistemi için yol ifadelerini çözen basit yalın bir kodu nasıl yazabiliriz? Bizim bir yol ifadesi verildiğinde
+    o yol ifadesini parse edip oradaki yol bileşenlerini elde edebilmemiz gerekir. Sonra dizinler bir dosya olduğuna göre dizinlere 
+    ilişkin cluster zincirinde diğer bileşenin aranması gerekir. İşlemler böyle devam ettirilir. FAT dosya sistemi için yol 
+    ifadesini çözümleyen bir fonksiyonun parametrik yapısı şöyle olabilir:
+
+    int resolve_path(FATSYS *fatsys, const char *path, DIRECTORY_ENTRY *de);
+
+    Biz mutlak yol ifadelerini çözümleyecek olalım. Her dizinin bir cluster zinciri vardır. Ancak FAT12 ve FAT16 sistemlerinde
+    kök dizinin bir cluster zinciri yoktur. Kök dizinin yeri ve uzunluğu baştan bellidir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+                                            178. Ders 08/11/2024 - Cuma
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    UNIX/Linux sistemlerinde i-node tabanlı dosya sistemleri kullanılmaktadır. i-node tabanlı dosya sistemlerinin temel 
+    organizasyonu FAT dosya sistemlerinden oldukça farklıdır. i-node tabanlı dosya sistemlerinin çeşitli varyasyonu vardır. 
+    Linux sistemleri ve BSD sistemleri ağırlıklı olarak ext (extended file system) denilen dosya sistemini kullanmaktadır.
+    ext dosya sistemi ilk kez 1992 yılında tasarlanmıtır. Sonra zaman içerisinde bu dosya sisteminin ext2, ext3 ve ext4 biçiminde 
+    çeşitli varyasyonları oluşturulmuştur. Bugün artık genellikle bu ailenin son üyesi olan ext4 dosya sistemi kullanılmaktadır. 
+    Ancak yukarıda da belirttiğimiz gibi i-node tabanlı dosya sistemleri bir aile belirtmektedir. Bu ailenin FAT sistemlerinde 
+    olduğu gibi genel tasarımı birbirine benzerdir. Biz burada ext dosya sisteminin en uzun süre kullanılan versiyonu olan 
+    ext konusunda temel bilgiler vereceğiz. ext2 dosya sisteminin resmi dokümantasyonuna aşağıdaki bağlantıdan erişebilirsiniz:
+
+    https://cscie28.dce.harvard.edu/lectures/lect04/6_Extras/ext2-struct.html
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    ext2 dosya sistemi üzerinde incelemeler ve denemeler yapmak için yine loop aygıtlarından faydalanabilrisiniz. Bunun için 
+    yine önce içi sıfırlarla dolu bir dosya oluşturulur:
+
+    $ dd if=/dev/zero of=ext2.dat bs=512 count=400000
+    
+    Sonra loop aygıt sürücüsü bu dosya için hazırlanır:
+
+    $ sudo losetup /dev/loop0 ext2.dat
+
+    Artık aygıt formatlanabilir:
+
+    $ mkfs.ext2 /dev/loop0
+
+    Mount işlemi aşağıdaki gibi yapılabilir:
+
+    $ mkdir ext2
+    $ sudo /dev/loop0 ext2
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    i-node tabanlı dosya sistemlerinde volüm kabaca aşağıdaki bölümlere ayrılmaktadır:
+
+    <boot block>>
+    <super block>
+    <i-node block>
+    <data block>
+
+    Boot blok (boot block) işletim sistemini boot eden kodların bulunduğu bloktur. Süper blok (super block) FAT dosya sistemlerindeki 
+    boot sektör BPB alanına benzemektedir. Yani burada dosya sistemine ilişkin meta data bilgiler bulunmaktadır. i-node blok 
+    i-node elemanlarından oluşmaktadır. Data block FAT dosya sistemindeki Data bölümü gibidir. FAT dosya sistemindeki "cluster" 
+    yerine i-node tabanlı dosya sistemlerinde "blok (block)" terimi kullanılmaktadır. Bir blok bir dosyanın parçası olabilecek 
+    en küçük birimdir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Süper blok hemen volümün 1024 byte offset'inde bulunmaktadır. (yani volümün başında boot sektör programları için 1024 
+    byte yer ayrılmıştır. Süper blok süper blocktta belirtilen blok uzunluğu kadar uzunluğa sahiptir. (Ayrıca izleyen paragraflarda 
+    da görüleceği gibi ext2 dosya sisteminde her blok grupta süper bloğun bir kopyası da bulunmaktadır.) Yukarıda da belirttiğimiz 
+    gibi burada volüm hakkında meta data bilgileri bulunmaktadır. Buradaki alanlar ext2 dokümantasyonunda ayrıntılarıyla açıklanmıştır. 
+    Süper blok içerisindeki alanlar aşağıdaki gibidir:
+
+    | Alan                 Boyut (Byte)                Açıklama                                                                               
+    |-----------------------|----|-----------------------------------------------------------------------------------------
+    | s_inodes_count        | 4  | Dosya sistemindeki toplam inode sayısı.                                                   
+    | s_blocks_count        | 4  | Dosya sistemindeki toplam blok sayısı.                                                    
+    | s_r_blocks_count      | 4  | Rezerve edilmiş blok sayısı.                                                              
+    | s_free_blocks_count   | 4  | Boş blok sayısı.                                                                                 
+    | s_free_inodes_count   | 4  | Boş inode sayısı.                                                                                 
+    | s_first_data_block    | 4  | İlk veri bloğunun numarası (bu, kök dizinin bulunduğu blok).                                      
+    | s_log_block_size      | 4  | Blok boyutunun logaritmasının değeri (örneğin, 1 KB için 10, 4 KB için 12, vs.).                  
+    | s_log_frag_size       | 4  | Parçacık boyutunun logaritması.                                                                   
+    | s_blocks_per_group    | 4  | Her blok grubundaki blok sayısı.                                                                  
+    | s_frags_per_group     | 4  | Her blok grubundaki fragman sayısı.                                                               
+    | s_inodes_per_group    | 4  | Her blok grubundaki inode sayısı.                                                                 
+    | s_mtime               | 4  | Dosya sisteminin son değiştirilme zamanı (Unix zaman damgası).                                    
+    | s_wtime               | 4  | Dosya sisteminin son yazılma zamanı (Unix zaman damgası).                                        
+    | s_mnt_count           | 2  | Dosya sisteminin kaç kez bağlandığı (mount) sayısı.                                              
+    | s_max_mnt_count       | 2  | Dosya sisteminin kaç kez daha bağlanabileceği (yani, montaj sayısı aşımı).                       
+    | s_magic               | 2  | Süper blok sihirli sayısı (bu, EXT2 dosya sistemini tanımlar ve genellikle `0xEF53`'tür).        
+    | s_state               | 2  | Dosya sisteminin durumu (örneğin, temiz mi, hata mı).                                             
+    | s_errors              | 2  | Hata durumunda yapılacak işlem (örneğin, “ignore”, “panic”, vb.).                                
+    | s_minor_rev_level     | 2  | Küçük revizyon seviyesi (EXT2’yi güncelleyen küçük değişiklikler için).                          
+    | s_lastcheck           | 4  | Dosya sisteminin son kontrol tarihi (Unix zaman damgası).                                         
+    | s_checkinterval       | 4  | Dosya sisteminin kontrol edilmesi gereken süre (saniye cinsinden).                                
+    | s_creator_os          | 4  | Dosya sistemini oluşturan işletim sistemi türü (örneğin, Linux, Solaris, vb.).                    
+    | s_rev_level           | 4  | EXT2 dosya sistemi revizyon seviyesi.                                                             
+    | s_def_resuid          | 2  | Varsayılan rezerv kullanıcı ID'si (uid).                                                          
+    | s_def_resgid          | 2  | Varsayılan rezerv grup ID'si (gid).                                                              
+    | s_first_ino           | 4  | İlk inode numarası (genellikle kök dizini için).                                                  
+    | s_inode_size          | 2  | Inode boyutu (genellikle 128 veya 256 byte).                                                     
+    | s_block_group_nr      | 2  | Bu süper blok ile ilişkili blok grubu numarası.                                                   
+    | s_feature_compat      | 4  | Uyumluluk özelliklerinin bit maskesi.                                                             
+    | s_feature_incompat    | 4  | Uyumsuz özelliklerin bit maskesi.                                                                 
+    | s_feature_ro_compat   | 4  | Okuma-yazma uyumsuz özelliklerinin bit maskesi.                                                   
+    | s_uuid                | 16 | Dosya sisteminin benzersiz tanımlayıcısı (UUID).                                                  
+    | s_volume_name         | 16 | Dosya sistemi adının (etiketinin) olduğu alan.                                                    
+    | s_last_mounted        | 64 | Dosya sisteminin son bağlandığı dizin yolu.                                                       
+    | s_algorithm_usage_bmp | 4  | Bloklar ve inode'lar için kullanılan algoritmaların bit maskesi.                                  
+    | s_prealloc_blocks     | 1  | Önceden tahsis edilecek blok sayısı.                                                              
+    | s_prealloc_dir_blocks | 1  | Önceden tahsis edilecek dizin blokları sayısı.                                                    
+    | s_padding             | 118| Alanın sonundaki boşluk (süper bloğun uzunluğunu tamamlar).        
+    
+    Buradaki önemli alanlar hakkında kısa bazı açıklamalar yapmak istiyoruz:
+
+    s_inodes_count: Bu alanda dosya sistemindeki toplam i-node elemanlarının sayısı bulunmaktadır. Bir ext2 disk bmölümünde en 
+    fazla buradaki i-node elemanlarının sayısı kadar farklı dosya bulunabilir. 
+
+    s_blocks_count: Burada Data bölümündeki toplam blokların sayısı bulunmaktadır. 
+
+    s_r_blocks_count: Burada ayrılmış (reserve edielmiş) blokların sayısı bulunmaktadır.
+
+    s_free_blocks_count: Burada Data bölümünde kullanımayan boş bloklatın sayısı turulmaktadır. 
+
+    s_log_block_size: Burada 1024 değerinin 2 üzeri kaçla çapılacağını belirten değer tutulmaktadır. Yani blok uzunluğu 1024 << s_log_block_siz
+    biçiminde hesaplanmaktadır. Örneğin burada 2 değeri yazılıyorsa blok uzunluğu 2^2 * 1024 = 4096 byte'tır.
+
+    ext2 dosya sisteminin super block bilgisi ve bazı önemli alanlarına ilişkin bilgiler "dumpefs" isimli utility programla 
+    elde edilebilir. Örneğin:
+
+    $ dumpe2fs /dev/loop0
+
+    Aşağıda bir ext2 süper bloğunun örnek bir içeriği verilmektedir:
+
+    00004000  60 c3 00 00 50 c3 00 00  c4 09 00 00 f4 b6 00 00  |`...P...........|
+    00000410  55 c3 00 00 00 00 00 00  02 00 00 00 02 00 00 00  |U...............|
+    00000420  00 80 00 00 00 80 00 00  b0 61 00 00 51 5c 2e 67  |.........a..Q\.g|
+    00000430  51 5c 2e 67 01 00 ff ff  53 ef 00 00 01 00 00 00  |Q\.g....S.......|
+    00000440  42 5c 2e 67 00 00 00 00  00 00 00 00 01 00 00 00  |B\.g............|
+    00000450  00 00 00 00 0b 00 00 00  00 01 00 00 38 00 00 00  |............8...|
+    00000460  02 00 00 00 03 00 00 00  ec 89 02 3e a8 11 4c 01  |...........>..L.|
+    00000470  b0 b5 f5 48 1e 30 79 d6  00 00 00 00 00 00 00 00  |...H.0y.........|
+    00000480  00 00 00 00 00 00 00 00  2f 68 6f 6d 65 2f 6b 61  |......../home/ka|
+    00000490  61 6e 2f 53 74 75 64 79  2f 55 6e 69 78 4c 69 6e  |an/Study/UnixLin|
+    000004a0  75 78 2d 53 79 73 50 72  6f 67 2f 44 69 73 6b 49  |ux-SysProg/DiskI|
+    000004b0  4f 2d 46 69 6c 65 53 79  73 74 65 6d 73 2f 65 78  |O-FileSystems/ex|
+    000004c0  74 32 00 00 00 00 00 00  00 00 00 00 00 00 0c 00  |t2..............|
+    000004d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+    000004e0  00 00 00 00 00 00 00 00  00 00 00 00 6e 47 e8 bc  |............nG..|
+    000004f0  81 50 45 f3 bb 96 6c 7c  51 bc e3 8a 01 00 00 00  |.PE...l|Q.......|
+    00000500  0c 00 00 00 00 00 00 00  42 5c 2e 67 00 00 00 00  |........B\.g....|
+
+    Burada toplam i-node eşemanlarının sayısı 0xC360 (50016) tanedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Disk bölümünün i-node bloğu i-node elemanlarından oluşmaktadır. Her i-node elemanının ilki 0 olmak üzere bir indeks numarası 
+    vardır. Örneğin:
+
+    0       i-node elemanı
+    1       i-node elemanı
+    2       i-node elemanı
+    3       i-node elemanı
+    4       i-node elemanı
+    ...
+    300     i-node elemanı
+    301     i-node elemanı
+    302     i-node elemanı
+    303     i-node elemanı
+    304     i-node elemanı
+    ...
+
+    Bir dosyanın ismi haricindeki bütün bilgileri dosyaya ilişkin i-node elemanında tutulmaktadır. Zaten stat fonksiyonları 
+    da aslında bilgileri bu i-node elemanından almaktadır. Her dosyanın diğerlerinden farklı bir i-node numarası olduğuna 
+    dikkat ediniz. Dolayısıyla dosyanın i-node numarası o dosyayı karakterize etmektedir. ("ls" komutunda dosyanın i-node 
+    numaralarının -i seçeneği ile elde edildiğini anımsayınız.) Burada hatırlatma yapmak amacıyla stat yapısını yeniden vermek 
+    istiyoruz:
+
+    struct stat {
+        dev_t     st_dev;     /* ID of device containing file */
+        ino_t     st_ino;     /* inode number */
+        mode_t    st_mode;    /* protection */
+        nlink_t   st_nlink;   /* number of hard links */
+        uid_t     st_uid;     /* user ID of owner */
+        gid_t     st_gid;     /* group ID of owner */
+        dev_t     st_rdev;    /* device ID (if special file) */
+        off_t     st_size;    /* total size, in bytes */
+        blksize_t st_blksize; /* blocksize for file system I/O */
+        blkcnt_t  st_blocks;  /* number of 512B blocks allocated */
+        time_t    st_atime;   /* time of last access */
+        time_t    st_mtime;   /* time of last modification */
+        time_t    st_ctime;   /* time of last status change */
+    };
+
+    ext2 dosya sisteminde bir i-node elemanın alanları aşağıdaki gibidir:
+
+    | Alan         Boyut (Byte)                         Açıklama
+    |--------------------------------------------------------------------------------------------------------------------
+    |i_mode       | 2          | Dosya türü ve izinler (örneğin, `S_IFREG` (normal dosya), `S_IFDIR` (dizin), vs.).                         
+    |i_uid        | 2          | Dosya sahibinin kullanıcı kimliği (UID).                                                                   
+    |i_size_lo    | 4          | Dosyanın boyutunun alt 32 biti (byte cinsinden).                                                           
+    |i_atime      | 4          | Son erişim zamanı (Unix zaman damgası).                                                                    
+    |i_ctime      | 4          | Son inode değişiklik zamanı (Unix zaman damgası).                                                          
+    |i_mtime      | 4          | Son değişiklik (modifikasyon) zamanı (Unix zaman damgası).                                                 
+    |i_dtime      | 4          | Dosyanın silinme zamanı (Unix zaman damgası), eğer geçerliyse.                                             
+    |i_gid        | 2          | Dosya sahibinin grup kimliği (GID).                                                                        
+    |i_links_count| 2          | Dosyaya bağlı olan hard link (bağlantı) sayısı.                                                            
+    |i_blocks     | 4          | Dosyanın disk üzerinde kullandığı blok sayısı (block, 512 byte'lık bloklar).                               
+    |i_flags      | 4          | Dosya bayrakları (örneğin, `i_dirty`, `i_reserved` gibi).                                                  
+    |i_osd1       | 4          | Linux spesifik alan (genellikle genişletilmiş özellikler için kullanılır).                                 
+    |i_block[15]  | 4 × 15 = 60| Dosyanın bloklarına işaretçi 
+    |i_generation | 4          | Dosyanın versiyon numarası (özellikle NFS gibi ağ dosya sistemlerinde kullanılır).                          
+    |i_file_acl   | 4          | Dosya için ACL (Access Control List) blok numarası.                                                         
+    |i_dir_acl    | 4          | Dizin için ACL blok numarası.                                                                               
+    |i_faddr      | 4          | Dosyanın "fragman adresi" (bu, çoğu zaman sıfırdır ve eski EXT2 uygulamalarında kullanılır).                
+
+    Biz bu alanların büyük çoğunluğunu aslında stat fonksiyonunda görmüştük. Ancak stat yaısında olmayan bazı elemanlar da 
+    burada bulunmaktadır. Biz stat yapısında olmayan bazı önemli elemanlar üzerinde durmak istiyoruz:
+
+    i_dtime: Bu alanda eğer dosya silinmişse dosyanın ne zaman silindiğine yönelik tarih zaman bilgisi tutulmaktadır. Buradaki
+    değer 01/01/1970'ten geçen saniye sayısı cinsindedir. 
+
+    i_block ve i_blocks: Bu elemanlar izleyen paragraflarda adaha ayrıntılı bir biçimde ele alınacaktır
+
+    i_flags: Bu alanda ilgili dosyaya ilişkin bazı bayraklar tutulmaktadır. 
+
+    i_file_acl: Dosyaya ilişkin "erişim kontrol listesi (access control list)" ile ilgili bilgiler tutulmaktadır. 
+
+    i-node elemanında dosyanın isminin tutulmadığına dikkat ediniz. Pekiyi dosyanın ismi nerededir ve dosyanın i-node numarası 
+    nereden elde edilmektedir? Bunu izleyen paragraflarda göreceğiz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda i-node tabanlı bir disk bölümünün kaba organizasyonunun aşağıdaki gibi olduğunu belirtmiştik:
+
+    <boot block>                    (1024 byte)
+    <super block>
+    <i-node block>
+    <data block>
+
+    Burada sanki süper bloktan hemen sonra i-node blok geliyormuş gibi biz organizasyon resmedilmiştir. Halbuki süper bloktan
+    hemen sonra i-node blok gelmemektedir. ext2 dosya sisteminin gerçek yerleşimi aşağıdaki gibidir:
+
+    <boot block>                      (1024 byte) 
+    <block group>
+    <block group>
+    <block group>
+    
+    Bir disk bölümü aslında blok gruplarından (block groups) oluşmaktadır. Her block grubu disk bölümüne ilişkin bir bölümü belirtir. 
+    Bir block grubu aşağıdaki gibi bir yapıya sahiptir:
+
+    <super block>
+    <block group descriptor table>
+    <block bitmap>
+    <i-node bitmap>
+    <i-node table>
+    <data block>
+
+    İşte "blok grup betimelyici tablosu (block group descriptor table)" block group'ları hakkında bilgi veren bir bölümdür. Bir 
+    kaç blok bilginin yer aldığı super block'un "s_blocks_per_group" elemanında saklanmaktadır. Her blok grupta belli sayıda 
+    i-node elemanı vardır. Bir blok gruptaki i-node elemanlarının sayısı super block'taki s_inodes_per_group elemanıyla 
+    belirtilmektedir. Yani aslında ext2 dosya sisteminde aşağıdaki gibi bir oragnizasyon söz konusudur:
+
+     <boot block>
+    
+    <super block>
+    <block group desciptor table>     (1024 byte)
+    <block bitmap>                    (1024 byte)
+    <i-node bitmap >                   (1024 byte)
+    <i-node table>
+    <data block>
+
+    <super block>
+    <block group desciptor table>     (1024 byte)
+    <block bitmap>                    (1024 byte)
+    <i-node bitmap >                   (1024 byte)
+    <i-node table>
+    <data block>
+
+    <super block>
+    <block group desciptor table>     (1024 byte)
+    <block bitmap>                    (1024 byte)
+    <i-node bitmap >                  (1024 byte)
+    <i-node table>
+    <data block>
+    ...
+
+    Görüldüğü gibi ext2 dosya sisteminde super bloğun tek bir kopyası yoktur. Her block grupta super blok yeniden yer 
+    almaktadır. Bir blok grupta ayrı bir i-node tablosunun ve data bölümünün olduğuna dikkat ediniz. 
+
+    Pekiyi neden ext2 dosya sisteminde disk bölümü birden fazla blok gruplara ayrılmıştır? İşte bunun nedenlerinden biri 
+    güvenliktir. Yani i-node bloklardan biri bozulduğunda diğeri bozulmamış biçimde kalabilir. 
+
+    Blok gruplarındaki "blok grup betimelyici tablosu (block group descriptor table)" blok grupları hakkında bazı meta data 
+    bilgileri tutmaktadır. Ancak blok grup betimleyicilerinde yalnızca o blok grubuna ilişkin bilgiler değil tüm blok gruplarına 
+    ilişkin bilgiler tutulmaktadır. Yani her blok grubunda yeniden tüm blok gruplarına ilişkin bilgiler tutulmaktadır. 
+    Block grup betimleyici tablosu blok grup betimleyicilerindne oluşan bir dizi gibidir:
+    
+    Block Grup Betimleyici Tablosu 
+
+    <block group descriptor>
+    <block group descriptor>
+    <block group descriptor>
+    ...
+    <block group descriptor>
+    <block group descriptor>
+
+    Bir blok grup betimleyicisinin alanları şöyledir:
+
+    | Eleman**          | Açıklama                                                                                Boyut
+    |-------------------|-------------------------------------------------------------------------------------|---------|
+    | Block Bitmap      | Blok bitmap'in bulunduğu blok numarası                                              | 4 Bayt  |
+    | Inode Bitmap      | Blok bitmap'in bulunduğu blok numarası                                              | 4 Bayt  |
+    | Inode Table       | Blok bitmap'in bulunduğu blok numarası                                              | 4 Bayt  |
+    | Free Blocks Count | Blok grubunda kullanılmayan veri bloklarının sayısını belirtir.                     | 2 Bayt  |
+    | Free Inodes Count | Blok grubunda kullanılmayan inode'ların sayısını belirtir.                          | 2 Bayt  |
+    | Used Dirs Count   | Blok grubunda bulunan kullanılan dizinlerin sayısını belirtir.                      | 2 Bayt  |
+    | Pad (Boş Alan)    | Yapıların hizalanabilmesi için ayrılmış boş alan. Genellikle sıfırlarla doldurulur. | 12 Bayt |
+
+    Blok grup betimleyicisi toplamda 32 byte yer kaplamaktadır. Her blok grubunda blok bitmap'in, i-node bitmap'in ve i-node 
+    tablosunun yerinin blok numarası tutulmaktadır. Buradaki blok uzunlukları disk bölümünün başından itibaren yer belirtir.  
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    İlk blok grubu hemen süper blok'tan sonra gelmektedir. İlk blok grup betimleyici tablosunun yeri de blok grubundaki super 
+    block'tan hemen sonradır. Örneğin dosya sistemindeki blok uzunluğu 4K (4096 byte) ise ilk blok betimleyici tablosunun 
+    yeri 1024 + 4096 = 0x1000 offset'indedir. Bir blok grubunun toplam kapladığı blok sayısı süper block içerisindeki 
+    s_blocks_per_group elemanında tutulmaktadır. Örneğin biz k numaralı blok grubun blok numarasını k * s_blocks_per_group
+    işlemiyle elde edebiliriz. 
+    
+    Aşağıda örnek bir blok grup betimleyici tablosu verilmiştir:
+
+    00001000  0e 00 00 00 0f 00 00 00  10 00 00 00 c7 79 a4 61  |.............y.a|
+    00001010  02 00 04 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+    00001020  0e 80 00 00 0f 80 00 00  10 80 00 00 25 3d b0 61  |............%=.a|
+    00001030  00 00 04 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+    00001040  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+    ....
+
+    Bir blok grup betimleyicisi 32 byte uzunluktadır. Burada toplam iki blok grup betimleyicisi yani disk bölümünde toplam 
+    iki blok grubu bulunmaktadır.Bu iki blok grup betimleyicisini ayrı ayrı aşağıda veriyoruz:
+
+    00001000  0e 00 00 00 0f 00 00 00  10 00 00 00 c7 79 a4 61  |.............y.a|
+    00001010  02 00 04 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+
+    00001020  0e 80 00 00 0f 80 00 00  10 80 00 00 25 3d b0 61  |............%=.a|
+    00001030  00 00 04 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+
+    Disk bölümünde toplam kaç blok grubu olduğu süper bloktaki s_blocks_count elemanında yazmaktadır. 
+
+    Bir blok grubundaki blok grup betimleyici tablosunun uzunluğu 1 blok kadardır. Blok bitmap'in ve I-node bitmap'in 
+    uzunlukları doğrudan süper blokta yazmamaktadır. Bu uzunluklar dolaylı bir biçimde hesaplanmaktadır. Dolayısıyla bir 
+    blok gruptaki data alanın başlangıç bloğu da dolaylı bir biçimde hesaplanmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Pekiyi bir dosyanın i-node numarası biliniyorsa onun disk bölümündeki yerini nasıl hesaplarız? Burada bizim bu i-node 
+    numaralı i-node elemanının hangi blok grubunda ve o blok grubunun i-node tablosunda nerede olduğunu belirlememiz gerekir. 
+    He blok grupta eşit sayıda i-node elemanı bulunmaktadır. Bir blk gruptaki i-node elemanlarının sayısı doğrudan süper 
+    bloktaki s_inodes_per_group elemanında belirtilmektedir. Bu durumda ilgili i-node numarasına ilişkin i-node elemanı i-node
+    numarası n olmak üzere n / s_inodes_per_group işlemiyle elde edilebilir. Tabii bu durumda n % s_inodes_per_group ifadesi 
+    de i-node elemanının o blok gruptaki i-node tablosunun kaçıncı elemanında olduğunu verecektir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
