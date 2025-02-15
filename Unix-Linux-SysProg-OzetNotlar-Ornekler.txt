@@ -69898,7 +69898,7 @@ int main(void)
     araçlar da vardır. Linux sistemlerinde en yaygın kullanılan iki araç "fdisk" ve "gparted" isimli araçlardır. fdisk komut 
     satırından kullanılabilen basit bir programdır. "gparted" ise GUI arayüzü ile görsel bir biçimde aynı işlemleri yapmaktadır. 
     "fdisk" temel bir araçtır. Dolayısıyla Linux sistemleri kurulduğunda büyük olasılıkla zaten kurulmuş olarak sisteminizde 
-    bulunuyor olacaktır. Ancak "gparted" programını aşağıdaki gibi siz kurmalısınız:
+    bulunuyor olacaktır. Ancak "gparted" programını Debian tabanlı sistemlerde aşağıdaki gibi siz kurmalısınız:
 
     $ sudo apt-get install gparted
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -69909,7 +69909,7 @@ int main(void)
 
 /*--------------------------------------------------------------------------------------------------------------------------
     Bu noktada Linux sistemlerindeki fdisk programının kullanımı üzerinde duracağız. Bu tür denemeleri loop aygıtları üzerinde 
-    yapmalısınız. fdisk kullanımını maddeler halinde açıklayalım.
+    yapmalısınız. fdisk kullanımını maddeler halinde açıklayalım:
 
     1) Hangi disk üzerinde işlem yapılacaksa o diske ilişkin aygıt dosyası fdisk programına komut satırı argümanı olarak 
     verilmelidir. Tabii disk aygıt dosyaları "root" kullanıcısına ilişkin olduğu için fdisk programı da genellikle "sudo" 
@@ -70084,8 +70084,8 @@ int main(void)
     Disk bölüm tablosunu yeniden okumak için ioctl() çağrılıyor.
     Disk bölümü tablosu yeniden okunamadı.: Geçersiz bağımsız değişken
 
-    Çekirdek hala eski tabloyu kullanıyor. Yeni tablo bir sonraki yeniden başlatma işleminden sonra ya da partprobe(8) veya kpartx(8)'i 
-    çalıştırdığınızda kullanılacak.
+    Çekirdek hala eski tabloyu kullanıyor. Yeni tablo bir sonraki yeniden başlatma işleminden sonra ya da partprobe(8) veya 
+    kpartx(8)'i çalıştırdığınızda kullanılacak.
     **************************************************************************************
 
     - Bir disk bölümünü silmek için "d" komutu kullanılmaktadır. Disk bölümlerini silerken dikkat ediniz.
@@ -70110,8 +70110,8 @@ int main(void)
     Aslında yukarıda yapılan işlemlerin sonucu olarak Disk Bölümleme Tablosu'ndaki iki giriş (32 byte) güncellenmiştir.
 
     5) fdisk programının başka komutları da vardır. Örneğin disk bölümlendirmesi yapıldıktan sonra bu bölümlendirme bilgileri 
-    "O" komutu ile bir dosyaya aktarılabilir. Sonra "I" komutu ile bu dosyadan yükleme yapılabilir. Böylece farklı diskler için
-    aynı işlemlerin daha kolay yapılması sağlanabilmektedir.
+    "O" komutu ile bir dosyaya aktarılabilir. Sonra "I" komutu ile bu dosyadan yükleme yapılabilir. Böylece farklı diskler 
+    için aynı işlemlerin daha kolay yapılması sağlanabilmektedir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -71153,7 +71153,93 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Bu bölümde Linux kaynak kodlarının derlenmesi ve sistemin yeni çeekirdekle açılması üzerinde duracağız. Çekirdek kodlarının
+    Bu bölümde Linux'taki sistem fonksiyonlarının nasıl çağrılacağı üzerinde duracağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Linux'ta her sistem fonksiyonunun bir numarası vardır. Linux çekirdeği sistem fonksiyonlarının başlangıç adreslerini 
+    bir gösterici dizisinde tutar. Bir sistem fonksiyonu çağrıldığında bu dizinin ilgi numaralı indeksindeki fonksiyonu 
+    çağırır. Tabii akış sistem fonksiyonuna geçirilmeden thread'in akışı da user moddan kernel moda geçirilmektedir. Intel 
+    sisteminde user moddan kernel moda geçiş 80H kesmesi yoluyla yapılmaktadır. Değişik sistemlerde bu işlemler değişik makine
+    komutlarıyla yapıldığı için "libc" kütüphanesi syscall isimli bir sarma fonksiyon bulundurmuştur. Bu fonksiyona programcı 
+    sistem fonksiyonunun numarasını ve parametrelerini girer. Fonksiyon sembolik makine dilinde yazılmış makine komutlarından 
+    oluşmaktadır. Böylece ilgili sistemde çağrım için gereken işlemler taşınabilir bir biçimde yapılabilmektedir. syscall
+    fonksiyonun prototipi şöyledir:
+
+    #include <unistd.h>
+
+    long syscall(long number, ...);
+
+    Fonksiyonun birinci parametresi sistem fonksiyonun numarasını almaktadır. Diğer parametreler ilgili sistem fonksiyonuna 
+    geçirilecek argümanları almaktadır. Fonksiyonun geri dönüş değeri sistem fonksiyonuna bağlı olarak değişebilmektedir. 
+    Pek çok sistem fonksiyonunda 0 başarı için kullanılmaktadır. Sistem fonksiyonlarının numaralarını Internet'te pek çok 
+    yerde bulabilirsiniz. Aynı zamanda bu numaralar <sys/syscall.h> başlık dosyasında SYS_xxx biçiminde define edilmiştir. 
+    Örneğin prosesi sonlandıran sys_exit isimli sistem fonksiyonun numarası 60'tır. Ancak biz bu numarayı kullanmak yerine 
+    SYS_exit ismini de kullanabiliriz. SYS_exit aşağıdaki gibi define edilmiştir:
+
+    #define SYS_exit        60  
+
+    Aşağıda sys_exit sistem fonksiyonunun syscall fonksiyonuyla çağrılmasına bir örnek verilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+int main(void)
+{
+    printf("running...\n");
+
+    syscall(SYS_exit, 0);
+
+    return 0;
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Daha önceden de belirttiğimiz gibi bazı POSIX fonksiyonları Linux'ta doğrudan belli bir sistem fonksiyonunu çağırmaktadır.
+    Örneğin open POSIX fonksiyonu Linux'ta doğrudan sys_open isimli sistem fonksiyonunu, read, write ve close POSIX fonksiyonları 
+    doğrudan sys_read, sys_write ve sys_close sistem fonksiyonlarını, exit POSIX fonksiyonu sys_exit sistem fonksiyonunu çağırmaktadır. 
+    GNU "libc" kütüphanesinde bazı sistem fonksiyonları için POSIX standartlarında olmayan sarma fonksiyonlar da bulundurulmuştur. 
+    Ancak bazı sistem fonksiyonlarını çağıran POSIX fonksiyonları da sarma fonksiyonlar da yoktur. Bu tür durumlarda ilgili 
+    sistem fonksiyonu numara belirtilerek syscall fonksiyonuyla çağrılabilir. 
+
+    Aşağıdaki örnekte openi read ve close POSIX fonkssiyonları yerine doğrudan Linux'taki sistem fonksiyonları çağrılmıştır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/syscall.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int main(void)
+{
+    int fd;
+    char buf[10];
+    long result;
+
+    if ((fd = syscall(SYS_open, "sample.c", O_RDONLY)) == -1) {
+        perror("SYS_open");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((result = syscall(SYS_read, fd, buf, 10)) == -1) {
+        perror("SYS_read");
+        exit(EXIT_FAILURE);
+    }
+    buf[result] = '\0';
+    puts(buf);
+
+    if ((result = syscall(SYS_close, fd)) == -1) {
+        perror("SYS_read");
+        exit(EXIT_FAILURE);
+    }
+    
+    return 0;
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Bu bölümde Linux kaynak kodlarının derlenmesi ve sistemin yeni çekirdekle açılması üzerinde duracağız. Çekirdek kodlarının
     derlenmesi tüm Linux sistemleri için aynı biçimde yapılmaktadır. Ancak sistemin yeni çekirdekle açılması kullanılan "boot 
     loader" programın ayarlarıyla ilgilidir. Bugün masaüstü bilgisayarlarında ağırlıklı olarak GRUB isimli boot lader 
     kullanılmaktadır. Biz burada bu nedenle sürecin GRUB'ta nasıl yürütüleceğini ele alacağız. Gömülü sistemlerde ise ağırlıklı 
@@ -71176,8 +71262,8 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Nasıl C'deki main fonksiyonuna komut satırı argümanları geçiriliyorsa işletim sistem sistemi çekirdeklerine de çeşitli 
-    biçimlerde parametreler geçirilebilmektedir. Böylece çekirdek belli bir konfigürasyonla işlev görecek biçimde başlatılabilmektedir.
+    Nasıl C'deki main fonksiyonuna komut satırı argümanları geçiriliyorsa işletim sistemi çekirdeklerine de çeşitli biçimlerde 
+    parametreler geçirilebilmektedir. Böylece çekirdek belli bir konfigürasyonla işlev görecek biçimde başlatılabilmektedir.
     Linux çekirdeğini önyükleyici yüklediğine göre çekirdek parametreleri de önyükleyici tarafından çekirdeğe aktarılmaktadır. 
     Linux'ta bu parametreler "grub" önyükleyicisinin başvurduğu dosyalarda belirtilmektedir. Grub önyükleyicisinin kullanımı
     biraz ayrıntılıdır. Ancak biz burada grub işlemlerini daha basit ve görsel biçimde yapabilmek için "grub-customizer" 
@@ -71187,33 +71273,34 @@ void exit_sys(const char *msg)
     $ sudo apt-get update
     $ sudo apt-get install grub-customizer
 
-    Pekiyi nedne işletim sistemini yüklemek için ayrı bir programa gereksinim duyulmuştur? Eskiden işletim sistemleri doğrudan
+    Pekiyi neden işletim sistemini yüklemek için ayrı bir programa gereksinim duyulmuştur? Eskiden işletim sistemleri doğrudan
     BIOS kodları tarafındna yüklenebiliyordu. Ancak zamanla işletim sistemleri parametreler alacak biçimde geliştirildi. 
     Önyükleyiciler birden fazla çekirdeğin bulunduğu durumlarda basit ayarlarla sistem yöneticisinin istediği çekirdekle 
     boot işlemini yapabilmektedir. Diskte birden fazla işletim sisteminin bulunduğu durumlarda sistemin istenilen bir işletim 
     sistemi tarafından boot edilmesini sağlayabilmektedir. Örneğin makinemizde hem Windows hem de Linux aynı anda bulunuyor 
     olabilir. Önyükleyicimiz bize bir menü çıkartıp hangi işletim sistemi ile boot işlemini yapmak istediğimizi sorabilir. 
-    Sskiden basit boot prosedürleri zamanla daha karmaşık hale gelmiştir. Önyükleyici programlara gereksinim duyulmaya başlanmıştır. 
+    Eskiden nispeten basit olan boot prosedürleri zamanla daha karmaşık hale gelmiştir. Önyükleyici programlara gereksinim 
+	duyulmaya başlanmıştır.  
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   Pekiyi nedenleri biz Linux çekirdeğini kaynak kodlardan yeniden derlemek isteyebiliriz? İşte bunun tipik nedenleri şunlar 
+   Pekiyi neden biz Linux çekirdeğini kaynak kodlardan yeniden derlemek isteyebiliriz? İşte bunun tipik nedenleri şunlar 
    olabilir:
 
-    - Bazı çekirdek modüllerinin ve aygıt sürücülerin çekirdek imajından çıkartılması ve dolayısıyla çekirdeğin küçültülmesi 
+    - Bazı çekirdek modüllerinin ve aygıt sürücülerinin çekirdek imajından çıkartılması ve dolayısıyla çekirdeğin küçültülmesi 
     için.
     - Yeni birtakım modüllerin ve aygıt sürücülerin çekirdek imajına eklenmesi için.
     - Çekirdeğe tamamen başka özelliklerin eklenmesi için.
     - Çekirdek üzerinde çekirdek parametreleriyle sağlanamayacak bazı konfigürasyon değişikliklerinin yapılabilmesi için.
     - Çekirdek kodlarında yapılan değişikliklerin etkin hale getirilmesi için.
-    - Çekirdeğe yama yapılması için.
+    - Çekirdeğe yama (patch) yapılması için.
     - Yeni çıkan çekirdek kodlarının kullanılabilir hale getirilmesi için.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Çekirdeğin derlenmesi için öncelikle çekirdek kaynak kodlarının derleme yapılacak bilgisayara indirilmesi gerekir. Pek 
+    Çekirdeğin derlenmesi için öncelikle çekirdek kaynak kodlarının derlemenin yapılacağı bilgisayara indirilmesi gerekir. Pek 
     çok dağıtım default durumda çekirdeğin kaynak kodlarını kurulum sırasında makineye çekmemektedir. Çekirdek kodları "kernel.org"
-    sitesinde bulundurulmaktadır. Tarayıcdan "kernel.org" sitesine girilip "pub/linux/kernel" dizinine geçildiğinde tüm yayınlanmış
+    sitesinde bulundurulmaktadır. Tarayıcdan "kernel.org" sitesine girerek "pub/linux/kernel" dizinine geçtiğinizde tüm yayınlanmış
     çekirdek kodlarını göreceksiniz. İndirmeyi tarayıcıdan doğrudan yapabilirsiniz. Eğer indirmeyi komut satırından "wget" 
     programıyla yapmak istiyorsanız aşağıdaki URL'yi kullanabilirsiniz:
 
@@ -71228,13 +71315,12 @@ void exit_sys(const char *msg)
 
     $ wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.1.tar.xz
    
-
-   Çekirdek kodları indirildikten sonra onun açılması gerekir. Açma işlemi tar komutuyla aşağıdaki gibi yapılabilir:
+   Çekirdek kodları indirildikten sonra onun açılması gerekir. Açma işlemi "tar" komutuyla aşağıdaki gibi yapılabilir:
 
     $ tar -xvJf linux-5.15.12.tar.xz
 
-    Debian tabanlı sistemlerde o anda makşnede yüklü olan mevcut çekirdeğin kaynak kodlarını indirmek için aşağıdaki komutu 
-    kullanabilirisiniz:
+    Debian tabanlı sistemlerde o anda makinede yüklü olan mevcut çekirdeğin kaynak kodlarını indirmek için aşağıdaki komutu 
+    kullanabilirsiniz:
 
     $ sudo apt-get install linux-source
 
@@ -71242,7 +71328,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Linux kaynak kodlarının verisyonlanması eskiden daha farklıydı. Cekirdeğin 2.6 versionundan sonra versiyon numaralandırma 
+    Linux kaynak kodlarının versiyonlanması eskiden daha farklıydı. Cekirdeğin 2.6 versiyonundan sonra versiyon numaralandırma 
     sistemi değiştirilmiştir. Eskiden (2.6 ve öncesinde) versiyon numaraları çok yavaş ilerletiliyordu. 2.6 sonrasındaki yeni 
     versiyonlamada versiyon numaraları daha hızlı ilerletilmeye başlanmıştır. Bugün kullanılan Linux versiyonları nokta ile 
     ayrılmış üç sayıdan oluşmaktadır:
@@ -71940,47 +72026,282 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+                                        196. Ders 07/02/2025 - Cuma
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    Şimdi de yeni bir sistem fonksiyonunu çekirdeğe eklemek isteyelim. Linux çekirdeğinde sistem fonksiyonlarının adresleri 
+    bir fonksiyon gösterici dizisinde tutulmaktadır. Bu gösterici dizisinin her elemanı bir sistem fonksiyonun adresini içerir. 
+    O halde çekirdeğe bir sistem fonksiyonu ekleyebilmek için sistem fonksiyonunu bir dosya içerisine yazmak ve bu tabloya 
+    o fonksiyonu gösteren bir giriş eklemek gerekir. Bunun yapılış biçimi Linux'un çeşitli versiyonlarında değiştirilmiştir. 
+    Aşağıda güncel bir versiyonda bu işlemin nasıl yapıldığına ilişkin bir örnek vereceğiz:
+
+    1) Sistem fonksiyonumuz "mysyscall" biçiminde isimlendirmiş olalım. Önce yine çekirdek kaynak kod ağacında uygun bir dizine
+    yine bir dosya eklemek gerekir. Bunun için en uygun dizin "kernel" dizinidir. Bu durumda sistem fonksiyonumuzu "kernel" 
+    dizini içerisinde "mysyscall.c" ismiyle yazabiliriz:
+
+    /* mysyscall.c */
+
+    #include <linux/kernel.h>
+    #include <linux/syscalls.h>
+    #include <linux/uaccess.h> 
+
+    SYSCALL_DEFINE0(mysyscall)
+    {
+        printk(KERN_INFO "My system call\n");
+
+        return 0;
+    }
+
+    Bundan sonra kernel dizini içerisindeki "Makefile" dosyasına aşağıdaki satırı ekleriz:
+
+    obj-y += mysyscall.o
+
+    2) Sistem fonksiyon tablosuna ilgili sistem fonksiyonu bir eleman olarak girilir. Sistem fonksiyon tablosu 
+    "arch/<platform>/syscall/xxx.tbl" dosyasında belirtilmektedir. 64 bit Linux sistemleri için bu dosya 
+    "arch/x86/entry/syscalls/syscall_64.tbl" biçimindedir. Ekleme bu dosyanın sonuna aşağıdaki gibi yapılabilir:
+
+    ......
+    544	x32	io_submit		compat_sys_io_submit
+    545	x32	execveat		compat_sys_execveat
+    546	x32	preadv2			compat_sys_preadv64v2
+    547	x32	pwritev2		compat_sys_pwritev64v2
+    # This is the end of the legacy x32 range.  Numbers 548 and above are
+    # not special and are not to be used for x32-specific syscalls.
+    548    common   mysyscall    sys_mysyscall
+
+    3)  Artık çekirdek aaşağıdaki gibi derlenebilir:
+
+    $ sudo make -j$(nproc)
+
+    4) Çekirdek modüllerini aşağıdaki gibi install edebiliriz:
+
+    $ sudo make modules_install
+
+    5) Çekirdeğin kendisini de şöyle install edebiliriz:
+
+    $ sudo make install
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    Sistem fonksiyonunu çekişrdeğe yerleştirip yeni çekirdekle makinemizi açtıktan sonra fonksiyonun tesitini aşağıdaki gibi 
+    yapabiliriz:
+
+    #include <stdio.h>
+    #include <sys/syscall.h>
+    #include <unistd.h>
+
+    #define SYS_mysyscall       548
+
+    int main(void)
+    {
+        printf("running...\n");
+
+        syscall(SYS_mysyscall);
+
+        return 0;
+    }
+
+    Bu programı derleyip çalıştırdıktan sonra "dmesg" yaptığımızda aşağıdaki gibi bir çıktı elde etmeliyiz:
+    
+    ....
+    file uses a different sequence number ID, rotating.
+    [  144.816248] warning: `ThreadPoolForeg' uses wireless extensions which will stop working for Wi-Fi 7 hardware; use nl80211
+    [  487.365691] My system call
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Her ne kadar sistem programlamanın doğrudan veritabanlarıyla bir ilgisi yoksa da C programcılarının yine de sistem programcıların
+    bazı durumlarda veritabanları oluşturup onları kullanması gerekebilmektedir. Bu bölümde C'den SQL kullanarak veritabanlarıyla 
+    nasıl işlem yapılacağı üzerinde duracağız. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Eskiden veritabanı işlemleri kütüphanelerle yapılıyordu. Daha sonra veritabanı işlemleri için özel programlar geliştirildi. 
+    Veritabanı işlemlerini ayrıntılı ve etkin bir biçimde gerçekleştiren yazılımlara "Veritabanı Yönetim Sistemleri (DBMS)"
+    denilmektedir. Günümüzde çeşitli firmalar ve kurumlar tarafından geliştirilmiş pek çok VTYS vardır. Bunların bazıları 
+    kapalı ve ücretli yazılımlardır. Bazıları ise açık kaynak kodlu ve ücretsiz yazılımlardır. En çok kullanılan VTYS yazılımları 
+    şunlardır:
+
+    - IBM DB2 (Dünyanın ilk VTYS'sidir.)
+    - Oracle (Oracle firmasının en önemli ürünü.)
+    - SQL Server (Microsoft firmaının VTYS'si.)
+    - MySQL (Açık kaynak kodlu, ancak Oracle firması satın aldı ve gelecekteki durumu tartışmalı.)
+    - MariaDB (Açık kaynak kodlu, MySQL Oracle yarafındna satın alınınca kapatılma tehlikesine karşı MySQL varyantı olarak 
+    devam ettirlmektedir.)
+    - PostgreSQL (Açık kaynak kodlu, son yıllarda geniş kesim tarafından kullanılan VTYS.)
+    - SQLite (Gerçek anlamda bir VTYS değil, VTYS'yi taklit eden mini bir kütüphane gibi. Bu tür yazılımlara "gömülü VTYS" de
+    denilmektedir.)
+    - Microsoft Access Jet Motoru (Bu da Microsoft'un gömülü bir VTYS sistemidir. Micsofot Access tarafından da kullanılmaktadır.)
+
+    Bir yazılımın VTYS olabilmesi için onun bazı gelişmiş özelliklere sahip olması gerekir:
+
+    1) VTYS'ler kullanıcılarına yüksek seviyeli bir çalışma modeli sunmaktadır.
+    
+    2) VTYS'ler genellikle dış dünyadan istekleri "SQL (Structured Query Language)" denilen dekleratif bir dille almaktadır. 
+    Yani programcı VTYS'ye iş yaptırmak için SQL denilen bir yüksek seviyeli dekleratif bir dil kullanmaktadır. VTYS SQL 
+    komutlarını alıp onları parse eder ve C ve C++ gibi dillerde yazılmış olan motor kısmı (engine) tarafından işlemler yapılır. 
+    SQL veritabanı işlemlerini yapan bir dil değildir. Programcı ile VTYS arasında yüksek seviyeli iletişim için kullanılan 
+    bir dildir. VTYS'lerin motor ısımları genellikle C ve C++ gibi sistem programlama dilleriyle yazılmaktadır. 
+
+    3) VTYS'ler pek çok yüksek seviyeli araçlara da sahiptir. Örneğin backup ve restore işlemlerini yapan araçlar her VTYS'de 
+    bulunmaktadır. 
+
+    4) VTYS'ler genellikle birden fazla kullanıcıya aynı anda hizmet verecek biçimde client-server mimarisine uygun biçimde
+    yazılmaktadır. Bunlara uzaktan erişilebilmekte ve aynı anda pek çok kullanıcı bunlara iş yaptırabilmektedir. 
+
+    5) VTYS'ler ileri derece güvenlik sunmaktadır. Bir kullanıcı başka bir kullanıcının bilgilerine erişememektedir. 
+
+    6) VTYS'ler yüksek miktarda kayıtlardan oluşan veritabanarı üzerinde etkin bir biçimde işlemler yapabilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Sistem programlama uygulamalarında bazen küçük veritabanalrının oluşturulması gerekebilmektedir. Bu tür durumlarda kapasiteli
+    VTYS'ler yerine tek bir dosyadan oluşan adeta bir kütüphane biçiminde yazılmış olan gömülü VTYS'lerden (embedded DBMS)
+    faydalanılmaktadır. Bunlar en çok kullanılanı SQLite denilen gömülü VTYS'dir. Örneğin bir tarayıcı yazdığımızı düşünelim. 
+    Son ziyaret edilen Web sayfalarının bir biçimde tarayıcdan çıkıldıktan sonra saklanması gerekir. İşte bu tür durumlarda 
+    SQLite gibi basit yapıda VTYS'ler tercih edilebilmektedir. Internet bağlantısı olmayan mobil cihazlarda da SQLite gibi 
+    gömülü VTYS'ler çokça kullanılmaktadır. Örneğin biz bir soket uygulaması yazmış olalım. Bu uygulama bir log tutacak olsun. 
+    Burada SQLServer, MySQL gibi büyük çaplı VTYS'ler yerine SQLite gibi bir gömülü VTYS'yi tercih edebiliriz. Gömülü VTYS'ler
+    büyük çağlı veritabanlarında iyi bir performans gösterememektedir. Bunlar daha ok küçük ve orta çaplı veritabanlarında 
+    kullanılmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    Veritabanı işlemleri için C'den ziyade yüksek seviyeli diller tercih edilmektedir. Örneğin Java, C#, Python gibi diller 
+    veritabanı işlemlerinde oldukça yaygın kullanılmaktadır. Benzer biçimde JavaScript de Web uygulamalarında veritabanları
+    üzerinde işlem yapmak için kullanılan dillerdendir. Günümüzde veritabanlarının en çok kullanıldığı uygulamalar Web 
+    uygulamalarıdır. Bir Web mağasına girdiğinizde oradaki bütün ürünler veritabanlarında tutulmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    VTYS'lerin client-server mimarisine uygun bir biçimde yazıldığını belirtmiştik. VTYS'lerle tipik çalışma şu biçimdedir:
+
+    1) Programcı "kullanıcı ismi" ve "parola" ile VTYS'ye bağlanır. Bu durumda programcı client durumunda VTYS ise server 
+    dumundadır. 
+
+    2) Programcı VTYS'ye yaptırmak istediği şeyleri SQL dilinde oluşturur ve VTYS'ye SQL komutlarını gönderir. 
+
+    3) VTYS bu SQL komutlarını parse eder ve istenilen işlemleri yapar, programcıya işlemin sonuçlarını iletir.
+
+    4) Programcı işi bittiğinde bağlantıyı kapatır.
+
+    Her ne kadar SQLite gibi Microsoft Access Jet Motoru gibi VTYS'ler aslında client-server çalışmıyor olsa da bunlar 
+    çalışma biçimi olarak geniş kapasiteli VTYS'leri taklit etmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    Veritabanları tasarım bakımından birkaç gruba ayrılmaktadır. Günümüzde en çok kullanılan veritabanı mimarisine "İlişkisel
+    Veritabanı (Relational Database) Mimarisi" denilmektedir. İlişkisel veritabanları "tablolardan (tables)" tablolar da 
+    sütun ve satırlardna oluşmaktadır. Örneğin biz öğrencilerin bilgilerini tutmak için bir veritabanı tablosu oluştururz. 
+    Bu tablo aşağıdaki görünümde olur:
+
+    Adı Soyadı      Numarası        Sınıfı      
+    ---------------------------------------
+    Ali Serçe       1234            3B
+    Güray Sönmez    6745            2C
+    Ayşe Er         6234            2B
+    ....
+
+    Tablolardaki sütunlara "alan (field)" satırlara ise "satır (row)" ya da "kayıt (record)" denilmektedir. MySQL, SQLServer, 
+    Oracle, SQLite gibi VTYS'ler ilişkissel veritabanı mimarisini kullanmaktadır. 
+
+    Hiyerarşik bilgileri (örneğin bir ağaç yapısını) tutmak için hiyerarşik veritabanı mimarileri kullanılabilmektedir. Son 15
+    senedir ismine "nosql" denilen ilişkisel olmayan ve özellikle metin tabanlı bilgiler üzerinde işlem yapan veritabanı 
+    mimarileri sıkça kullanılır hale gelmiştir. Ancak en yaygın kullanılan mimari ilişkisel veritabanı mimarisidir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    MyQL'i kurmak için tek yapılacak şey server programı http://dev.mysql.com/downloads/ sitesnden indirip yüklemektir. Kurulum 
+    oldukça basittir. Birtakım sorular default değerlerle geçilebilir. Ancak kurulum sırasında MySQL kurulum programı bizden 
+    “root” isimli yetkili kullanıcının parolasını istenecektir. Diğer Bu parola yetkili olarak VTYS'ye bağlanmak için gerekir. 
+    Server programın yanı sıra bir yönetim ekranı elde etmek için ayrıca "MySql Workbench" programı da kurulabilir. 
+
+    MySQL Linux sistemlerinde Debian paket yöneticisi ile aşağıdaki gibi basit bir biçimde kurulabilir:
+
+    $ sudo apt-get install mysql-server
+
+    Kütüphane dosyaları da şöyle indirilebilir:
+
+    sudo apt-get install libmysqlclient21
+
+    MySQL Workbench ise komut satırı yerine Web Sayfasından indirilerek kurululabilir. 
+
+    Yukarıda da belirttiğimiz gibi MySQL kısmen paralı hale getirilince bunun MariDB isimli bir klonu oluşturuldu. MariDB'nin
+    uzun vadede açık kaynak kod güvencesi olduğu için tercih edebilirsiniz. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    SQL paralı bir üründür. Fakat bunun da "Express Edition" isminde bedava bir sürümü vardır. Bu sürüm Microsoft'un sayfasından 
+    indirilip kurulabilir. Tıpkı MySQL'de olduğu gibi SQL Server'da da yönetim konsol programı da vardır. Buna "SQL Server 
+    Management Studio" denilmektedir. Bunun da indirilip kurulması tavsiye edilir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+   SQLite zaten tek bir DLL'den oluşmaktadır. Dolayısıyla aslında kurulumu diye bir durum söz konusu değildir. Fakat biz 
+   burada C için örnekler yaparken SQLite başlık dosyalarına ve SQLite DLL’inin import kütüphanesine sahip olmak zorundayız. 
+   Bunların nasıl elde edileceği sonraki konularda ele alınacaktır. SQLite yönetim konsolu olarak pek çok alternatif vardır. 
+   Bunlardan biri "FireFox Add On olarak çalışmaktadır. İkinci bir seçenek ise “SQLite Studio” aracıdır. Cross Platform olan 
+   bu araç ilgili web sayfasından indirilerek kurulabilir. Ya da daha genel "DBeaver" da tercih edilebilir. 
+
+   SQLite'ı Windows için aşağıdaki bağlantıdan indirebilirsiniz:
+
+   https://www.sqlite.org/download.html
+
+   Buradan indirilen zip dosyasının içerisinde bir tane ".DLL" dosyası bir ".DEF" dosyası bulunacaktır. Bu DLL'i PATH dizinlerinin
+   içerisine ya da uygulama dizinin içerisine çekebilirsiniz. Linux'ta SQLite şöyle indirilebilir:
+
+   $ sudo apt-get install sqlite
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    İlişkisel veritabanları tablolardan tablolar da sütunlardan (fields) oluşmaktadır. Tabii sütunların da veri türleri vardır. 
+    SQL Standratlarında standart bazı veri türleri belirtilmiştir. Ancak SQL VTYS'den VTYS'ye değişiklik gösterebilmektedir. 
+    Dolayısıyla her VTYS'nin SQL komutlarında bazı farklılıklar bulunabilmektedir. Biz burada bazı standart sütun türleri
+    üzerinde duracağız. Çalıştığınız VTYS'nin dokğmanlarından onlara özgü ayrıntıları elde edebilirsiniz. 
+
+    INTEGER: Tamsayısal bilgileri tutan bir türdür. İstenirse kaç digitlik sayıların tutulacağı da belirtilebilir.
+
+    INT: Tipik olarak 4 byte uzunluğunda işaretli tamsayı türüdür. (Örneğin bu tür C’deki int türü ile temsil edilebilir.)
+
+    SMALLINT: Tipik olarak 2 byte'lık işaretli tamsayı türüdür. (Örneğin bu tür C’deki short türü ile temsil edilebilir.)
+
+    BIGINT: Tipik olarak 8 byte uzunluğunda işaretli tamsayı türüdür. (Örneğin bu tür C’deki long long türü ile temsil 
+    edilebilir.)
+
+    FLOAT: Tipik olarak 4 byte'lık gerçek sayı türüdür. (Örneğin bu tür C’deki float  türü ile temsil edilebilir.)
+
+    DOUBLE: Tipik olarak 8 byte'lık gerçek sayı türüdür. (Örneğin bu tür C’deki double türü ile temsil edilebilir.)
+
+    TIME: Zaman bilgisini saklamak için kullanılan türdür. 
+
+    DATE: Tarih bilgisini saklamak için kullanılan türdür. 
+
+    CHAR(n): n karakterli yazıyı tutmak için kullanılan türdür. 
+
+    VARCHAR(n): En fazla n karakterli bir yazıyı tutmak için kullanılan türdür. 
+
+    TINYTEXT: Yazısal bilgileri tutmak için kullanılan türdür. (Tipik olarak 256 byte'a kadar)
+
+    TEXT: Yazısal bilgileri tutmak için kullanılan türdür. (Tipik olarak 64K'ya kadar)
+
+    LONGTEXT:  (Tipik olarak 4GB'ye byte'a kadar)
+
+    TINYBLOB: Binary bilgileri tutmak için kullanılan türdür. (Tipik olarak 256 byte'a kadar)
+
+    BLOB: Binary bilgileri tutmak için kullanılan türdür. (Tipik olarak 64K'ya kadar)
+
+    LONGBLOB:  Binary bilgileri tutmak için kullanılan türdür. (Tipik olarak 4GB'ye byte'a kadar)
+
+    Tablo sütunlarının türleri tablo yaratılırken belirlenmektedir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   
+    Şimdi de temel SQL komutlarını görelim. SQL bazı ayrıntıları olan dekleratif bir programlama dilidir. Komutlardan oluşmaktadır.
+    Biz burada temel SQL komutlarını ayrıntılarına girmeden ele alacağız.
+
+    SQL büyük jarf küçük harf duyarlılığı olmayan (case insensitive) bir dildir. Ancak geleneksel olarak anahtar sözcüklerin
+    büyük harflerle yazılması tercih edilmektedir. SQL komutlarının sonunda sonlandırıcı olarak ';' karakteri bulundurulmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
