@@ -13,7 +13,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 07/01/2025 - Salı
+                                            Son Güncelleme: 25/02/2025 - Salı
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
@@ -12165,9 +12165,18 @@ void exit_sys(const char *msg)
     $ sudo ip addr add 192.168.7.2/24 dev usb0
     $ sudo ip link set usb0 up
 
-    3) İnternete çıkış yapabilmesi için varsayılan gateway olarak host makine  aşağıdaki givi ayarlanabilir:
+    3) İnternete çıkış yapabilmesi için varsayılan gateway olarak host makine  aşağıdaki gibi ayarlanabilir:
 
     $ sudo ip route add default via 192.168.7.1
+
+    Bu işlemden sonra  "ip route show" komutunu uyguladığınızda aşağıdaki gibi bir satır görmeniz gerekir:
+
+    default via 192.168.7.1 dev usb0 
+
+    Eğer default gateway doğru atanmamışsa ve "ip route add default" komutundan "ip: RTNETLINK answers: File exists"
+    biçiminde bir hata mesajı alırsanız yanlış gateway adresini aşağıdaki gibi düzeltebilirsiniz:
+
+    $ sudo ip route replace default via 192.168.7.1 dev usb0
 
     Burada artık BBB'de host makinenın IP adresi 192.168.7.1 biçiminde BBB'deki USB arayüzünün IP adresi ise 192.168.7.2 
     biçiminde ayarlanmıştır. Yukarıdaki iki maddenin otomatik yapılması için "/etc/network/interfaces" dosyası aşağıdaki 
@@ -12249,9 +12258,9 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    Şimdi de yukarıda açıkladığımız host ve BBB'de yapılanlar otomatize edilebilir. BBB'deki sistemde "systemd" kullanılıyorsa 
-    (örneğin biz "debootstrap" ile Debian sistemi kurmuşsak) otomatize etmek için bir "servis birim (service unit)" dosyası 
-    oluşturabiliriz. Bu dosya şöyle olabilir:
+    Şimdi de BBB'de yapılması gerekenleri optomatize edelim. BBB'deki sistemde "systemd" kullanılıyorsa (örneğin biz "debootstrap" 
+    ile Debian sistemi kurmuşsak) otomatize etmek için bir "servis birim (service unit)" dosyası oluşturabiliriz. Bu dosya şöyle 
+    olabilir:
 
     [Unit]
     Description=USB connection
@@ -12273,7 +12282,7 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    Şimdi de Internet'i BusyBox ile oluşturduğumuz minimak kök dosya sistemindeki Linux'a bağlamaya çalışalım. Ancak öncelikle
+    Şimdi de Internet'i BusyBox ile oluşturduğumuz minimal kök dosya sistemindeki Linux'a bağlamaya çalışalım. Ancak öncelikle
     BusyBox'ta oluşturduğunuz kök dosya sisteminin ağ komutlarını içerip içermediğinden emin olmalısınız. Eğer bu kök dosya 
     sisteminde bu komutlar yoksa kök dosya sistemi bu komutları içerecek biçimde yeniden derlenmelidir. Bu seçenekler BusyBox'ın
     menuconfig menüsünde "Network Utilities" girişinde bulunmaktadır. 
@@ -12331,49 +12340,314 @@ void exit_sys(const char *msg)
 
     Bu giriş eklendiğinde artık açılış sırasında rcS script'inin yanı sıra "network" script'i de çalıştırılacaktır. Bu dosyaların 
     "x" hakkına sahip olması gerektiğini anımsayınız. Yukarıdaki scrip içeriğini "network" isimli sctipt dosyasına yazabiliriz:
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                    82. Ders 20/02/2025 - Perşembe
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bu bölümde geçici olarak Gömülü Linux sistemlerinin organize edilmesine yönelik konulardan uzaklaşıp kernel mod aygıt 
+    sürücülerin yazılması ve kullanılmaıs üzerinde duracağız. Sonra yeniden Linux sistemlerinin organize edilmesine ilişkin 
+    "buildroot" ve "yocto" gibi araçları inceleyeceğiz.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Giriş derslerinden de anımsayacağınız gibi modern Linux sistemleri işlemcilerin "korumalı mod" özelliklerini kullanıyordu. 
+    Bu sistemlerde çalışan programların (yani proseslerin) "kullanıcı modu (user mode)" ya da "çekirdek modu (kernel mode)" biçiminde
+    çalışma modları vardır. Normak bütün programlar kullanıcı modunda (user mode'da) çalışmaktadır. Ancak çekirdek kodları 
+    "çekirdek modunda (kernel mode)" çalışır. Kullanıcı modunda koruma mekanizması aktiftir. Dolayısıyla kullanıcı modunda çalışan 
+    programlar bellekte her yere erişemezler ve her maikne komutunu kullanamazlar. Halbuki çekirdek kodları koruma mekanizmasına 
+    takılmamaktadır. Yani çekirdek kodları bellekte her yere erişebilmeke ve her makine komutunu kullanabilmektedir. Daha önceden 
+    de gördüğümüz gibi kullanıcı modundaki sıradan programlar işletim sisteminin içerisindeki ismine "sistem fonksiyonları ya da 
+    sistem çağrıları" denilen özel fonksiyonları çağırabilmektedir. Kullanıcı modundaki programlar bir sistem fonksiyonunu çağırdığında
+    programın akışı sistem fonksiyonu çağrıldığı anda çekirdek moduna geçer, sistem fonksiyonu çekirdek modunda çalıştırılır, 
+    sonra sistem fonksiyonu bittiğinde programın akışı yenidne kullanıcı modune döner. Bunu şekilsel olarak şöyle gösterebilriz:
+
+    kullanıcı modunda çalışan sıradan program -----> sistem fonksiyonunu çağırıyor -----> programın akışı kullanıcı modunundan 
+    çekirdek moduna geçiliyor -----> ilgili sistem fonksiyonun kodları çalıştırılıyor -----> sistem fonksiyonun çalışması bitiyor
+    -----> programın akışı çekirdek modundan yeniden kullanıcı moduna geçiyor.
+
+    Kullanıcı modunda çalışan sıradan programlar sistem fonksiyonlarını genellikle doğrudan değil POSIX kütüphanesindeki POSIX
+    fonskiyonları yoluyla dolaylı bir biçimde çağırmaktadır. Yani programcı bir POSIX fonksiyonunu çağırdığında o POSIX fonksiyonu 
+    da bir sistem fonksiyonunu çağırabilmektedir. Tabii her POSIX fonksiyonun bir sistem fonksiyonunu çağırdığını söylemiyoruz. 
+    Önceki konularda çekirdeğe yeni sistem fonksiyonu eklerken de gördüğümüz gibi programcı isterse syscall isimli "libc" kütüphane
+    fonksiyonu ile numarasını belirterek de sistem fonksiyonlarını doğrudan çağırabilir. Tabii Linux'ta sistem fonksiyonlarının 
+    çağrılmasının belli bir yöntemi vardır. Bunun için makine dilinde bazı komutların kullanılması gerekmektedir. syscall fonksiyonu
+    bunu bizim için yapmaktadır. 
+
+    Linux çekirdeğinin içerisinde sistem fonksiyonlarının dışında binlerce fonksiyon vardır. Kullanıcı modunda çalışan normal 
+    programlar yalnızca sistem fonksiyonlarını çağırabilmektedir. 
+
+    Biz bir programı etkin kullanıcı id'si 0 olacak biçimde "sudo" ile çalıştırdığımızda program yine kullanıcı modunda çalışmaktadır. 
+    Bu "sudo" mekanizmasının bu konuyla bir ilgisi yoktur. Linux sistemlerinde kullanıcı id'leri bir kulalnıcının bir programının 
+    başka bir kulalnıcının bir dosyasına erişip erişememesi konusunda etki gstermektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    İşte çekirdeğin bir parçası biçiminde işlev gören çekirdek modunda çalışan özel programlara "çekirdek modülleri (kernel modules)
+    ve "aygıt sürücüler (device drivers)" denilmektedir. Çekirdek modülleri ya da aygıt sürücülerin en önemli özelliği özelliği 
+    bunların bellek ve komut koruma mekanizmasına takılmamalarıdır. Böylece biz kullanıcı modunda yapamayacağımız birtakım işlemleri 
+	çekirdek modülleri ve aygıt sürücüler oluşturarak yapabilmekteyiz. Aslında aygıt sürücülerin çekirdek modu yerine kullanıcı 
+	modunda çalıştığı işletim sistemleri de vardır. Bu tür çekirdek mimarilerine genel olarak "mikro çekirdek (micro kernel)" 
+	mimarileri denilmektedir. Ancak Linux ve Windows sistemleri büyük ölçüde "monolitik" bir yapıdadır. Fakat bu işletim sistemlerine 
+	de yavaş yavaş "kullanıcı modunda çalışan aygıt sürücüler" sokulmumaktadır.
+
+    Linux sistemlerinde "çekirdek modülü (kernel module)" ve "aygıt sürücü (device driver)" kavramları arasında bir fark vardır. 
+    Çekirdeğe yüklenen bütün kodlara "çekirdek modülü" denilmektedir. Eğer bir çekirdek modülü kulalnıcı modu ile ilişki kuruyorsa
+    ya da birtakım kesme gibi olaylara yanıt verecek biçimde yazılmışsa bunlara aygıt sürücü denilmektedir. Yani her aygıt sürücü 
+    bir çekirdek modülüdür ancak her çekirdek modülü bir aygıt sürücü değildir. 
+/*-----------------------------------------------------------------------------------------------------------------------------
     
+/*-----------------------------------------------------------------------------------------------------------------------------
+	Çekirdek modüllerinde ve aygıt sürücülerde her türlü fonksiyon kullanılamaz. Bunları yazabilmek için özel başlık dosyalarına 
+    ve ve amaç dosyalara gereksinim duyulmaktadır. Bu nedenle ilk yapılacak şey bu başlık dosyalarının ve kütüphanelerin ilgili 
+    sisteme yüklenmesidir.
+
+    Genellikle bir Linux sistemini yüklediğimizde zaten çekirdek modüllerini ve aygıt sürücüleri oluşturabilmek için gereken 
+    başlık dosyaları ve diğer gerekli öğeler zaten "/usr/src" dizini içerisindeki "linux-headers-$(uname -r)" dizininde yüklü 
+    biçimde bulunmaktadır. Ancak bunlar yüklü değilse Debian tabanlı sistemlerde bunları şöyle yükleyebilirsiniz:
+
+    $ sudo apt install linux-headers-$(uname -r)
+    
+    Tabii programcı o anda çalışılan çekirdeğin kodlarının hepsini de kendi makinesine indirmek isteyebilir. Bunun için aşağıdaki 
+    komut kullanılabilir:
+
+    $ sudo apt-get install linux-source
+
+    Bu indirmeler "/usr/src" dizinine yapılmaktadır. 
+    
+    Ayrıca "/lib/modules/$(uname -r)" isimli dizindeki "build" isimli dizin de çekirdek kaynak kodlarının bulunduğu dizine ya 
+	da aygıt sürücülerin derlenmesi için gereken öğelerin bulunduğu dizine (tipik olarak "linux-headers-$(uname -r)" dizinine) 
+    sembolik link yapılmış durumdadır. 
+
+    Biz daha önce çekirdeği derlerken "make modules_install" yaptığımızda çekirdek modülelrinin install edildiği yerde "build" 
+	isimli biri dizinin de oluşturulduğunu görmüştük. Bu "build" dizini aslında çekirdek kaynak kodlarına bir sembolik link 
+	oluşturmaktaydı. Yani "make modules_install" yapıldığında aslında aynı zamanda çekirdek modüllerinin ve aygıt sürücülerin 
+	derlenmesi ve link edilmesi için gerekli olan dosyalar da hedefe çekilmiş olmaktadır. 
 -----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bir çekirdek modülünde biz user mod için yazılmış kodları kullanamayız. Çünkü orası ayrı bir dünyadır. Ayrıca biz çekirdek 
+    modüllerinde çekirdek içerisindeki her fonksiyonu da kullanamayız. Yalnızca bazı fonksiyonları kullanabiliriz. Bunlara 
+    "çekirdek tarafından export edilmiş fonksiyonlar" denilmektedir. "Çekirdek tarafından export edilmiş fonksiyon" kavramıyla 
+    "sistem fonksiyonu" kavramının bir ilgisi yoktur. Sistem fonksiyonları kullanıcı modundan (user mode) çağrılmak üzere tasarlanmış 
+    ayrı bir grup fonksiyondur. Oysa çekirdek tarafından export edilmiş fonksiyonlar kullanıcı modundan çağrılamazlar. Yalnızca 
+    çekirdek modüllerinden çağrılabilirler. Buradan çıkan sonuç şudur: Bir çekirdek modülü yazılırken ancak çekirdeğim export 
+    ettiği fonksiyonlar ve nesneler kullanılabilmektedir. Tabii çekirdeğin kaynak kodları çok büyüktür ancak buradaki kısıtlı 
+    sayıda fonksiyon export edilmiştir. Benzer biçimde programcının oluşturduğu bir çekirdek modül içerisindeki belli fonksiyonları 
+    da programcı export edebilir. Bu durumda bu fonksiyonlar da başka çekirdek modüllerinden kullanılabilirler. O halde özetle:
+
+    1) Çekirdek modülleri yalnızca çekirdek içerisindeki export edilmiş fonksiyonları kullanabilir.
+    2) Kendi çekirdek modülümüzde biz de istediğimiz fonksiyonu export edebiliriz. Bu durumda bizim çekirdek modülümüz çekirdeğin
+    bir parçası haline geldiğine göre başka çekirdek modülleri de bizim export ettiğimiz bu fonksiyonları kullanabilir.
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Mademki çekirdek modülleri işletim sisteminin çekirdek kodlarındaki fonksiyonları ve nesneleri kullanabiliyor o zaman çekirdek 
+    modülleri o anda çalışılan çekirdeğin yapısına da bağlı durumdadır. Bu nedenle işletim sistemlerinde "çekirdek modülü yazmak" 
+    ya da "aygıt sürücü yazmak" biçiminde genel bir konu yoktur. Her işletim sisteminin çekirdek modül ve aygıt sürücü mimarisi 
+    diğerlerinden farklıdır. Dolayısıyla çekirdek modüllerinin ve aygıt sürücülerinin yazılması spesifik bir işletim sistemi için 
+    geçerli olabilecek platform oldukça bağımlı bir konudur. Hatta işletim sistemlerinde bazı versiyonlarda genel aygıt sürücü 
+    mimarisi bile değiştirilebilmektedir. Dolayısıyla bu tür durumlarda eski aygıt sürücüler yeni versiyonlarda, yenileri de eski 
+    versiyonlarda çalışamamaktadır. Örneğin Linux'ta çekirdek versiyonları arasında çekirdekteki export edilmiş bazı fonksiyonlar 
+    isim ya da parametrik yapı olarak değiştirilmiş durumdadır. Bu nedenle Linux çekirdeğinin belli bir versiyonu için yazılmış 
+    olan aygıt sürücüler başka bir versiyonunda geçersiz hale gelebilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Çekirdek modüllerinin ve aygıt sürücülerin yazımı için programcının çekirdek yapısını ana hatlarıyla bilmesi gerekmektedir. 
+    Çünkü bunları yazarken çekirdeğin içerisindeki çeşitli veri yapıları ve export edilmiş fonksiyonlar kullanılmaktadır. 
+    
+    Linux çekirdek modülleri ve aygıt sürücüleri hakkında yazılmış birkaç kitap vardır. Bunların en klasik olanı "Linux Device 
+    Drivers (3. Edition)" kitabıdır. Ancak bu kitaptaki bazı içerikler güncel çekirdeklerle uyumsuz hale gelmiştir. Bu konudaki 
+    resmi dokümanlar ise "kernel.org" sitesindeki "documentation" kısmında bulunmaktadır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bir çekirdek modülünü derlemek ve link etmek maalesef sanıldığından daha zordur. Her ne kadar çekirdek modülleri ELF object 
+    dosyaları biçimindeyse de bunlarda özel bazı "bölümler (sections)" bulunmaktadır. Dolayısıyla bu modüllerin derlenmesinde 
+    özel gcc seçenekleri devreye sokulmaktadır. Çekirdek modüllerinin link edilmeleri de bazı kütüphane dosyalarının devreye 
+    sokulmasıyla yapılmaktadır. Dolayısıyla bir çekirdek modülünün manuel biçimde "build edilmesi" için bazı ayrıntılı bilgilere 
+    gereksinim duyulmaktadır. İşte çekirdek modüllerinin build edilmesinde çekirdeğin KBuild sistemi devreye sokulmaktadır. Bu 
+    nedenle çekirdek modüllerinin build edilmesi için çekirdek kaynak kodlarındaki birtakım başlık dosyalarının ve Make dosyalarının 
+    build işleminin yapılacağı makinede bulunması gerekir. Biz yukarıda bu dosyalara "/lib/modules/$(uname -r)/build" dizini 
+    yoluyla erişilebileceğini belirtmiştik. Bu dizin aslında Linux kaynak kod ağacının bulunduğu dizini belirtmektedir. Ancak
+    yukarıda da belirttiğimiz gibi çekidek modüllerinin ve aygıt sürücülerin derlenmesi için Linux'ın tüm kaynak kodlarına
+    gerek yoktur. Yalnızca başlık dosyaları ve make dosyalarının bulunması yeterlidir.
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Çekirdek modülleri o anda çalışılan host sistem için derlenebileceği gibi gömülü bir sistem için de derlenebilir. Eğer derleme
+    gömülü sistem için yapılacaksa süphesiz çapraz derleyicilerin de ilgili sistemde kurulu olması gerekir. Yukarıda da belirttiğimiz 
+    gibi çekirdek modüllerinin derlenmesi için ilgili çekirdeğe yönelik başlık dosyaları ve çeşitli make dosyaları gibi 
+    bazı öğelerin de bulunuyor olması gerekir. Eğer derleme bir gömülü sistem için yapılacaksa o gömülü sistemdeki çekirdeğe 
+    ilişkin bu dosyalar da host makinede bulunuyor olmalıdır. Örneğin biz masaüstü bilgisayardaki Mint dağıtımında çalışıyor 
+    olalım. Bu sistemin kendisi için çekirdek modülü derleyeceksek zaten tüm gerkeli öğeler hazır bulunuyor olacaktır. Ancak biz 
+    bu akinede BBB için çekirdek modülü ve aygıt sürücü derlemesi yapacaksak çapraz derleyicimizin ve BBB'deki çekirdeğe yönelik 
+    temel başlık dosyalarının ve Make dosyalarının bulunuyor olamsı gerekecektir. Tabii BBB'deki çekirdek sürümüne kaynak kodları 
+    bu makineye çekerek bu gereksinimi karşılayabiliriz. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Masaüstü bir sistem için çekirdek modül derlemeinde kullanılabilecek minimal bir "Makefile" dosyası aşağıdaki gibi olabilir:
+
+    obj-m += generic.o 
+
+    all:
+        make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+    clean:
+        make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+    Burada önce "/lib/modules/$(uname -r)/build" dizinindeki "Makefile" dosyası çalıştırılmış ondan sonra çalışma bu yazdığımız 
+    make dosyasından devam ettirilmiştir. Özetle bu make dosyası aslında çekirdeğin buil sistemini kullanarak "generic.c" isimli 
+    dosyanın derlenmesini ve çekirdek modülü biçiminde link edilmesini sağlamaktadır. Tabii bu make dossyasını şöyle de düzenleyebiliriz:
+    
+    obj-m += generic.o 
+
+    KDIR := /lib/modules/$(shell uname -r)/build
+    PWD := $(shell pwd)
+
+    all:
+        make -C ${KDIR} M=${PWD} modules
+    clean:
+        make -C ${KDIR} M=${PWD} clean
+  
+    Çekirdek modülü birden fazla kaynak dosya kullanılarak oluşturulabilir. Bu durumda ilk satır şöyle oluşturulabilir:
+
+	obj-m += a.o b.o c.o...
+
+    Eğer bu dosyaları birden fazla satırda ayrı ayrı belirtirsek bu durumda birden fazla modül dosyası oluşturulur:
+    
+    obj-m += a.o
+    obj-m += b.o
+    obj-m += c.o
+    ...
+
+    Bizim oluşturduğumuz Makefile dosyasındaki "all" hedefine dikkat ediniz:
+
+    $ make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+
+    make programının -C seçeneği Makefile dosyasını aramadan önce bu seçeneğin argümanında belirtilen dizine geçiş yapmaktadır.
+    Dolayısıyla aslında yukarıdaki satırla "/lib/modules/$(shell uname -r)/build" dizinindeki Makefile dosyası çalıştırılacaktır.
+	Buradaki M=${PWD} derlenecek kaynak dosyaların o anda çalışılan dizinde aranacağını belirtmektedir. Böyşece çekirdeğin KBuild
+	sistemi yalnızca bizim dosyalarımızı derleyecektir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                    	83. Ders 25/02/2025 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+	Çekirdek modüllerini va aygıt sürücüleri derlerken iki noktaya dikkat etmelisiniz:
+
+	1) Kullandığınız çekirdek kodları hedef mekinenin çekirdek sürümüne uygun olmalıdır. Eğer bu koşul sağlanmazsa çekirdekler
+	arasında farklılıklar söz konusu olabileceği için derlenmiş olan çekirdek modül dosyası hedef sisteme başarılı bir biçimde
+	yüklenemeyebilir. Tabii Linux çekirdeğindeki değişiklikler daha önce yazılmış olan her çekirdek modülünü ve aygıt sürücüyü
+	geçersiz hale getirmemektedir. Örneğin minör numara değişikliklerinde genellikle bir sorun oluşmamaktadır. Ancak ne olursa 
+	olsun derleme yapılırken hedef sistemdeki çekirdeğe uygun kaynak dosyaların kullanılması şiddetle tavsiye edilmektedir. 
+	Örneğin biz 6.9.2 çekirdeğinde çalışan makine için aygıt sürücüsü yazacaksak derleme yaptığımız makinede kullanacağımız 
+	çekirdek kaynak kodlarının da bu 6.9.2 çekirdeğine ilişkin olması gerekir. Biz eski bir çekirdeğin kaynak kodlarıyla yeni 
+	bir çekirdek için aygıt süsürücü derlemeye çalışmamalıyız. Tabii eski bir veriyon kullanılarak derleme yapılırsa çoğu 
+	durumda bir sorun ortaya çıkmayabilecektir. Ancak sorunun ortaya çıkma olsılığı da vardır. 
+
+	2) Kullanılan araç zincirinin de (yani derleyici, linker gibi programların da) çekirdeğin derlenmiş olduğu sistemle uyumlu
+	olmasına dikkat ediniz. Eğer bu temel araçların versiyonlarında geçmişe doğru uyumu bpzabilecek değişiklikler söz konusuysa
+	yine derleme işlemi başarısız olabilir ya da çekirdek modülü yüklenirken sorun oluşabilir. Aslında çekirdeğin KBuild sistemi 
+	çekirdek konfigürasyon dosyası yoluyla bu kontrolü yapabilmektedir. Ancak bu kontrol bypass da edilebilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+	Pekiyi bir çekirdek modülünü ya da aygıt sürücüyü gömülü bir Linux sistemi için derlerken yukarıdaki iki madde dışında nelere 
+	dikkat etmemiz gerekir? Host makine genellikle Intel tabanlı hedef makine de ARM tabanlı olacaktır. O halde yine bir çapraz 
+	derleme işleminin yapılması gerekir. Çapraz derleme yaparken make işleminde yine CROSS_COMPILE çevre değişkeni set edilmelidir. 
+	Derlemenin yapıldığı kabulta yine çağran derleyicinin "bin" dizini için PATH çevre değişkeninin ayarlanmış olması gerekir. 
+	Ayrıca make işleminde ARCH çevre değişkeninin "arm" biçiminde ya da "arm64" biçiminde belirtilmiş olması gerekir. O halde 
+	çapraz derleme yapacak tipik bir Makefile dosyası şöyle olabilir:
+
+	CROSS_COMPILE = arm-none-linux-gnueabihf-
+	ARCH = arm
+
+	KDIR := /home/kaan/Study/EmbeddedLinux/KernelBuild/linux-6.6.32-ti-arm32-r4
+	PWD := $(shell pwd)
+
+	obj-m += $(file).o
+
+	all:
+		make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules
+	clean:
+		make -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) clean
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+	Şimdi en basit bir kernel modülü oluşturup bunu bir başlangıç noktası olarak kullanalım. Bu modülümüze "helloworld" ismini
+    verelim:
+
+    /* helloworld.c */
+
+    #include <linux/module.h>
+    #include <linux/kernel.h>
+
+    MODULE_LICENSE("GPL");
+
+    int init_module(void)
+    {
+        printk(KERN_INFO "Hello World...\n");
+
+        return 0;
+    }
+
+    void cleanup_module(void)
+    {
+        printk(KERN_INFO "Goodbye World...\n");
+    }
+
+    Bu kernel modül aşağıdaki gibi build edilebilir:
+
+    $ make file=helloworld"
+
+    Build işlemi bittiğinde kernel modül "helloworld.ko" dosyası biçiminde oluşturulacaktır. Burada "ko" uzantısı "kernel 
+    object" sözcüklerinden kısaltılmıştır.
+-----------------------------------------------------------------------------------------------------------------------------*/
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Modüller "modprobe" isimli programla da yüklenebilir. Ancak modprobe programı yüklenecek modülleri "/lib/modules/$(uname -r)"
+    dizininde aramaktadır. Dolayısıyla biz kendi derlediğimiz modülleri bu dizine yerleştirmemişsek yüklemeyi modprobe ile 
+    yapamayız. Ancak çekirdek derlenirken oluşturulmuş olan modüller bu dizinde olduğu için bunları modprobe ile yükleyebiliriz. 
+	modprobe programı yüklenecek aygıt sürücünün yalnızca ismini almaktadır. Çünkü zaten arama işlemini kendisi yapmaktadır. 
+	Örneğin:
+
+	$ modprobe g_ether
+
+	insmod programının yüklenecek aygıt sürücü dosyasının tüm yol ifadesini aldığına dikkat ediniz. modprobe programında dosyanın 
+	".ko" uzantısı da belirtilmemektedir. Halbuki insmod programında bu uazantının da belirtilmesi gerekmektedir. modprobe aslında 
+	"modules.dep" isimi bir dosyaya başvurmaktadır. Bu dosya çekirdek kaynak kodlarının kök dizininde çekirdek modülleri derlenirken 
+	oluşturulmaktadır. Bu dosya içerisinde bağımlılık bilgileri vardır. Bir çekirdek modülü yazılırken başka bir çekirdek modülünün 
+	içerisindeki fonksiyonlar kullanılmış olabilir. Bu durumda kullanan modülün yüklenmesi için önce onun kullandığı modülün 
+	yüklenmesi gerekir. İşte bu biçimde durum karmaşık bir hal alabilmektedir. "modules.dep" dosyası içerisinde bir modülün 
+	yüklenebilmesi için hangi modüllerin de yüklenmesi gerektiği bilgileri bulunmaktadır. Eğer biz kendi çekirdek modülümüzün de 
+	modprobe ile yüklenmesini istiyorsak önce onu "/lib/modules/$(uname -r)/kernel" dizininin içerisindeki dizinlerden birine yerleştirip 
+	sonra bu "modules.dep" dosyasının güncllenmesini sağlamamız gerekir. Bu işlem "depmod" programıyla "-a" seçeneği kullanılarak 
+	yapılmaktadır:
+
+	$ sudo depmod -a
+
+	Kendi çekirdek modülünüzü ya da aygıt sürücünüzü örneğin "/lib/modules/$(uname -r)/kernel/drivers/misc" dizinine yerleştirebilirsiniz.
+	Tabii aygıt sürücü geliştirirken ikide bir modülü buraya yerleştirmenin bir anlamı yoktur. Bu nedenle geliştirme aşamasında 
+	genellikle "insmod" programı kullanılmaktadır. 
+
+	modprobe ile yüklenen aygıt sürücü "modeprobe -r" ile boşaltılabilir. Örneğin:
+
+	$ modprobe -r g_ether
+
+	Tabii boşaltım sırasında yine eğer aygıt sürünün bağımlı olduğu çekirdek modülleri başka modüller tarafından kullanılmıyorsa
+	onlar da çekirdekten çıkartılacaktır.
+-----------------------------------------------------------------------------------------------------------------------------*/
+<BURADA KALDIK>
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-  
------------------------------------------------------------------------------------------------------------------------------*/
 
------------------------------------------------------------------------------------------------------------------------------*/
 
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-   
------------------------------------------------------------------------------------------------------------------------------*/
-  
-/*-----------------------------------------------------------------------------------------------------------------------------
-  
------------------------------------------------------------------------------------------------------------------------------*/
-  
-/*-----------------------------------------------------------------------------------------------------------------------------
-  
------------------------------------------------------------------------------------------------------------------------------*/
-  
-/*-----------------------------------------------------------------------------------------------------------------------------
-  
------------------------------------------------------------------------------------------------------------------------------*/
-  
-/*-----------------------------------------------------------------------------------------------------------------------------
-  
------------------------------------------------------------------------------------------------------------------------------*/
-  
-/*-----------------------------------------------------------------------------------------------------------------------------
-  
------------------------------------------------------------------------------------------------------------------------------*/
-  
-/*-----------------------------------------------------------------------------------------------------------------------------
-  
 -----------------------------------------------------------------------------------------------------------------------------*/
   
 
