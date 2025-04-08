@@ -11,7 +11,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                        Son Güncelleme: 27/10/2023 - Cuma 
+                                        Son Güncelleme: 08/04/2023 - Salı 
 
 #------------------------------------------------------------------------------------------------------------------------------------
                                                     1. Ders 23/02/2025 - Pazar
@@ -2599,25 +2599,36 @@ s
     Cursor nesnesi bir kez dolaşıldıktan sonra yeniden dolaşılamaz. Çünkü artık dolaşımın sonuna gelinmiştir. Cursor nesnesi ile 
     dolaşmak yerine fetchone, fatchmany ya da fetchall metotlarını kullanmak çoğu kez daha uygun olur. 
 #------------------------------------------------------------------------------------------------------------------------------------
-    <BURADA KALDIK>
-#------------------------------------------------------------------------------------------------------------------------------------
-    Programcı birden fazla Cursor nesnesi ile çalışabilir. Connection sınıfının cursor metodu her çağrıldığında yeni bir Cursor nesnesi elde 
-    edilmektedir. Aslında execute metodu (executemany ve executescript metotları da) Cursor nesnesinin kendisine geri dönmektedir. Aşağıdaki gibi bir döngü 
-    geçerlidir:
 
-     for name, no, school_id in conn.cursor().execute("SELECT * FROM student"):
+#------------------------------------------------------------------------------------------------------------------------------------
+                                            10. Ders 06/04/2025 - Pazar
+#------------------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------------------
+    Bir Cursor nesnesi kullanıldıktan sonra Cursor sınıfının close metodu ile onun tuttuğu kaynaklar boşaltılıp kapatılabilir. Ancak 
+    açıkça kapatma yapılmadığı durumda Cursor nesnesi çöp durumuna geldiğinde sınıfın __del__ metodu yoluyla zaten nesnenin kaynakları
+    boşaltılıp kapatma işlemi yapılmaktadır. Dolayısıyla çoğu durumda Cursor nesnesinin kapatılmaması bir soruna yol açmamaktadır. Cursor 
+    nesneleri "bağlam yönetim protokolüne (resource management protocol)" uymamaktadır. Dolayısıyla Cursor nesnelerini with deyimi ile 
+    kullanamayız. 
+    
+    Programcı birden fazla Cursor nesnesi ile çalışabilir. Connection sınıfının cursor metodu her çağrıldığında yeni bir Cursor nesnesi 
+    elde edilmektedir. Aslında execute metodu (executemany ve executescript metotları da) Cursor nesnesinin kendisine geri dönmektedir. 
+    Aşağıdaki gibi bir döngü geçerlidir:
+
+    for name, no, school_id in conn.cursor().execute("SELECT * FROM student"):
         print(name, no, school_id)
 
-    Burada conn.cursor() çağrısı bize bir Cursor nesnesi verir. Sonra o nesne ile execute metodunu çağırdığımızda Cursor nesnesinin yine 
-    kendisini elde ederiz. İşte biz de yukarıdaki örnekte bu Cursor nesnesini dolaşmış olmaktayız. Pekiyi yaratılan Cursor nesneleri birtakım bilgiler
-    tuttuğuna göre bunların yok edilmesi nasıl olmaktadır? Cursor nesneleri de aslında close edilebilmektedir. Ancak programcılar bu işlemi 
-    genellikle yapmazlar. Çöp toplayıcı zaten __del__ metodunda close işlemini yapmaktadır. 
+    Burada conn.cursor() çağrısı bize bir Cursor nesnesi verir. Sonra o nesne ile execute metodunu çağırdığımızda Cursor nesnesinin 
+    yine kendisini elde ederiz. İşte biz de yukarıdaki örnekte bu Cursor nesnesini dolaşmış olmaktayız. 
 #------------------------------------------------------------------------------------------------------------------------------------
     
 #------------------------------------------------------------------------------------------------------------------------------------
-     INSERT, UPDATE, DELETE işlemleri sonucunda bu işlemden etkilenen kayıt sayısı Cursor sınıfının rowcount isimli örnek özniteliğinden
-     elde edilebilmektedir. Örneğin biz DELETE komutu ile bir grup kaydı silmişsek rowcount bize silinen kayıtların sayısını verir. 
-     Aşağıdaki örnekte biz veritabanına 1 kayıt insert ediyoruz. Dolayısıyla rowcount bize 1 değerini verecektir.                                           
+    INSERT, UPDATE, DELETE işlemleri sonucunda bu işlemlerden etkilenen kayıt sayısı Cursor sınıfının rowcount isimli örnek özniteliğinden
+    elde edilebilmektedir. Örneğin biz DELETE komutu ile bir grup kaydı silmişsek rowcount bize silinen kayıtların sayısını verir. 
+    rowcount örnek özniteliği SELECT komutu uygulandığında set edilmemektedir. Yani biz SEELCT edilen satırların sayısını rowcount ile
+    elde edemeyiz. 
+    
+    Aşağıdaki örnekte biz veritabanına 1 kayıt insert ediyoruz. Dolayısıyla rowcount bize 1 değerini verecektir.                                           
 #------------------------------------------------------------------------------------------------------------------------------------
 
 import sqlite3
@@ -2628,62 +2639,107 @@ try:
         cur.execute("INSERT INTO student(student_no, student_name, school_id) VALUES(2145, 'Fehmi Özışık', 2)")
         print(cur.rowcount)     # 1
         conn.commit()
-            
 except sqlite3.Error as e:
     print(e)
   
 #------------------------------------------------------------------------------------------------------------------------------------
-    Cursor sınıfının connection isimli örnek özniteliği bize o Cursor nesnesinin yaratıldığı connection nesnesini vermektedir. Bu sayede 
-    eğer elimizde bir Cursor nesnesi varsa biz connection nesnesini de elde edebiliriz.                                      
+    Cursor sınıfının connection isimli örnek özniteliği bize o Cursor nesnesinin yaratıldığı connection nesnesini vermektedir. Bu 
+    sayede eğer elimizde bir Cursor nesnesi varsa biz connection nesnesini de elde edebiliriz. Böylece bizim bir fonksiyona hem Cursor 
+    nesnesini hem de Connection nesnesini paramete olarak geçirmemize gerek kalmaz. Zaten Cursor nesnesinden hareketle Connection 
+    nesnesini elde edebiliriz. 
 #------------------------------------------------------------------------------------------------------------------------------------
+
+import sqlite3
+
+def insert_record(cur, student_no, student_name, school_id):
+    sqlcmd = f"INSERT INTO student(student_no, student_name, school_id) VALUES({student_no}, '{student_name}', {school_id})"
+    cur.execute(sqlcmd)
+    cur.connection.commit()
+
+try:
+    with sqlite3.connect('school.sqlite') as conn:
+        cur = conn.cursor()       
+        
+        student_no = int(input('No:'))
+        student_name = input('Adı Soyadı:')
+        school_id = int(input('School Id:'))
+        
+        insert_record(cur,  student_no, student_name, school_id)
+    
+except sqlite3.Error as e:
+    print(e)
+except Exception as e:
+    print(e)
 
 #------------------------------------------------------------------------------------------------------------------------------------
     Birden fazla tablo ile ilgili INSERT işlemleri yapılırken dikkatli olmak gerekir. Örneğin "student" tablosunun bir sütunu "school_id"
     biçiminde olsun. Bu sütunun da "school" tablosunun bilgilerine erişmek için "foreign key" olarak kullanıldığını düşünelim. Biz şimdi 
-    bir öğrenci INSERT ederken school tablosunda olmayan bir school_id girmemeliyiz. Bu tür kontoller şüphsiz manuel biçimde school tablosu 
-    sorgulanarak yapılabilir. Ancak VTYS'ler bu tür işlemleri kendi içlerinde yapabilmektedir. Bunlara "yabancı anahtar kısıtları (foreign key constraints)" 
-    denilmektedir. Yabancı anahtar kısıtları tablo yaratılırken CREATE TABLE komutunda komutun sonunda belirtilmektedir. VYS'ler arasında bu konuda 
-    farklılıklar bulunmaktadır.Örneğin SQLite'ta CREATE TABLE komutunda komutun sonunda aşağıaki gibi kısıt girilebilir:
+    bir öğrenciyi INSERT ederken school tablosunda olmayan bir school_id girmemeliyiz. Bu tür kontoller şüphesiz manuel biçimde school 
+    tablosu sorgulanarak yapılabilir. Ancak VTYS'ler bu tür işlemleri kendi içlerinde yapabilmektedir. Bunlara "yabancı anahtar kısıtları
+    (foreign key constraints)" denilmektedir. Yabancı anahtar kısıtları tablo yaratılırken CREATE TABLE komutunda komutun sonunda belirtilmektedir. 
+    VTYS'ler arasında bu konuda farklılıklar bulunmaktadır. Örneğin SQLite'ta CREATE TABLE komutunda komutunun sonunda aşağıaki gibi kısıt 
+    girilebilir:
 
     CREATE TABLE student (
         .....
-        FOREIGN KEY (school_id) REFERENCES school (school_id) 
+        FOREIGN KEY (school_id) REFERENCES school(school_id) 
     )
 
+    Burada student tablosunaki school_id sütunu scool tablosundaki school_id ütunu ile foreign key temelinde ilişkilendirilmiştir. 
+    Artık biz bir örenciyi eklerken school tablosunda olmayan bir scool_id girersek işlme başarısızlıkla sonuçlanacaktır.
 #------------------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------------------
     Bazı tablolarda bazı sütunlar "yabancı anahtar (foreign key)" durumundadır. Öğrenğin school tablosunun school_id elemanı hem PRIMARY KEY 
     durumundadır hem de student tablosu için FOREIGN KEY durumundadır. school tablosuna bir okul eklerken ekleyen kişinin school_id vermesi 
-    zor bir kullanımdır. İşte bu tür durumlarda ilgili sütuna AUTOINCREMENT özelliği verilebilmektedir. AUTO INCREMENT bir sütun söz konusu olduğunda
-    eğer INSERT işleminde bu sütun belirtilmezse bu durumda VTYS genellikle en büyük numaranın bir fazlasını almaktadır. SQLite'ta aslında PRIMARY KEY
-    olan tamsayı alanları otomatik AUTOINCREMENT durumdadır. Ancak uygulamacı AUTOINCREMENT belirlemesini yine yapabilir.                                            
+    zor bir kullanımdır. İşte bu tür durumlarda anımsanacağı gibi ilgili sütuna AUTOINCREMENT özelliği verilebilmektedir. AUTO INCREMENT 
+    bir sütun söz konusu olduğunda eğer INSERT işleminde bu sütun belirtilmezse bu durumda VTYS en büyük numaranın bir fazlasını almaktadır. 
+    SQLite'ta aslında PRIMARY KEY olan tamsayı alanları otomatik AUTOINCREMENT durumdadır. Ancak uygulamacı AUTOINCREMENT belirlemesini 
+    yine yapabilir.                                            
 #------------------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------------------
-    Cursor sınıfının commit metodu veritabaı üzerinde yapılan değişikliklerin atomik bir biçimde veritabanına yansıtılmasını sağlamaktadır. 
-    Bir kaydın veritabanına insert edilmesi sırasında aslında bu kayıt insert etme işlemi birden fazla tabloya INSERT INTO komutlarıyla
-    yapılabilmektedir. Örneğin:
+    Bazen veritabanı üzerinde birbirleriyle ilişkili olan işlemler yapılıyor olabilir. Bu tür işlemlerin "ya hep ya hiç" biçiminde 
+    gereçekleştirilmesi gerelebilmektedir. İşte VTYS'lerde "bir grup eylemin sanki tek bir eylemmiş gibi peşi sıra gerçekleştirilmesine 
+    "transaction" denilmektedir. Örneğin bir grup bilginin birbirleriyle tutarlı bir biçimde üç farklı tabloya insert edilmek istendiğini
+    düşünelim. Biz bu üç insert işlemi başarılıysa en sonunda commit yaparak bu işlemlerin veritabanına yansıtılmasını isteriz. Örneğin:
 
     INSERT INTO ...
     INSERT INTO ...
     INSERT INTO ...
     COMMIT
 
-    Pekiyi bu işlemlerin herhangi birinde bir sorun olsa ne olacaktır? Genel olarak bu tür sorunlarda exception oluşaacağı için akış commit 
-    metodunu görmeyecektir. Dolayısıyla değişikliklerin hiçbiri veritabanına yansıtılmayacaktır. Peki exception'a yol açan önceki INSERT INTO işlemleri 
-    ne olacaktır? İşte o işlemler ilk commit işleminde yapılacağı için onların "geri alınması" gerekmektedir. Bu geri alma işlemi Cursor sınıfının rollback
-    isimli metoduyla yapılmaktadır. Eğer rollback metodu çağrıldığında hiçbir transaction içerisinde bulunulmuyorsa metodun bir etkisi olmaz. 
+    Pekiyi bu işlemlerin herhangi birinde bir sorun çıkarsa ne olacaktır? Genel olarak bu tür sorunlarda exception oluşacağı için akış 
+    commit işlemini görmeyecektir. Dolayısıyla değişikliklerin hiçbiri veritabanına yansıtılmayacaktır. Ancak exception'a yol açmayan 
+    önceki INSERT INTO işlemleri eğer geri alınmazsa ilk commit işleminde veritabanına yansıtılır ki bunun sonucunda ilgili bilgi 
+    tutarsız bir biçimde tablolara eklenmiş olur. İşte peşi sıra gerçekleştirilen bir grup işlemde bir işlem başarısız olduğunda önceki 
+    başarılı olan işlemlerin de geri alınmasına "rollback" denilmektedir. Rollback işlemi Connection sınıfının rollback isimli metoduyla 
+    yapılmaktadır. rollback metodunun self parametresinin dışında parametresi yoktur. Eğer rollback metodu çağrıldığında hiçbir transaction 
+    içerisinde bulunulmuyorsa metodun bir etkisi olmaz. 
 
-    VTYS'lerde yukarıdaki gibi bir grup komutun sanki tek komutmuş gibi "atomik" bir biçimde işletilmesine "transaction" denilmektedir. 
-    Eskiden VTYS'ler transcation işlemlerini desteklemiyordu. Sonra VTYS'ler bu özelliklere sahip oldular. Bugün SQLite da dahil olmak üzere 
-    VTYS'ler "transaction" işlemlerini desteklemektedir. Pek çok VTYS'de transaction işlemleri SQL ile de desteklenmektedir. Tipik olarak transaction
-    BEGIN gibi bir SQL komutuyla başlatılır. Eğer bir sorun oluşmazsa COMMIT işlemi sorun oluşursa ROLLBACK işlemi yapılır. 
+    Yukarıda da belirttiğimiz gibi VTYS'lerde bir grup komutun sanki tek komutmuş gibi "atomik" olarak işletilmesine "transaction" 
+    denilmektedir. Eskiden VTYS'ler transcation işlemlerini desteklemiyordu. Sonra VTYS'ler bu özelliklere sahip oldular. Bugün SQLite da 
+    dahil olmak üzere VTYS'lerin hemen hepsi "transaction" işlemlerini desteklemektedir. Pek çok VTYS'de transaction işlemleri SQL ile 
+    de desteklenmektedir. Tipik olarak transaction BEGIN ya da BEGIN TRANSACTION gibi bir SQL komutuyla başlatılır. Eğer bir sorun oluşmazsa 
+    COMMIT işlemi sorun oluşursa ROLLBACK işlemi yapılır. Örneğin:
 
-    Python'da biz genel olarak transaction'ları SQL komutlarıyla değil metotlarla oluşutururuz. Cursor sınıfının "execute" ve "executemany" 
-    "executescript" isimli metotları eğer bir transaction başlatılmamışsa otomatik olarak transaction'ı başlatılırlar. Yani bizim transaction'ı 
-    başlatmak için Python programcısı olarak SQL komutu kullanmamıza ya da özel bir işlem yapmamıza gerek yoktur. Bu durumda tipik bir transaction 
-    şöyle yürütülmelidir:
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        INSERT INTO tablo_adı (kolon1, kolon2) VALUES (değer1, değer2);
+        INSERT INTO tablo_adı (kolon1, kolon2) VALUES (değer3, değer4);
+        INSERT INTO tablo_adı (kolon1, kolon2) VALUES (değer5, değer6);
+        COMMIT;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK;
+    END CATCH;
+
+    SQL'deki transaction komutları VTYS'den VTYS'ye farklılıklar gösterebilmektedir. 
+
+    Python'da biz çoğu kez transaction'ları SQL komutlarıyla değil metotlarla oluşutururuz. Cursor sınıfının "execute" ve "executemany" 
+    isimli metotları eğer bir transaction başlatılmamışsa otomatik olarak transaction'ı başlatılırlar. Yani bizim transaction'ı başlatmak 
+    için Python programcısı olarak SQL komutu kullanmamıza ya da özel bir işlem yapmamıza gerek yoktur. Bu durumda tipik bir transaction 
+    Python'da şöyle yürütülmelidir:
 
      try:
         cur.execute(...)
@@ -2691,15 +2747,14 @@ except sqlite3.Error as e:
         cur.execute(...)
         cur.commit()
     except sqlite3.Error as e:
-        cur.rollback()
+        conn.rollback()
+
+    Özel bir durum olarak execute işleminde eğer SQL SELECT komutu uygulanmışsa bu durumda transcation otomatik başlatılmamaktadır. 
 
     Transaction kavramı ve rollback işlemi birden fazla INSERT, UPDATE ve DELETE komutlarının peşi sıra geldiği durumlarda önemli olmaktadır. 
-    Yoksa tek bir INSERT, UPDATE ya da DELETE komutu için rollback yapmaya gerek yoktur. Rollback işlemi bir grup peşi sıra yapılan işlemin bir tanesi 
-    başarısız ise onların hiçbirini yapmamayı sağlamaktadır. commit işlemi ise onların hepsini tek bir işlemmiş gibi atomik yapmayı sağlar.    
-#------------------------------------------------------------------------------------------------------------------------------------
- 
-#------------------------------------------------------------------------------------------------------------------------------------
-                                                          10. Ders 11/01/2023 - Çarşamba
+    Yoksa tek bir INSERT, UPDATE ya da DELETE komutu için rollback uygulamaya gerek yoktur. Yukarıda da beirttiğimiz gibi rollback işlemi 
+    bir grup peşi sıra yapılan işlemin bir tanesi başarısız ise onların hiçbirini yapmamayı sağlamaktadır. commit işlemi ise onların 
+    hepsini tek bir işlemmiş gibi atomik yapmayı sağlar.    
 #------------------------------------------------------------------------------------------------------------------------------------
  
 #------------------------------------------------------------------------------------------------------------------------------------
@@ -2711,23 +2766,73 @@ except sqlite3.Error as e:
         CREATE TABLE school (school_id INTEGER PRIMARY KEY AUTOINCREMENT, school_name TEXT(64), school_type TEXT(64));
         CREATE TABLE student(student_no INTEGER, student_name VARCHAR(64), school_id	INTEGER, 
                 FOREIGN KEY("school_id") REFERENCES "school"("school_id"), PRIMARY KEY("student_no" AUTOINCREMENT));    
-    """)                                              
+    """)             
+
+    Biz executescript metodu otomatik transaction başlatmamaktadır. Eğer bu metot ile transcation yapılacaksa SQL komutunun içerisine 
+    transaction'ı başlatan BEGIN (ya da BEGIN TRANSACTION) komutu eklenmelidr. Örneğin:
+
+    cur.executescript("""
+        BEGIN;
+        CREATE TABLE person(firstname, lastname, age);
+        CREATE TABLE book(title, author, published);
+        CREATE TABLE publisher(name, address);
+        COMMIT;
+    """)      
+
+    Burada biz üç farklı tablo yaratmak istedik. Eğer bu üç tablonun hepsi yaratılırsa SQL içerisinde commit işlemi yapılmıştır. 
+    Eğer burada bu komutlardan herhangi birinde bir sorun oluşursa bu durumda exception fırlatılır biz de bu exception içerisinde 
+    rollback yapabiliriz. Örneğin:
+
+    try:
+        cur.executescript("""
+        BEGIN;
+        CREATE TABLE person(firstname, lastname, age);
+        CREATE TABLE book(title, author, published);
+        CREATE TABLE publisher(name, address);
+        COMMIT;
+    """)      
+    except sqlite3.Error as e:
+        conn.rollback()
+
+    Tabii yukarıda da belirttiğimiz gibi execute, executemany ve exceutescript metotları zaten otomatik trnsaction oluşturmaktadır. 
+    Python programcıları da genellikle commit ve rollback gibi işlemleri SQL komutlarının içerisinde değil metot çağrılarıyla 
+    yapmaktadır. 
 #------------------------------------------------------------------------------------------------------------------------------------
 
+import sqlite3
+
+try:
+    with sqlite3.connect('test.sqlite') as conn:
+        cur = conn.cursor()       
+        cur.executescript("""
+          CREATE TABLE person(person_id INTEGER PRIMARYKEY AUTO_INCREMENT person_name VARCHAR(20), person_no INTEGER);
+          CREATE TABLE book(book_id INTEGER PRIMARYKEY AUTO_INCREMENT book_title VARCHAR(128), book_author VARCHAR(128));
+          CREATE TABLE WRONG_COMMAND publisher(name, address);
+          """)               
+except sqlite3.Error as e:
+    conn.rollback()
+    print(e)
+except Exception as e:
+    print(e)
+
 #------------------------------------------------------------------------------------------------------------------------------------
-    Bir uygulamada eğer veritabanı zaten yoksa onu yaratan kodlar da uygulamanın içerisinde bulunabilir. Yukarıda da belirttiğimiz gibi 
-    connect isimli fonksiyon SQLite'ta eğer veribanı dosyası varsa olanı açmakta yoksa içi boş olarak sıfırdan yaratmaktadır. Veritabanı 
-    tabloları yaratılırken eğer tablo zaten varsa exception oluşur. Ancak CREATE TABLE komutuna IF NOT EXISTS cümleceği eklenirse eğer tablo 
-    varsa komut etki göstermez ancak tablo yoksa yaratılır. Örneğin:
+    Bir uygulamada eğer veritabanı zaten yoksa onu yaratan kodlar da uygulamanın içerisinde bulundurulabilir. Yukarıda da belirttiğimiz 
+    gibi connect isimli fonksiyon SQLite'ta eğer veribanı dosyası varsa olanı açmakta yoksa içi boş olarak sıfırdan yaratmaktadır. Veritabanı 
+    tabloları yaratılırken eğer tablo zaten varsa exception oluşur. Ancak CREATE TABLE komutuna IF NOT EXISTS cümleceği eklenirse eğer 
+    tablo varsa komut etki göstermez ancak tablo yoksa yaratılır. Örneğin:
 
     def create_tables(cur):
         cur.executescript("""
             CREATE TABLE IF NOT EXISTS school (school_id INTEGER PRIMARY KEY AUTOINCREMENT, school_name TEXT(64), school_type TEXT(64));
-            CREATE TABLE IF NOT EXISTS student(student_no INTEGER, student_name VARCHAR(64), school_id	INTEGER, FOREIGN KEY("school_id") REFERENCES "school"("school_id"), PRIMARY KEY("student_no" AUTOINCREMENT));    
+            CREATE TABLE IF NOT EXISTS student(student_no INTEGER, student_name VARCHAR(64), school_id	INTEGER,
+                    FOREIGN KEY("school_id") REFERENCES "school"("school_id"), PRIMARY KEY("student_no" AUTOINCREMENT));    
         """)   
 
-    Burada create_tables fonksiyonu veritabanı tablolarını yaratmaktadır. Ancak tablolar zaten yaratılmışsa buradaki komutların bir etkisi olmayacaktır.                                          
+    Burada create_tables fonksiyonu veritabanı tablolarını yaratmaktadır. Ancak tablolar zaten yaratılmışsa buradaki komutların bir 
+    etkisi olmayacaktır.                                          
 #------------------------------------------------------------------------------------------------------------------------------------
+
+BURADA KALDIK
 
 #------------------------------------------------------------------------------------------------------------------------------------
     Aşağıda "school" veritabanı üzerinde temel işleler yapan konsol tabanlı basit bir program verilmiştir. 
