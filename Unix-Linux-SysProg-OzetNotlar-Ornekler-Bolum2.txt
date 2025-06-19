@@ -16,7 +16,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                          Son Güncelleme: 09/05/2025 - Cuma
+                                          Son Güncelleme: 20/06/2025 - Cuma
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -28,13 +28,13 @@
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Sinyal mekanizması kesme (interrupt) mekanizmasına benzetilebilir. Sinyaller UNIX/Linux sistemlerinde asenkron işlem yapılmasına
-    olanak sağlayan bir mekanizmadır. Sinyaller normal olarak proseslere gönderilmektedir. Ancak thread konusunun işletim sistemlerine 
-    eklenmesiyle thread'lere de sinyal gönderilmesi mümkün hale getirilmiştir. (Ancak thread'lerin yalnızca ilgili proses içerisinde 
-    erişilebilen bir kaynak olduğunu anımsayınız. Thread'lerin id değerleri ilgili proseste anlamlı değerlerdir.) Bir sinyal 
-    prosese gönderildiğinde prosesin akışı kesilir, ismine sinyal fonksiyonu (signal handler) denilen bir fonksiyon çalıştırılır. 
-    Sinyal fonksiyonu bitince akış kalınan yerden devam eder. Bu mekanizma kod çalışırken araya asenkron biçimde başka işlemlerin 
-    girebilmesine olanak sağlamaktadır.
+    Sinyal mekanizması kesme (interrupt) mekanizmasına benzetilebilir. Sinyaller UNIX/Linux sistemlerinde asenkron işlem 
+    yapılmasına olanak sağlayan bir mekanizmadır. Sinyaller normal olarak proseslere gönderilmektedir. Ancak thread konusunun 
+    işletim sistemlerine eklenmesiyle thread'lere de sinyal gönderilmesi mümkün hale getirilmiştir. (Ancak thread'lerin yalnızca 
+    ilgili proses içerisinde erişilebilen bir kaynak olduğunu anımsayınız. Thread'lerin id değerleri ilgili proseste anlamlı 
+    değerlerdir.) Bir sinyal prosese gönderildiğinde prosesin akışı kesilir, ismine sinyal fonksiyonu (signal handler) denilen 
+    bir fonksiyon çalıştırılır. Sinyal fonksiyonu bitince akış kalınan yerden devam eder. Bu mekanizma kod çalışırken araya 
+    asenkron biçimde başka işlemlerin girebilmesine olanak sağlamaktadır.
 
     Sinyalin oluşmasına yol açan çeşitli durumlar söz konusu olabilmektedir. Örneğin sinyal işletim sistemi tarafından prosese
     belli koşullar altında gönderiliyor olabilir. Programcının yaptığı çeşitli ihlallerde de işletim sistemi tarafından prosese
@@ -31354,7 +31354,7 @@ void exit_sys(const char *msg)
     #ifndef IOCTL_DRIVER_H_
     #define IOCTL_DRIVER_H_
 
-    #include <stddef.h>
+    #include <linux/stddef.h>
     #include <linux/ioctl.h>
 
     #define GENERIC_DRIVER_MAGIC        'g'
@@ -31610,7 +31610,7 @@ rm -f $module
 #ifndef GENERIC_DRIVER_H_
 #define GENERIC_DRIVER_H_
 
-#include <stddef.h>
+#include <linux/stddef.h>
 #include <linux/ioctl.h>
 
 #define GENERIC_DRIVER_MAGIC		'g'
@@ -32246,7 +32246,7 @@ done
 #ifndef PIPE_DRIVER_H_
 #define PIPE_DRIVER_H_
 
-#include <stddef.h>
+#include <linux/stddef.h>
 #include <linux/ioctl.h>
 
 #define PIPE_DRIVER_MAGIC           'p'
@@ -32579,7 +32579,7 @@ void exit_sys(const char *msg)
 #ifndef PIPE_DRIVER_H_
 #define PIPE_DRIVER_H_
 
-#include <stddef.h>
+#include <linux/stddef.h>
 #include <linux/ioctl.h>
 
 #define PIPE_DRIVER_MAGIC           'p'
@@ -33893,115 +33893,249 @@ rm -f $module
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Şimdi de boru aygıt sürücüsüne proc dosya sistemi desteği verelim. Aygıt sürücümüz proc kök dizininde minör numara 
-    kadar ayrı dizin oluşturmaktadır. Sonra da bu dizinlerin içerisinde ilgili aygıtların bufsize ve count değerlerini iki dosya
-    ile dış dünyaya vermektedir. Örneğimizde dikkat edilmesi gereken birkaç nokta üzerinde durmak istiyoruz:
+    Şimdi de daha önce yazmış olduğumuz boru aygıt sürücüsüne proc dosya sistemi desteği verelim. Bunun için proc dosya 
+    sisteminde    aşağıdaki gibi bir dizin ve dosya yapısı kullanacak olalım:
 
-    - proc dosya sistemi içerisindeki bir dosya user mode'dan açıldığında aygıt sürücümüz hangi dosyanın açıldığını nereden 
-    bilecektir? İşte dosya nesnesi görevinde olan file yapısının f_path elemanı path isimli bir yapı türündendir. Bu yapı 
-    şöyle bildirilmiştir:
+    /proc
+        pipe-driver <DIR>
+            pipe-0 <DIR>
+                bufsize
+                count
+            pipe-1 <DIR>
+                bufsize
+                count
+            pipe-2 <DIR>
+                bufsize
+                count
+            pipe-3 <DIR>
+                bufsize
+                count
+            ...
+        
+    Örneğimizde "/proc" dizinin kök dizininde "pipe-driver" isimli bir dizin, bu dizinin içerisinde de minör numara kadar 
+    "pipe-N" dizinleri yaratılacaktır. Her "pipe-N" dizinin içerisinde "bufsize" ve "count" isminde iki dosya bulundurulacaktır.
+    "bufsize" dosyası read/write, count dosyası ise read-only biçimde olacaktır. Böylece bir kişi hiç ioctl yapmadan boruların 
+    uzunluklarını alıp değiştirebilecek ve bir borunun içerisinde kaç byte olduğunu anlayabilecektir. 
 
-    struct path {
-        struct vfsmount *mnt;
-        struct dentry *dentry;
+    Yukarıdaki gibi bir örnek için proc dosya sistemi desteğini sağlarken sorun oluşturabilecek iki önemli nokta vardır:
+
+    1) Birden fazla proc dosyasıyla işlem yaparken her dosya için ayrı bir proc_read, proc_write fonksiyonu oluşturmak oldukça
+    zahmetlidir. İdeal olan durum tek bir proc_read, proc_write fonksiyonu yazıp bu fonksiyonun birden fazla dosya üzerinde 
+    işlem yapabilmesini sağlamaktır. 
+
+    2) Boru aygıt sürücüsü örneğimizde birden fazla minör numaraya ilişkin birden fazla boru söz konusudur. Dolayısıyla bizim 
+    kod içerisinde bir biçimde hangi boru üzerinde işlem yapıldığını bilmemiz gerekir. 
+
+    İşte proc dosya sisteminde bir dosya yaratmak için kullandığımız proc_create fonksiyonunun proc_create_data isimli bir
+    biçimi de vardır. proc_create_data fonksiyonunun prototipi şöyledir:
+
+    struct proc_dir_entry *proc_create_data(const char *name, umode_t mode, struct proc_dir_entry *parent, 
+        const struct proc_ops *proc_ops, void *data);
+
+    Linux çekirdeğinin 5.17 versiyonundan öncesinde buradaki data adresi proc_dir_entry yapısı içerisindeki data elemanına 
+    yerleştiriliyordu. Bu versiyonlarda inode nesnesi yoluyla proc dosyasına ilişkin proc_dir_entry yapısına ise PDE_DATA 
+    isimli fonksiyonla erişiliyordu. Erişimde kullanılan fonksiyonları ver yapıları aşağıda veriyoruz:
+
+    void *PDE_DATA(const struct inode *inode)
+    {
+        return __PDE_DATA(inode);
+    }
+
+    static inline void *__PDE_DATA(const struct inode *inode)
+    {
+        return PDE(inode)->data;
+    }
+
+    static inline struct proc_dir_entry *PDE(const struct inode *inode)
+    {
+        return PROC_I(inode)->pde;
+    }
+
+    static inline struct proc_inode *PROC_I(const struct inode *inode)
+    {
+        return container_of(inode, struct proc_inode, vfs_inode);
+    }
+
+    struct proc_inode {
+        struct pid *pid;
+        unsigned int fd;
+        union proc_op op;
+        struct proc_dir_entry *pde;
+        struct ctl_table_header *sysctl;
+        struct ctl_table *sysctl_entry;
+        struct hlist_node sibling_inodes;
+        const struct proc_ns_operations *ns_ops;
+        struct inode vfs_inode;
     } __randomize_layout;
 
-    Yapının dentry elemanı dosya hakkında bilgiler içermektedir:
+    file yapısından inode yapısına daha hızlı erişimi sağlamak için belli bir versiyondan sonra file yapısının içerisine
+    f_inode elemanının eklendiğinden bahsetmiştik. Bu işlemin geçmişe ve geleceğe doğru uyumu koruyarak yapılmasını sağlamak 
+    için ise file_inode fonksiyonu bulundurulmuştur. Bu fonksiyonunun mevcut çekirdeklerdeki tanımlması şöyle yapılmıştır:
 
-    struct dentry {
-        /* RCU lookup touched fields */
-        unsigned int d_flags;        /* protected by d_lock */
-        seqcount_spinlock_t d_seq;    /* per dentry seqlock */
-        struct hlist_bl_node d_hash;    /* lookup hash list */
-        struct dentry *d_parent;    /* parent directory */
-        struct qstr d_name;
-        struct inode *d_inode;        /* Where the name belongs to - NULL is negative */
-        unsigned char d_iname[DNAME_INLINE_LEN];    /* small names */
+    static inline struct inode *file_inode(const struct file *filp)
+    {
+        return filp->f_inode;
+    }
 
-        /* Ref lookup also touches following */
-        struct lockref d_lockref;    /* per-dentry lock and refcount */
-        const struct dentry_operations *d_op;
-        struct super_block *d_sb;    /* The root of the dentry tree */
-        unsigned long d_time;        /* used by d_revalidate */
-        void *d_fsdata;            /* fs-specific data */
+    O halde 5.17 öncesi çekirdeklerde verilen bu adres filp göstericisi yoluyla şöyle elde edilmektedir:
 
-        union {
-            struct list_head d_lru;        /* LRU list */
-            wait_queue_head_t *d_wait;    /* in-lookup ones only */
-        };
-        struct hlist_node d_sib;    /* child of parent list */
-        struct hlist_head d_children;    /* our children */
-        /*
-        * d_alias and d_rcu can share memory
-        */
-        union {
-            struct hlist_node d_alias;    /* inode alias list */
-            struct hlist_bl_node d_in_lookup_hash;    /* only for in-lookup ones */
-            struct rcu_head d_rcu;
-        } d_u;
+    data = PDE_DATA(file_inode(filp));
+
+    Ancak 5.17 çekirdeğinden itibaren artık proc_create_data fonksiyonuna verilen data adresi doğrudan i_node nesnesinin
+    i_private elemanına yerleştirilmektedir. Dolayısıyla yeni çekirdeklerde artık proc_create_data fonksiyonuna geçirilen 
+    data parametresine şöyle erişilmektedir:
+
+    data = file_inode(filp)->i_private;
+
+    Aslında yeni çekirdeklerde inode nesnesinin adresinden hareketle inonde nesnesinin i_private elemanını veren pde_data 
+    isimli ayrı bir fonksiyon da bulunmaktadır:
+
+    static inline void *pde_data(const struct inode *inode)
+    {
+        return inode->i_private;
+    }
+
+    O halde yeni çekirdeklerde proc_create_data fonksiyonuna girilen data adresi şöyle de elde edilebilmektedir:
+
+    data = pde_data(file_inode(filp));
+
+    Örneğimizde proc_create_data fonksiyonuna aşağıdaki yapı türünden nesnenin adresi geçirilmiştir:
+
+    struct PROC_FILE_INFO {
+        struct PIPE_DEVICE *pipedev;
+        int procfile;	
     };
 
-    Burada yapının d_name elemanı qstr isimli bir yapı türündedir:
+    Yapının procfile elemanı hangi proc dosyasının kullanıldığını belirtmektedir. Bu değerin 0 olması bufsize dosyasının 
+    1 olması ise count dosyasının kullanıldığı anlamına gelmektedir:
 
-    struct qstr {
-        union {
-            struct {
-                HASH_LEN_DECLARE;
-            };
-            u64 hash_len;
-        };
-        const unsigned char *name;
-    };
+    for (i = 0; i < ndevices; ++i) {
+		sprintf(pname, "pipe-%d", i);
+		if ((pdir2 = proc_mkdir(pname, pdir1)) == NULL) 
+			goto EXIT2;;
+	
+		pfi = &g_proc_info[i * 2];
+		pfi->pipedev = g_devices[i];	
+		pfi->procfile = 0;
 
-    İşte buradaki name elemanı ilgili dosyanın ismini belirtmektedir. Özetle biz file yapısından hareketle dosyanın ismini 
-    elde edebilmekteyiz.
+		if (proc_create_data("bufsize", S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH, pdir2, &g_procops, pfi) == NULL)
+			goto EXIT2;
 
-    Böylece biz proc dosya sistemi içerisinde bir dosya açıldığında o dosyanın isminden hareketle hangi dosyanın açılmış 
-    olduğunu anlayabiliriz. Ayrıca dentry yapısının d_parent elemanı dosya ya da dizinin içinde bulunduğu dizine ilişkin 
-    dentry nesnesini vermektedir. Yani biz istersek dosyanın içinde bulunduğu dizinin ismini de alabiliriz.
+		pfi = &g_proc_info[i * 2 + 1];
+		pfi->pipedev = g_devices[i];
+		pfi->procfile = 1;
+		if (proc_create_data("count", S_IRUSR|S_IRGRP|S_IROTH, pdir2, &g_procops, pfi) == NULL)
+			goto EXIT2;
+	}
 
-    Aşağıda örneği bir bütün olarak veriyoruz. Aygıt sürücüyü yine aşağıdaki gibi derleyebilirsiniz:
+    Örneğimizdeki proc_read fonksiyonu şöyle yazılmıştır:
 
-    $ make file=pipe-driver
+    static ssize_t proc_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        struct PROC_FILE_INFO *pfi;
+        static char valbuf[32];
+        ssize_t result;
+        size_t esize, left;
 
-    Yüklemeyi aşağıdaki gibi yapabilirsiniz:
+        pfi = (struct PROC_FILE_INFO *)pde_data(file_inode(filp));
 
-    $ sudo ./loadmulti 5 pipe-driver ndevices=5
+        if (*off > 0)
+            return 0;
 
-    Aygıt sürücüyü yükledikten sonra artık proc dosya sisteminde "pipe-driver" isimli bir dizin oluşturulacak ve bu dizin 
-    içerisinde de aşağıdaki gibi 5 dizin yaratılmış olacaktır:
+        if (down_interruptible(&pfi->pipedev->sem))
+            return -ERESTARTSYS;
 
-    $ ls /proc/pipe-driver
-    pipe0  pipe1  pipe2  pipe3  pipe4
+        if (pfi->procfile == 0) 								// bufsize
+            sprintf(valbuf, "%zu\n", pfi->pipedev->bufsize);
+        else if (pfi->procfile == 1) 
+            sprintf(valbuf, "%zu\n", pfi->pipedev->count);		// count
+        else {										
+            result = 0;
+            goto EXIT;
+        }
 
-    Bu dosyaların her birinin içerisinde de "bufsize" ve "count" isimli iki dosya bulunacaktır. Burada testi "prog1.c" ve 
-    "prog2.c" programları yardımıyla yapabilirsiniz. Örneğin "prog1" programı ile "pipe-driver3" borusunu açıp içerisine 
-    bir şeyler yazarsanız "/proc/pipe-driver/pipe3/count" dosyasının içerisinde yazılan byte sayısını görebilirsiniz. Aygıt
-    sürücümüzü yine "unloadmulti" script'i ile boşaltabilirsiniz.
+        left = strlen(valbuf);
+        esize = size > left ? left : size;
 
-    $ sudo ./unloadmulti 5 pipe-drive
+        if (copy_to_user(buf, valbuf, esize) != 0)  {
+            result = -EFAULT; 
+            goto EXIT;
+        }
+        *off += esize;
+        result = esize;
+    EXIT:
+        up(&pfi->pipedev->sem);
+        
+        return result;
+    }
+
+    Bu fonksiyonda parçalı okumaya izin verilmemektedir. proc_write fonksiyonu da benzer biçimde yazılmıştır:
+
+    static ssize_t proc_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+    {
+        struct PROC_FILE_INFO *pfi;
+        static char valbuf[32];
+        size_t esize;
+        ssize_t  result;
+        int val;
+
+        pfi = (struct PROC_FILE_INFO *)pde_data(file_inode(filp));
+
+        if (*off > 0)
+            return 0;
+
+        if (down_interruptible(&pfi->pipedev->sem))
+            return -ERESTARTSYS;
+
+        if (pfi->procfile == 0) { 								// bufsize
+            esize = size > 32 ? 32 : size;
+            if (copy_from_user(valbuf, buf, esize) != 0) {
+                result = -EFAULT; 
+                goto EXIT;
+            }
+            valbuf[esize] = '\0'; 
+            if ((result = kstrtoint(valbuf, 10, &val)) != 0) 
+                goto EXIT;
+            if ((result = set_bufsize(pfi->pipedev, val)) != 0)
+                goto EXIT;
+            *off += esize;
+        }
+        else 									
+            result = 0;
+        result = esize;
+    EXIT:
+        up(&pfi->pipedev->sem);
+        
+        return result;
+    }
+
+    Bu fonksiyonda da parçalı okumaya izin verilmediğine dikkat ediniz. Örneğin tüm kodlarını aşağıda veriyoruz.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /* pipe-driver.h */
 
-#ifndef PIPEDRIVER_H_
-#define PIPEDRIVER_H_
+#ifndef PIPE_DRIVER_H_
+#define PIPE_DRIVER_H_
 
-#include <stddef.h>
+#include <linux/stddef.h>
 #include <linux/ioctl.h>
+
+#define PIPE_DRIVER_MAGIC           'p'
+
+#define IOC_PIPE_GETNDEVICES        _IOR(PIPE_DRIVER_MAGIC, 0, size_t)
+#define IOC_PIPE_GETCOUNT           _IOR(PIPE_DRIVER_MAGIC, 1, size_t)
+#define IOC_PIPE_GETBUFSIZE         _IOR(PIPE_DRIVER_MAGIC, 2, size_t)
+#define IOC_PIPE_SETBUFSIZE         _IO(PIPE_DRIVER_MAGIC, 3)
+#define IOC_PIPE_PEEK               _IOWR(PIPE_DRIVER_MAGIC, 4, struct PIPE_PEEK)
 
 struct PIPE_PEEK {
     size_t size;
     void *buf;
 };
 
-#define PIPE_DRIVER_MAGIC        'p'
-#define IOC_PIPE_GETCOUNT        _IOR(PIPE_DRIVER_MAGIC, 0, size_t)
-#define IOC_PIPE_GETBUFSIZE        _IOR(PIPE_DRIVER_MAGIC, 1, size_t)
-#define IOC_PIPE_SETBUFSIZE        _IOW(PIPE_DRIVER_MAGIC, 2, size_t)
-#define IOC_PIPE_PEEK            _IOWR(PIPE_DRIVER_MAGIC, 3, struct PIPE_PEEK)
-
 #endif
+
+/* pipe-driver.c */
 
 /* pipe-driver.c */
 
@@ -34009,481 +34143,602 @@ struct PIPE_PEEK {
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
-#include <linux/uaccess.h>
-#include <linux/spinlock.h>
+#include <linux/semaphore.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include "pipe-driver.h"
 
-#define MIN(a, b)            ((a) < (b) ? (a) : (b))
-#define NDEVICES            10
-#define DEF_PIPE_BUFSIZE    10
-#define MAX_PIPE_BUFSIZE    131072        /* 128K */
+#define DEF_NDEVICES				10
+#define DEF_PIPE_BUFFER_SIZE       	10
+#define MAX_PIPE_BUFFER_SIZE		65535
+
+#define MIN(a, b)	((a) < (b) ? (a) : (b))
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaan Aslan");
-MODULE_DESCRIPTION("Pipe Driver");
+MODULE_DESCRIPTION("Pipe Device Driver");
 
-static int generic_open(struct inode *inodep, struct file *filp);
-static int generic_release(struct inode *inodep, struct file *filp);
-static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off);
-static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off);
-static long generic_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static int ndevices = DEF_NDEVICES;
+module_param(ndevices, int, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+
+static int create_proc_files(void);
+static int pipe_driver_open(struct inode *inodep, struct file *filp);
+static int pipe_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t pipe_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t pipe_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long pipe_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static dev_t g_dev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = pipe_driver_open,
+	.read = pipe_driver_read,
+	.write = pipe_driver_write,
+	.release = pipe_driver_release,
+	.unlocked_ioctl = pipe_driver_ioctl
+};
 
 static int proc_open(struct inode *inodep, struct file *filp);
 static int proc_release(struct inode *inodep, struct file *filp);
 static ssize_t proc_read(struct file *filp, char *buf, size_t size, loff_t *off);
-static ssize_t proc_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t proc_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 
-static struct file_operations g_fops = {
-    .owner = THIS_MODULE,
-    .open = generic_open,
-    .read = generic_read,
-    .write = generic_write,
-    .release = generic_release,
-    .unlocked_ioctl = generic_ioctl
-};
-
-static struct proc_ops g_proc_ops = {
+static struct proc_ops g_procops = {
     .proc_open = proc_open,
-    .proc_release = proc_release,
     .proc_read = proc_read,
+    .proc_write = proc_write,
+    .proc_release = proc_release
 };
-
-/*
-static struct file_operations g_proc_ops = {
-    .open = proc_open,
-    .release = proc_release,
-    .read = proc_read,
-};
-*/
 
 struct PIPE_DEVICE {
-    unsigned char *pipebuf;
-    size_t head;
-    size_t tail;
-    size_t count;
-    size_t bufsize;
-    struct semaphore sem;
-    wait_queue_head_t wqread;
-    wait_queue_head_t wqwrite;
-    struct cdev cdev;
+	unsigned char *buf;
+	size_t bufsize;
+	size_t head;
+	size_t tail;
+	size_t count;
+	struct semaphore sem;
+	wait_queue_head_t wqwriteopen;
+	wait_queue_head_t wqreadopen;
+	wait_queue_head_t wqread;
+	wait_queue_head_t wqwrite;
+	int nreaders;
+	int nwriters;
+	struct cdev cdev;
 };
 
-struct PROC_INFO {
-    struct PIPE_DEVICE *pdevice;
-    int filetype;        /* 0 = count, 1 = bufsize */
-    char strbuf[32];
+struct PROC_FILE_INFO {
+	struct PIPE_DEVICE *pipedev;
+	int procfile;	
 };
 
-static int set_bufsize(struct PIPE_DEVICE *pdevice, unsigned long arg);
+static int set_bufsize(struct PIPE_DEVICE *pipedev, unsigned long size);
 static int read_peek(struct PIPE_DEVICE *pdevice, unsigned long arg);
 
-static dev_t g_dev;
-static struct PIPE_DEVICE *g_pdevices;
-static int ndevices = NDEVICES;
+static struct PIPE_DEVICE **g_devices;
+struct PROC_FILE_INFO *g_proc_info;
 
-module_param(ndevices, int, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-
-static int __init generic_init(void)
+static int __init pipe_driver_init(void)
 {
-    int result;
-    dev_t dev;
-    int i, k;
-    struct proc_dir_entry *pde_root, *pde_pipe;
-    char namebuf[16];
+	int result;
+	int i, k;
+	dev_t dev;
 
-    printk(KERN_INFO "pipe-driver module initialization...\n");
+	printk(KERN_INFO "pipe-driver init...\n");
 
-    if ((result = alloc_chrdev_region(&g_dev, 0, ndevices, "pipe-driver")) < 0) {
-        printk(KERN_INFO "cannot alloc char driver!...\n");
-        return result;
+	if ((result = alloc_chrdev_region(&g_dev, 0, ndevices, "pipe-driver")) < 0) {
+		printk(KERN_ERR "cannot register device!...\n");
+		goto EXIT1;
+	}
+	if ((g_devices = (struct PIPE_DEVICE **)kmalloc(sizeof(struct PIPE_DEVICE *) * ndevices, GFP_KERNEL)) == NULL) {
+		result = -ENOMEM;
+        goto EXIT2;
     }
-
-    if ((g_pdevices = (struct PIPE_DEVICE *)kmalloc(sizeof(struct PIPE_DEVICE) * ndevices, GFP_KERNEL)) == NULL) {
-        unregister_chrdev_region(g_dev, ndevices);
-        return -ENOMEM;
-    }
-
-    if ((pde_root = proc_mkdir("pipe-driver", NULL)) == NULL) {
-        kfree(g_pdevices);
-        unregister_chrdev_region(g_dev, 1);
-        return -ENOMEM;
-    }
-
-    for (i = 0; i < ndevices; ++i) {
-        sprintf(namebuf, "pipe%d", i);
-        if ((pde_pipe = proc_mkdir(namebuf, pde_root)) == NULL) {
-            kfree(g_pdevices);
-            unregister_chrdev_region(g_dev, 1);
-            remove_proc_entry("pipe-driver", NULL);
-            return -ENOMEM;
-        }
-        g_pdevices[i].head = g_pdevices[i].tail = g_pdevices[i].count = 0;
-        g_pdevices[i].bufsize = DEF_PIPE_BUFSIZE;
-        sema_init(&g_pdevices[i].sem, 1);
-        init_waitqueue_head(&g_pdevices[i].wqread);
-        init_waitqueue_head(&g_pdevices[i].wqwrite);
-        cdev_init(&g_pdevices[i].cdev, &g_fops);
+	for (i = 0; i < ndevices; ++i) {
+		if ((g_devices[i] = (struct PIPE_DEVICE *)kmalloc(sizeof(struct PIPE_DEVICE), GFP_KERNEL)) == NULL) {
+			printk(KERN_ERR "cannot allocate pipe device!...\n");
+			result = -ENOMEM;
+			for (k = 0; k < i; ++k)	
+				kfree(g_devices[k]);
+			goto EXIT3;
+		}
+	}	
+	for (i = 0; i < ndevices; ++i) {
+		if ((g_devices[i]->buf = (unsigned char *)kmalloc(DEF_PIPE_BUFFER_SIZE, GFP_KERNEL)) == NULL) {
+			printk(KERN_ERR "cannot allocate pipe buffer!...\n");
+			result = -ENOMEM;
+			for (k = 0; k < i; ++k)	
+				kfree(g_devices[k]->buf);
+			goto EXIT4;
+		}
+        g_devices[i]->head = g_devices[i]->tail = g_devices[i]->count = 0;
+		g_devices[i]->bufsize = DEF_PIPE_BUFFER_SIZE;
+        sema_init(&g_devices[i]->sem, 1);
+	    init_waitqueue_head(&g_devices[i]->wqwriteopen);
+        init_waitqueue_head(&g_devices[i]->wqreadopen);			
+        init_waitqueue_head(&g_devices[i]->wqread);
+        init_waitqueue_head(&g_devices[i]->wqwrite);
+		g_devices[i]->nreaders = g_devices[i]->nwriters = 0;
+	    cdev_init(&g_devices[i]->cdev, &g_fops);
         dev = MKDEV(MAJOR(g_dev), i);
-        g_pdevices[i].pipebuf = (char *)kmalloc(DEF_PIPE_BUFSIZE, GFP_KERNEL);
-        result = cdev_add(&g_pdevices[i].cdev, dev, 1);
+        if ((result = cdev_add(&g_devices[i]->cdev, dev, 1)) < 0) {
+            for (k = 0; k < i; ++k) 
+                cdev_del(&g_devices[k]->cdev);
+			printk(KERN_ERR "cannot add device!...\n");
+        	goto EXIT5;
+		}
+    }	
+	if (create_proc_files() != 0)
+		goto EXIT6;
 
-        if (g_pdevices[i].pipebuf == NULL || result < 0) {
-            if (g_pdevices[i].pipebuf != NULL)
-                kfree(g_pdevices[i].pipebuf);
+	return 0;
 
-            for (k = 0; k < i; ++k) {
-                cdev_del(&g_pdevices[k].cdev);
-                kfree(g_pdevices[k].pipebuf);
-            }
-
-            kfree(g_pdevices);
-            unregister_chrdev_region(dev, ndevices);
-            printk(KERN_ERR "cannot add device!...\n");
-
-            return result;
-        }
-
-        if ((proc_create("count", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_pipe, &g_proc_ops)) == NULL
-                || proc_create("bufsize", S_IRUSR|S_IRGRP|S_IROTH, pde_pipe, &g_proc_ops) == NULL) {
-            remove_proc_entry("pipe-driver", NULL);
-            for (k = 0; k < i; ++k) {
-                cdev_del(&g_pdevices[k].cdev);
-                kfree(g_pdevices[k].pipebuf);
-            }
-            unregister_chrdev_region(g_dev, 1);
-            return -ENOMEM;
-        }
-    }
-
-    return 0;
+EXIT6:
+	for (i = 0; i < ndevices; ++i)
+		cdev_del(&g_devices[k]->cdev);
+EXIT5:
+	for (i = 0; i < ndevices; ++i) 
+		kfree(g_devices[i]->buf);
+EXIT4:
+	for (i = 0; i < ndevices; ++i) 
+		kfree(g_devices[i]);
+EXIT3:
+	kfree(g_devices);
+EXIT2:
+	unregister_chrdev_region(g_dev, ndevices);
+EXIT1:
+	return result;
 }
 
-static void __exit generic_exit(void)
+static int create_proc_files(void)
 {
-    int i;
+	struct proc_dir_entry *pdir1, *pdir2;
+	int i;
+	char pname[16];
+	struct PROC_FILE_INFO *pfi;
 
+	if ((pdir1 = proc_mkdir("pipe-driver", NULL)) == NULL)
+		return -1;
+
+	if ((g_proc_info = (struct PROC_FILE_INFO *)kmalloc(sizeof(struct PROC_FILE_INFO) * ndevices * 2, GFP_KERNEL)) == NULL)
+		goto EXIT1;
+
+	for (i = 0; i < ndevices; ++i) {
+		sprintf(pname, "pipe-%d", i);
+		if ((pdir2 = proc_mkdir(pname, pdir1)) == NULL) 
+			goto EXIT2;;
+	
+		pfi = &g_proc_info[i * 2];
+		pfi->pipedev = g_devices[i];	
+		pfi->procfile = 0;
+
+		if (proc_create_data("bufsize", S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH, pdir2, &g_procops, pfi) == NULL)
+			goto EXIT2;
+
+		pfi = &g_proc_info[i * 2 + 1];
+		pfi->pipedev = g_devices[i];
+		pfi->procfile = 1;
+		if (proc_create_data("count", S_IRUSR|S_IRGRP|S_IROTH, pdir2, &g_procops, pfi) == NULL)
+			goto EXIT2;
+	}
+
+	return 0;
+
+EXIT2:
+	kfree(g_proc_info);
+EXIT1:
+	remove_proc_entry("pipe-driver", NULL);
+
+	return -1;
+}
+
+static void __exit pipe_driver_exit(void)
+{
+	int i;
+
+	kfree(g_proc_info);
+	remove_proc_entry("pipe-driver", NULL);
     for (i = 0; i < ndevices; ++i)
-        cdev_del(&g_pdevices[i].cdev);
-    kfree(g_pdevices);
-    remove_proc_entry("pipe-driver", NULL);
-    unregister_chrdev_region(g_dev, ndevices);
+		cdev_del(&g_devices[i]->cdev);
+	for (i = 0; i < ndevices; ++i)
+		kfree(g_devices[i]);
+	kfree(g_devices);
 
-    printk(KERN_INFO "pipe-driver module exit...\n");
+	unregister_chrdev_region(g_dev, ndevices);
+	
+	printk(KERN_INFO "pipe-driver module exit...\n");
 }
 
-static int generic_open(struct inode *inodep, struct file *filp)
+static int pipe_driver_open(struct inode *inodep, struct file *filp)
 {
-    struct PIPE_DEVICE *pdevice;
+	struct PIPE_DEVICE *pipedev;
+	int accmode = filp->f_flags & O_ACCMODE;
 
-    pdevice = container_of(inodep->i_cdev, struct PIPE_DEVICE, cdev);
-    filp->private_data = pdevice;
+	pipedev = container_of(inodep->i_cdev, struct PIPE_DEVICE, cdev);
+	filp->private_data = pipedev;
 
-    printk(KERN_INFO "pipe-driver opened...\n");
+	if (down_interruptible(&pipedev->sem) != 0)
+		return -ERESTARTSYS;
 
-    return 0;
+	if (accmode == O_RDONLY) {
+		++pipedev->nreaders;
+		wake_up_interruptible(&pipedev->wqwriteopen);
+		while (pipedev->nwriters == 0) {
+			up(&pipedev->sem);
+			if (filp->f_flags & O_NONBLOCK)
+				return 0;
+			if (wait_event_interruptible(pipedev->wqreadopen, pipedev->nwriters > 0))
+				return -ERESTARTSYS;
+			if (down_interruptible(&pipedev->sem))
+				return -ERESTARTSYS;
+		}
+	}
+	else if (accmode == O_WRONLY) {
+		++pipedev->nwriters;
+		wake_up_interruptible(&pipedev->wqreadopen);
+		while (pipedev->nreaders == 0) {
+			if (filp->f_flags & O_NONBLOCK) {
+				--pipedev->nwriters;
+				up(&pipedev->sem);
+				return -ENXIO;
+			}
+			up(&pipedev->sem);
+			if (wait_event_interruptible(pipedev->wqwriteopen, pipedev->nreaders > 0))
+				return -ERESTARTSYS;
+			if (down_interruptible(&pipedev->sem))
+				return -ERESTARTSYS;
+		}
+	}
+	else if (accmode == O_RDWR) {
+		++pipedev->nreaders;
+		++pipedev->nwriters;
+		wake_up_interruptible(&pipedev->wqreadopen);
+		wake_up_interruptible(&pipedev->wqwriteopen);
+	}
+	up(&pipedev->sem);
+
+	printk(KERN_INFO "pipe-driver opened...\n");
+	
+	return 0;
 }
 
-static int generic_release(struct inode *inodep, struct file *filp)
+static int pipe_driver_release(struct inode *inodep, struct file *filp)
 {
-    printk(KERN_INFO "pipe-driver closed...\n");
+	struct PIPE_DEVICE *pipedev;
+	int accmode = filp->f_flags & O_ACCMODE;
 
-    return 0;
+	pipedev = filp->private_data;
+
+	if (down_interruptible(&pipedev->sem) != 0)
+		return -ERESTARTSYS;
+
+	if (accmode == O_RDONLY)
+		--pipedev->nreaders;
+	else if (accmode == O_WRONLY)
+		--pipedev->nwriters;
+	else if (accmode == O_RDWR) {
+		--pipedev->nreaders;
+		--pipedev->nwriters;
+	}
+	if (pipedev->nreaders == 0)
+		wake_up_interruptible(&pipedev->wqwrite);
+	if (pipedev->nwriters == 0)
+		wake_up_interruptible(&pipedev->wqread);
+
+	if (pipedev->nreaders + pipedev->nwriters == 0) 
+		pipedev->count = pipedev->head = pipedev->tail = 0;
+		
+	up(&pipedev->sem);
+
+	printk(KERN_INFO "pipe-driver closed...\n");
+
+	return 0;
 }
 
-static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+static ssize_t pipe_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    struct PIPE_DEVICE *pdevice;
-    size_t esize, size1, size2;
+	size_t esize, size1, size2;
+	ssize_t result = -EFAULT;
+	struct PIPE_DEVICE *pipedev;
 
-    pdevice = (struct PIPE_DEVICE *)filp->private_data;
+	pipedev = (struct PIPE_DEVICE *)filp->private_data;
 
-    if (size == 0)
-        return 0;
+	if (down_interruptible(&pipedev->sem) != 0)
+		return -ERESTARTSYS;
 
-    if (down_interruptible(&pdevice->sem))
-        return -ERESTARTSYS;
+	while (pipedev->count == 0) {
+		if (pipedev->nwriters == 0) {
+			result = 0;
+			goto EXIT;
+		}
+		up(&pipedev->sem);
+		if (filp->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		if (wait_event_interruptible(pipedev->wqread, pipedev->count > 0 || pipedev->nwriters == 0) != 0)
+			return -ERESTARTSYS;
+		if (down_interruptible(&pipedev->sem) != 0)
+			return -ERESTARTSYS;
+	}
 
-    while (pdevice->count == 0) {
-        up(&pdevice->sem);
+	esize = MIN(size, pipedev->count);
+	if (pipedev->head >= pipedev->tail)
+		size1 = MIN(esize, pipedev->bufsize - pipedev->head);
+	else
+		size1 = esize;
+	size2 = esize - size1;
 
-        if (filp->f_flags & O_NONBLOCK)
-            return -EAGAIN;
+	if (copy_to_user(buf, pipedev->buf + pipedev->head, size1) != 0)
+		goto EXIT;
 
-        if (wait_event_interruptible(pdevice->wqread, pdevice->count > 0))
-            return -ERESTARTSYS;
+	if (size2 != 0)
+		if (copy_to_user(buf + size1, pipedev->buf, size2) != 0)
+			goto EXIT;
 
-        if (down_interruptible(&pdevice->sem))
-            return -ERESTARTSYS;
-    }
+	pipedev->head = (pipedev->head + esize) % pipedev->bufsize;
+	pipedev->count -= esize;
 
-    esize = MIN(pdevice->count, size);
+	result = esize;
 
-    if (pdevice->tail <= pdevice->head)
-        size1 = MIN(pdevice->bufsize - pdevice->head, esize);
-    else
-        size1 = esize;
+	wake_up_interruptible(&pipedev->wqwrite);
+EXIT:
+	up(&pipedev->sem);
 
-    size2 = esize - size1;
-
-    if (copy_to_user(buf, pdevice->pipebuf + pdevice->head, size1) != 0) {
-        up(&pdevice->sem);
-        return -EFAULT;
-    }
-
-    if (size2 != 0)
-        if (copy_to_user(buf + size1, pdevice->pipebuf, size2) != 0) {
-            up(&pdevice->sem);
-            return -EFAULT;
-        }
-
-    pdevice->head = (pdevice->head + esize) % pdevice->bufsize;
-    pdevice->count -= esize;
-
-    up(&pdevice->sem);
-
-    wake_up_interruptible_all(&pdevice->wqwrite);
-
-    return esize;
+	return result;
 }
 
-static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+static ssize_t pipe_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
 {
-    struct PIPE_DEVICE *pdevice;
-    size_t esize, size1, size2;
+	size_t esize, size1, size2;
+	ssize_t result = -EFAULT;
+	struct PIPE_DEVICE *pipedev;
 
-    pdevice = (struct PIPE_DEVICE *)filp->private_data;
+	pipedev = (struct PIPE_DEVICE *)filp->private_data;
 
-    if (down_interruptible(&pdevice->sem))
-        return -ERESTARTSYS;
+	if (size > pipedev->bufsize)
+		size = pipedev->bufsize;
 
-    if (size > pdevice->bufsize)
-        size = pdevice->bufsize;
+	if (down_interruptible(&pipedev->sem) != 0)
+		return -ERESTARTSYS;
 
-    while (pdevice->bufsize - pdevice->count < size) {
-        up(&pdevice->sem);
+	if (pipedev->nreaders == 0) {
+		up(&pipedev->sem);
+		send_sig(SIGPIPE, current, 0);
+		return -EPIPE;
+	}
+	while (pipedev->bufsize - pipedev->count < size) {
+		up(&pipedev->sem);
+		if (filp->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		if (wait_event_interruptible(pipedev->wqwrite, pipedev->bufsize - pipedev->count >= size || pipedev->nreaders == 0) != 0)
+			return -ERESTARTSYS;
+		if (down_interruptible(&pipedev->sem) != 0)
+			return -ERESTARTSYS;
+		if (pipedev->nreaders == 0) {
+			up(&pipedev->sem);
+			send_sig(SIGPIPE, current, 0);
+			return -EPIPE;
+		}
+	}
 
-        if (filp->f_flags & O_NONBLOCK)
-            return -EAGAIN;
+	esize = MIN(size, pipedev->bufsize - pipedev->count);
 
-        if (wait_event_interruptible(pdevice->wqwrite, pdevice->bufsize - pdevice->count >= size))
-            return -ERESTARTSYS;
+	if (pipedev->tail >= pipedev->head)
+		size1 = MIN(esize, pipedev->bufsize - pipedev->tail);
+	else
+		size1 = esize;
+	size2 = esize - size1;
 
-        if (down_interruptible(&pdevice->sem))
-            return -ERESTARTSYS;
-    }
+	if (copy_from_user(pipedev->buf + pipedev->tail, buf, size1) != 0)
+		goto EXIT;
+	if (size2 != 0)
+		if (copy_from_user(pipedev->buf, buf + size1, size2) != 0)
+			goto EXIT;
 
-    esize = MIN(pdevice->bufsize - pdevice->count, size);
-
-    if (pdevice->tail >= pdevice->head)
-        size1 = MIN(pdevice->bufsize - pdevice->tail, esize);
-    else
-        size1 = esize;
-
-    size2 = esize - size1;
-
-    if (copy_from_user(pdevice->pipebuf + pdevice->tail, buf, size1) != 0) {
-        up(&pdevice->sem);
-        return -EFAULT;
-    }
-
-    if (size2 != 0)
-        if (copy_from_user(pdevice->pipebuf, buf + size1, size2) != 0) {
-            up(&pdevice->sem);
-            return -EFAULT;
-        }
-
-    pdevice->tail = (pdevice->tail + esize) % pdevice->bufsize;
-    pdevice->count += esize;
-
-    up(&pdevice->sem);
-
-    wake_up_interruptible_all(&pdevice->wqread);
-
-    return esize;
-}
-
-static long generic_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
-{
-    struct PIPE_DEVICE *pdevice;
-
-    printk(KERN_INFO "ioctl");
-
-    pdevice = (struct PIPE_DEVICE *)filp->private_data;
-
-    switch (cmd) {
-        case IOC_PIPE_GETCOUNT:
-            return put_user(pdevice->count, (size_t *)arg);
-        case IOC_PIPE_GETBUFSIZE:
-            return put_user(pdevice->bufsize, (size_t *)arg);
-        case IOC_PIPE_SETBUFSIZE:
-            return set_bufsize(pdevice, arg);
-        case IOC_PIPE_PEEK:
-            return read_peek(pdevice, arg);
-        default:
-            return -ENOTTY;
-    }
-
-    return 0;
-}
-
-static int set_bufsize(struct PIPE_DEVICE *pdevice, unsigned long arg)
-{
-    char *new_pipebuf;
-    size_t size;
-
-    if (arg > MAX_PIPE_BUFSIZE)
-        return -EINVAL;
-
-    if (arg <= pdevice->count)
-        return -EINVAL;
-
-    if (down_interruptible(&pdevice->sem))
-        return -ERESTARTSYS;
-
-    if ((new_pipebuf = (char *)kmalloc(arg, GFP_KERNEL)) == NULL) {
-        up(&pdevice->sem);
-        return -ENOMEM;
-    }
-
-    if (pdevice->count != 0) {
-        if (pdevice->tail <= pdevice->head) {
-            size = pdevice->bufsize - pdevice->head;
-            memcpy(new_pipebuf, pdevice->pipebuf + pdevice->head, size);
-            memcpy(new_pipebuf + size, pdevice->pipebuf, pdevice->count - size);
-        }
-        else
-            memcpy(new_pipebuf, pdevice->pipebuf + pdevice->head, pdevice->count);
-    }
-
-    pdevice->head = 0;
-    pdevice->tail = pdevice->count;
-
-    kfree(pdevice->pipebuf);
-    pdevice->pipebuf = new_pipebuf;
-    pdevice->bufsize = arg;
-
-    up(&pdevice->sem);
-
-    return 0;
-}
-
-static int read_peek(struct PIPE_DEVICE *pdevice, unsigned long arg)
-{
-    size_t esize, size1, size2;
-    struct PIPE_PEEK *userpp = (struct PIPE_PEEK *)arg;
-    struct PIPE_PEEK pp;
-    int status = 0;
-
-    if (copy_from_user(&pp, userpp, sizeof(struct PIPE_PEEK)) != 0)
-        return -EFAULT;
-
-    if (pp.size == 0)
-        return 0;
-
-    if (down_interruptible(&pdevice->sem))
-        return -ERESTARTSYS;
-
-    esize = MIN(pdevice->count, pp.size);
-
-    if (pdevice->tail <= pdevice->head)
-        size1 = MIN(pdevice->bufsize - pdevice->head, esize);
-    else
-        size1 = esize;
-
-    size2 = esize - size1;
-
-    if (copy_to_user(pp.buf, pdevice->pipebuf + pdevice->head, size1) != 0) {
-        status = -EFAULT;
-        goto EXIT;
-    }
-
-    if (size2 != 0)
-        if (copy_to_user(pp.buf + size1, pdevice->pipebuf, size2) != 0) {
-            status = -EFAULT;
-            goto EXIT;
-        }
-
-    if (put_user(esize, &userpp->size) != 0)
-        status = -EFAULT;
+	pipedev->tail = (pipedev->tail + esize ) % pipedev->bufsize;
+	pipedev->count += esize;
+	result = esize;
 
 EXIT:
-    up(&pdevice->sem);
+	wake_up_interruptible(&pipedev->wqread);
+	up(&pipedev->sem);
 
-    return status;
+	return result;
 }
+
+static long pipe_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct PIPE_DEVICE *pipedev;
+	int result;
+
+	printk(KERN_INFO "ioctl\n");
+
+	pipedev = (struct PIPE_DEVICE *)filp->private_data;
+
+	if (down_interruptible(&pipedev->sem))
+		return -ERESTARTSYS;
+
+	switch (cmd) {
+		case IOC_PIPE_GETNDEVICES:
+			result =  put_user(ndevices, (size_t *)arg);
+			break;
+		case IOC_PIPE_GETCOUNT:
+			result =  put_user(pipedev->count, (size_t *)arg);
+			break;
+		case IOC_PIPE_GETBUFSIZE:
+			result = put_user(pipedev->bufsize, (size_t *)arg);
+			break;
+		case IOC_PIPE_SETBUFSIZE:
+			result = set_bufsize(pipedev, arg);
+			break;
+		case IOC_PIPE_PEEK:
+			result = read_peek(pipedev, arg);
+			break;
+		default:
+			result = -ENOTTY;
+	}
+
+	up(&pipedev->sem);
+
+	return result;
+}
+
+static int set_bufsize(struct PIPE_DEVICE *pipedev, unsigned long arg)
+{
+    char *newbuf;
+    size_t size;
+	
+	if (arg > MAX_PIPE_BUFFER_SIZE)
+        return -EINVAL;
+   
+	if (arg <= pipedev->count) 
+		return -EINVAL;
+
+    if ((newbuf = (char *)kmalloc(arg, GFP_KERNEL)) == NULL) 
+		return -ENOMEM;
+        
+    if (pipedev->count != 0) {
+        if (pipedev->tail <= pipedev->head) {
+            size = pipedev->bufsize - pipedev->head;
+            memcpy(newbuf, pipedev->buf + pipedev->head, size);
+            memcpy(newbuf + size, pipedev->buf, pipedev->tail);
+        }
+        else
+            memcpy(newbuf, pipedev->buf + pipedev->head, pipedev->count);
+    }
+
+    pipedev->head = 0;
+    pipedev->tail = pipedev->count;
+    kfree(pipedev->buf);
+    pipedev->buf = newbuf;
+    pipedev->bufsize = arg;
+
+    return 0;
+}
+
+static int read_peek(struct PIPE_DEVICE *pipedev, unsigned long arg)
+{
+    size_t esize, size1, size2;
+    struct PIPE_PEEK *userpp;
+    struct PIPE_PEEK pp;
+    
+	userpp = (struct PIPE_PEEK *)arg;
+	if (copy_from_user(&pp, userpp, sizeof(struct PIPE_PEEK)) != 0)
+        return -EFAULT;
+
+	if (pp.size == 0)
+        return 0;
+
+	esize = MIN(pipedev->count, pp.size);
+
+	if (pipedev->tail >= pipedev->head)
+		size1 = MIN(esize, pipedev->bufsize - pipedev->tail);
+	else
+		size1 = esize;
+	size2 = esize - size1;
+
+    if (copy_to_user(pp.buf, pipedev->buf + pipedev->head, size1) != 0) 
+        return -EFAULT;
+    if (size2 != 0)
+        if (copy_to_user(pp.buf + size1, pipedev->buf, size2) != 0) 
+            return -EFAULT;      
+    
+	if (put_user(esize, &userpp->size) != 0)
+        return -EFAULT;
+
+	return 0;
+}
+
 
 static int proc_open(struct inode *inodep, struct file *filp)
 {
-    const char *file_name = filp->f_path.dentry->d_name.name;
-    const char *parent_file_name = filp->f_path.dentry->d_parent->d_name.name;
-    struct PROC_INFO *pi;
-
-    printk(KERN_INFO "pipe-driver proc file opened...\n");
-
-    if ((pi = (struct PROC_INFO *)kmalloc(sizeof(struct PROC_INFO), GFP_KERNEL)) == NULL)
-        return -ENOMEM;
-
-    pi->pdevice = &g_pdevices[parent_file_name[4] - '0'];
-
-    if (!strcmp(file_name, "bufsize"))
-        pi->filetype = 1;
-    else if (!strcmp(file_name, "count"))
-        pi->filetype = 0;
-
-    filp->private_data = pi;
-
     return 0;
 }
 
 static int proc_release(struct inode *inodep, struct file *filp)
 {
-    struct PROC_INFO *pi;
-
-    pi = (struct PROC_INFO *)filp->private_data;
-
-    kfree(pi);
-
     return 0;
 }
 
 static ssize_t proc_read(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    struct PROC_INFO *pi;
-    size_t esize, left;
+	struct PROC_FILE_INFO *pfi;
+	static char valbuf[32];
+	ssize_t result;
+	size_t esize, left;
 
-    pi = (struct PROC_INFO *)filp->private_data;
+	pfi = (struct PROC_FILE_INFO *)pde_data(file_inode(filp));
 
-    switch (pi->filetype) {
-        case 0:
-            sprintf(pi->strbuf, "%lu\n", (unsigned long)pi->pdevice->count);
-            left = strlen(pi->strbuf) - *off;
-            esize = left < size ? left : size;
-            if (esize != 0) {
-                if (copy_to_user(buf, pi->strbuf + *off, esize) != 0)
-                    return -EFAULT;
-                *off += esize;
-            }
-            break;
-        case 1:
-            sprintf(pi->strbuf, "%lu\n", (unsigned long)pi->pdevice->bufsize);
-            left = strlen(pi->strbuf) - *off;
-            esize = left < size ? left : size;
-            if (esize != 0) {
-                if (copy_to_user(buf, pi->strbuf + *off, esize) != 0)
-                    return -EFAULT;
-                *off += esize;
-            }
-            break;
-    }
+	if (*off > 0)
+        return 0;
 
-    return esize;
+	if (down_interruptible(&pfi->pipedev->sem))
+		return -ERESTARTSYS;
+
+	if (pfi->procfile == 0) 								// bufsize
+		sprintf(valbuf, "%zu\n", pfi->pipedev->bufsize);
+	else if (pfi->procfile == 1) 
+		sprintf(valbuf, "%zu\n", pfi->pipedev->count);		// count
+	else {										
+		result = 0;
+		goto EXIT;
+	}
+
+	left = strlen(valbuf);
+  	esize = size > left ? left : size;
+
+	if (copy_to_user(buf, valbuf, esize) != 0)  {
+		result = -EFAULT; 
+		goto EXIT;
+	}
+	*off += esize;
+	result = esize;
+EXIT:
+	up(&pfi->pipedev->sem);
+    
+	return result;
 }
 
-module_init(generic_init);
-module_exit(generic_exit);
+static ssize_t proc_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	struct PROC_FILE_INFO *pfi;
+	static char valbuf[32];
+	size_t esize;
+	ssize_t  result;
+	int val;
+
+	pfi = (struct PROC_FILE_INFO *)pde_data(file_inode(filp));
+
+	if (*off > 0)
+        return 0;
+
+	if (down_interruptible(&pfi->pipedev->sem))
+		return -ERESTARTSYS;
+
+	if (pfi->procfile == 0) { 								// bufsize
+		esize = size > 32 ? 32 : size;
+		if (copy_from_user(valbuf, buf, esize) != 0) {
+			result = -EFAULT; 
+			goto EXIT;
+		}
+    	valbuf[esize] = '\0'; 
+    	if ((result = kstrtoint(valbuf, 10, &val)) != 0) 
+        	goto EXIT;
+		if ((result = set_bufsize(pfi->pipedev, val)) != 0)
+			goto EXIT;
+		*off += esize;
+
+	}
+	else 									
+		result = 0;
+	result = esize;
+EXIT:
+	up(&pfi->pipedev->sem);
+	
+    return result;
+}
+
+module_init(pipe_driver_init);
+module_exit(pipe_driver_exit);
 
 # Makefile
 
@@ -34499,6 +34754,7 @@ clean:
 #!/bin/bash
 
 module=$2
+mode=666
 
 /sbin/insmod ./${module}.ko ${@:3} || exit 1
 major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
@@ -34521,55 +34777,107 @@ do
     rm -f ${module}$i
 done
 
-/* prog1.c */
+/* preader.c */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
-#include "pipe-driver.h"
 
-#define PIPE_SIZE        4096
+#define BUFFER_SIZE		8192
 
 void exit_sys(const char *msg);
 
-int main(void)
+int main(int argc, char *argv[])
+{
+	int fd;
+	char buf[BUFFER_SIZE];
+	int n;
+	ssize_t result;
+
+	if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if ((fd = open(argv[1], O_RDONLY)) == -1)
+		exit_sys("open");
+
+	for (;;) {
+		printf("Number of bytes to read? ");
+		scanf("%d", &n);
+		if (n == 0)
+			break;
+		if ((result = read(fd, buf, n)) == -1) {
+			if (errno != EAGAIN)
+				exit_sys("read");
+			printf("pipe is empty, let's do something else...\n");
+			continue;
+		}
+		if (result == 0) {
+			putchar('\n');
+			break;
+		}
+		buf[result] = '\0';
+		printf("%jd bytes read: %s\n", (intmax_t)result, buf);
+	}
+
+	close(fd);
+
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/* pwriter.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#define BUFFER_SIZE     8192
+
+void exit_sys(const char *msg);
+
+int main(int argc, char *argv[])
 {
     int fd;
-    char buf[PIPE_SIZE];
+    char buf[BUFFER_SIZE];
     char *str;
-    size_t len, bufsize, new_bufsize;
+    ssize_t result;
 
-    if ((fd = open("pipe-driver3", O_WRONLY)) == -1)
+    if (argc != 2) {
+		fprintf(stderr, "wrong number of arguments!..\n");
+		exit(EXIT_FAILURE);
+	}
+
+    if ((fd = open(argv[1], O_WRONLY)) == -1)
         exit_sys("open");
-
+    
     for (;;) {
         printf("Enter text:");
         fflush(stdout);
-        fgets(buf, PIPE_SIZE, stdin);
+        if (fgets(buf, BUFFER_SIZE, stdin) == NULL)
+            continue;
         if ((str = strchr(buf, '\n')) != NULL)
             *str = '\0';
         if (!strcmp(buf, "quit"))
             break;
-
-        if (buf[0] == '!') {
-            new_bufsize = atoi(&buf[1]);
-            printf("%zd\n", new_bufsize);
-            if (ioctl(fd, IOC_PIPE_SETBUFSIZE, new_bufsize) == -1)
-                exit_sys("ioctl");
-            if (ioctl(fd, IOC_PIPE_GETBUFSIZE, &bufsize) == -1)
-                exit_sys("ioctl");
-            printf("new pipe buffer size is %zu\n", bufsize);
-        }
-        else {
-            len = strlen(buf);
-            if (write(fd, buf, len) == -1)
-                exit_sys("write");
-
-            printf("%lu bytes written...\n", (unsigned long)len);
-        }
+        if ((result = write(fd, buf, strlen(buf))) == -1)
+            exit_sys("write");
+        
+        printf("%jd bytes written...\n", (intmax_t)result);
     }
 
     close(fd);
@@ -34579,106 +34887,64 @@ int main(void)
 
 void exit_sys(const char *msg)
 {
-    perror(msg);
+	perror(msg);
 
-    exit(EXIT_FAILURE);
-}
-
-/* prog2.c */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include "pipe-driver.h"
-
-#define BUFFER_SIZE 4096
-
-void exit_sys(const char *msg);
-
-int main(void)
-{
-    int pdriver;
-    char buf[BUFFER_SIZE + 1];
-    int count, size;
-    ssize_t result;
-    struct PIPE_PEEK pp;
-    char *peekbuf;
-
-    if ((pdriver = open("pipe-driver3", O_RDONLY)) == -1)
-        exit_sys("open");
-
-    for (;;) {
-        if (ioctl(pdriver, IOC_PIPE_GETCOUNT, &count) == -1)
-            exit_sys("ioctl");
-        printf("There are (is) %d byte(s) in the pipe\n", count);
-        printf("Size:");
-        scanf("%d", &size);
-        if (size > BUFFER_SIZE) {
-            printf("size is very long!...\n");
-            continue;
-        }
-        if (size == 0)
-            break;
-        if (size < 0) {
-            pp.size = -size;
-            if ((pp.buf = malloc(-size)) == NULL) {
-                fprintf(stderr, "cannot allocate memory!...\n");
-                exit(EXIT_FAILURE);
-            }
-
-            if (ioctl(pdriver, IOC_PIPE_PEEK, &pp) == -1)
-                exit_sys("ioctl");
-
-            peekbuf = (char *)pp.buf;
-            for (size_t i = 0; i < pp.size; ++i)
-                putchar(peekbuf[i]);
-            putchar('\n');
-
-            free(pp.buf);
-
-        }
-        else {
-            if ((result = read(pdriver, buf, size)) == -1)
-                exit_sys("read");
-            buf[result] = '\0';
-            printf("%jd bytes read: %s\n", (intmax_t)result, buf);
-        }
-    }
-
-    close(pdriver);
-
-    return 0;
-}
-
-void exit_sys(const char *msg)
-{
-    perror(msg);
-
-    exit(EXIT_FAILURE);
+	exit(EXIT_FAILURE);
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Şimdi de aygıt sürücülerde zamanlama işlemlerinin nasıl yapılacağı üzerinde duracağız. Çekirdeğin zamanlama mekanizması
-    periyodik oluşturulan donanım kesmeleriyle sağlanmaktadır. Bu kesmelere genel olarak "timer kesmeleri" ya da Linux 
-    terminolojisinde "jiffy" denilmektedir. Eskiden tek CPU'lu makineler kullanıyordu ve eski işlemcilerde işlemcinin içerisinde 
-    periyodik kesme oluşturacak bir mekanizma yoktu. Ancak daha sonraları işlemcilere kendi içerisinde periyodik kesme 
-    oluşturabilecek timer devreleri eklendi. Bugün ağırlıklı olarak birden fazla çekirdeğe sahip işlemcileri kullanıyoruz. Bu 
-    işlemcilerin içerisindeki çekirdeklerin her birinde o çekirdekte periyodik kesme oluşturan (local interrupts) timer devreleri 
-    bulunmaktadır. Böylece her çekirdek kendi timer devresiyle "context switch" yapmakta ve proses istatistiklerini güncellemektedir. 
-    Bugün PC mimarisinde yerel çekirdeklerin kesme mekanizmaları dışında ayrıca bir de eski sistemlerde zaten var olan IRQ0 hattına 
-    bağlı global bir timer devresi de bulunmaktadır. Bu global timer devresi "context switch" yapmak için değil sistem zamanının 
-    ilerletilmesi amacıyla kullanılmaktadır.
+    Bu bölümde aygıt sürücülerde zamanlama işlemlerinin nasıl yapılacağı üzerinde duracağız. Aygıt sürücülerde zamanlama 
+    işlemleri bazı uygulamalarda kritik önemde olabilmektedir. Örneğin programcının bir IO port'una bir bilgi gönderdikten 
+    sonra diğerini göndermek için belli bir süre beklemesi gerekebilir. Bazen programcı belli bir süre sonra birtakım işlemlerin 
+    yapılmasını isteyebilir. Masaüstü Linux sistemleri "katı gerçek zamanlı (hard real time)" işlemler için uygun olmasa da bazı 
+    "gevşek gerçek zamanlı (soft real time)" işlemlere olanak sağlayabilmektedir. Gerçek zamanlı işlemlerde kritik zamanlamalar 
+    söz konusu olabilmektedir. İşte Linux'ta bu tür bekleme işlemleri çekirdeğin sunduğu mekanizmalar yoluyla yapılmaktadır. 
 
-    Bugünkü Linux sistemlerinde söz konusu olan bu timer devrelerinin hepsi 1 milisaniye, 4 milisaniye ya da 10 milisaniyeye 
+    Linux çekirdeğinde zamanlama işlemleri iki yolla gerçekleştirilmektedir:
+
+    1) Periyodik donanım kesmeleri yoluyla
+    2) İşlemcilerin sunduğu TSC (time stamp counter) mekanizması yoluyla
+
+    Uzun süreli zamanlama işlemlerinde periyodik donanım kesmelerinden kısa süreli zamanlama işlemlerinde ise işlemcilerin sunduğu 
+    TSC mekanizmasından faydalanılmaktadır. 
+
+    Zamanlama işlemleri için periyodik donanım kesmeleri oluşturan devrelerden faydalanılmaktadır. Örneğin klasik PC mimarisinde 
+    CPU üzerinde periyodik kesme oluşturmak için Intel'in 8254 "Programmable Interval Timer (PIT)" denilen entegre devresi 
+    kullanılıyordu. Bugün Intel tabanlı PC'lerde hala bu donanım birimi bulundurulmaktadır. Ancak belli bir zamandan sonra 
+    PC board'larına daha yüksek çözünürlüklü periyodik donanım kesmesi oluşturmak için chipset'ler içerisine yeni donanım 
+    birimleri de eklenmiştir. Periyodik donanım kesmesi oluşturmak için kullanılan bu yüksek çözünürlüklü birimlere "HPET (High 
+    Precision Event Timer)" de denilmektedir. 
+    
+    Belli bir süreden sonra Intel ve ARM işlemcilerine CPU içerisine de periyodik kesme oluşturan zamanlayıcı devreler eklenmiştir. 
+    Bunlara PC mimarisinde "APIC Timer (Advanced Progammable Interrupt Controller Timer)" ya da "yerel timer (local timer)" 
+    denilmektedir. Çok çekirdekli işlemcilerde her çekirdeğin ayrı bir "yerel timer" devresi bulunmaktadır. Bugünkü çok çekirdekli 
+    sistemlerde thread'ler arası geçiş (context switch) bu yerel timer devrelerinin oluşturduğu kesmeler yoluyla gerçekleştirilmektedir. 
+    
+    Gömülü sistemlerde CPU'nun dışındaki periyodik kesme oluşturan donanım birimleri genellikle SoC içerisinde bulunmaktadır.
+    Tabii ARM tabanlı gömülü sistemlerde aynı zamanda tıpkı Intel işlemcilerinde olduğu gibi CPU içerisinde de periyodik donanım 
+    kesmeleri oluşturacak ayrı yerel timer devreleri vardır. Bu yerel timer devrelerine "ARM Generic Timer" da denilmektedir. 
+
+    Özetle bugünkü Linux sistemlerinin çalıştırıdığı masaüstü sistemlerinde ve ARM tabanlı gömülü sistemlerde genel olarak olarak 
+    iki zamanlayıcı devre bulunmaktadır:
+
+    1) Global Timer devresi
+    2) Her CPU'nun ya da çekirdeğin içerisindeki yerel timer devresi
+
+    Global timer devresi Linux tarafından genel zamanlama işlemleri için, yerel timer devreleri ise ilgili çekirdekteki 
+    thread'ler arası geçiş (context switch) işlemlerini sağlamak için kullanılmaktadır.
+    
+    Bugünkü Linux sistemlerinde bu global ve yerel timer devrelerinin hepsi 1 milisaniye, 4 milisaniye ya da 10 milisaniyeye 
     kurulmaktadır. Eskiden ilk Linux çekirdeklerinde 10 milisaniyelik periyotlar kullanılıyordu. Sonra bilgisayarlar hızlanınca 
-    1 milisaniye periyot yaygın olarak kullanılmaya başlandı. Ancak bugünlerde 4 milisaniye periyotları kullanan çekirdekler de 
-    yaygın biçimde bulunmaktadır. Aslında timer frekansı çekirdek konfigüre edilirken kullanıcılar tarafından da değiştirilebilmektedir. 
-    (Çekirdek derlenmeden önce çekirdeğin davranışları üzerinde etkili olan parametrelerin belirlenmesi sürecine "çekirdeğin 
-    konfigüre" edilmesi denilmektedir.)
+    1 milisaniye periyot yaygın olarak kullanılmaya başlandı. Ancak bugünlerde 4 milisaniye periyotları kullanan çekirdekler 
+    de yaygın biçimde bulunmaktadır. Aslında timer frekansı çekirdek konfigüre edilirken kullanıcılar tarafından da değiştirilebilmektedir. 
+    (Anımsanacağı gibi çekirdek derlenmeden önce çekirdeğin davranışları üzerinde etkili olan parametrelerin belirlenmesi sürecine 
+    "çekirdeğin konfigüre" edilmesi denilmektedir.) Ancak bu timer frekansı çekirdek boot parametreleri yoluyla değiştirilememektedir. 
+
+    proc dosya sistemine belli bir çekirdek verisyonundan sonra "timer_list" isimli bir giriş de eklenmiştir. Bu dizin girişi 
+    okunduğunda o sistemdeki çekirdeğin kullandığı timer devrelerine ilişkin bilgiler elde edilmektedir. Yine Linux'un kullandığı 
+    timer kaynakları hakkında bilgiler sys dosya sisteminin içerisinden "/sys/devices/system/clocksource" dizininden de elde 
+    edilebilmektedir. Bu dosyaların ayrıntılı formatları için Linux dokümanlarına başvurabilirsiniz. (İçerik olarak çekirdek 
+    versiyonları arasında farklılıklar da söz konusu olabilmektedir.)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -34686,34 +34952,45 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Global timer kesmelerine (PC mimarisinde IRQ0) ilişkin kesme kodları çekirdek içerisindeki jiffies isimli bir global 
-    değişkeni artırmaktadır. Böylece eğer timer kesme periyodu biliniyorsa iki jiffies değeri arasındaki farka bakılarak 
-    bir zaman ölçümü mümkün olabilmektedir.
+    Global timer kesmelerine (PC mimarisinde IRQ0) ilişkin kesme kodları çekirdek içerisindeki jiffies isimli bir global değişkeni 
+    artırmaktadır. Böylece eğer timer kesme periyodu biliniyorsa iki jiffies değeri arasındaki farka bakılarak bir zaman ölçümü 
+    mümkün olabilmektedir. Tabii buradaki hesabın çözünürlüğü ancak global timer devresinin periyodu kadardır.
 
-    Timer frekansı Linux kernel içerisindeki HZ isimli sembolik sabitle belirtilmiştir. Timer periyodu çekirdek konfigüre 
-    edilirken değiştirilebilmektedir. Genellikle bu süre 1 ms, 4 ms ya da 10 ms olmaktadır. (Ancak değişik mimarilerde farklı 
-    değerlerde olabilir.) Örneğin kursun yapıldığı sanal makinede timer periyodu 4 milisaniyedir. Bu da saniyede 250 kez timer
-    kesmesinin oluşacağı anlamına gelmektedir. Başka bir deyişle bu makinede HZ sembolik sabiti 250 olarak define edilmiştir.
+    Timer frekansı Linux çekirdeği içerisindeki HZ isimli sembolik sabitle belirtilmiştir. Timer frekansı çekirdek konfigüre 
+    edilirken CONFIG_HZ konfigürasyon parametresi yoluyla değiştirilebilmektedir. Yukarıda da belirttiğimiz gibi genellikle 
+    timer frekansı 1000 (1 ms) , 250 (4 ms) ya da 100 (10 ms) olmaktadır. (Ancak değişik mimarilerde farklı değerlerde olabilir.) 
+    Örneğin kursun yapıldığı sanal makinede timer periyodu 1 milisaniyedir. Bu da saniyede 1000 kez timer kesmesinin oluşacağı 
+    anlamına gelmektedir. Başka bir deyişle bu makinede HZ sembolik sabiti 1000 olarak define edilmiştir. Çekirdeğin CONFIG_HZ
+    konfigürasyon parametresi değiştirildiğinde bu değişiklik HZ sembolik sabitine de yansıtılmaktadır. Çekirdek kodlarında 
+    aşağıdaki gibi bir #define işlemi bulunmaktadır:
 
-    İşte timer kesmesi her oluştuğunda işletim sisteminin kesme kodu (interrupt handler) devreye girip "jiffies" isimli 
+    #define HZ  CONFIG_H
+
+    Ancak bazı özel ve uç durumlarda CONFIG_HZ değeri HZ değeri ile olmayabilmektedir. Ancak burda bu durum hakkında açıklama
+    yapmayacağız.
+
+    İşte global timer kesmesi her oluştuğunda işletim sisteminin kesme kodu (interrupt handler) devreye girip "jiffies" isimli 
     global değişkeni 1 artırmaktadır. Bu jiffies değişkeni unsigned long türdendir. Bilindiği gibi unsigned long türü 32 
-    bit Linux sistemlerinde 32 bit, 64 bit Linux sistemlerinde 64 bittir. 32 bit Linux sistemlerinde ayrıca jiffies_64 isimli 
-    bir değişken daha vardır. Bu değişken hem 32 bit sistemde hem de 64 bit sistemde 64 bitliktir. 32 bit sistemde jiffies 
-    değişkeni 32 bit olduğu için bilgisayar uzun süre açık kalırsa taşma (overflow) oluşabilmektedir. Ancak 64 bit sistemlerde 
-    taşma mümkün değildir. 32 bit sistemlerde jiffies_64 değeri çekirdek tarafından iki ayrı makine komutuyla güncellenmektedir. 
-    Çünkü 32 bit sistemlerde 64 bit değeri belleğe tek hamlede yazmak mümkün değildir. Bu nedenle jiffies_64 değerinin taşma 
-    durumunda yanlış okunabilme olasılığı vardır. Hem 32 bit hem 64 bit sistemlerde 64 bitlik jiffies değerini düzgün bir 
-    biçimde okuyabilmek için get_jiffies_64 isimli fonksiyon bulundurulmuştur:
+    bit Linux sistemlerinde 4 byte, 64 bit Linux sistemlerinde 8 byte'tır. 32 bit Linux sistemlerinde ayrıca jiffies_64 isimli 
+    bir değişken de bulunmaktadır. Bu değişken hem 32 bit sistemde hem de 64 bit sistemde 8 byte'tır. Aslında 32 bit sistemlerde 
+    zaten jiffies değişkeni jiffies_64 değişkeninin düşük anlamlı 4 byte'ı durumundadır. 32 bit sistemde jiffies değişkeni 4 
+    byte olduğu için bilgisayar çok uzun süre açık kalırsa taşma (overflow) oluşabilmektedir. Ancak 64 bit sistemlerde taşma 
+    mümkün değildir. 32 bit sistemlerde jiffies_64 değeri çekirdek tarafından iki ayrı makine komutuyla güncellenmektedir. 
+    Çünkü 32 bit sistemlerde 64 bit bir değeri belleğe tek hamlede yazmak mümkün değildir. Bu nedenle jiffies_64 değerinin 
+    taşma durumunda yanlış okunabilme olasılığı vardır. Ayrıca bu jiffies_64 değeri okunurken de global timer kesmesi oluşabilir. 
+    Overlow durumunda Hem 32 bit hem 64 bit sistemlerde 64 bitlik jiffies değerini düzgün bir biçimde okuyabilmek için get_jiffies_64 
+    isimli fonksiyon bulundurulmuştur:
 
     #include <linux/jiffies.h>
 
     u64 get_jiffies_64(void);
 
-    Biz 32 bit sistemde de olsak bu fonksiyonla 64 bitlik jiffies değerini düzgün bir biçimde okuyabiliriz.
+    Biz 32 bit sistemde de olsak bu fonksiyonla 64 bitlik jiffies değerini düzgün bir biçimde okuyabiliriz. Bu fonksiyon düzgün
+    okuma için gereken senkronizasyonu sağlamaktadır.
 
-    Aşağıdaki örnekte çekirdek modülü içerisinde proc dosya sisteminde "jiffy-module" isimli bir dizin, dizinin içerisinde de 
-    "jiffy" ve "hertz" isimli iki dosya yaratılmıştır. "jiffy" dosyası okunduğunda o anki jiffies değeri elde edilmektedir. 
-    "hertz" dosyası okunduğunda ise timer frekansı elde edilmektedir. Aygıt sürücüyü aşağıdaki gibi derleyip yükleyebilirsiniz:
+    Aşağıdaki örnekte çekirdek modülü içerisinde proc dosya sisteminde "jiffy-module" isimli bir dizin, bu dizinin içerisinde 
+    de "jiffy" ve "hertz" isimli iki dosya yaratılmıştır. "jiffy" dosyası okunduğunda o anki jiffies değeri, "hertz" dosyası 
+    okunduğunda ise timer frekansı elde edilmektedir. Çekirdek modülünü aşağıdaki gibi derleyip yükleyebilirsiniz:
 
     $ make file=jiffy-module
     $ sudo insmod jiffy-module.ko
@@ -34728,7 +35005,6 @@ void exit_sys(const char *msg)
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
-#include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
 
@@ -34747,9 +35023,6 @@ static struct proc_ops g_procops_hertz = {
     .proc_read = proc_read_hertz,
 };
 
-static char g_jiffies_str[32];
-static char g_hertz_str[32];
-
 static int __init generic_init(void)
 {
     struct proc_dir_entry *pde_dir;
@@ -34757,7 +35030,7 @@ static int __init generic_init(void)
     if ((pde_dir = proc_mkdir("jiffy-module", NULL)) == NULL)
         return -ENOMEM;
 
-    if (proc_create("jiffy", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_jiffy) == NULL) {
+    if (proc_create("jiffies", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_jiffy) == NULL) {
         remove_proc_entry("jiffy-module", NULL);
         return -ENOMEM;
     }
@@ -34779,40 +35052,44 @@ static void __exit generic_exit(void)
 
 static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    size_t esize;
-    size_t left;
+    unsigned long long jf;
+    static char valbuf[64 + 1];
+    size_t left, esize;
 
-    sprintf(g_jiffies_str, "%lu\n", jiffies);
+    if (*off > 0)
+        return 0;
 
-    left = strlen(g_jiffies_str) - *off;
-    esize = left < size ? left : size;
+    jf = get_jiffies_64();
+    sprintf(valbuf, "%llu\n", jf);
 
-    if (esize != 0) {
-        if (copy_to_user(buf, g_jiffies_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
+    left = strlen(valbuf);
+  	esize = size > left ? left : size;
 
-    printk(KERN_INFO "jiffy file read...\n");
+    if (copy_to_user(buf, valbuf, esize) != 0)  
+        return -EFAULT;
+    *off += esize;
+
+    printk(KERN_INFO "jiffies file read...\n");
 
     return esize;
 }
 
 static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    size_t esize;
-    size_t left;
+    static char valbuf[32 + 1];
+    size_t left, esize;
 
-    sprintf(g_hertz_str, "%d\n", HZ);
+    if (*off > 0)
+        return 0;
 
-    left = strlen(g_hertz_str) - *off;
-    esize = left < size ? left : size;
+    sprintf(valbuf, "%u\n", HZ);
 
-    if (esize != 0) {
-        if (copy_to_user(buf, g_hertz_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
+    left = strlen(valbuf);
+  	esize = size > left ? left : size;
+
+    if (copy_to_user(buf, valbuf, esize) != 0)  
+        return -EFAULT;
+    *off += esize;
 
     printk(KERN_INFO "hertz file read...\n");
 
@@ -34832,8 +35109,8 @@ clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Yukarıda da belirttiğimiz gibi eğer 64 bit sistemde çalışılıyorsa jiffies değerinin taşması (overflow olması) mümkün değildir. 
-    Ancak 32 bit sistemlerde timer frekansı 1000 ise 49 günde taşma meydana gelebilmektedir. Aygıt sürücü programcısı bazen geçen 
+    Yukarıda da belirttiğimiz gibi eğer 64 bit sistemde çalışıyorsak jiffies değerinin taşması (overflow olması) mümkün değildir. 
+    Ancak 32 bit sistemlerde HZ değeri 1000 ise 49 günde taşma meydana gelebilmektedir. Aygıt sürücü programcısı bazen geçen 
     zamanı hesaplamak için iki noktada jiffies değerini alıp aradaki farka bakmak isteyebilmektedir. Ancak bu durumda 32 bit 
     sistemlerde "overflow" olasılığının ele alınması gerekir. İşaretli sayıların ikili sistemdeki temsiline dayanarak iki jiffies 
     arasındaki fark aşağıdaki gibi tek bir ifadeyle de hesaplanabilmektedir:
@@ -34855,7 +35132,8 @@ clean:
     Bu fonksiyonların hepsi bool bir değere geri dönmektedir. Bu fonksiyonlar 32 bit sistemlerde taşma durumunu da dikkate 
     almaktadır. time_after fonksiyonu birinci parametresiyle belirtilen jiffy değerinin ikinci parametresiyle belirtilen jiffy 
     değerinden sonraki bir jiffy değeri olup olmadığını belirlemekte kullanılmaktadır. Diğer fonksiyonlar da bu biçimde birinci 
-    parametredeki jiffy değeri ile ikinci parametredeki jiffy değerini karşılaştırmaktadır.
+    parametredeki jiffy değeri ile ikinci parametredeki jiffy değerini karşılaştırmaktadır. Tabii aslında eğer jiffies değerini 
+    get_jiffies_64 fonksiyonuyla elde ediyorsanız yukarıdaki fonksiyonları kullanmanıza hiç gerek kalmaz.
 
     Çekirdek içerisinde jiffies değerini çeşitli biçimlere dönüştüren aşağıdaki fonksiyonlar da bulunmaktadır:
 
@@ -34871,7 +35149,8 @@ clean:
     unsigned int jiffies_to_usecs(const unsigned long j);
     unsigned int jiffies_to_nsecs(const unsigned long j);
 
-    Bu fonksiyonlar o andaki aktif HZ değerini dikkate almaktadır.
+    Bu fonksiyonlar HZ sembolik sabitinin değerini dikkate almaktadır. HZ değerinin genel olarak CONFIG_HZ değeri ile aynı 
+    olduğunu anımsayınız.
 
     Ayrıca jiffies değerini saniye ve nanosaniye biçiminde ayırıp bize struct timespec64 biçiminde bir yapı nesnesi olarak veren 
     jiffies_to_timespec64 isimli bir fonksiyon da vardır. Bunun tersi timespec64_to_jiffies fonksiyonuyla yapılmaktadır.
@@ -34879,8 +35158,8 @@ clean:
     timespec64 yapısı da şöyledir:
 
     struct timespec64 {
-        time64_t    tv_sec;            /* seconds */
-        long        tv_nsec;        /* nanoseconds */
+        time64_t    tv_sec;             /* seconds */
+        long        tv_nsec;            /* nanoseconds */
     };
 
     Eski çekirdeklerde bu fonksiyonların yerine aşağıdaki fonksiyonlar bulunuyordu:
@@ -34893,7 +35172,7 @@ clean:
     void jiffies_to_timeval(unsigned long jiffies, struct timeval *value);
 
     Aşağıdaki örnekte proc dosya sisteminde "jiffy-module" dizini içerisinde ayrıca "difference" isimli bir dosya da yaratılmıştır. 
-    Bu dosya her okunduğunda önceki okumayla aradaki jiffy farkı yazdırılmaktadır.
+    Bu dosya her okunduğunda önceki okumayla aradaki jiffies farkı yazdırılmaktadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /* jiffy-module.c */
@@ -35015,7 +35294,8 @@ static ssize_t proc_read_difference(struct file *filp, char *buf, size_t size, l
 
     jiffies_to_timespec64(net_jiffies, &ts);
 
-    sprintf(g_difference_str, "Jiffy difference: %10ld (%ld seconds + %ld nanoseconds)\n", net_jiffies, (long)ts.tv_sec, (long)ts.tv_nsec);
+    sprintf(g_difference_str, "Jiffy difference: %10ld (%ld seconds + %ld nanoseconds)\n", 
+            net_jiffies, (long)ts.tv_sec, (long)ts.tv_nsec);
 
     left = (loff_t)strlen(g_difference_str) - *off;
     esize = left < size ? left : size;
@@ -35098,11 +35378,8 @@ clean:
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
-#include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
-#include <linux/time.h>
-#include <linux/delay.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaan Aslan");
@@ -35111,7 +35388,6 @@ MODULE_DESCRIPTION("jiffy module");
 static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t *off);
 static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off);
 static ssize_t proc_read_difference(struct file *filp, char *buf, size_t size, loff_t *off);
-static ssize_t proc_read_sleep(struct file *filp, char *buf, size_t size, loff_t *off);
 
 static struct proc_ops g_procops_jiffy = {
     .proc_read = proc_read_jiffy,
@@ -35125,14 +35401,6 @@ static struct proc_ops g_procops_difference = {
     .proc_read = proc_read_difference,
 };
 
-static struct proc_ops g_procops_sleep = {
-    .proc_read = proc_read_sleep,
-};
-
-static char g_jiffies_str[32];
-static char g_hertz_str[32];
-static char g_difference_str[512];
-
 static int __init generic_init(void)
 {
     struct proc_dir_entry *pde_dir;
@@ -35140,7 +35408,7 @@ static int __init generic_init(void)
     if ((pde_dir = proc_mkdir("jiffy-module", NULL)) == NULL)
         return -ENOMEM;
 
-    if (proc_create("jiffy", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_jiffy) == NULL) {
+    if (proc_create("jiffies", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_jiffy) == NULL) {
         remove_proc_entry("jiffy-module", NULL);
         return -ENOMEM;
     }
@@ -35151,11 +35419,6 @@ static int __init generic_init(void)
     }
 
     if (proc_create("difference", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_difference) == NULL) {
-        remove_proc_entry("jiffy-module", NULL);
-        return -ENOMEM;
-    }
-
-    if (proc_create("sleep", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_sleep) == NULL) {
         remove_proc_entry("jiffy-module", NULL);
         return -ENOMEM;
     }
@@ -35172,40 +35435,44 @@ static void __exit generic_exit(void)
 
 static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    size_t esize;
-    size_t left;
+    unsigned long long jf;
+    static char valbuf[64 + 1];
+    size_t left, esize;
 
-    sprintf(g_jiffies_str, "%lu\n", jiffies);
+    if (*off > 0)
+        return 0;
 
-    left = strlen(g_jiffies_str) - *off;
-    esize = left < size ? left : size;
+    jf = get_jiffies_64();
+    sprintf(valbuf, "%llu\n", jf);
 
-    if (esize != 0) {
-        if (copy_to_user(buf, g_jiffies_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
+    left = strlen(valbuf);
+  	esize = size > left ? left : size;
 
-    printk(KERN_INFO "jiffy file read...\n");
+    if (copy_to_user(buf, valbuf, esize) != 0)  
+        return -EFAULT;
+    *off += esize;
+
+    printk(KERN_INFO "jiffies file read...\n");
 
     return esize;
 }
 
 static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    size_t esize;
-    size_t left;
+    static char valbuf[32 + 1];
+    size_t left, esize;
 
-    sprintf(g_hertz_str, "%d\n", HZ);
+    if (*off > 0)
+        return 0;
 
-    left = strlen(g_hertz_str) - *off;
-    esize = left < size ? left : size;
+    sprintf(valbuf, "%u\n", HZ);
 
-    if (esize != 0) {
-        if (copy_to_user(buf, g_hertz_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
+    left = strlen(valbuf);
+  	esize = size > left ? left : size;
+
+    if (copy_to_user(buf, valbuf, esize) != 0)  
+        return -EFAULT;
+    *off += esize;
 
     printk(KERN_INFO "hertz file read...\n");
 
@@ -35214,41 +35481,34 @@ static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t
 
 static ssize_t proc_read_difference(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    static unsigned long prev_jiffies;
-    loff_t left, esize;
-    long int net_jiffies;
+    static char valbuf[64 + 1];
+    static unsigned long long prev_jiffies;
+    unsigned long long net_jiffies;
     struct timespec64 ts;
+    size_t left, esize;
 
-    net_jiffies = (long)jiffies - (long)prev_jiffies;
+    if (*off > 0)
+        return 0;
 
+    if (prev_jiffies == 0)
+        prev_jiffies = get_jiffies_64();
+
+    net_jiffies = get_jiffies_64() - prev_jiffies;
     jiffies_to_timespec64(net_jiffies, &ts);
 
-    sprintf(g_difference_str, "Jiffy difference: %10ld (%ld seconds + %ld nanoseconds)\n", net_jiffies, (long)ts.tv_sec, (long)ts.tv_nsec);
+    sprintf(valbuf, "%llu seconds + %llu nanoseconds\n", 
+        (unsigned long long)ts.tv_sec, (unsigned long long)ts.tv_nsec);
 
-    left = (loff_t)strlen(g_difference_str) - *off;
-    esize = left < size ? left : size;
+    left = strlen(valbuf);
+  	esize = size > left ? left : size;
 
-    if (esize != 0) {
-        if (copy_to_user(buf, g_difference_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
+    if (copy_to_user(buf, valbuf, esize) != 0)  
+        return -EFAULT;
+    *off += esize;
 
     prev_jiffies = jiffies;
 
-    return (ssize_t)esize;
-}
-
-static ssize_t proc_read_sleep(struct file *filp, char *buf, size_t size, loff_t *off)
-{
-    /*
-    set_current_state(TASK_INTERRUPTIBLE);
-    schedule_timeout(HZ * 10);
-    */
-
-    ssleep(10);
-
-    return 0;
+    return esize;
 }
 
 module_init(generic_init);
