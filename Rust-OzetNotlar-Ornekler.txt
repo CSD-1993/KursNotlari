@@ -15,7 +15,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                                Son Güncelleme: 24/06/2025 - Salı
+                                                Son Güncelleme: 26/06/2025 - Perşembe
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -7968,7 +7968,7 @@ fn get_roots(a: f64, b: f64, c: f64) -> (f64, f64, bool) {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                        28. Ders 18/06/2025 - Çarşamba
+                                            28. Ders 18/06/2025 - Çarşamba
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -8681,30 +8681,675 @@ fn get_roots(a: f64, b: f64, c: f64) -> (f64, f64, bool) {
 
     Mademki enum varyantlarının ayırıcı değerlerinin bir türü var ve bu türü biz repr özniteliği ile belirleyebiliyoruz,
     pekiyi bu belirlemeyi hiç yapmadığımız durumdaki ayırıcı değerlerin default türü nedir? İşte Rust'ta açıkça repr 
-    özniteliği ile bir tür belitilmemişse default durumda "Rust temsili" geçerli olmaktadır. Rust temsiline göre de enum 
-    varyantlarının ayırıcı değerleri isize türündendir. Ancak "The Rust Reference" dokümanları bu isize türünün yalnızca 
-    temsil amacıyla kullanıldığını belirtmektedir. Yani default ayırıcı değer türü isize olsa da derleyiciler isterse 
-    kod üretirken bundan daha küçük türleri de kullanabilirler.
+    özniteliği ile bir tür belirtilmemişse default durumda "Rust temsili (Rust representation)" geçerli olmaktadır. Rust 
+    temsiline göre de enum varyantlarının ayırıcı değerleri isize türündendir. Ancak "The Rust Reference" dokümanları bu 
+    isize türünün yalnızca temsil amacıyla kullanıldığını belirtmektedir. Yani default ayırıcı değer türü isize olsa da 
+    derleyiciler isterse kod üretirken bundan daha küçük türleri de kullanabilirler.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
+                                        30. Ders 25/06/2025 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Bir enum türünden nesnenin bellek organizasyonu daha önce de belirttiğimiz gibi adeta bir "birlik (union)" organizasyonu
+    gibidir. enum türünden bir nesne için C'de olduğu enum türünün en büyük elemanını içerecek büyüklükte bir yer ayrılmaktadır. 
+    Ancak C'den farklı olarak Rust'taki enum nesneleri aynı zamanda ayırıcı değeri de kendi içerisinde tutmaktadır. Böylece 
+    derleyici enum nesnesinde hangi varyantın tutulduğunu da bu ayrıcı değerden hareketle anlayabilmektedir. O halde Rust'ta 
+    bir enum türünden nesne için ayrılacak alanın yerin uzunluğu şöyle ifade edilebilir:
+
+    enum nesnesi için ayrılacak yerin uzunluğu = ayrıca değerin uzunluğu + enum türünün en büyük elemanının uzunluğu 
+
+    Tabii ayrıcı değerler ile tutulan enum varyantı arasında hizalama amacıyla padding byte'ları bulunabilir. Aslında "The 
+    Rust Reference" dokümanlarında enum nesnesinin uzunluğunun ne olduğu ve içsel yerleşiminin nasıl yapıldığı hakkında bir 
+    şey söylenmemiştir. Yani bu durum derleyici yazanların isteğine bırakılmıştır. durumdadır. Biz yukarıda tipik olarak bir 
+    enum nesnesinin içsel organizasyonunun nasıl olması gerektiği konusunda bir açıklama yaptık. Şimdi açıklamalarımızı 
+    somut bir örnekle pekiştirelim. Aşağıdaki gibi bir enum tanımlanmış olsun: 
+
+    enum Fruit {
+        Apple,
+        Banana(i32, f64),
+        Apricot { price: i32, unit: i32 }
+    }
     
+    Burada Apple varyantı birimsel bir varyanttır. Birimsel varyantların aslında nesne içerisinde bir yer kaplamasına 
+    gerek yoktur. Çünkü zaten birimsel varyantlar değer tutmamaktadır. Dolayısıyla aslında onlar yalnızca ayırıcı değer 
+    yoluyla teşhis edilebilirler. Örneğimizde Banana varyantı 4 + 8 = 12 byte, Apricot varyantı ise 4 + 4 = 8 byte yer 
+    kaplayacaktır. Bu durumda bu enum türünün en büyük varyantı Banana varyantıdır. O halde bu enum türünden nesne "bu 
+    varyantın uzunluğu + ayrıcı değerin (discriminant) uzunluğu" kadar yer kaplayacaktır. Ayırıcı değerin dil içerisindeki 
+    default türünün isize olduğunu belirtmiştik. isize türü de 64 bit sistemlerde 8 byte uzunluğundaydı. Ancak yukarıda biz 
+    "her ne kadar ayırıcı değerin türü isize olarak belirtiliyorsa da derleyicilerin ayırıcı değer için içsel olarak aha 
+    küçük türleri de kullanabileceğini" belirtmiştik. Elimizde derleyicide bu enum türünden nesnenin uzunluğu 16 byte olarak
+    rapor edilmektedir. Muhtemelen derleyicimiz bu enum türünün ayırıcı değeri için 8 byte değil 4 byte ayırmıştır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let f = Fruit::Apple;
+    let size = std::mem::size_of_val(&f);
+
+    println!("{}", size);       // 16
+}
+
+enum Fruit {
+    Apple,
+    Banana(i32, f64),
+    Apricot { price: i32, unit: i32 }
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Bu konuda sıkça tereddüt edilen bir konu hakkında açıklamada bulunmak istiyoruz. Aşağıdaki enum türünden nesneye dikkat 
+    ediniz:
+
+    enum Fruit {
+        Apple,
+        Banana(i32, f64),
+        Apricot { price: i32, unit: i32 }
+    }
+    //...
+
+    let f = Fruit::Apple;
+
+    Burada neden f için 16 byte yer ayrılıyor? Örneğin 4 byte bunun için yetmez miydi? İşte tıpkı C'deki birliklerde olduğu 
+    derleyicinin enum türünden nesneler için enum türünün en büyük elemanını tutabilecek kadar yer ayırması gerekmektedir. 
+    Çünkü daha sonra (eğer nesne mut ise) bu nesne aynı enum türünün başka bir varyantını da tutabilmelidir. Örneğin:
+
+    let mut f = Fruit::Apple;
+    //...
+    f = Fruit::Banana(10, 5.5);
+
+    Burada başlangıçta f nesnesi Fruit::Apple varyantını tutarken sonra Fruit::Banana(10, 5.5) varyantını tutar hale 
+    gelmiştir. İşte işin başında f için en kötü olasılıkla en uzun elemanı da tutabilecek uzunlukta bir yer ayrılması 
+    gerekmektedir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Pekiyi elimizde bir enum türünden nesne varsa biz onun ayırıcı değerini sayısal olarak elde edebilir miyiz? İşte Rust'ta
+    aslında ayrıcı değerin sayısal biçimde elde edilmesi dilin tasarımsal prensipleriyle çelişmektedir. Yani Rust tasarımcıları
+    enum nesnesinin ayırıcı değerinin sayısal biçimde elde edilmesini pek de istememiştir. Ancak yine de iki durumda bu ayırıcı 
+    değer açıkça sayısal biçimde elde edilebilmektedir. 
+
+    1) Eğer enum türünün tüm varyantları birimsel varyantlarsa (yani enm türü "unit-only" biçimindeyse) bu durumda bu enum 
+    türünden bir nesne as operatöryle herhangi bir tamsayı türüne (ancak gerçek sayı türlerine değil) dönüştürülerek ayırıcı 
+    değer elde edilebilir. Örneğin:
+
+    fn main() {
+        let d = Direction::Right;
+        let dval: i32;
+
+        dval = d as i32;            // geçerli, enum "unit-only"
+        println!("{}", dval);       // 2
+    }
+
+    enum Direction {
+        Left,
+        Up,
+        Right,
+        Down
+    }
+
+    Byrada d değişkeni Direction isimli enum türündendir. Bu enum türünün tüm varyantları birimseldir. Bu nedenle bu enum 
+    türünden bir nesne as operatörü ile bir tamsayı türüne dönüştürüldüğünde ayırıcı değer elde edilebilir. 
+
+    2) Alansız (field-less) bir enum türünün birimsel varyantları dışındaki hiçbir varyantı için "= <sabit_ifadesi> ile açıkça 
+    değer belirtilmemişse bu enum türünden nesne tamsayı türlerine dönüştürülerek ayırıcı değer elde edilebilir. Örneğin:
+
+    enum Color {
+        Red,
+        Green(),
+        Blue {},
+        Magenta
+    }
+
+    Burada Color alansız (field-less) bir enum türüdür. Bu enum türünün birimsel olmayan varyantları için açıkça değer belirtilmediği 
+    için bu enum türünden nesne as operatörüyle tamsayı türlerine dönüştürülerek ayırıcı değer elde edilebilir:
+
+    fn main() {
+        let d = Color::Blue{};
+        let dval: i32;
+
+        dval = d as i32;            // geçerli
+        println!("{}", dval);       // 2
+    }
+
+    Burada bir hatırlatma yapmak istiyoruz. Yukarıdaki enum türünün varyantları için ancak repr özniteliği ile ayırıcı değer 
+    belirtilebilmektedir. Aşağıdaki enum türüne dikkat ediniz:
+
+    #[repr(i32)]
+    enum Color {
+        Red = 10,
+        Green(),
+        Blue {},
+        Magenta
+    }
+
+    Burada biz bu enum türünden bir nesneyi yine as operatörüyle tamsayı türlerine dönüştürebiliriz. Çünkü açıkça değeri
+    belirtilen varyant birimsel varyanttır:
+
+    fn main() {
+        let d = Color::Blue{};
+        let dval: i32;
+
+        dval = d as i32;            // geçerli
+        println!("{}", dval);       // 2
+    }
+
+    #[repr(i32)]
+    enum Color {
+        Red = 10,
+        Green(),
+        Blue {},
+        Magenta
+    }
+
+    Fakat aşağıdaki dönüştürme error ile sonuçlanacaktır:
+
+    fn main() {
+        let d = Color::Blue{};
+        let dval: i32;
+
+        dval = d as i32;            // error!
+        println!("{}", dval);
+    }
+
+    #[repr(i32)]
+    enum Color {
+        Red,
+        Green() = 10,
+        Blue {},
+        Magenta
+    }
+
+    Tabii enum alansız değilse zaten hiçbir durumda dönüştürme yapılamamaktadır. Örneğin:
+
+    fn main() {
+        let d = Color::Blue{};
+        let dval: i32;
+
+        dval = d as i32;            // error!
+        println!("{}", dval);
+    }
+
+    enum Color {
+        Red,
+        Green(i32),
+        Blue,
+        Magenta
+    }
+
+    Burada Color alansız (field-less) bir enum değildir. Dolayısıyla bu enum türünden bir nesne tamsayı türlerine dönüştürülemez.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    std::mem modülü içerisindeki discriminant isimli fonksiyon bir enum nesnesinin adresini alır. O enum nesnesinin ayırıcı 
+    değerine ilişkin std::mem::Discriminant<E> türünden (buradaki E adresi alınan enum nesnesinin ilişkin olduğu enum türünü 
+    belirtmektedir) bir değer verir. std::mem::Discriminant<E> türü generic bir yapı belirtmektedir. Bu yapının elemanları 
+    da == ve != operatörleriyle karşılaştırılabilmektedir. Bu sayede biz aynı türden iki enum nesnesinin içerisinde aynı 
+    ayrıcı değerin olup olmadığını dolaylı bir biçimde anlayabiliriz. Örneğin:
+
+    enum Color {
+        Red(i32),
+        Green(i32),
+        Blue(i32),
+        Magenta(i32)
+    }
+    //...
+
+    let x = Color::Blue(10);
+    let y = Color::Blue(20);
+
+    Burada x ve y nesneleri alan değerleri farklı olsa da aynı varyantı turmaktadır. İşte biz bu x ve y nesnelerinin içerisindeki 
+    ayırıcı değerlerin aynı olup olmadığını std::mem::discriminant fonksiyonuyla anlayabiliriz: 
+
+    let disc_x: std::mem::Discriminant<Color>;
+    let disc_y: std::mem::Discriminant<Color>;
+    let result: bool;
+
+    disc_x = std::mem::discriminant(&x);
+    disc_y = std::mem::discriminant(&y);
+
+    result = disc_x == disc_y;
+    println!("result: {}", result);         // true
+
+    Burada x ve y içerisinde aynı varyant bulunmaktadır. Ancak bu varyantların tuttukları değer farklıdır. Fakat std::mem::discriminant 
+    fonksiyonu bu alan değerlerine değil yalnızca ayırıcı değere bakmaktadır. Tabii bu tür karşılaştırmalar aslında daha kısa bir 
+    biçimde aşağıdaki gibi de yapılabilmektedir:
+
+    use std::mem::discriminant;
+
+    let x = Color::Blue(10);
+    let y = Color::Blue(20);
+    let result: bool;
+
+    result = discriminant(&x) == discriminant(&y);
+    println!("{}", result);     // true
+
+    Ya da örneğin:
+
+    let x = Color::Blue(10);
+
+    if discriminant(&x) == discriminant(&Color::Blue(10)) {
+        println!("yes");
+    }
+    else {
+       println!("no");
+    }
+
+    Ancak bu Discriminant<E> nesnesi ile >, <, >=, <= gibi karşılaştırmalar yapılamamaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::mem::discriminant;
+
+fn main() {
+    let x = Color::Blue(10);
+
+    if discriminant(&x) == discriminant(&Color::Blue(10)) {
+        println!("yes");
+    }
+    else {
+       println!("no");
+    }
+}
+
+enum Color {
+    Red(i32),
+    Green(i32),
+    Blue(i32),
+    Magenta(i32)
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Pekiyi bir enum türünden nesnesnin içerisindeki varyant alanalrını nasıl elde edebiliriz? İşte varyant alanları ancak 
+    Rust'taki "kalıp uyuşumu" mekaznizması ile elde edilebilmektedir. Bunun için tipik olarak match ifadesi kullanılmaktadır. 
+    match anahtar sözcüğünün yanındaki ifade bir enum türündense match kollarında bu enum türüne ilişkin varyant kalıpları 
+    bulundurulabilir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Birimsel enum varyantları için kalıplar doğrudan varyant ismiyle belirtilmektedir. Örneğin:
+
+    enum Direction  {
+        Left,
+        Up,
+        Right,
+        Down
+    }
+    //...
+
+    let d = Direction::Right;
+
+    match d {
+        Direction::Left => println!("left"),
+        Direction::Up => println!("up"),
+        Direction::Right => println!("right"),
+        Direction::Down => println!("down")
+    }
+
+    Burada kalıpların oluşturulma biçimine dikkat ediniz. Kalıplar yalnızca varyant isimlerinden oluşturulmuştur. Çünkü 
+    kalıplara ilişkin varyantlarda alanlar yoktur.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let d = Direction::Right;
+
+    match d {
+        Direction::Left => println!("left"),
+        Direction::Up => println!("up"),
+        Direction::Right => println!("right"),
+        Direction::Down => println!("down")
+    }
+}
+
+enum Direction  {
+    Left,
+    Up,
+    Right,
+    Down
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    enum türünün demetsel varyantları için daha önce demetler (tuples) konusunda görmüş olduğumuz demet kalıplarının hepsi 
+    kullanılabilir. Yani bu durumda kalıp bir demet kalıbı gibi oluşturulmaktadır. Önce enum varyantının ismi belirtilir,
+    sonra parantezler içerisinde demet kalıbı oluşturulur. Örneğin:
+
+    enum Color  {
+        RGB(u8, u8, u8),
+        GrayScale(u8),
+        CMYK(u8, u8, u8, u8),
+    }
+
+    Buradaki enum türünün varyantları demetsel biçimdedir. Biz de match deyiminde varyant isminden sonra demet kalıplarını
+    kullanabiliriz:
+
+     match color {
+        Color::RGB(r, g, b) => println!("RGB: {}, {}, {}", r, g, b),
+        Color::GrayScale(c) => println!("Grayscale, {}", c),
+        Color::CMYK(c, m, y, k) => println!("CMYK: {}, {}, {}, {}", c, m, y, k),
+    }
+ 
+    Burada match kollarında uyuşma sağlandığında biz hem nesnenin hangi varyantı tuttuğunu hem de o varyantın alanlarını elde 
+    etmiş oluruz. Yukarıdaki match deyiminin "exhaustive" olduğuna da dikkat ediniz. Bu nedenle match ifadesinin sonuna _ kolu
+    yerleştirmedik.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let color = Color::RGB(255, 255, 0);
+
+    match color {
+        Color::RGB(r, g, b) => println!("RGB: {}, {}, {}", r, g, b),
+        Color::GrayScale(c) => println!("Grayscale, {}", c),
+        Color::CMYK(c, m, y, k) => println!("CMYK: {}, {}, {}, {}", c, m, y, k),
+    }
+}
+
+enum Color  {
+    RGB(u8, u8, u8),
+    GrayScale(u8),
+    CMYK(u8, u8, u8, u8),
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Demetsel varyantlarda varyant isminden sonra yalnızca değişken kalıplarını değil daha önce görmüş olduğumuz tüm demet
+    kalıplarını kullanabiliriz. Örneğin:
+
+     match color {
+        Color::RGB(255, g, _) => println!("RGB: {}", g),
+        Color::GrayScale(c) => println!("Grayscale, {}", c),
+        Color::CMYK(..) => println!("CMYK"),
+        _=> println!("None")
+    }
+
+    Burada ilk match koluna dikkat ediniz:
+
+    Color::RGB(255, g, _) => println!("RGB: {}", g),
+    
+    Bu match kolunun uyuşması için ilk değerin 255 olması gerekir. Burada demetin üçüncü elemanı her durumda uyuşum sağlayacaktır. 
+    Programcı demetin ikinci elemanının değerini elde etmek istemiştir. Şimdi de üçüncü match koluna dikkat ediniz:
+
+    Color::CMYK(..) => println!("CMYK"),
+
+    Burada programcı CMYK varyantının her alanına uyuşum sağlamak istemiştir. Bu kalıp şöyle yazılamazdı:
+
+    Color::CMYK => println!("CMYK"),            // error!
+
+    Yine demetsel varyantlarda .. atomu herhangi bir elemanda bulunabilmektedir. Örneğin:
+
+    Color::RGB(.., b) => println!("RGB: {}", b),
+
+    Tabii .. atomu yalnızca tek bir elemanda bulunabilir. Biz yine @ sentaksı ile "başlama (binding)" yapabiliriz. Örneğin:
+
+    c @ Color::RGB(255, g, _) => println!("RGB: {:?} {}", c, g),
+
+    Burada tüm varyantın değeri ayrıca c değişkenine de yerleştirilmiştir. Tabii demetsel varyantlarda demet elemanlarında
+    demet kalıplarındaki diğer diğer tüm kalıplar kullanılabilir. Örneğin biz bir alanda range kalıbını kullanabiliriz:
+
+    Color::RGB(200..=255, g, b) => println!("RGB: {} {}", g, b),
+
+    Yine demetsel varyantlara ilişkin kalıplarda koruma (guard) uygulanabilir. Örneğin:
+
+    Color::RGB(_, g, b) if g + b > 100 => println!("RGB: {} {}", g, b),
+
+    Burada kalıp uyuşumunun sağlanması içinb ayrıca g + b > 100 koşulunun da sağlanması gerekmektedir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Biz daha önce ikinci derece bir denklemin köklerini veren bir fonksiyon örneği yazmıştık. Ancak o fonksiyonda göze 
+    hoş gelmeyen bir durum vardı. Denklemin kökü yoksa biz gereksiz bir biçimde yine bir demet oluşturuyorduk. Fonksiyonun 
+    tasarımını anımsayınız:
+
+    fn get_roots(a: f64, b: f64, c: f64) -> (f64, f64, bool) {
+        let delta: f64;
+
+        delta = b * b - 4.0 * a * c;
+        if delta < 0.0 {
+            (0., 0., false)
+        }
+        else {
+            let x1 = (-b + delta.sqrt()) / (2. * a);
+            let x2 =  (-b - delta.sqrt()) / (2. * a);
+            (x1, x2, true)
+        }
+    }
+
+    İşte bu tür durumlarda aslında Rust'ta enum türleri tercih edilmektedir. enum türleri farklı içerikteki bilgileri çakıuşık 
+    biçimde tutabildiği için bu tür durumlara çok uygundur. Aşağıdaki tasarıma dikkat ediniz:
+
+    enum QuadraticResult {
+        Roots(f64, f64),
+        None
+    }
+
+    fn get_roots(a: f64, b: f64, c: f64) -> QuadraticResult {
+        let delta = b * b - 4. * a * c;
+
+        if delta > 0. {
+            let x1 = (-b + delta.sqrt()) / (2. * a);
+            let x2 = (-b - delta.sqrt()) / (2. * a);
+            QuadraticResult::Roots(x1, x2)
+        }
+        else {
+            QuadraticResult::None
+        }
+    }
+
+    Burada artık fonksiyon bir enum nesnesine geri dönemektedir. Bu nesne de ya QuadraticResult::Roots varyantına ilişkin 
+    olabilir ya da QuadraticResult::None varyantına ilişkin olabilir. Şimdi fonksiyonu çağıralım:
+
+    let qresult: QuadraticResult;
+
+    qresult = get_roots(1., 0., -4.);
+
+    Bizim burada fonksiyonun köklerinin olup olmadığını belirleyip eğer kök varsa kök değerlerini elde etmemiz gerekir. İşte 
+    bunu kalıp uyuşumu ile match ifadesini kullanarak sağlayabiliriz:
+
+    match qresult {
+        QuadraticResult::Roots(x1, x2) => println!("x1 = {} x2 = {}", x1, x2),
+        QuadraticResult::None => println!("No root found"),
+    }
+
+    Tabii biz kalıp uyuşumu ile çalışan if let deyimini de kullanabilirdik. Ne de olsa örneğimizdeki QuadraticResult enum 
+    türünün yalnızca iki varyantı vardır. Örneğin:
+
+    if let QuadraticResult::Roots(x1, x2) = get_roots(1., 0., -4.) {
+        println!("x1 = {}, x2 = {}", x1, x2);
+    } 
+    else {
+        println!("No root found!")
+    }
+
+    Burada eğer kalıp uyuşuyorsa zaten kök var demektir. Kökün olmaması durumunda kalıp uyuşumu da sağlanmayacaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    if let QuadraticResult::Roots(x1, x2) = get_roots(1., 0., -4.) {
+        println!("x1 = {}, x2 = {}", x1, x2);
+    }
+    else {
+        println!("No root found!")
+    }
+}
+
+fn get_roots(a: f64, b: f64, c: f64) -> QuadraticResult {
+    let delta = b * b - 4. * a * c;
+
+    if delta > 0. {
+        let x1 = (-b + delta.sqrt()) / (2. * a);
+        let x2 = (-b - delta.sqrt()) / (2. * a);
+        QuadraticResult::Roots(x1, x2)
+    }
+    else {
+        QuadraticResult::None
+    }
+}
+
+enum QuadraticResult {
+    Roots(f64, f64),
+    None
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki enum türünü hata mesajını da barındıracak biçimde aşağıdaki hale dönüştürebiliriz:
+
+    enum QuadraticResult {
+        Roots(f64, f64),
+        Error(String),
+    }
+
+    Artık enum türünün bir elemanı kökleri, diğer elemanı kökün olmaması durumundaki hata mesajı belirtmektedir. Tabii fonksiyonu 
+    da Fonksiyon da şöyle değiştirmemiz gerekecektir:
+
+    fn get_roots(a: f64, b: f64, c: f64) -> QuadraticResult {
+        let delta = b * b - 4. * a * c;
+
+        if delta > 0. {
+            let x1 = (-b + delta.sqrt()) / (2. * a);
+            let x2 = (-b - delta.sqrt()) / (2. * a);
+            QuadraticResult::Roots(x1, x2)
+        }
+        else {
+            QuadraticResult::Error(String::from("No roots found"))
+        }
+    }
+
+    Biz de artık fonksiyonun geri dönüş değerini match ifadesi ile aşağıdaki gibi ele alırız:
+
+    match get_roots(1., 0., 4.) {
+        QuadraticResult::Roots(x1, x2) => println!("x1 = {}, x2 = {}", x1, x2),
+        QuadraticResult::Error(msg) => println!("{}", msg)
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    match get_roots(1., 0., 4.) {
+        QuadraticResult::Roots(x1, x2) => println!("x1 = {}, x2 = {}", x1, x2),
+        QuadraticResult::Error(msg) => println!("{}", msg)
+    }
+}
+
+fn get_roots(a: f64, b: f64, c: f64) -> QuadraticResult {
+    let delta = b * b - 4. * a * c;
+
+    if delta > 0. {
+        let x1 = (-b + delta.sqrt()) / (2. * a);
+        let x2 = (-b - delta.sqrt()) / (2. * a);
+        QuadraticResult::Roots(x1, x2)
+    }
+    else {
+        QuadraticResult::Error(String::from("No roots found"))
+    }
+}
+
+enum QuadraticResult {
+    Roots(f64, f64),
+    Error(String),
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
 
 
 
