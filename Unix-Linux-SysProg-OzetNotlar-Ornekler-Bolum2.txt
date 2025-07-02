@@ -16,7 +16,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                          Son Güncelleme: 20/06/2025 - Cuma
+                                          Son Güncelleme: 02/07/2025 - Çarşamba
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -35053,7 +35053,7 @@ static void __exit generic_exit(void)
 static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t *off)
 {
     unsigned long long jf;
-    static char valbuf[64 + 1];
+    char valbuf[64 + 1];
     size_t left, esize;
 
     if (*off > 0)
@@ -35076,7 +35076,7 @@ static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t
 
 static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    static char valbuf[32 + 1];
+    char valbuf[32 + 1];
     size_t left, esize;
 
     if (*off > 0)
@@ -35180,204 +35180,6 @@ clean:
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
-#include <linux/cdev.h>
-#include <linux/uaccess.h>
-#include <linux/proc_fs.h>
-#include <linux/time.h>
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Kaan Aslan");
-MODULE_DESCRIPTION("jiffy module");
-
-static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t *off);
-static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off);
-static ssize_t proc_read_difference(struct file *filp, char *buf, size_t size, loff_t *off);
-
-static struct proc_ops g_procops_jiffy = {
-    .proc_read = proc_read_jiffy,
-};
-
-static struct proc_ops g_procops_hertz = {
-    .proc_read = proc_read_hertz,
-};
-
-static struct proc_ops g_procops_difference = {
-    .proc_read = proc_read_difference,
-};
-
-static char g_jiffies_str[32];
-static char g_hertz_str[32];
-static char g_difference_str[512];
-
-static int __init generic_init(void)
-{
-    struct proc_dir_entry *pde_dir;
-
-    if ((pde_dir = proc_mkdir("jiffy-module", NULL)) == NULL)
-        return -ENOMEM;
-
-    if (proc_create("jiffy", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_jiffy) == NULL) {
-        remove_proc_entry("jiffy-module", NULL);
-        return -ENOMEM;
-    }
-
-    if (proc_create("hertz", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_hertz) == NULL) {
-        remove_proc_entry("jiffy-module", NULL);
-        return -ENOMEM;
-    }
-
-    if (proc_create("difference", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops_difference) == NULL) {
-        remove_proc_entry("jiffy-module", NULL);
-        return -ENOMEM;
-    }
-
-    return 0;
-}
-
-static void __exit generic_exit(void)
-{
-    remove_proc_entry("jiffy-module", NULL);
-
-    printk(KERN_INFO "jiffy-module module exit...\n");
-}
-
-static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t *off)
-{
-    size_t esize;
-    size_t left;
-
-    sprintf(g_jiffies_str, "%lu\n", jiffies);
-
-    left = strlen(g_jiffies_str) - *off;
-    esize = left < size ? left : size;
-
-    if (esize != 0) {
-        if (copy_to_user(buf, g_jiffies_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
-
-    printk(KERN_INFO "jiffy file read...\n");
-
-    return esize;
-}
-
-static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off)
-{
-    size_t esize;
-    size_t left;
-
-    sprintf(g_hertz_str, "%d\n", HZ);
-
-    left = strlen(g_hertz_str) - *off;
-    esize = left < size ? left : size;
-
-    if (esize != 0) {
-        if (copy_to_user(buf, g_hertz_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
-
-    printk(KERN_INFO "hertz file read...\n");
-
-    return esize;
-}
-
-static ssize_t proc_read_difference(struct file *filp, char *buf, size_t size, loff_t *off)
-{
-    static unsigned long prev_jiffies;
-    loff_t left, esize;
-    long int net_jiffies;
-    struct timespec64 ts;
-
-    net_jiffies = (long)jiffies - (long)prev_jiffies;
-
-    jiffies_to_timespec64(net_jiffies, &ts);
-
-    sprintf(g_difference_str, "Jiffy difference: %10ld (%ld seconds + %ld nanoseconds)\n", 
-            net_jiffies, (long)ts.tv_sec, (long)ts.tv_nsec);
-
-    left = (loff_t)strlen(g_difference_str) - *off;
-    esize = left < size ? left : size;
-
-    if (esize != 0) {
-        if (copy_to_user(buf, g_difference_str + *off, esize) != 0)
-            return -EFAULT;
-        *off += esize;
-    }
-
-    prev_jiffies = jiffies;
-
-    return (ssize_t)esize;
-}
-
-module_init(generic_init);
-module_exit(generic_exit);
-
-# Makefile
-
-obj-m += ${file}.o
-
-all:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
-clean:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
-/*--------------------------------------------------------------------------------------------------------------------------
-    Aygıt sürücü içerisinde bazen belli bir süre bekleme yapmak gerekebilmektedir. Biz kursumuzda daha önce user modda bekleme
-    yapan fonksiyonları görmüştük. Ancak o fonksiyonlar kernel modda kullanılamamaktadır. Kernel modda çekirdek içerisindeki 
-    olanaklarla bekleme yapılabilmektedir.
-
-    Eğer bekleme süresi kısa ise bekleme işlemi meşgul bir döngü ile yapılabilir. Örneğin:
-
-    while (time_before(jiffies, jiffies_target))
-        schedule();
-
-    Burada o anki jiffies değeri hedef jiffies değerinden küçükse schedule fonksiyonu çağrılmıştır. schedule fonksiyonu thread'i 
-    uykuya yatırmamaktadır. Yalnızca thread'ler arası geçiş oluşmasına yol açmaktadır. Yani bu fonksiyon uykuya dalmadan CPU'yu 
-    bırakmak için kullanılmaktadır. schedule fonksiyonunu çağıran thread çalışma kuyruğunda (run queue) kalmaya devam eder. Yine
-    çalışma sırası ona geldiğinde kaldığı yerden çalışmaya devam eder. Ancak meşgul bir döngü içerisinde schedule işlemi yine
-    önemli bir CPU zamanın harcanmasına yol açmaktadır. Bu nedenle uzun beklemelerin yukarıdaki gibi yapılması tavsiye edilmemektedir. 
-    Uzun beklemelerin uykuya dalarak yapılması gerekir.
-
-    Uzun beklemeler için bir wait kuyruğu oluşturulup wait_event_timeout ya da wait_event_interruptible_timeout fonksiyonlarıyla koşul 
-    0 yapılarak gerçekleştirilebilir. Ancak bunun için bir wait kuyruğunun oluşturulması gerekir. Bu işlemi zaten kendi içerisinde 
-    yapan özel fonksiyonlar vardır.
-
-    schedule_timeout fonksiyonu belli bir jiffy zamanı geçene kadar thread'i çekirdek tarafından bu amaçla oluşturulmuş olan bir
-    wait kuyruğunda bekletir.
-
-    #include <linux/sched.h>
-
-    signed long schedule_timeout(signed long timeout);
-
-    Fonksiyon parametre olarak beklenecek jiffy değerini alır. Eğer sinyal dolayısıyla fonksiyon sonlanırsa kalan jiffy sayısına, 
-    eğer zaman aşımının dolması nedeniyle fonksiyon sonlanırsa 0 değerine geri döner. Fonksiyon başarısız olmamaktadır. Fonksiyonu 
-    kullanmadan önce prosesin durum bilgisini set_current_state isimli fonksiyonla değiştirmek gerekir. Değiştirilecek durum 
-    TASK_UNINTERRUPTIBLE ya da TASK_INTERRUPTIBLE olabilir. Bu işlem yapılmazsa bekleme gerçekleşmemektedir. Örneğin:
-
-    set_current_state(TASK_INTERRUPTIBLE);
-    schedule_timeout(jiffies + 5 * HZ);
-
-    Uzun beklemeyi kendi içerisinde schedule_timeout kullanarak yapan üç yardımcı fonksiyon da vardır:
-
-    #include <linux/delay.h>
-
-    void msleep(unsigned int msecs);
-    unsigned long msleep_interruptible(unsigned int msecs);
-    void ssleep(unsigned int secs);
-
-    Aşağıdaki örnekte "jiffy-module" dizinindeki "sleep" dosyasından okuma yapıldığında (denemeyi cat komutuyla yapabilirsiniz) 
-    10 saniye bekleme oluşacaktır.
-
-    $ cat /proc/jiffy-module/sleep
----------------------------------------------------------------------------------------------------------------------------*/
-
-/* jiffy-module.c */
-
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/proc_fs.h>
 
@@ -35459,7 +35261,7 @@ static ssize_t proc_read_jiffy(struct file *filp, char *buf, size_t size, loff_t
 
 static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    static char valbuf[32 + 1];
+    char valbuf[32 + 1];
     size_t left, esize;
 
     if (*off > 0)
@@ -35481,7 +35283,7 @@ static ssize_t proc_read_hertz(struct file *filp, char *buf, size_t size, loff_t
 
 static ssize_t proc_read_difference(struct file *filp, char *buf, size_t size, loff_t *off)
 {
-    static char valbuf[64 + 1];
+    char valbuf[64 + 1];
     static unsigned long long prev_jiffies;
     unsigned long long net_jiffies;
     struct timespec64 ts;
@@ -35522,148 +35324,119 @@ all:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
 clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
+    
 /*--------------------------------------------------------------------------------------------------------------------------
-                                                155. Ders 14/07/2024 - Pazar
+    Aygıt sürücü içerisinde bazen belli bir süre bekleme yapmak gerekebilir. Biz kursumuzda daha önce user modda bekleme yapan 
+    fonksiyonları görmüştük. Ancak o fonksiyonlar çekirdek modunda kullanılamamaktadır. Çekirdek modunda çekirdeğin sağladığı 
+    olanaklarla bekleme yapılabilmektedir.
+
+    Eğer bekleme süresi kısa ise bekleme işlemi meşgul bir döngü ile yapılabilir. Örneğin:
+
+    while (time_before(jiffies, jiffies_target))
+        schedule();
+
+    Burada o anki jiffies değeri hedef jiffies değerinden küçükse schedule fonksiyonu çağrılmıştır. schedule fonksiyonu thread'i 
+    uykuya yatırmamaktadır. Yalnızca thread'ler arası geçiş (context switch) oluşmasına yol açmaktadır. Yani bu fonksiyon uykuya 
+    dalmadan CPU'yu bırakmak için kullanılmaktadır. schedule fonksiyonunu çağıran thread çalışma kuyruğunda (run queue) kalır. 
+    Yine çalışma sırası ona geldiğinde kaldığı yerden çalışmaya devam eder. Ancak meşgul bir döngü içerisinde schedule işlemi 
+    yine önemli bir CPU zamanın harcanmasına yol açmaktadır. Bu nedenle uzun beklemelerin yukarıdaki gibi yapılması tavsiye 
+    edilmemektedir. Uzun beklemelerin uykuya dalarak yapılması gerekir.
+
+    Uzun beklemeler bir wait kuyruğu oluşturulup wait_event_timeout ya da wait_event_interruptible_timeout fonksiyonlarıyla 
+    koşul 0 yapılarak gerçekleştirilebilir. Ancak bunun için bir wait kuyruğunun oluşturulması gerekir. Bu işlemi zaten kendi 
+    içerisinde yapan özel fonksiyonlar vardır.
+
+    schedule_timeout fonksiyonu belli bir jiffy zamanı geçene kadar thread'i çekirdek tarafından bu amaçla oluşturulmuş olan 
+    bir wait kuyruğunda bekletir.
+
+    #include <linux/sched.h>
+
+    signed long schedule_timeout(signed long timeout);
+
+    Fonksiyon parametre olarak beklenecek jiffy değerini alır. Eğer fonksiyon sinyal dolayısıyla sonlanırsa kalan jiffy sayısına, 
+    zaman aşımının dolması nedeniyle sonlanırsa 0 değerine geri dönmektedir. schedule_timeout fonksiyonu başarısız olmaz. Fonksiyonu 
+    kullanmadan önce prosesin durum bilgisini set_current_state isimli fonksiyonla değiştirmek gerekir. Değiştirilecek durum 
+    TASK_UNINTERRUPTIBLE ya da TASK_INTERRUPTIBLE olabilir. Bu işlem yapılmazsa bekleme gerçekleşmemektedir. Örneğin bu fonksiyonla
+    thread'i 10 saniye bekletmek isteyelim:
+
+    set_current_state(TASK_INTERRUPTIBLE);
+    schedule_timeout(10 * HZ);
+
+    Uzun beklemeyi kendi içerisinde schedule_timeout kullanarak yapan üç yardımcı fonksiyon da vardır:
+
+    #include <linux/delay.h>
+
+    void msleep(unsigned int msecs);
+    unsigned long msleep_interruptible(unsigned int msecs);
+    void ssleep(unsigned int secs);
+
+    Buradaki mseel ve msleep_interruptible mili saniye cinsinden, ssleep ise saniye cinsinden bekleme yapmaktadır. Yukarıda 
+    da belirttiğimiz gibi bu fonksiyonlar aslında schedule_timeout fonksiyonu klullanılarak yazılmıştır. Örneğin msleep 
+    fonksiyonu tanımlanmıştır:
+
+    void msleep(unsigned int msecs)
+    {
+        unsigned long timeout = msecs_to_jiffies(msecs);
+
+        while (timeout)
+            timeout = schedule_timeout_uninterruptible(timeout);
+    }
+
+    Aşağıdaki örnekte "jiffy-module" dizinindeki "sleep" dosyasından okuma yapıldığında 10 saniye bekleme oluşacaktır.
+
+    $ cat /proc/jiffy-module/sleep
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/*--------------------------------------------------------------------------------------------------------------------------
-    Aygıt sürücü içerisinde kısa beklemeler gerekebilmektedir. Çünkü bazı donanım aygıtlarının programlanabilmesi için bazı 
-    beklemelere gereksinim duyulabilmektedir. Kısa beklemeler meşgul döngü yoluyla yani hiç sleep yapılmadan sağlanmaktadır. 
-    Ayrıca kısa bekleme yapan fonksiyonlar atomiktir. Atomiklikten kastedilen şey thread'ler arası geçiş işleminin kapatılmasıdır. 
-    Yani kısa bekleme yapan fonksiyonlar thread'ler arası geçiş işlemini o işlemci için kapatırlar. Bu sırada thread'ler arası 
-    geçiş söz konusu olmamaktadır. Ancak donanım kesmeleri bu süre içerisinde oluşabilmektedir.
-
-    Kısa süreli döngü içerisinde bekleme yapan fonksiyonlar şunlardır:
-
-    void ndelay(unsigned int nsecs);
-    void udelay(unsigned int usecs);
-    void mdelay(unsigned int msecs);
-
-    Burada delay nanosaniye cinsinden bekleme yapmak için, udelay mikrosaniye cinsinden bekleme yapmak için, mdelay ise 
-    milisaniye cinsinden bekleme yapmak için kullanılmaktadır.
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*--------------------------------------------------------------------------------------------------------------------------
-    Linux çekirdeklerine belli versiyondan sonra bir timer mekanizması da eklenmiştir. Bu sayede aygıt sürücü programcısı 
-    belli bir zaman sonra belirlediği bir fonksiyonun çağrılmasını saplayabilmektedir. Bu mekanizmaya "kernel timer" mekanizması 
-    denilmektedir. Maalesef kernel timer mekanizması da birkaç kere arayüz olarak değiştirilmiştir. Bu mekanizma kullanılırken 
-    dikkat edilmesi gereken bir nokta callback fonksiyonun bir proses bağlamında çağrılmadığıdır. Yani callback fonksiyon 
-    çağrıldığında biz current makrosu ile o andaki prosese erişemeyiz. O anda çalışan prosesin user alanına kopyalamalar 
-    yapamayız. Çünkü callback fonksiyon timer kesmeleri tarafından çağrılmaktadır. Dolayısıyla callback fonksiyon çağrıldığında
-    o anda hangi prosesin çalışmakta olduğu belli değildir.
-
-    Son Linux çekirdeklerindeki kernel timer kullanımı şöyledir:
-
-    1) struct timer_list türünden bir yapı nesnesi statik düzeyde tanımlanır ve bu yapı nesnesine ilk değeri verilir. DEFINE_TIMER
-    makrosu ile hem tanımlama hem de ilkdeğer verme işlemi birlikte yapılabilir. Makro şöyledir:
-
-    #include <linux/time.h>
-
-    #define DEFINE_TIMER(_name, _function)
-
-    Örneğin:
-
-    DEFINE_TIMER(g_mytimer, timer_proc);
-
-    Ya da alternatif olarak struct timer_list nesnesi yaratılıp timer_setup makrosuyla da ilkdeğer verilebilir. Makronun parametrik 
-    yapısı şöyledir:
-
-    #include <linux/time.h>
-
-    #define timer_setup(timer, callback, flags)
-
-    Makronun birinci parametresi timer nesnesinin adresini almaktadır. İkinci parametresi çağrılacak fonksiyonu belirtir. 
-    flags parametresi 0 geçilebilir.
-
-    Örneğin:
-
-    static struct timer_list g_mytimer;
-
-    timer_setup(&g_mytimer, timer_proc, 0);
-
-    Buradaki timer fonksiyonunun parametrik yapısı şöyle olmalıdır:
-
-    void timer_proc(struct timer_list *tlisr);
-
-    2) Tanımlanan struct timer_list nesnesi add_timer fonksiyonu ile bir bağlı listeye yerleştirilir. Bu bağlı liste çekirdeğin
-    içerisinde çekirdek tarafından oluşturulmuş bir listedir. add_timer fonksiyonunun prototipi şöyledir:
-
-    #include <linux/time.h>
-
-    void add_timer(struct timer_list *timer);
-
-    3) Daha sonra ne zaman fonksiyonun çağrılacağını anlatmak için mod_timer fonksiyonu kullanılır.
-
-    #include <linux/time.h>
-
-    int mod_timer(struct timer_list *timer, unsigned long expires);
-
-    Buradaki expires parametresi jiffy türündendir. Bu parametre hedef jiffy değerini içermelidir. (Yani jiffies + gecikme 
-    jiffy değeri)
-
-    4) Timer nesnesinin silinmesi için del_timer ya da del_timer_sync fonksiyonu kullanılmaktadır:
-
-    #include <linux/time.h>
-
-    int del_timer(struct timer_list * timer);
-    int del_timer_sync(struct timer_list * timer);
-
-    del_timer fonksiyonu eğer timer fonksiyonu o anda başka bir işlemcide çalışıyorsa asenkron biçimde silme yapar. Yani 
-    fonksiyon sonlandığında henüz silme gerçekleşmemiş göreli bir süre sonra gerçekleşecek olabilir. Halbuki del_timer_sync 
-    fonksiyonu geri dönünce timer silinmesi gerçekleşmiş olur. Eğer timer silinmezse modül çekirdekten atıldığında tüm sistem 
-    çökebilir.
-
-    Normal olarak belirlenen fonksiyon yalnızca 1 kez çağrılmaktadır. Ancak bu fonksiyonun içerisinde yeniden mod_timer çağrılarak
-    çağırma periyodik hale getirilebilir.
-
-    Aşağıda kernel timer kullanımına basit bir örnek verilmiştir.
----------------------------------------------------------------------------------------------------------------------------*/
-
-/* timer-module.c */
+/* jiffy-module.c */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/time.h>
+#include <linux/proc_fs.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaan Aslan");
-MODULE_DESCRIPTION("Timer Module");
+MODULE_DESCRIPTION("jiffy module");
 
-static void timer_proc(struct timer_list *tlist);
+static ssize_t proc_read(struct file *filp, char *buf, size_t size, loff_t *off);
 
-DEFINE_TIMER(g_mytimer, timer_proc);
+static struct proc_ops g_procops = {
+    .proc_read = proc_read,
+};
 
 static int __init generic_init(void)
 {
-    add_timer(&g_mytimer);
+    struct proc_dir_entry *pde_dir;
 
-    mod_timer(&g_mytimer, jiffies + msecs_to_jiffies(5000));
+    if ((pde_dir = proc_mkdir("jiffy-module", NULL)) == NULL)
+        return -ENOMEM;
 
-    printk(KERN_INFO "timer-module module init...\n");
+    if (proc_create("sleep", S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH, pde_dir, &g_procops) == NULL) {
+        remove_proc_entry("jiffy-module", NULL);
+        return -ENOMEM;
+    }
 
     return 0;
 }
 
-static void timer_proc(struct timer_list *tlist)
-{
-    static int count = 0;
-
-    if (count == 5) {
-        del_timer(&g_mytimer);
-        count = 0;
-        return;
-    }
-    ++count;
-
-    printk(KERN_INFO "timer callback (%d)\n", count);
-
-    mod_timer(&g_mytimer, jiffies + msecs_to_jiffies(5000));
-}
-
 static void __exit generic_exit(void)
 {
-    printk(KERN_INFO "timer-module module exit...\n");
+    remove_proc_entry("jiffy-module", NULL);
+
+    printk(KERN_INFO "jiffy-module module exit...\n");
+}
+
+static ssize_t proc_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+    msleep_interruptible(10000);
+
+    /*
+    set_current_state(TASK_INTERRUPTIBLE);
+    schedule_timeout(10 * HZ);
+    */
+
+    printk(KERN_INFO "sleep file read...\n");
+
+    return 0;
 }
 
 module_init(generic_init);
@@ -35679,62 +35452,274 @@ clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
 /*--------------------------------------------------------------------------------------------------------------------------
+                                                155. Ders 14/07/2024 - Pazar
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Aygıt sürücü içerisinde kısa beklemelerim yapılması gerekebilmektedir. Çünkü bazı donanım aygıtlarının programlanabilmesi 
+    için bazı beklemelere gereksinim duyulabilmektedir. Kısa beklemeler meşgul döngü yoluyla yani hiç sleep yapılmadan sağlanmaktadır. 
+    Ayrıca kısa bekleme yapan fonksiyonlar atomiktir. Atomiklikten kastedilen şey thread'ler arası geçiş (context switch) 
+    mekanizmasının kapatılmasıdır. Yani kısa bekleme yapan fonksiyonlar bu bekleme sırasında thread'in quanta süresi bitse bile 
+    bundan etkilenmemektedir. Tabii bu fonksiyonlar thread'ler arası geçiş işlemini o işlemci ya da çekirdek için kapatırlar. 
+    Ancak donanım kesmeleri bu süre içerisinde oluşabilmektedir. Yani bir donanım kesmesi oluşursa buradaki bekleme belirlenen 
+    süreyi aşabilir. Bu tür durumlarda programcının kendisinin donanım kesmelerini ilgili CPU ya da çekirdek için kapatması gerekir. 
+
+    Kısa süreli döngü içerisinde bekleme yapan fonksiyonlar şunlardır:
+
+    void ndelay(unsigned int nsecs);
+    void udelay(unsigned int usecs);
+    void mdelay(unsigned int msecs);
+
+    Burada delay nanosaniye cinsinden bekleme yapmak için, udelay mikrosaniye cinsinden bekleme yapmak için, mdelay ise 
+    milisaniye cinsinden bekleme yapmak için kullanılmaktadır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeklerine belli bir versiyondan sonra bir timer mekanizması da eklenmiştir. Bu sayede aygıt sürücü programcısı 
+    belli bir zaman sonra belirlediği bir fonksiyonun çağrılmasını sağlayabilmektedir. Bu mekanizmaya "kernel timer" mekanizması 
+    denilmektedir. Maalesef kernel timer mekanizması da birkaç kere arayüz olarak değiştirilmiştir. Bu mekanizma kullanılırken 
+    dikkat edilmesi gereken bir nokta callback fonksiyonun bir proses bağlamında çağrılmadığıdır. Yani callback fonksiyon 
+    çağrıldığında biz current makrosu ile o andaki prosese erişemeyiz. O anda çalışan prosesin user alanına kopyalamalar 
+    yapamayız. Çünkü callback fonksiyon timer kesmeleri tarafından çağrılmaktadır. Dolayısıyla callback fonksiyon çağrıldığında
+    o anda hangi prosesin çalışmakta olduğu belli değildir.
+
+    Son Linux çekirdeklerindeki kernel timer kullanımı aşağıdaki adımlardan geçilerek sağlanmaktadır:
+
+    1) struct timer_list türünden bir yapı nesnesi statik düzeyde tanımlanır ve bu yapı nesnesine ilk değeri verilir. DEFINE_TIMER
+    makrosu ile hem tanımlama hem de ilkdeğer verme işlemi birlikte yapılabilir. Makro şöyledir:
+
+    #include <linux/time.h>
+
+    #define DEFINE_TIMER(_name, _function)
+
+    Örneğin:
+
+    DEFINE_TIMER(g_mytimer, timer_proc);
+
+    Ya da alternatif olarak struct timer_list nesnesi yaratılıp timer_setup makrosuyla da ilkdeğer verilebilir. Makronun 
+    parametrik yapısı şöyledir:
+
+    #include <linux/time.h>
+
+    #define timer_setup(timer, callback, flags)
+
+    Makronun birinci parametresi timer nesnesinin adresini almaktadır. İkinci parametresi çağrılacak fonksiyonu belirtir. 
+    flags parametresi 0 geçilebilir.
+
+    Örneğin:
+
+    static struct timer_list g_mytimer;
+    ...
+
+    timer_setup(&g_mytimer, timer_proc, 0);
+
+    Buradaki callback fonksiyonunun parametrik yapısı şöyle olmalıdır:
+
+    void timer_proc(struct timer_list *tlist);
+
+    2) Tanımlanan struct timer_list nesnesi add_timer fonksiyonu ile çekirdek içerisindeki bir bağlı listeye yerleştirilir. 
+    Çekirdek timer nesnelerine bu bağlı listeden hareketle erişmektedir. add_timer fonksiyonunun prototipi şöyledir:
+
+    #include <linux/time.h>
+
+    void add_timer(struct timer_list *timer);
+
+    3) Daha sonra callback fonksiyonun ne zaman çağrılacağını belirlemek için mod_timer fonksiyonu kullanılır. Fonksiyonun 
+    prototipi şöyledir:
+
+    #include <linux/time.h>
+
+    int mod_timer(struct timer_list *timer, unsigned long expires);
+
+    Buradaki expires parametresi jiffy türündendir. Ancak bu parametre hedef jiffy değerini içermelidir. (Yani jiffies + 
+    gecikme jiffy değeri)
+
+    4) Timer nesnesinin silinmesi için del_timer ya da del_timer_sync fonksiyonu kullanılmaktadır:
+
+    #include <linux/time.h>
+
+    int del_timer(struct timer_list * timer);
+    int del_timer_sync(struct timer_list * timer);
+
+    del_timer fonksiyonu eğer timer fonksiyonu o anda başka bir işlemcide çalışıyorsa asenkron biçimde silme yapar. Yani 
+    fonksiyon sonlandığında henüz silme gerçekleşmemiş fakat göreli bir süre sonra gerçekleşecek olabilir. Halbuki del_timer_sync 
+    fonksiyonu geri dönünce timer silinmesi gerçekleşmiş olur. Eğer timer silinmezse modül çekirdekten atıldığında tüm sistem 
+    çökebilir.
+
+    Normal olarak belirlenen fonksiyon yalnızca 1 kez çağrılmaktadır. Ancak bu fonksiyonun içerisinde yeniden mod_timer 
+    çağrılarakçağırmayı periyodik hale getirilebilir.
+
+    Aşağıda kernel timer kullanımına basit bir örnek verilmiştir. Bu örnekte her 5 saniyede bir belirlenen callback fonksiyon
+    çağrılmıştır. Çekirdek modülünün init ve exit fonksiyonları şöyle yazılmıştır:
+
+    static void timer_proc(struct timer_list *tlist);
+
+    static struct timer_list g_mytimer;
+    ...
+
+    static int __init timer_init(void)
+    {
+        timer_setup(&g_mytimer, timer_proc, 0);
+        add_timer(&g_mytimer);
+        mod_timer(&g_mytimer, get_jiffies_64() + 5 * HZ);
+
+        printk(KERN_INFO "timer-module module init...\n");
+
+        return 0;
+    }
+
+    static void __exit timer_exit(void)
+    {
+        del_timer(&g_mytimer);
+
+        printk(KERN_INFO "timer-module module exit...\n");
+    }
+
+    Callback fonksiyon da şöyle yazılmıştır:
+
+    static void timer_proc(struct timer_list *tlist)
+    {
+        printk(KERN_INFO "timer_proc called...\n");
+
+        mod_timer(&g_mytimer, get_jiffies_64() + 5 * HZ);
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* timer-module.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/timer.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("timer module");
+
+static void timer_proc(struct timer_list *tlist);
+
+static struct timer_list g_mytimer;
+
+static int __init timer_init(void)
+{
+    timer_setup(&g_mytimer, timer_proc, 0);
+    add_timer(&g_mytimer);
+    mod_timer(&g_mytimer, get_jiffies_64() + 5 * HZ);
+
+    printk(KERN_INFO "timer-module module init...\n");
+
+    return 0;
+}
+
+static void __exit timer_exit(void)
+{
+    del_timer(&g_mytimer);
+
+    printk(KERN_INFO "timer-module module exit...\n");
+}
+
+static void timer_proc(struct timer_list *tlist)
+{
+    printk(KERN_INFO "timer_proc called...\n");
+
+    mod_timer(&g_mytimer, get_jiffies_64() + 5 * HZ);
+}
+
+module_init(timer_init);
+module_exit(timer_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/*--------------------------------------------------------------------------------------------------------------------------
                                                 156. Ders 19/07/2024 - Cuma
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Önceki konularda da UNIX/Linux sistemlerinde kernel mode'da çalışan işletim sistemine ait thread'ler olduğundan bahsetmiştik. 
-    Bu thread'ler çalışma kuyruğunda (run queue) bulunan ve uykuya dalabilen işletim sisteminin bir parçası durumundaki 
-    thread'lerdir. İşletim sistemine ait bu thread'ler çeşitli işlemlerden sorumludurlar. Linux işletim sisteminde kernel thread'ler 
-    genellikle "user mode daemon"lar gibi sonu 'd' ile bitecek biçimde isimlendirilmiştir. Ancak çekirdeğe ait olan bu thread'lerin 
-    ismi 'k' (kernel'dan geliyor) ile başlatılmıştır. Örneğin "kupdated", "kswapd", "keventd" gibi.
+    Bizim şimdiye kadar yazmış olduğumuz çekirdek modüllerindeki ve aygıt sürücülerdeki kodlarımız aşağıdaki durumlarda çalışma
+    fırsatı bulmaktadır:
 
-    İşte aygıt sürücüler de isterlerse arka planda kernel mode'da bir proses gibi çalışan thread'ler yaratabilirler. Ancak bu 
-    thread'ler bir proses ile ilişkisiz biçimde çalıştırılmaktadır. Bu nedenle bunlar içerisinde current makrosu, ve copy_to_user 
-    ya da copy_from_user gibi fonksiyonlar kullanılamaz.
+    1) Modül yüklenirken ve çekirdek alanından atılırken
+    2) Aygıt sürücü üzerinde aygıt dosyası yoluyla dosya işlemleri yapılırken
+    3) Kullanıcı modundan ioctl işlemleri yoluyla
+    4) proc ve sys dosya sistemlerindeki dosyalar yoluyla
+    5) En son gördüğümüz timer mekanizması yoluyla
 
-    Aygıt sürücü kodlarımız genellikle bir olay olduğunda (örneğin kesme gibi) ya da user mode'dan çağrıldığında (read, write, 
-    ioctl gibi) çalıştırılmaktadır. Ancak kernel thread'ler aygıt sürücüye sanki bir programmış gibi kernel mode'da sürekli 
-    çalışma imkanı vermektedir.
+    Bunların yanı sıra henüz görmediğimiz aşağıdaki iki durumda da çekirdek modülümüzdeki ya da aygıt sürücümüzdeki kodlar 
+    çalışma fırsatı bulabilmektedir:
 
-    Kernel thread'ler sırasıyla şu adımlarlardan geçilerek kullanılmaktadır:
+    6) Çekirdek thread'leri (kernel therads) yoluyla
+    7) Donanım kesmeleri yoluyla
 
-    1) Önce kernel thread aygıt sürücü içerisinde yaratılır. Yaratılma modülün init fonksiyonunda yapılabileceği gibi aygıt sürücü 
-    ilk kez açıldığında open fonksiyonunda ya da belli bir süre sonra belli bir fonksiyonda da yapılabilmektedir. Kernel thread'ler 
-    kthread_create fonksiyonuyla yaratılmaktadır:
+    Biz bu bölümde "çekirdek thread'leri" üzerinde duracağız.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+     Önceki konularda da Linux sistemlerinde çekirdek mode'da çalışan işletim sistemine ait thread'ler olduğundan bahsetmiştik. 
+    Bu thread'ler çalışma kuyruğunda (run queue) bulunan ve uykuya dalabilen işletim sisteminin bir parçası durumundaki thread'lerdir. 
+    İşletim sistemine ait bu thread'ler çeşitli işlemlerden sorumludurlar. Linux işletim sisteminde çekirdek thread'leri genellikle 
+    "kullanıcı modundaki daemon"larda olduğu gibi sonu 'd' ile bitecek biçimde isimlendirilmiştir. Ancak çekirdeğe ait olan bu 
+    thread'lerin ismi 'k' (kernel'dan geliyor) ile başlatılmıştır. Örneğin "kupdated", "kswapd", "keventd" gibi. Bu thread'ler 
+    yukarıda da belirttiğimiz gibi Linux işletim sisteminin bir parçası durumundadır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+   İşte aygıt çekirdek modülleri ve aygıt sürücüler de isterlerse arka planda çekirdek modunda çalışacak thread'ler yaratabilirler. 
+    Butür thread'lere İngilizce "kernel threads" denilmektedir. Biz kurusumuzda bunlara "çekirdek modunda çalışan thread'ler"
+    ya da "çekirdek thread'leri" diyeceğiz. 
+    
+    Çekirdek modunda çalışan thread'ler herhangi bir proses ile ilişkisiz biçimde çalıştırılmaktadır. Bu nedenle bunlar içerisinde 
+    copy_to_user ya da copy_from_user gibi fonksiyonlar kullanılamaz. Çekirdek modunda çalışan thread'ler de diğer kullanıcı 
+    modunda çalışan thread'lerde olduğu gibi aynı "çalışma kuyruğu (run queue)" içerisinde zaman paylaşımlı bir biçimde çalıştırılmaktadır.
+    
+    Çekirdek thread'leri sırasıyla şu adımlarlardan geçilerek kullanılmaktadır:
+
+    1) Önce çekirdek thread'i aygıt sürücü içerisinde yaratılır. Yaratılma modülün init fonksiyonunda yapılabileceği gibi aygıt 
+    sürücü ilk kez açıldığında open fonksiyonunda ya da belli bir süre sonra belli bir olay gerçekleştiğinde de yapılabilmektedir. 
+    Çekirdek thread'leri kthread_create fonksiyonuyla yaratılmaktadır:
 
     #include <linux/kthread.h>
 
     struct task_struct *kthread_create(int (*threadfn)(void *data), void *data, const char *namefmt);
 
     Fonksiyonun birinci parametresi thread akışının başlatılacağı fonksiyonun adresini almaktadır. Bu fonksiyon void * türünden 
-    parametreye ve int geri dönüş değerine sahip olmak zorundadır. Fonksiyonun ikinci parametresi thread fonksiyonuna geçirilecek 
-    parametreyi belirtmektedir. Eğer bir kernel thread'e bir parametre geçirilmek istenmiyorsa bu parametre için NULL adres 
-    girilebilir. Fonksiyonun üçüncü parametresi proc dosya sisteminde (dolayısıyla "ps" komutunda) görüntülenecek ismi belirtir. 
-    Fonksiyon başarı durumunda yaratılan thread'in task_struct adresine, başarısızlık durumunda negatif errno değerine geri 
-    dönmektedir. Adrese geri dönen diğer kernel fonksiyonlarında olduğu gibi fonksiyonun başarı durumu IS_ERR makrosuyla test 
-    edilmelidir. Eğer fonksiyon başarısız olmuşsa negatif errno değeri PTR_ERR makrosuyla elde edilebilir. Örneğin:
+    parametreye ve int geri dönüş değerine sahip olmak zorundadır. Fonksiyonun ikinci parametresi thread akışı başlatıldığında 
+    thread fonksiyonuna geçirilecek parametreyi belirtmektedir. Eğer bir thread fonksiyonuna bir parametre geçirilmek istenmiyorsa 
+    bu parametre için NULL adres girilebilir. Fonksiyonun üçüncü parametresi proc dosya sisteminde (dolayısıyla "ps" komutunda) 
+    görüntülenecek ismi belirtir. Fonksiyon başarı durumunda yaratılan thread'in task_struct adresine, başarısızlık durumunda 
+    negatif errno değerine geri dönmektedir. Adrese geri dönen diğer çekirdek fonksiyonlarında olduğu gibi fonksiyonun başarılı
+    olup olmadığı IS_ERR makrosuyla test edilmelidir. Eğer fonksiyon başarısız olmuşsa negatif errno değeri PTR_ERR makrosuyla 
+    elde edilebilir. Örneğin:
 
-    struct task_struct *ts;
+    static struct task_struct *g_kthread;
 
-    ts = kthread_create(...);
-    if (IS_ERR(ts)) {
-        printk(KERN_ERROR "cannot create kernel thread!..")
-        return PTR_ERR(ts);
+    g_kthread = kthread_create(...);
+      if (IS_ERR(g_kthread)) {
+        printk(KERN_ERR "cannot create kernel thread!..\n");
+        return PTR_ERR(g_kthread);
     }
 
-    Anımsanacağı gibi Linux sistemlerinde prosesler ve thread'ler task_struct yapısıyla temsil edilmektedir. İşte bu fonksiyon 
+    Anımsanacağı gibi Linux sistemlerinde prosesler ve thread'ler task_struct yapısıyla temsil ediliyordu. İşte bu fonksiyon 
     da başarı durumunda çekirdek tarafından yaratılan task_struct nesnesinin adresini bize vermektedir.
 
-    Kernel thread bu fonksiyonla yaratıldıktan sonra hemen çalışmaz. Onu çalıştırmak için wake_up_process fonksiyonun çağrılması 
-    gerekir:
+    Çekirdek thread'leri bu fonksiyonla yaratıldıktan sonra hemen çalışmazlar. Onları çalıştırmak için wake_up_process fonksiyonun 
+    çağrılması gerekir. Fonksiyonun prototipi şöyledir:
 
     #include <linux/kthread.h>
 
     int wake_up_process(struct task_struct *tsk);
 
-    Fonksiyon ilgili kernel thread'in task_struct adresini parametre olarak alır. Başarı durumunda 0 değerine, başarısızlık 
-    durumunda negatif errno değerine geri döner.
+    Fonksiyon ilgili çekirdek thread'inin task_struct adresini parametre olarak alır. Başarı durumunda 0 değerine, başarısızlık 
+    durumunda negatif errno değerine geri döner. Tabii bir çekirdek thread'in başarılı bir biçimde yaratılmışsa bu thread'in 
+    çalışmaya başlatılmasında bir sorun oluşmaz. Böylesi bir durum sistemdeki ciddi sorunlara işaret etmektedir. Bu nedenle 
+    wake_up_process fonksiyonunun geri dönüş değerini kontrol etmeyebilirsiniz. Çekirdek thread'in yaratılır yaratılmaz çalıştırılamsı
+    doğru tekniktir. Henüz çalıştırılmamış ancak task_struct yapısı tahsis edilmiş olan çekirdek thread_lerin task_struct yapısını 
+    geri bırakmak için put_task_struct fonksiyonu kullanılmalıdır. 
 
     Aslında yukarıdaki işlemi tek hamlede yapan kthread_run isimli bir fonksiyon da vardır:
 
@@ -35742,91 +35727,87 @@ clean:
 
     struct task_struct *kthread_run(int (*threadfn)(void *data), void *data, const char *namefmt);
 
-    2) Kernel thread kthread_stop fonksiyonuyla herhangi bir zaman ya da aygıt sürücü bellekten atılırken yok edilebilir:
-
+    2) Çekirdek thread'i kthread_stop fonksiyonuyla herhangi bir zaman yok edilebilir. Eğer çekirdek thread'i modülün init 
+    fonksiyonunda yaratılmışsa yok edilmesi de tipi olarak modülün exit fonksiyoununda yapılmaktadır. Fonksiyonun prototipi şöyledir:
+    
     #include <linux/kthread.h>
 
     int kthread_stop(struct task_struct *ts);
 
-    Fonksiyon thread sonlanana kadar blokeye yol açar. Fonksiyon thread fonksiyonunun exit koduyla (yani thread fonksiyonunun 
-    geri dönüş değeri ile) geri dönmektedir. Genellikle programcılar thread fonksiyonlarını başarı durumunda sıfır, başarısızlık 
-    durumunda sıfır dışı bir değerle geri döndürmektedir. Burada önemli nokta kthread_stop fonksiyonunun kernel thread'i zorla 
-    sonlandırılmadığıdır. Kernel thread'in sonlanması zorla yapılmaz. kthread_stop fonksiyonu bir bayrağı set eder. Kernel thread 
-    de tipik olarak bir döngü içerisinde "bu bayrak set edilmiş mi" diye bakar. Eğer bayrak set edilmişse kendini sonlandırır. 
-    Kernel thread'in bu bayrağa bakması kthread_should_stop fonksiyonuyla yapılmaktadır.
+    Fonksiyon çekirdek thread'inin task_struct nesnesinin adresini parametre olarak alır. Başarı durumunda 0 değerine başarısız
+    durumunda negatif errno değerine geri döner. Fonksiyonun normal koşullarda başarısız olması söz konusu değildir. Yani başarı 
+    kontrolü hiç yapılmayabilir. Örneğin:
+
+    kthread_stop(g_kthread);
+    
+    Fonksiyon thread fonksiyonu sonlanana kadar blokeye yol açmaktadır. Fonksiyon thread fonksiyonunun exit koduyla (yani thread 
+    fonksiyonunun geri dönüş değeri ile) geri dönmektedir. Genellikle programcılar thread fonksiyonlarını başarı durumunda sıfır, 
+    başarısızlık durumunda sıfır dışı bir değerle geri döndürmektedir. Burada önemli bir nokta kthread_stop fonksiyonunun çekirdek
+    modunda çalışan thread'i zorla sonlandırılmadığıdır. Çekirdek thread'in sonlanması zorla yapılmaz. kthread_stop fonksiyonu 
+    çekirdek thread'ine ilişkin task_struct yapısı içerisindeki bir bayrağı set eder. Çekirdke thread'i de tipik olarak bir döngü 
+    içerisinde "bu bayrak set edilmiş mi" diye bakar. Eğer bayrak set edilmişse kendini sonlandırır. Çekirdek thread'in bu bayrağa 
+    bakması kthread_should_stop fonksiyonuyla yapılmaktadır. Fonksiyonun prototipi şöyledir:
 
     #include <linux/kthread.h>
 
     bool kthread_should_stop(void);
 
-    Fonksiyon eğer bu flag set edilmişse sıfır dışı bir değere, set edilmediyse 0 değerine geri dönmektedir. Tipik olarak kernel 
+    Fonksiyon eğer bu bayrak set edilmişse sıfır dışı bir değere, set edilmemişse 0 değerine geri dönmektedir. Tipik olarak 
     thread fonksiyonu aşağıdaki gibi bir döngüde yaşamını geçirir:
 
     while (!kthread_should_stop()) {
         ...
     }
 
-    Tabii aslında biz kthread_create fonksiyonu ile bir kernel thread yaratmak istediğimizde asıl thread'in başlatıldığı 
-    fonksiyon çekirdek içerisindeki bir fonksiyondur. Bizim kthread_create fonksiyonuna verdiğimiz fonksiyon bu fonksiyon 
-    tarafından çağrılmaktadır. Dolayısıyla bizim fonksiyonumuz bittiğinde akış yine çekirdek içerisindeki asıl fonksiyona 
-    döner. O fonksiyonda da yaratılmış thread kaynakları otomatik boşaltılır. Yani biz bir thread yarattığımız zaman 
-    onun yok edilmesi thread fonksiyonu bittiğinde otomatik yapılmaktadır.
+    Tabii aslında biz kthread_create fonksiyonu ile bir çekirdek thread yaratmak istediğimizde thread çekirdek içerisindeki 
+    başka bir fonksiyondan başlatılmaktadır. Bizim kthread_create fonksiyonuna verdiğimiz fonksiyon bu fonksiyon tarafından 
+    çağrılmaktadır. Dolayısıyla bizim thread fonksiyonumuz bittiğinde akış yine çekirdek içerisindeki asıl fonksiyona döner. 
+    O fonksiyonda da yaratılmış thread kaynakları otomatik boşaltılır. Yani biz bir thread yarattığımız zaman onun yok edilmesi 
+    thread fonksiyonu bittiğinde otomatik yapılmaktadır.
 
-    Kernel thread'in kendisini sonlandırması do_exit fonksiyonuyla sağlanabilmektedir. Aslında do_exit fonksiyonu prosesleri
-    sonlandıran sys_exit fonksiyonunun doğrudan çağırdığı taban fonksiyondur.
+    Çekirdek thread'in kendisini sonlandırması do_exit fonksiyonuyla sağlanabilmektedir. Aslında do_exit fonksiyonu prosesleri
+    sonlandıran sys_exit fonksiyonunun doğrudan çağırdığı taban bir fonksiyondur.
 
     #include <linux/kernel.h>
 
     void do_exit(long code);
 
-    Fonksiyon thread'in exit kodunu parametre olarak almaktadır. Kernel thread normal biçimde ya da kthread_stop fonksiyonuyla 
-    sonlanmışsa artık thread'in tüm kaynakları (task_struct yapısı da) serbest bırakılmaktadır. Dolayısıyla artık ona kthread_stop
-    uygulamamak gerekir.
+    Fonksiyon thread'in exit kodunu parametre olarak almaktadır. Çekirdek thread do_exit fonksiyonuyla kendini sonlandırmışsa 
+    task_struct yapısı tread'in exit kodunu iletmek için sistem tarafından tutulur. kthread_stop fonksiyonu bu task_struct 
+    yapısını serbest bırakmaktadır. Zaten bir çekirdek thread sonlandığında bu fonksiyon çağrılmaktadır. Fkat son çekirdeğin 
+    belli bir versiyonundan sonra bu do_exit fonksiyonu artık export edilmemektedir. Dolayısıyla bu fonksiyonu her çekirdek 
+    versiyonunda kullanamazsınız.
 
     Aşağıdaki örnekte modül initialize edilirken kernel thread yaratılmış, modül yok edilirken kthread_stop ile kernel-thread'in 
     sonlanması beklenmiştir. kernel-thread içerisinde msleep fonksiyonu ile 1 saniyelik beklemeler yapılmıştır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/* kernel-thread-module.c */
+//* kernel-thread-module.c */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
-#include <linux/timer.h>
 #include <linux/delay.h>
+#include <linux/syscalls.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaan Aslan");
-MODULE_DESCRIPTION("Kernel Thread Module");
+MODULE_DESCRIPTION("kernel thread module");
 
-static int kernel_thread_proc(void *param);
+int kernel_thread_proc(void *data);
 
-struct task_struct *g_ts;
+static struct task_struct *g_kthread;
 
 static int __init generic_init(void)
 {
+    g_kthread = kthread_create(kernel_thread_proc, NULL, "my-kernel-thread");
+    if (IS_ERR(g_kthread)) {
+        printk(KERN_ERR "cannot create kernel thread!..\n");
+        return PTR_ERR(g_kthread);
+    }
+    wake_up_process(g_kthread);
+
     printk(KERN_INFO "kernel-thread-module init...\n");
-
-    g_ts = kthread_run(kernel_thread_proc, NULL, "kmythreadd");
-    if (IS_ERR(g_ts)) {
-        printk(KERN_ERR "cannot create kernel thread!...\n");
-        return PTR_ERR(g_ts);
-    }
-
-    return 0;
-}
-
-static int kernel_thread_proc(void *param)
-{
-    static int count;
-
-    printk(KERN_INFO "kernel-thread starts...\n");
-
-    while (!kthread_should_stop()) {
-        printk(KERN_INFO "kernel-thread is running: %d\n", count);
-        msleep(1000);
-        ++count;
-    }
 
     return 0;
 }
@@ -35834,10 +35815,24 @@ static int kernel_thread_proc(void *param)
 static void __exit generic_exit(void)
 {
     int ecode;
+    
+    ecode = kthread_stop(g_kthread);
+    printk(KERN_INFO "kernel thread exited with %d code\n", ecode);;
 
-    ecode = kthread_stop(g_ts);
-    printk(KERN_INFO "kernel thread exits with code \"%d\"\n", ecode);
-    printk(KERN_INFO "kernel-thread-module exit...\n");
+    printk(KERN_INFO "kernel-thread-module module exit...\n");
+}
+
+int kernel_thread_proc(void *data)
+{
+    int count = 0;
+
+    while (!kthread_should_stop()) {
+        printk(KERN_INFO "kernel thread running: %d\n", count);
+        ++count;
+        msleep_interruptible(1000);            
+    }
+
+    return 0;
 }
 
 module_init(generic_init);
@@ -35845,7 +35840,7 @@ module_exit(generic_exit);
 
 # Makefile
 
-obj-m += $(file).o
+obj-m += ${file}.o
 
 all:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
