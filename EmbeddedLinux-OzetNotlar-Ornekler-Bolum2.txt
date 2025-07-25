@@ -14413,20 +14413,20 @@ rm -f $module
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    PC'lerdeki klavye denetleyicisinin (klavye içerisindeki değil, PC tarafındaki denetleyicinin (orijinali Intel 8042)) 
-    60H ve 64H numaralı iki portu vardır. 60H portu hem okunabilir hem de yazılabilir durumdadır. 60H portu 1 byte olarak 
-    okunduğunda son basılan ya da çekilen tuşun klavye scan kodu elde edilmektedir. Yukarıda da belirttiğimiz gibi klavye 
-    terminolojisinde tuşa basılırken oluşturulan scan koduna "make code", parmak tuştan çekildiğinde oluşturulan scan koduna 
-    ise "break code" denilmektedir. Klavye içerisindeki işlemcinin (keyboard encoder) break code olarak önce bir F0 byte'ını 
-    sonra da make code byte'ını gönderdiğini belirtmiştik. İşte PC içerisindeki klavye denetleyicisi bu break kodu aldığında bunu 
-    iki byte olarak değil, yüksek anlamlı biti 1 olan byte olarak saklamaktadır. Böylece biz 60H portunu okuduğumuzda onun 
-    yüksek anlamlı bitine bakarak okuduğumuz scan kodunun make code mu yoksa break code mu olduğunu anlayabiliriz.
+    PC'lerdeki klavye denetleyicisinin (klavye içerisindeki değil, PC tarafındaki denetleyicinin (orijinali Intel 8042)) 60H 
+    ve 64H numaralı iki portu vardır. 60H portu hem okunabilir hem de yazılabilir durumdadır. 60H portu 1 byte olarak okunduğunda 
+    son basılan ya da çekilen tuşun klavye scan kodu elde edilmektedir. Yukarıda da belirttiğimiz gibi klavye terminolojisinde 
+    tuşa basılırken oluşturulan scan koduna "make code", parmak tuştan çekildiğinde oluşturulan scan koduna ise "break code" 
+    denilmektedir. Klavye içerisindeki işlemcinin (keyboard encoder) break code olarak önce bir F0 byte'ını sonra da make code 
+    byte'ını gönderdiğini belirtmiştik. İşte PC içerisindeki klavye denetleyicisi bu break kodu aldığında bunu iki byte olarak 
+    değil, yüksek anlamlı biti 1 olan byte olarak saklamaktadır. Böylece biz 60H portunu okuduğumuzda onun yüksek anlamlı bitine 
+    bakarak okuduğumuz scan kodunun make code mu yoksa break code mu olduğunu anlayabiliriz.
 
     Klavye denetleyicisinin 60H portuna gönderilen 1 byte değere "keyboard encoder command" denilmektedir. Bu 1 byte'lık komut 
     klavye denetleyicisi tarafından klavye içerisindeki işlemciye gönderilir. Ancak bu 1 byte'tan sonra bazı komutlar parametre 
     almaktadır. Parametreler de komuttan sonra 1 byte olarak aynı port yoluyla iletilmektedir.
 
-    Aşağıdaki aygıt sürücü örneğinde  klavyeden tuşlara basıldığında basılan ve çekilen tuşların make ve break code'ları 
+    Aşağıdaki aygıt sürücü örneğinde klavyeden tuşlara basıldığında basılan ve çekilen tuşların make ve break code'ları 
     yazdırılmaktadır. Ancak burada bir noktayı belirtmek istiyoruz. Biz bu örnekte IRQ1 kesme kodunda 60h protunu okuduğumuzda 
     Linux çekirdeği de bu portu okuduğu için klavye denetleyicisinin tasarımından dolayı bazı çalışma sorunları ortaya çıkabilecektir. 
 -----------------------------------------------------------------------------------------------------------------------------*/
@@ -14554,19 +14554,513 @@ module=$1
 rm -f $module
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                            117. Ders 24/07/2025 - Perşembe
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Intel tabanlı masaüstü bilgisayarlardaki RTC (Real Time Clock) devresinden zamanı okuyan bir aygıt sürücü yazalım.
+    Bugün kullandığımız PC'lerde bilgisayar kapatıldıktan sonra zamanı tutanm ismine "gerçek zaman saati (real time clock)" 
+    denilen bir yardımcı işlemci (denetleyici) vardır. Masaüstü bilgisayarlarımızı açarken Del ya da F1 tuşuna basarak çıkarttığımız 
+    setup ekranındaki bilgiler de (buna CMOS setup bilgileri de denilmektedir) aslında aynı denetleyicinin içerisindeki bir 
+    RAM'de tutulmaktadır. RTC denetleyicisi bir pille beslenmektedir. İşletim sistemleri boot işlemi sırasında RTC denetleyicisine 
+    başvurarak tarih ve zamanı alıp sonra da bu tarih ve zamanı bilgisayar açık olduğu sürece güncellemektedir. Yani genellikle 
+    RTC denetleyicisine yalnızca açılış sırasında başvurulmaktadır. Tabii biz işletim sisteminde saati ve tarihi ayarladığımızda 
+    işletim sistemi de RTC denetleyicisindeki saati yeniden ayarlar. 
 
+    PC'lerimizdek RTC denetleyicisi ile port-mapped IO kullanılarak haberleşilmektedir. RTC denetleyicisinin iki portu vardır. 
+    Pc'lerimizde bu portlar 70h ve 71h portlarıdır. RTC 8 bitlik bir denetleyicidir. Dolayısıyla bu portlarla 8 bitlik değerler 
+    okunup yazılabilmektedir. 70h portu kontrol portudur, 71h portu ise bilgilerin alındığı ve gönderildiği porttur. Sistem 
+    programcısı önce 70h portuna komut göndererek 71h prortunun hangi amaçla kullanılacağını belirler. Sonra 71h portunu okur 
+    ya da ona yazma yapar. Biz aşağıdaki örneğimizde 70h portuna komut gönderdikten sonra 71h portunu okuyan bir fonksiyon 
+    tanımladık:
+
+    static inline unsigned int rtc_read(unsigned int cmd)
+    {
+        outb(cmd, 0x70);         
+        return inb(0x71);        
+    }
+
+    RTC denetleyicisinden saat, dakika ve saniye bilgilerini de şöyle ettik:
+
+    hour = rtc_read(0x04);
+    minute = rtc_read(0x02);
+    second = rtc_read(0x00);
+
+    RTC denetleyicisi bilgileri binry ta da BCD olarak verebilmektedir. Bu durum ayarlanabilmektedir. RTC denetleyicisinin 
+    verdiği bilgilerin binary mi yoksa BCD mi olduğu 70H portuna 0x0B gönderilip 71H protunun okunmasıyla elde edilebilmektedir. 
+    Örneğin:
+
+    if ((rtc_read(0x0B) & 0x04) == 0) {     /* BCD? */
+        ...
+    }
+    else {
+       ...
+    }
+
+    Aslında RTC denetleyicisinden bilgi okunurken tesadüfen onun güncelleme işlemine denk gelinirse geçersiz değerler okunabilmektedir.
+    Bu nedenle okuma işleminin daha güvenli bir biçimde yapılması gerekir. Ancak biz burada karmaşıklık oluşmasın diye bu durumu 
+    göz ardı ediyourz.
+
+    Örneğimizde bir aygıt sürücü oluşturarak aygıt sürücü için ioctl fonksiyonunu yazdık. Aygıt sürücünün iotcl fonksiyonu 
+    şöyle yazılmıştır:
+
+    static long rtc_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+    {
+        long result;
+
+        switch (cmd) {
+            case IOC_RTC_GETTIME:
+                result = ioctl_gettime(filp, (struct RTC_TIME *)arg);
+                break;
+            default:
+                result = -ENOTTY;
+        }
+
+        return result;
+    }
+
+    static inline unsigned int rtc_read(unsigned int cmd)
+    {
+        outb(cmd, 0x70);         
+        return inb(0x71);        
+    }
+
+    static inline int bin_to_bcd(int val)
+    {
+        return (val >> 4 ) * 10 + (val & 0x0F);
+    }
+
+    static long ioctl_gettime(struct file *filp, struct RTC_TIME *rtct)
+    {
+        struct RTC_TIME rtm;
+        int hour, minute, second;
+        
+        hour = rtc_read(0x04);
+        minute = rtc_read(0x02);
+        second = rtc_read(0x00);
+        
+        if ((rtc_read(0x0B) & 0x04) == 0) {     /* BCD? */
+            rtm.hour = bin_to_bcd(hour);
+            rtm.minute  = bin_to_bcd(minute);
+            rtm.second = bin_to_bcd(second);
+        }
+        else {
+            rtm.hour = hour;
+            rtm.minute  = minute;
+            rtm.second = second;
+        }
+
+        if (copy_to_user(rtct, &rtm,  sizeof(rtm)) != 0)
+            return -EFAULT;   
+
+        return 0;
+    }
+
+    Kullanıcı modundan zaman bilgisi ioctl çağrısı ile elde edilmektedir. Örneğin:
+
+    int fd;
+    struct RTC_TIME rtct;
+		
+	if ((fd = open("rtc-driver", O_RDONLY)) == -1)
+		exit_sys("open");
+
+    if (ioctl(fd, IOC_RTC_GETTIME, &rtct) == -1)
+        exit_sys("ioctl");
+
+    printf("%02d:%02d:%02d\n", rtct.hour, rtct.minute, rtct.second);
+
+    close(fd);
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/* rtc-driver.h */
+
+#ifndef RTC_DRIVER_H_
+#define RTC_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+struct RTC_TIME {
+    int hour;
+    int minute;
+    int second;
+};
+
+#define RTC_DRIVER_MAGIC		    'r'
+#define IOC_RTC_GETTIME		        _IOR(RTC_DRIVER_MAGIC, 1, struct RTC_TIME)
+
+#endif
+
+/* rtc-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <asm/io.h>
+#include "rtc-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("rtc-driver");
+
+static int generic_open(struct inode *inodep, struct file *filp);
+static int generic_release(struct inode *inodep, struct file *filp);
+static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long rtc_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_gettime(struct file *filp, struct RTC_TIME *rtct);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = generic_open,
+	.read = generic_read,
+	.write = generic_write,
+	.release = generic_release,
+    .unlocked_ioctl = rtc_driver_ioctl
+};
+
+static int __init generic_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "rtc-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "rtc-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit generic_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "rtc-driver module exit...\n");
+}
+
+static int generic_open(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "rtc-driver opened...\n");
+
+	return 0;
+}
+
+static int generic_release(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "rtc-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "rtc-driver read...\n");
+
+	return 0;
+}
+
+static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "rtc-driver write...\n");
+
+	return 0;
+}
+
+static long rtc_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+
+    switch (cmd) {
+        case IOC_RTC_GETTIME:
+            result = ioctl_gettime(filp, (struct RTC_TIME *)arg);
+            break;
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+static inline unsigned int rtc_read(unsigned int cmd)
+{
+    outb(cmd, 0x70);         
+    return inb(0x71);        
+}
+
+static inline int bin_to_bcd(int val)
+{
+    return (val >> 4 ) * 10 + (val & 0x0F);
+}
+
+static long ioctl_gettime(struct file *filp, struct RTC_TIME *rtct)
+{
+    struct RTC_TIME rtm;
+    int hour, minute, second;
+    
+    while (rtc_read(0x0A) & 0x80)
+        ;
+
+    hour = rtc_read(0x04);
+    minute = rtc_read(0x02);
+    second = rtc_read(0x00);
+    
+    if ((rtc_read(0x0B) & 0x04) == 0) {     /* BCD? */
+        rtm.hour = bin_to_bcd(hour);
+        rtm.minute  = bin_to_bcd(minute);
+        rtm.second = bin_to_bcd(second);
+    }
+    else {
+        rtm.hour = hour;
+        rtm.minute  = minute;
+        rtm.second = second;
+    }
+
+    if (copy_to_user(rtct, &rtm,  sizeof(rtm)) != 0)
+		return -EFAULT;   
+
+    return 0;
+}
+
+module_init(generic_init);
+module_exit(generic_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* rtc.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "rtc-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    struct RTC_TIME rtct;
+		
+	if ((fd = open("rtc-driver", O_RDONLY)) == -1)
+		exit_sys("open");
+
+    if (ioctl(fd, IOC_RTC_GETTIME, &rtct) == -1)
+        exit_sys("ioctl");
+
+    printf("%02d:%02d:%02d\n", rtct.hour, rtct.minute, rtct.second);
+
+    close(fd);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Derleyiciler ve işlemciler tarafından yapılan önemli bir optimizasyon temasına "komutların yer değiştirilmesi (instruction 
+    reordering)" denilmektedir. Bu optimizasyon hem derleyici tarafından hem de işlemcinin kendisi tarafından yapılabilmektedir. 
+    Bu optimizasyonda birbirlerini normal bir durumda etkilemeyecek iki ya da daha fazla ayrı makine komutunun yerleri hız kazancı
+    sağlamak amacıyla yer değiştirilmektedir. Bu tür yer değiştirmeler normal kullanıcı modu programlarında hiçbir davranış 
+    değişikliğine dolayısıyla da soruna yol açmazlar ancak işletim sistemlerinin ve aygıt sürücülerinin yazımı sırasında bu duruma 
+    dikkat edilmesi gerekir. Bu tür çekirdek kodlamalarında komutların işlemci tarafından yer değiştirilmesi potansiyel sorunların
+    ortaya çıkmasına yol açabilmektedir. Örneğin birbirleriyle alakasız iki adrese yazma yapılması durumunda yazma komutlarının 
+    yer değiştirmesi işlemcinin bu işleri daha hızlı yapabilmesine yol açabilmektedir. Fakat IO portları ve memory-mapped IO söz 
+    konusu olduğunda bu sıralama değişikliği istenmeyen olumsuz sonuçlar doğurabilmektedir. Yalnızca bu biçimdeki IO işlemlerinde 
+    değil aynı zamanda senkronizasyon nesnelerinin gerçekleştiriminde de komutların yer değiştirmesi durumuna dikkat edilmesi 
+    gerekir. İşte bu yer değiştirmeyi ortadan kaldırmak için "bellek bariyeri (memory barrier)" koyma yöntemi uygulanmaktadır. 
+    İşlemciler bellek bariyerininin yukarısıyla aşağısını yer değiştirmemektedir. Linux çekirdeğinde kullanılan Bariyer fonksiyonları 
+    şunlardır:
+
+    #include <asm/system.h>
+
+    void rmb(void);
+    void wmb(void);
+    void mb(oid);
+
+    rmb fonksiyonunun aşağısındaki kodlar yukarısındaki okuma işlemleri yapıldıktan sonra yapılırlar. wmb fonksiyonunda 
+    ise wmb fonksiyonun yukarısındaki yazma işlemleri yapıldıktan sonra aşağıdaki kodlar çalıştırılır. mb fonksiyonu ise 
+    hem okuma hem yazma için yukarıdaki ve aşağıdaki kodları birbirlerinden ayırmaktadır. Örneğin:
+
+    ...
+    wmb();
+    ...
+
+    Burada wmb fonksiyonunun yukarısındaki belleğe yazma işlemleri bittikten sonra altındaki kodlar çalıştırılacaktır. Bellek 
+    bariyerleri Intel ve ARM mimarilerinde özel makine komutlarıyla sağlanmaktadır. Bu fonksiyonlar hangi mimari söz konusuysa 
+    o mimariye özgü bariyer oluşturan makine komutlarını kullanmaktadır.
+    
+    Linux çekirdeğinde önceki paragraflarda gördüğümüz port-mapped IO fonksiyonları zaten kendi içlerinde bellek bariyerlerini 
+    kullanmaktadır. Bu nedenle bizim aşağıdaki gibi port işlemlerinde ayrıca bariyer kullanmamıza gerek kalmaz:
+
+    outb(cmd, 0x70);         
+    inb(0x71);
+
+    Bu fonksiyonlar zaten kendi içlerinde bellek bariyerlerini oluşturdukları için bunların yer değiştirilmesi söz konusu 
+    olmamaktadır. Aygıt sürücü programcısı genellikle Linux çekirdek fonksiyonlarını kullanarak kodlama yapmaktadır. Bu fonksiyonlar 
+    da zaten kendi içlerinde gerekli yerlere bellek bariyerlerini yerleştirmektedir. Bu nedenle aygıt sürücü programcısı açıkça 
+    bellek bariyerlerini kullanmaya çoğu durumda gereksinim duyduymamaktadır. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Memory-mapped IO işlemi pek çok mimaride normal göstericilerle yapılabilmektedir. Yani aslında bu mimarilerde memory-mapped 
+    IO için özel çekirdek fonksiyonlarının kullanılmasına gerek olmayabilir. Ancak bazı mimarilerde memory-mapped IO işlemi 
+    için özel bazı işlemlerin de yapılması gerekebilmektedir. Bu nedenle bu işlemlerin taşınabilir biçimde yapılabilmesi için 
+    özel çekirdek fonksiyonlarının kullanılması tavsiye edilir.
 
------------------------------------------------------------------------------------------------------------------------------*/
+    Tıpkı port-mapped IO işlemlerinde olduğu gibi memory-mapped IO işlemleri için de iki farklı aygıt aynı adres bölgesini 
+    kullanmasın diye bir registration işleminin yapılması tavsiye edilmektedir. Bu işlemler request_mem_region ve release_mem_region 
+    fonksiyonlarıyla yapılmaktadır. request_mem_region fonksiyonunun prototipi şöyledir:
 
-/*-----------------------------------------------------------------------------------------------------------------------------
+    #include <linux/ioport.h>
 
+    struct resource *request_mem_region(unsigned long start, unsigned long len, const char *name);
+
+    Fonksiyonun birinci parametresi başlangıç fiziksel bellek adresini, ikinci parametresi alanın uzunluğunu belirtmektedir. 
+    Üçüncü parametre ise "/proc/iomem" dosyasında görüntülenecek olan isimdir. Fonksiyon başarı durumunda resource isimli bir 
+    yapı nesnesinin adresine, başarısızlık durumunda NULL adrese geri dönmektedir. Daha önce register ettirilmiş olan bellek 
+    bölgesini serbest bırakmak için (yani register ettirilmemiş hale getirmek için) release_mem_region fonksiyonu kullanılmaktadır. 
+    Fonksiyonun prototipi şöyledir:
+
+    #include <linux/ioport.h>
+
+    void release_mem_region(unsigned long start, unsigned long len);
+
+    Fonksiyonun birinci parametresi başlangıç fiziksel bellek adresini, ikinci parametresi ise uzunluğu belirtmektedir.
+
+    Donanım aygıtının kullandığı bellek adresleri fiziksel adreslerdir. Örneğin aygıt 0xFFFF8000 gibi bir adresi kullanıyorsa 
+    bu adres fiziksel adrestir. Halbuki aygıt sürücünün sanal adres yoluyla bu fiziksel adrese erişebilmesi için bu dönüşümü 
+    yapacak sayfa tablosu girişlerinin bulunuyor olması gerekir. Çünkü program içerisindeki sanal adresler sayfa tablosu yoluyla 
+    fiziksel adreslere dönüştürülmektedir. İşte fiziksel adresler için sayfa tablosunda sanal adres girişlerini oluşturan 
+    ioremap isimli bir çekirdek fonksiyonu vardır. Bu çekirdek fonksiyonuna biz fiziksel adresi ve onun uzunluğunu veririz, 
+    fonksiyon da sayfa tablosunda bu fiziksel adrese erişmek için gerekli düzenlemeyi yapar ve bize erişimde kullanabileceğimiz 
+    sanal adresi verir. ioremap fonksiyonun prototipi şöyledir:
+
+    #include <asm/io.h>
+
+    void *ioremap(unsigned long physical_address, unsigned long size);
+
+    Fonksiyonun birinci parametresi fiziksel adresii ikinci parametresi map edilecek uzunluğu belirtmektedir. Fonksiyon bize 
+    bu fiziksel adrese erişmekte kullanılacak sanal adresi vermektedir. Bugünkü mikroişlemciler birden fazla çekirdeğe sahip 
+    olabilmektedir. Her çekirdeğin ayrı bir cache'i vardır. (Buna L1 cache ve L2 cache de denilmektedir.) CPU RAM'e erişimi 
+    azaltmak için (çünkü RAM göreli olarak yavaştır) okuma ve yazma işlemleri için mümkün olduğunca kendi içerisindeki 
+    cache'leri kullanır. Bunun sonucu olarak da aslında biz bir bellek adresine örneğin yazma yaptığımızda CPU aslında yazmayı
+    RAM'e değil kendi cache'ine yapıyor olabilir. Tabii bu bilgi bir süre sonra RAM'e aktarılmaktadır. İşte memory-mapped IO 
+    tekniğinde donanım aygıtının kullandığı RAM bölümünün CPU tarafından cache'lenmemesi gerekir. Bu işlem sayfa tablşosundaki
+    bazı bitler ile sağlanmaktadır. İşte ioremap fonksiyonu bu işlemi de yapmaktadır. Aksi takdirde donanım aygıtına göndermek 
+    istediğimiz bilgiler elektirksel olarak oraya gönderilmeyebilecektir. Ayrıca ioremap işleminin CPU cache'lerini devre dışı 
+    bırakmayan ioremap_cache isimli bir biçimi de vardır. 
+
+    ioremap işlemini geri almak için iounmap fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <asm/io.h>
+
+    void iounmap(void *addr);
+
+    Fonksiyon sanal bellek adresini parametre almaktadır. Uzunluk bilgisi zaten çekirdek tarafından kaydedildiği için ayrıca
+    fonksiyona verilmemektedir. 
+
+    ioremap fonksiyonu ile sanal adres elde edildikten sonra biz C'de göstericilerle doğrudan aygıta erişebilir miyiz? Aslında 
+    erişebiliriz. Ancak önceki paragrafta açıkladığımız gibi erişimi sorunsuz yapabilmek için platforma bağlı olarak bellek 
+    bariyerlerinin kullanılması gerekir. Bu nedenle erişimin doğrudan göstericilerle değil özel çekirdek fonksiyonlarıyla 
+    yapılması tavsiye edilmektedir. Memory-mapped IO ile aygıta erişen çekirdek fonksiyonları çekirdeğin belli bir verisyonundan 
+    sonra daha modern hale getirilmiştir. Biz burada daha taşınabilir daha yeni fonksiyonları tanıtacağız. Aşağıdaki fonksiyonlar 
+    addr ile belirtilen bellek adresinden 1 byte, 2 byte ve 4 byte okurlar.
+
+    #include <asm/io.h>
+
+    unsigned int ioread8(void *addr);
+    unsigned int ioread16(void *addr);
+    unsigned int ioread32(void *addr);
+
+    Aşağıdaki fonksiyonlar ise addr ile belirtilen bellek adresine 1 byte, 2 byte ve 4 byte bilgi yazmaktadır:
+
+    #include <asm/io.h>
+
+    void iowrite8(u8 value, void *addr);
+    void iowrite16(u16 value, void *addr);
+    void iowrite32(u32 value, void *addr);
+
+    Bu ioreadxxx ve iowritexxx fonksyonları yerine eskiden readxxx ve writexxx fonksiyonları kullanılıyordu. ioradxxx ve 
+    iowritexxx fonksiyonları 2.6 sürümleriyle çekirdeğe eklenmiştir. Ancak eski readxxx ve writexxx fonksiyonları yeni 
+    çekirdeklerde de muhafaza edilmektedir. 
+
+    Yukarıdaki fonksiyonların rep'li (repetition/tekrar) versiyonları da vardır:
+
+    #include <asm/io.h>
+
+    void ioread8_rep(void *addr, void *buf, unsigned long count);
+    void ioread16_rep(void *addr, void *buf, unsigned long count);
+    void ioread32_rep(void *addr, void *buf, unsigned long count);
+
+    void iowrite8_rep(void *addr, const void *buf, unsigned long count);
+    void iowrite16_rep(void *addr, const void *buf, unsigned long count);
+    void iowrite32_rep(void *addr, const void *buf, unsigned long count);
+
+    Bu fonksiyonlar donanım aygıtına ilişkin bellek adresinden belli bir adrese belli miktarda (count parametresi) 
+    byte, word ya da dword transfer etmektedir. 
+
+    Tıpkı memcpy fonksiyonunda olduğu gibi memory-mapped aygıt ile bellek arasında blok kopyalaması yapan iki fonksiyon 
+    da bulunmaktadır:
+
+    #include <asm/io.h>
+
+    void memcpy_fromio(void *dest, const void *source, unsigned int count);
+    void memcpy_toio(void *dest, const void *source, unsigned int count);
+
+    Belli bir memory-mapped IO adresinden itibaren belli bir byte'ı n defa dolduran memset_io isimli bir fonksiyon da vardır:
+
+    #include <asm/io.h>
+
+    void memset_io(void *dest, u8 value, unsigned int count);
+
+    Bu fonksiyonu memset fonksiyonuna benzetebilirsiniz.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
