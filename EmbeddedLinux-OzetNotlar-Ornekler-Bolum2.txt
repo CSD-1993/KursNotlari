@@ -17,7 +17,7 @@
                             (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                                     (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 22/07/2025 - Salı
+                                            Son Güncelleme: 20/08/2025 - Çarşamba
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
@@ -14986,16 +14986,17 @@ void exit_sys(const char *msg)
 
     void *ioremap(unsigned long physical_address, unsigned long size);
 
-    Fonksiyonun birinci parametresi fiziksel adresii ikinci parametresi map edilecek uzunluğu belirtmektedir. Fonksiyon bize 
-    bu fiziksel adrese erişmekte kullanılacak sanal adresi vermektedir. Bugünkü mikroişlemciler birden fazla çekirdeğe sahip 
-    olabilmektedir. Her çekirdeğin ayrı bir cache'i vardır. (Buna L1 cache ve L2 cache de denilmektedir.) CPU RAM'e erişimi 
-    azaltmak için (çünkü RAM göreli olarak yavaştır) okuma ve yazma işlemleri için mümkün olduğunca kendi içerisindeki 
-    cache'leri kullanır. Bunun sonucu olarak da aslında biz bir bellek adresine örneğin yazma yaptığımızda CPU aslında yazmayı
-    RAM'e değil kendi cache'ine yapıyor olabilir. Tabii bu bilgi bir süre sonra RAM'e aktarılmaktadır. İşte memory-mapped IO 
-    tekniğinde donanım aygıtının kullandığı RAM bölümünün CPU tarafından cache'lenmemesi gerekir. Bu işlem sayfa tablşosundaki
-    bazı bitler ile sağlanmaktadır. İşte ioremap fonksiyonu bu işlemi de yapmaktadır. Aksi takdirde donanım aygıtına göndermek 
-    istediğimiz bilgiler elektirksel olarak oraya gönderilmeyebilecektir. Ayrıca ioremap işleminin CPU cache'lerini devre dışı 
-    bırakmayan ioremap_cache isimli bir biçimi de vardır. 
+    Fonksiyonun birinci parametresi fiziksel adresii ikinci parametresi map edilecek uzunluğu belirtmektedir. Fonksiyon başarı 
+    durumunda bu fiziksel adrese erişmekte kullanılacak sanal adresi, başarısızlık durumunda NULL adrese geri dönmektedir. 
+    Fonksiyon NULL adrese geri döndüüğünde aygıt sürücüdeki fonksiyonunda -ENOMEM geri döndürülmesi uygun olur. Bugünkü 
+    mikroişlemciler birden fazla çekirdeğe sahip olabilmektedir. Her çekirdeğin ayrı bir cache'i vardır. (Buna L1 cache ve L2 
+    cache de denilmektedir.) CPU RAM'e erişimi azaltmak için (çünkü RAM göreli olarak yavaştır) okuma ve yazma işlemleri için 
+    mümkün olduğunca kendi içerisindeki cache'leri kullanır. Bunun sonucu olarak da aslında biz bir bellek adresine örneğin 
+    yazma yaptığımızda CPU aslında yazmayı RAM'e değil kendi cache'ine yapıyor olabilir. Tabii bu bilgi bir süre sonra RAM'e 
+    aktarılmaktadır. İşte memory-mapped IO tekniğinde donanım aygıtının kullandığı RAM bölümünün CPU tarafından cache'lenmemesi 
+    gerekir. Bu işlem sayfa tablşosundaki bazı bitler ile sağlanmaktadır. İşte ioremap fonksiyonu bu işlemi de yapmaktadır. Aksi 
+    takdirde donanım aygıtına göndermek istediğimiz bilgiler elektirksel olarak oraya gönderilmeyebilecektir. Ayrıca ioremap 
+    işleminin CPU cache'lerini devre dışı bırakmayan ioremap_cache isimli bir biçimi de vardır. 
 
     ioremap işlemini geri almak için iounmap fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
 
@@ -15015,21 +15016,25 @@ void exit_sys(const char *msg)
 
     #include <asm/io.h>
 
-    unsigned int ioread8(void *addr);
-    unsigned int ioread16(void *addr);
-    unsigned int ioread32(void *addr);
+    u8   ioread8(const void __iomem *addr);
+    u16  ioread16(const void __iomem *addr);
+    u32  ioread32(const void __iomem *addr);
+    u64  ioread64(const void __iomem *addr);
 
     Aşağıdaki fonksiyonlar ise addr ile belirtilen bellek adresine 1 byte, 2 byte ve 4 byte bilgi yazmaktadır:
 
     #include <asm/io.h>
 
-    void iowrite8(u8 value, void *addr);
-    void iowrite16(u16 value, void *addr);
-    void iowrite32(u32 value, void *addr);
+    void iowrite8(u8 value, void __iomem *addr);
+    void iowrite16(u16 value, void __iomem *addr);
+    void iowrite32(u32 value, void __iomem *addr);
+    void iowrite64(u64 value, void __iomem *addr);  
 
     Bu ioreadxxx ve iowritexxx fonksyonları yerine eskiden readxxx ve writexxx fonksiyonları kullanılıyordu. ioradxxx ve 
     iowritexxx fonksiyonları 2.6 sürümleriyle çekirdeğe eklenmiştir. Ancak eski readxxx ve writexxx fonksiyonları yeni 
-    çekirdeklerde de muhafaza edilmektedir. 
+    çekirdeklerde de muhafaza edilmektedir. Bazı platformlarda ioread64 ve iowrite64 fonksiyonları yoktur. Bu platformlarda 
+    32 bitten daha fazla okulamalar için izleyen paragraflarda açıklayacağımız memcpy_fromio ve memcpy_toio fonksiyonlarını 
+    kullanmalısınız. 
 
     Yukarıdaki fonksiyonların rep'li (repetition/tekrar) versiyonları da vardır:
 
@@ -15064,32 +15069,891 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                            118. Ders 29/07/2025 - Salı
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Intel tabanlı PC mimarisinde memory-mapped IO örneği verelim. PC mimarisinde geleneksel olarak port-mapped IO 
+    kullanılmaktadır. Ancak mimariye sonradan eklenen donanım bileşenleri memory-mapped IO kullanacak biçimde tasarlanmıştır. 
+    
+    Eskiden PC mimarisinde tek işlemci vardı ve bu işlemcinin içerisinde de APIC (yani kesme denetleyicisi ve timer devresi)
+    yoktu. Eski PC'lerde zamanlama amacıyla yalnızca board üzerinde Inetl 8254 PIT (Programmable Interval Timer) devresi 
+    kullanılıyordu. Gerçekten de işletim sistemlerinde preemptive bağlamsal geçiş (context switch) işlemini bu timer devresinin
+    ürettiği kesme tetikliyordu. Ancak daha sonraları PC mimamrisine HPET (High Precision Event Timer) isimli modern ve yüksek
+    çözünürlüklü bir timer devresi eklenmiştir. HPET  denetleyicisi aynı zamanda kesme de oluşturabilmektedir. Bu timer devresine 
+    memory-mapped IO tekniğiyle erişilmektedir. Aynı zamanda Linux sistemlerinde HPET denetleyicisine erişmek için "/dev/hpet" 
+    isimli bir aygıt sürücü de bulundurulmuştur. Bu aygıt sürücüden okuma yapıldığında aygıt sürücü HPET içerisindeki sayacın 
+    değerini bize vermektedir. HPET sayacının frekansı bir IOCTL komut kodu ile elde edilebilmektedir. Ancak son zamanlarda 
+    bazı dağıtımlar bu aygıt sürücünün read fonksiyonunun içini silip doğrudan fonksiyonu -EIO hata kodu ile geri döndürmektedir. 
+    Dolaysıyla read fonksiyonu da "Input/output error" hata mesajıyla başarısız olmaktadır. Ancak biz yine de aşağıda bir kod 
+    parçasının çalışma süresinin bu HPET aygıt sürücüsü yoluyla nasıl hesaplanacağına bir örnek veriyoruz.
+-----------------------------------------------------------------------------------------------------------------------------*/
 
+/* ioctl-test.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/hpet.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    struct hpet_info info;
+    uint64_t start, end;
+    double result;
+		
+	if ((fd = open("/dev/hpet", O_RDONLY)) == -1)
+		exit_sys("open");
+
+    if (ioctl(fd, HPET_INFO, &info) == -1) 
+        exit_sys("ioctl");
+    
+    if (read(fd, &start, 8) == -1)
+        exit_sys("read");
+    
+    for (long i = 0; i < 10000000000; ++i)
+        ;
+    
+    if (read(fd, &end, 8) == -1)
+        exit_sys("read");
+
+    result = ((double)end - start) / info.hi_ireqfreq;
+    printf("Elapsed time: %f\n", result);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                        119. Ders 31/07/2025 - Perşembe
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de biz HPET denetleyicisine ilişkin bir aygıt sürücü yazalım. Aygıt sürücümüzün read fonksiyonu aygıttan 8 byte 
+    okunduğunda HPET içeirsindeki sayacın değerini versin. HPET sayacının frekansını almak için de bir ioctl komutu kullanalım.
+    HPET denetleyicisinin memory-mapped fiziksel adresi default durumda 0xFED00000 biçimindedir. Ancak PC'lerde plug and play 
+    tekniği sayesinde ACPI protokolü tarafından çakışma durumunda bu adres değiştirilebilmektedir. Yani bu denetleyicinin 
+    memory-mapped fiziksel adresini elde etmenin en güvenilir yolu ACPI tablosuna başvurmaktır. Çalışan Linux sisteminizde 
+    aşağıdaki komut ile dmesg log'larından denetleyicinin adresini elde edebilirsiniz:
 
+    $ dmesg | grep -i hpet
+
+    Örnek çıktı şöyle olabilir:
+
+     0.003467] ACPI: HPET 0x00000000BFEE76F7 000038 (v01 VMWARE VMW HPET 06040000 VMW  00000001)
+    [    0.003475] ACPI: Reserving HPET table memory at [mem 0xbfee76f7-0xbfee772e]
+    [    0.149999] ACPI: HPET id: 0x8086af01 base: 0xfed00000
+    [    0.481936] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 133484882848 ns
+    [    1.218886] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    [    1.218886] hpet0: 16 comparators, 64-bit 14.318180 MHz counter
+    [    1.468033] rtc_cmos 00:01: alarms up to one month, y3k, 114 bytes nvram, hpet irqs
+    ...
+
+    Aygıt sürücücümüzün 0xFED00000 fiziksel adresine erişebilmesi için ioremap fonksiyonun çağrılması gerekir. Örneğimizde 
+    fonksiyon şçyle çağrılmıştır:
+
+    static void *g_hpet_base;;
+    ...
+
+    if ((g_hpet_base = ioremap(HPET_BASE_ADDR, 4096)) == NULL) {     
+        ...
+        return -ENOMEM;
+    }
+   
+    HPET denetleyicisinden sayaç değerini almak için denetleyicinin taban adresinden 0xF0 byte ilerisinden 8 byte'ın okunması 
+    gerekir. Bu okuma işlemi aygıt sürücü içerisinde şöyle yapılabilmektedir:
+
+    memcpy_fromio(&count_val, (char *)g_hpet_base + OFFSET_MAIN_CNT, size);
+    
+    HPET aygıt sürücüsü kullanıcı modundan her okunduğunda bize 8 byte'lık sayaç değerini verecektir. Dosya göstericisinin 
+    kullanılmasına gerek yoktur. Her okumanın dosyanın başından itibaren yapıldığı kabul edilebilir:
+
+    static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        u64 count_val;
+
+        if (size < sizeof(count_val))
+            return -EINVAL;
+
+        memcpy_fromio(&count_val, (char *)g_hpet_base + OFFSET_MAIN_CNT, size);
+        if (copy_to_user(buf, &count_val , size) != 0)
+            return -EFAULT;
+
+        return size;
+    }
+
+    Pekiyi elde edilen bu sayaç değerine ilişkin sayaç saniyede kaç kere güncellenmektedir? Yani bu sayacın frekeansı nedir? 
+    İşte bu sayacın frekansını almak için örneğimizde IOC_HPET_GETFREQ isimli bir ioctl komutu bulundurulmuştur:
+
+    static long hpet_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+    {
+        long result;
+        u64 cap_id;
+        u32 clk_period_fs;
+        u64 frequency_hz;
+
+        switch (cmd) {
+            case IOC_HPET_GETFREQ:
+                memcpy_fromio(&cap_id, (char *)g_hpet_base + HPET_GEN_CAP_ID_OFFSET, sizeof(u64));
+                clk_period_fs = cap_id >> 32;      // femtosaniye per tick
+                frequency_hz = 1000000000000000ULL / clk_period_fs;
+                if (copy_to_user((void *)arg, & frequency_hz, sizeof(u64)) != 0)
+                    return -EFAULT;     
+                result = 0;         
+                break;
+            default:
+                result = -ENOTTY;
+        }
+
+        return result;
+    }
+
+    Burada frekansın nasıl alındığını anlamak HPET denetleyicisine ilişkin bazı ayrıntıların bilinmesi gerekmektedir. Biz burada
+    bu ayrıntılara girmeyeceğiz. Frekansı elde etmek için ioctl fonksiyonu uint64_t türünden bir nesnenin adresiyle çağrılmalıdır. 
+    Sayaç değeri bu adrese yerleştirilecektir. 
+
+    Aygıt sürücümüz kullanıcı modundan şöyle  kullanılabilir:
+
+    if ((fd = open("hpet-driver", O_RDONLY)) == -1)
+		exit_sys("open");
+        
+    if (ioctl(fd, IOC_HPET_GETFREQ, &freq) == -1) 
+        exit_sys("ioctl");
+    
+    printf("Frequency: %llu\n", freq);
+    
+    if (read(fd, &start, 8) == -1)
+        exit_sys("read");
+    
+    for (long i = 0; i < 10000000000; ++i)
+        ;
+    
+    if (read(fd, &end, 8) == -1)
+        exit_sys("read");
+
+    result = ((double)end - start) / freq;
+    printf("Elapsed time: %f\n", result);
+
+    Aygıt sürücümüzün tüm kodları aşağıda verilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/* hpet-driver.h */
+
+#ifndef HPET_DRIVER_H_
+#define HPET_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define HPET_DRIVER_MAGIC		    'h'
+
+#define IOC_HPET_GETFREQ	        _IOR(HPET_DRIVER_MAGIC, 1, unsigned long long)
+
+#endif
+
+/* hpet-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <asm/io.h>
+#include "hpet-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("hpet-driver");
+
+#define HPET_BASE_ADDR              0xFED00000
+#define HPET_GEN_CAP_ID_OFFSET      0x00
+#define OFFSET_MAIN_CNT             0xF0
+
+static int generic_open(struct inode *inodep, struct file *filp);
+static int generic_release(struct inode *inodep, struct file *filp);
+static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static long hpet_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = generic_open,
+	.read = generic_read,
+	.release = generic_release,
+    .unlocked_ioctl = hpet_driver_ioctl
+};
+
+static void *g_hpet_base;
+
+static int __init generic_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "hpet-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "hpet-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+    if ((g_hpet_base = ioremap(HPET_BASE_ADDR, 4096)) == NULL) {
+        cdev_del(&g_cdev);
+        unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot remap IO device!...\n");
+        return -ENOMEM;
+    }
+   
+	return 0;
+}
+
+static void __exit generic_exit(void)
+{
+    iounmap(g_hpet_base);
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "hpet-driver module exit...\n");
+}
+
+static int generic_open(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "hpet-driver opened...\n");
+
+	return 0;
+}
+
+static int generic_release(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "hpet-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+    u64 count_val;
+
+    if (size < sizeof(count_val))
+        return -EINVAL;
+
+    memcpy_fromio(&count_val, (char *)g_hpet_base + OFFSET_MAIN_CNT, size);
+    if (copy_to_user(buf, &count_val , size) != 0)
+        return -EFAULT;
+
+	return size;
+}
+
+static long hpet_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+    u64 cap_id;
+    u32 clk_period_fs;
+    u64 frequency_hz;
+
+    switch (cmd) {
+        case IOC_HPET_GETFREQ:
+            memcpy_fromio(&cap_id, (char *)g_hpet_base + HPET_GEN_CAP_ID_OFFSET, sizeof(u64));
+            clk_period_fs = cap_id >> 32;      // femtosaniye per tick
+            frequency_hz = 1000000000000000ULL / clk_period_fs;
+            if (copy_to_user((void *)arg, & frequency_hz, sizeof(u64)) != 0)
+                return -EFAULT;     
+            result = 0;
+            break;
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+module_init(generic_init);
+module_exit(generic_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* ioctl-test.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "hpet-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    uint64_t freq;
+    uint64_t start, end;
+    double result;
+		
+	if ((fd = open("hpet-driver", O_RDONLY)) == -1)
+		exit_sys("open");
+
+        
+    if (ioctl(fd, IOC_HPET_GETFREQ, &freq) == -1) 
+        exit_sys("ioctl");
+    
+    printf("Frequency: %llu\n", freq);
+    
+    if (read(fd, &start, 8) == -1)
+        exit_sys("read");
+    
+    for (long i = 0; i < 10000000000; ++i)
+        ;
+    
+    if (read(fd, &end, 8) == -1)
+        exit_sys("read");
+
+    result = ((double)end - start) / freq;
+    printf("Elapsed time: %f\n", result);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Biz şimdiye kadar karakter aygıt sürücüleri üzerinde durduk. Aygıt sürücülerin çok büyük kısmı karakter aygıt sürücüsü 
+    biçiminde yazılmaktadır. Karakter aygıt sürücülerinde aygıttan (yani donanım biriminden)  bilgiler birkaç byte biçiminde 
+    azar azar değil blok blok okunmakta ve aygıta bilgiler birkaç byte biçiminde değil blok blok yazılmaktadır. Örneğin seri 
+    portu yönten bir aygıt sürücüsü karakter aygıt sürücüsüdür. Çünkü sei porttan bilgiler blok blok değil byte byte edilmektedir. 
+    Yardımcı işlemcilere ilişkin aygıt sürücülerinin çoğu da karakter aygıt sürücüsü biçimindedir. Blok aygıt sürücülerinde aygıt 
+    bilgileri blok blok alıp vermektedir. Karakter aygıtlarıyla blok aygıtları arasındaki en önemli farklılık iletilen bilginin 
+    büyüklüğü ve iletilen bilginin bloklu yapıda olmasıdır. Blok aygıt sürücüleri karakter aygıt sürücülerine göre oldukça seyrek 
+    karşımıza çıkmaktadır. Bir aygıt sürücü programcısı çoğu zaman karakter aygıt sürücülerinin yazımıyla uğraşır. Aygıt sürücü 
+    programcısı seyrek bir biçimde blok aygıt sürücüleri ile çalışmaktadır. Aygıt sürücülerini konu alan kitaplar da genellikle 
+    karakter aygıt sürücülerini ele almaktadır. 
+
+    Biligsayar sistemlerinde karşılaşılan blok aygıtlarının önemli olanları şunlardır:
+
+    - Hard Diskler 
+    - SSD Diskler
+    - USB bellekler
+    - CD/DVD ROM'lar
+    - Ramdisk'ler
+    - Sanal diskler
+
+    Linux'ta karakter aygıt sürücülerinin mimarisi ve alt sistemleri zaman içerisinde büyük ölçüde oturmuştur. Çekirdekler 
+    arasında önemli farklılıklar yoktur. Ancak blok aygıt mimarisi ve alt sistemleri üzerinde maalesef Linux çekirdeklerinde 
+    çokça değişiklikler yapılmıştır. Bu nedenle blok aygıt sürücülerini yazanlar versiyon değişikliklerine çok dikkat etmelidir. 
+    Linux'un neredeyse her majör numarasında blok aygıt sürücüsüne ilişkin fonksiyonlarda ve veri yapılarında değişiklikler 
+    yapılmıştır. Biz kurusumuzda 6'lı çekirdekleri göz önüne alarak konuyu açıklayacağız. Burada verdiğimiz örneklerin eski
+    çekirdeklerde çalışmayabileceğini vurgulamak istiyoruz. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Blok aygıt sürücüleri (block device drivers) disk benzeri birimlerden bloklu okuma ve bu birimlere yazma yapabilmek için 
+    kullanılan özel aygıt sürücülerdir. Daha önceden de belirttiğimiz gibi disk benzeri birimlerden bir hamlede okunabilecek 
+    ya da yazılabilecek bilgi miktarına "sektör" denilmektedir. İşte blok aygıt sürücüleri transferleri byte byte değil blok 
+    blok (sektör sektör) yapmaktadır. Örneğin bir diskten 1 byte okuma diye bir şey yoktur ya da bir diske 1 yazma diye bir şey 
+    yoktur. Diskteki 1 byte değiştirilecekse önce onun bulunduğu sektör RAM'e okunur, değişiklikler RAM üzerinde yapılır. Sonra 
+    o sektör yeniden diske yazılır. Tipik transfer bu adımlardan geçilerek gerçekleştirilmektedir. Sektörler bugün kullandığımız
+    sistemlerde 512 byte uzunluğundadır. 
 
+    Bir Linux sistemini kurduğumuzda "/dev" dizininin altında disklerle işlem yapan aygıt sürücülere yönelik aygıt dosyaları
+    da oluşturulmuş durumdadır. Blok aygıt sürücülerine ilişkin aygıt dosyaları "ls -l" komutunda dosya türü 'b' olarak 
+    görüntülenmektedir. Örneğin:
+
+    $ ls -l /dev
+    ...
+    brw-rw----  1 root disk      8,   0 Ağu  7 13:57 sda
+    brw-rw----  1 root disk      8,   1 Ağu  7 13:57 sda1
+    brw-rw----  1 root disk      8,   2 Ağu  7 13:57 sda2
+    brw-rw----  1 root disk      8,   3 Ağu  7 13:57 sda3
+    crw-rw----+ 1 root cdrom    21,   0 Ağu  7 13:57 sg0
+    crw-rw----  1 root disk     21,   1 Ağu  7 13:57 sg1
+    ...
+
+    Burada "sda" aygıt dosyası diske bir bütün olarak erişmek için kullanılırken sda1, sda2, sda3 aygıt dosyaları ise diskteki 
+    disk bölümlerine (partition) erişmek için kullanılmaktadır. Bu aygıt dosyalarının majör numaralarının aynı olduğuna ancak 
+    minör numaralarının farklı olduğuna dikkat ediniz. Biz bir flash belleği USB soketine taktığımızda burada flash belleğe 
+    erişmek için gerekli olan aygıt dosyaları otomatik biçimde oluşturulacaktır.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+    İşletim sistemleri bloklu çalışan aygıtlarda erişimi hızlandırmak için ismine "IO çizelgelemesi (IO Scheduling)" denilen 
+    bir yöntem uygulamaktadır. Çeşitli prosesler diskten sektörleri okumak istediğinde ya da sektörleri diske yazmak istediğinde 
+    bunlar işletim sistemi tarafından birleştirilerek disk erişimleri azaltılmaktadır. Yani bu tür transferlerde transfer talep 
+    edildiği anda değil, biraz bekletilerek (tabii kısa bir zaman) gerçekleştirilebilmektedir. Disk sistemi bilgisayar sistemlerinin 
+    en yavaş alt sistemlerinden birini oluşturmaktadır. SSD diskler bile yazma bakımından RAM'e göre neredeyse binlerce kat yavaştır. 
+    İşte işletim sistemleri aslında ayrık olan birtakım okuma yazma işlemlerini diskte mümkün olduğunca ardışıl hale getirerek 
+    ve gereksiz okuma yazma işlemlerini elimine ederek disk erişiminden kaynaklanan zaman kayıplarını minimize etmeye çalışmaktadır. 
+    Peşi sıra blokların ayrı ayrı değil de tek hamlede okunup yazılması disklerde bir zaman kazancı sağlamaktadır. Hard disklerde 
+    bu kazanç önemli bir boyuttadır. SSD'lerde de hard diskler kadar önemli boyutta olmasa da bir hız kazancı oluşturmaktadır. 
+    Farklı proseslerin sektör okuma istekleri aslında bazen birbirine yakın bölgelerde gerçekleşir. İşte onların yeniden sıralanması 
+    gibi faaliyetler IO çizelgeleyicisinin önemli görevlerindendir.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Blok aygıtlarından okumalar ve blok aygıtına yazmalar bir cache sistemi aracılıyla gerçekleştirilmektedir. Bu cache sistemine 
+    işletim sistemlerinde "disk cache sistemi" ya da "buffer cache sistemi" denilmektedir. Linux işletim sisteminde eskiden bu 
+    cache sistemine "buffer cache" deniliyordu. Daha sonra "page cache" denilmeye başlandı. Page cache sistemi tipik olarak 
+    şöyle çalılmaktadır:
 
+    - Bir proses blok aygıtından read fonksiyonu ile okuma yapmak istediğinde işletim sistemi önce okunacak kısmın blok aygıtının 
+    neresinde olduğunu hesaplamaktadır. Sonra bu bloğu blok aygırından okuyarak page cache içerisine yazmaktadır. Prosese de 
+    page cache içerisinden bilgiler verilmektedir. Böylece aynı disk bloğundan başka bir okuma yapılacağı zaman o blok zaten 
+    cache içerisinde olduğu için gereksiz aygıt okuması yapılmayacaktır. Ancak bu bloğa talep yoksa artık bu blok cache'ten 
+    atılıp onun yerine aygıttaki başka bir blok cache'e yerleştirilebilmektedir. Page cache sisteminde LRU (Least Recently Used)
+    cache algoritması kullanılmaktadır. Cache terminolojisinde bir bilgi talep edildiğinde eğer o bilgi cache'te varsa buna 
+    İngiizce "cache hit", cache'te yoksa buna da "cache miss" denilmektedir. İşletim sisteminin read fonksiyonu her zaman önce 
+    page cache'e bakmaktadır. Eğer bilgi page cache'te varsa hiç bloke oluşmadan bilgi ilgili thread'e verilmektedir. Eğer 
+    "cache miss" durumu oluşursa ilgili thread bloke edilip "wait kuyruklarında uykuya yatırılır" ve gerçek aygıt okuması 
+    yapılır. 
+
+    - Bir proses blok aygıtına write fonksiyonu ile yazmak yapmak istediğinde işletim sistemi eğer o blok cache'te varsa 
+    yazmayı doğrudan cache'e yapmaktadır. Eğer ilgili blok cache'te yoksa bu durumda cache'e çekilip yazma cache'e yapılmaktadır. 
+    Ancak cache'e yazılan bloklar elektrik kesilmesi gibi durumlarda gerçek aygıta aktarılmamış olacağından dolayı bir bilgi
+    kaybı oluşabilecektir. İşte işletim sistemleri bu kayıp olasılığını azaltmak için "gecikmeli yazım (delayed write)" denilen 
+    tekniği kullanmaktadır. İşletim sisteminin bir çekirdek thread'i belli periyotlarla page cache'te bozulmuş olan ("dirty" 
+    olan) blokları diske yazmaktadır. Yani yazım ilk aşamada cache'e yapılmakta ancak çok da fazla bekletilmeden işletim 
+    sistemi tarafından kısa bir süre sonra  aygıta aktarılmaktadır. Gecikmeli yazımın gerekçesi şunlardır:
+
+    1) Yazma işlemi sırasında yazan thread bloke olmadan hemen geri döner. Çünkü yazma aygıta değil cache'e yapılmaktadır.
+    2) İşletim sistemi yukarıda sözünü ettiğimiz IO çizelgelemesini cache üzerinde uygulamaktadır. Yani cache'te bozulmuş olan 
+    blokları çizelgeleyerek daha etkin bir biçimde blok aygıtına yazabilmektedir. 
+    3) Üst üste yazımlarda bu sayede gereksiz yazımlar engellenmiş olur.   
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+    Blok aygıt sürücüleri bazı bakımlardan karakter aygıt aygıt sürücülerine benzese de "IO çizelgelemesi" ve "page cache "
+    sistemi yüzünden tasarımsal farklılıklara sahiptir. Karakter aygıt sürücülerinde her read ve write işlemi için bir IO 
+    çizelgelemesi ve cache'leme işlemi yapılmadan aygıt sürücünün fonksiyonları çağrılmaktadır. Çünkü karakter aygıt sürücülerinde 
+    az miktarda bilgiler aktarılmakta ve disk gibi zaman alıcı işlemlerle uğraşılmamaktadır. Ancak blok aygıt sürücülerinde 
+    aktarım isteği çizelgelenerek bazen gecikmelerle yerine getirilmektedir.
 -----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            120. Ders 05/08/2025 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bir blok aygıt sürücüsü oluşturmak için ilk yapılacak işlem tıpkı karakter aygıt sürücülerinde olduğu gibi blok aygıt 
+    sürücüsünün bir isim altında aygıt numarası belirtilerek register ettirilmesidir. Bu işlem register_blkdev fonksiyonuyla 
+    yapılmaktadır:
+
+    #include <linux/blkdev.h>
+
+    int register_blkdev(unsigned int major, const char *name);
+
+    Fonksiyonun birinci parametresi aygıtın majör numarasını belirtir. Eğer majör numara olarak 0 geçilirse fonksiyon boş bir 
+    majör numarayı kendisi tahsis eder. Fonksiyonun ikinci parametresi ise "/proc/devices" dosyasında görüntülenecek olan 
+    ismi belirtmektedir. Fonksiyon başarı durumunda aygıt sürücünün majör numarasına, başarısızlık durumunda negatif errno 
+    değerine geri dönmektedir. Örneğin:
+
+    if ((g_major = register_blkdev(0, "generic-blkdev")) < 0) {
+        printk(KERN_INFO "cannot alloc block driver!...\n");
+        return g_major;
+    }
+
+    register_blkdev fonksiyonunun yalnızca bir majör numara aldığına dikkat ediniz. Habuki register_chrdev_region fonksiyonunda
+    register ettirilecek minör numaralar da belirtiliyordu. Blok aygıt sürücüleri için minör numara tahsisatı disk tahsis edilirken 
+    (yani eski versiyonlarda alloc_disk, yeni versiyonlarda blk_alloc_disk fonksiyonunda) yapılmaktadır. 
+
+    Modül boşaltılırken bu işlemin geri alınması için unregister_blkdev fonksiyonu kullanılmaktadır:
+
+    #include <linux/blkdev.h>
+
+    void unregister_blkdev(unsigned int major, const char *name);
+
+    Fonksiyonun parametrik yapısı register_blkdev fonksiyonuyla tamamen aynıdır. Örneğin:
+
+    unregister_blkdev(g_major, "generic-blkdev");
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bizim daha önce kullandığımız "load" script'i karakter aygıt dosyası yaratıyordu. Halbuki bizim artık blok aygıt dosyası 
+    yaratmamız gerekir. Bunun için "load" ve "unload" script'lerini "loadblk" ve "unloadblk" ismiyle yeniden yazacağız. (Tabii 
+    aslında "unload" script'inde değiştirilecek bir şey yoktur. Ancak isimsel uyumluluk bakımından biz her iki dosyayı da 
+    yeniden yeni isimlerle oluşturacağız.) Bu iki script'e de "x" haklarının verilmesi gerektiğini anımsayınız.
+
+    $ sudo chmod +x loadblk unloadblk
+
+    /* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+    #!/bin/bash
+
+    module=$1
+    mode=666
+
+    /sbin/insmod ./$module.ko ${@:2} || exit 1
+    major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+    rm -f $module
+    mknod -m $mode $module b $major 0
+
+    /* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+    #!/bin/bash
+
+    module=$1
+ 
+    /sbin/rmmod ./$module.ko || exit 1
+    rm -f $module
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Blok aygıt sürücüleri için en önemli nesne gendisk isimli nesnesidir. Blok aygıt sürücüsü çekirdekte bu nesne ile temsil 
+    edilmektedir. gendisk nesnesi eski çekirdeklere alloc_disk isimli fonksiyonla (aslında bir makro olarak yazılmıştır) tahsis 
+    ediliyordu. Ancak 5'li çekirdeklerle birlikte fonksiyonun ismi blk_alloc_disk biçiminde değiştirildi. Ayrıca aşağıdaki 
+    fonksiyonların bir bölümünün bulunduğu <linux/genhd.h> dosyası da çekirdeğin 5.18 versiyonunda kaldırılmış buradaki 
+    fonksiyonların prototipleri <linux/blkkdev.h> dosyasına taşınmıştır.
+
+    #include <linux/genhd.h>                           /* #include <linux/blkkdev.h> */
+
+    struct gendisk *alloc_disk(int minors);            /* eski çekirdek versiyonları bu fonksiyonu kullanıyor */
+    struct gendisk *blk_alloc_disk(int minors);        /* yeni çekirdek versiyonları bu fonksiyonu kullanıyor */
+
+    Fonksiyonlar parametre olarak aygıt sürücünün destekleyeceği minör numara sayısını almaktadır. Fonksiyonların geri dönüş 
+    değerleri diski temsil eden gendisk isimli yapı türünden nesnenin adresidir. (Birden fazla minör numaranın söz konusu olduğu 
+    durumda geri döndürülen adres aslında gendisk türünden bir dizinin adresidir.) Fonksiyonlar başarısızlık durumunda NULL adrese 
+    geri dönmektedir. Başarısızlık durumunda bu fonksiyonları çağıran fonksiyonları -ENOMEM değeri ile geri döndürmek uygun olur.
+    Örneğin:
+
+    static struct gendisk *g_gdisk;
+
+    if ((g_gdisk = blk_alloc_disk(1)) == NULL) {
+        ...
+        return -ENOMEM;
+    }
+
+    disk sözcüğü bu bağlamda aslında fiziksel bir diskten ziyade bir blok aygıtını temsil etmektedir. Blok aygıtları tipik olarak
+    disk biçiminde bulunduğu için disk terimi tercih edilmiştir.
+
+    Son versiyonlarda Linux çekirdeğinin bu blok aygıt sürücülerine ilişkin fonksiyonlarında yine bazı değişiklikler olmuştur. 
+    Örneğin 5.14 çekirdeği ile birlikte gendisk tahisatı ile kuyruk tahsisatını birlikte yapan blk_alloc_mq_disk isimli bir 
+    fonksiyon eklenmiştir. Bu fonksiyon her iki tahsisatı da birlikte yaptığı için en yeni çekirdeklerde tercih edilebilir. 
+
+    blk_alloc_disk fonksiyonu ile elde edilen gendisk nesnesi henüz add_disk işlemi yapılmamışsa (ya da add_disk başarısız 
+    olduğunda) put_disk fonksiyonu ile serbest bırakılır. 
+
+    blk_alloc_disk fonksiyonu ile elde edilen gendisk nesnesinin içinin doldurulması gerekmektedir. Bu yapının doldurulması 
+    gereken önemli elemanları şunlardır:
+
+    - Yapının major isimli elemanına aygıt sürücünün majör numarası yerleştirilmelidir. Örneğin:
+
+    g_gdisk->major = g_major;
+
+    - Yapının first_minor elemanına aygıt sürücünün ilk minör numarası yerleştirilmelidir (Tipik olarak 0). Örneğin:
+
+    g_gdisk->first_minor = 0;
+
+    - Yapının minors elemanı first_minor numaradan itibaren kaç minör numaranın kullanılacağını belirtmektedir. Biz tek bir 
+    minör numara kullanacaksak buraya 1 değerini yerleştiririz:
+
+    g_gdisk->minors = 1;
+
+    - Yapının disk_name elemanına diske (yani blok aygıtına) ilişkin bir isim yerleştirilir. Örneğin:
+
+    strscpy(g_disk->disk_name, "generic-blkdev", DISK_NAME_LEN);         
+
+    - Yapının flags elemanına duruma göre bazı bayraklar girilebilmektedir. Örneğin bir ramdisk uygulaması için bu bayrak 
+    GENHD_FL_NO_PART biçiminde girilebilir. Örneğin:
+
+    g_gdisk->flags = GENHD_FL_NO_PART;
+
+    - Yapının fops elemanına aygıt sürücü açıldığında, kapatıldığında, ioctl gibi işlemler yapıldığında çağrılacak fonksiyonların 
+    bulunduğuğu block_device_operations isimli yapı türünden nesnenin adresi atanmalıdır. Yaı şöyle tanımlanmıştır:
+
+    struct block_device_operations {
+        void (*submit_bio)(struct bio *bio);
+        int (*poll_bio)(struct bio *bio, struct io_comp_batch *iob, unsigned int flags);
+        int (*open)(struct gendisk *disk, blk_mode_t mode);
+        void (*release)(struct gendisk *disk);
+        int (*ioctl)(struct block_device *bdev, blk_mode_t mode, unsigned cmd, unsigned long arg);
+        int (*compat_ioctl)(struct block_device *bdev, blk_mode_t mode, unsigned cmd, unsigned long arg);
+        unsigned int (*check_events) (struct gendisk *disk, unsigned int clearing);
+        void (*unlock_native_capacity) (struct gendisk *);
+        int (*getgeo)(struct block_device *, struct hd_geometry *);
+        int (*set_read_only)(struct block_device *bdev, bool ro);
+        void (*free_disk)(struct gendisk *disk);
+        /* this callback is with swap_lock and sometimes page table lock held */
+        void (*swap_slot_free_notify) (struct block_device *, unsigned long);
+        int (*report_zones)(struct gendisk *, sector_t sector,
+                unsigned int nr_zones, report_zones_cb cb, void *data);
+        char *(*devnode)(struct gendisk *disk, umode_t *mode);
+        /* returns the length of the identifier or a negative errno: */
+        int (*get_unique_id)(struct gendisk *disk, u8 id[16],
+                enum blk_unique_id id_type);
+        struct module *owner;
+        const struct pr_ops *pr_ops;        /*
+        * Special callback for probing GPT entry at a given sector.
+        * Needed by Android devices, used by GPT scanner and MMC blk
+        * driver.
+        */
+        int (*alternative_gpt_sector)(struct gendisk *disk, sector_t *sector);
+    };
+        
+    Bu yapı karakter aygıt sürücülerindeki file_operations yapısına benzetilebilir. Yapının üç önemli elemanı önemli elemanı 
+    open ve release ve ioctl elemanlarıdır.  Burada belirtilen fonksiyonlar aygıt sürücü açıldığında, kapatıldığında ve ioctl 
+    işlemi yapıldığında çağrılmaktadır. Örneğin:
+
+    static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode);
+    static void generic_blkdev_release(struct gendisk *disk);
+    ...
+
+    static struct block_device_operations g_blkdev_ops = {
+        .open = generic_blkdev_open,
+        .release = generic_blkdev_release
+    };
+
+    g_gdisk->fops = &g_blkdev_ops;
+
+    - Eskiden gendisk yapısının queue elemanı için istek kuyruğunu (request queue) programcı yaratıyordu. Ancak blk_alloc_disk 
+    fonksiyonu artık bu yaratımı da kendisi yapmaktadır. İstek kuyruğu aygıt sürücüden read/write işlemi yapıldığında çekirdeğin 
+    IO çizelgeleyici alt sistemi tarafından optimize edilen işlemlerin yerleştirileceği kuyruk sistemidir. Programcı ileride 
+    görüleceği üzere bu kuyruk sisteminden istekleri alarak yerine getirir. Maalesef bu kuyruğun yaratılması ve işleme sokulması 
+    için gerekli çekirdek fonksiyonları çekirdeğin çeşitli versiyonlarında çok kereler değiştirilmiştir. Eskiden 4'lü çekirdeklerde 
+    istek kuyruğu oluşturmak için blk_init_queue isimli bir fonksiyon kullanılıyordu. Sonra 5'li çekirdeklerle birlikte istek 
+    kuyruğu işlemleri üzerinde değişiklikler yapıldı. Artık en yeni çekireklerde bu istek kuyruklarının yaratımı alloc_blk_disk 
+    fonksiyonu tarafından ya da alloc_mq_blk_disk fonksiyonu tarafından yapılmaktadır. Son çekirdeklerde blk_alloc_disk fonksiyonu 
+    tarafından yaratılan kuyruk nesnesinin bazı elemanlarının da programcı tarafından doldurulması gerekmektedir. 
+    Bu işlemler çekirdeğe eklenmiş olan blk_queue_xxx fonksiyonları tarafından yapılmaktadır. Tipik olarak programcı 
+    kuyruğun bazı özelliklerini aşağıdaki fonksiyonlarla belirlemelidir. 
+
+    blk_queue_logical_block_size(g_disk->queue, 512);       /* Mantıksal blok boyutu */
+    blk_queue_physical_block_size(g_disk->queue, 4096);    /* Fiziksel blok boyutu */
+    blk_queue_max_segments(g_disk->queue, 128);            /* Max segment sayısı */
+    blk_queue_max_segment_size(g_disk->queue, 65536);      /* Max segment boyutu */
+
+    - gendisk yapısının içerisine diskin (blok aygıt sürücüsünün temsil ettiği medyanın) kapasitesi set edilmelidir. Bu işlem 
+    set_capacity fonksiyonuyla yapılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <linux/genhd.h>
+
+    void set_capacity(struct gendisk *disk, sector_t size);
+
+    Fonksiyonun birinci parametresi gendisk yapısının adresini, ikinci parametresi aygıtın sektör uzunluğunu almaktadır. (Aslında 
+    bu fonksiyon gendisk yapısının ilgili elemanını set etmektedir.) Fonksiyonun ikinci parametresi aygıt sürücünün temsil 
+    ettiği aygıtın sektör uzunluğunu belirtmektedir. Bir sektör 512 byte'tır. Örneğin:
+
+    set_capacity(g_gdisk, 1000);
+
+     - Nihayet gendisk yapısının private_data elemanına programcı kendi belirlediği bir yapı nesnesinin adresini yerleştirebilir. 
+    Örneğin daha önce karakter aygıt sürücülerinde yaptığımız gibi bu private_data elemanına gendisk nesnesinin içinde bulunduğu 
+    yapı nesnesinin adresini yerleştirebiliriz.
+
+    Aşağıdaki örnekte yukarıda anlatılan kısma kadar olan işlemleri içeren bir blok aygıt sürücü örneği verilmiştir. Örneğin:
+
+    struct BLOCKDEV {
+        spinlock_t sl;
+        struct gendisk *gdisk;
+        struct request_queue *rq;
+        size_t capacity;
+    };
+    static struct BLOCKDEV g_bdev;
+    ...
+    g_gdisk->private_data = &g_bdev;
+
+    Tabii buradaki örnekte g_bdev zaten global bir nesne olduğu için ona private_data yoluyla erişmeye gerek kalmamaktadır. 
+    Ancak aygıt sürücümüz birden fazla minör numarayı destekliyorsa her aygıtın ayrı bir BLOCKDEV yapısı olacağı için ilgili 
+    aygıta bu private_data elemanı yoluyla erişebiliriz.
+
+    blk_alloc_disk fonksiyonu ile elde edilen gendisk nesnesi add_disk fonksiyonu ile sisteme eklenmelidir:
+
+    #include <linux/genhd.h>
+
+    void add_disk(struct gendisk *disk);        /* eski çekirdek versiyonlarındaki prototip */
+
+    Bu fonksiyonun geri dönüş değeri 5'li çekirdeklerle birlikte int yapılmıştır:
+
+    int add_disk(struct gendisk *disk);            /* yeni çekirdek versiyonlarındaki prototip */
+
+    Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda negatif errno değerine geri dönmektedir. Örneğin:
+
+    if ((result = add_disk(g_gdisk)) != 0) {
+        ...
+        return result;
+    }
+
+    add_disk fonksiyonuyla tahsis edilen ve sisteme yerleştirilen gendisk nesnesi del_gendisk fonksiyonuyla serbest bırakılmaktadır.
+    Bu fonksiyon aynı zamanda blk_alloc_disk fonksiyonu ile tahsis edilen alanı da serbest bırakır. 
+
+    #include <linux/genhd.h>
+
+    void del_gendisk(struct gendisk *gdisk);
+
+    Örneğin:
+
+    if ((g_gdisk = alloc_disk(1)) == NULL) {
+        ...
+        return -ENOMEM;
+    }
+
+    if ((result = add_disk(g_bdev->gdisk)) != 0) {
+        ...
+        return result;
+    }
+    ...
+    del_gendisk(g_gdisk);
+
+    Aşağıda şimdiye kadar görmüş olduğumuz fonksiyonların kullanıldığı bir blok aygıt sürücüsü iskeleti verilmiştir. Ancak 
+    aşağıdkai kodda henüz istek kuyruğuna yönelik bir işlem yapılmamıştır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/* generic-blkdev.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/blkdev.h>
+
+#define TOTAL_CAPACITY      1000
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("generic-blkdev");
+
+static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode);
+static void generic_blkdev_release(struct gendisk *disk);
+
+static int g_major;
+static struct gendisk *g_disk;
+static struct block_device_operations g_blkdev_ops = {
+    .open = generic_blkdev_open,
+    .release = generic_blkdev_release
+};
+
+static int __init generic_blkdev_init(void)
+{
+	printk(KERN_INFO "generic-blkdev initialization...\n");
+
+    if ((g_major = register_blkdev(0, "generic-blkdev")) < 0) {
+        printk(KERN_INFO "cannot register block device!..\n");
+        return g_major;
+    }
+
+    if ((g_disk = blk_alloc_disk(1)) == NULL) {
+        printk(KERN_INFO "cannot alloc gendisk!..\n");
+        unregister_blkdev(g_major, "generic-bloc-driver");
+        return -ENOMEM;
+    }
+
+    g_disk->major = g_major;
+    g_disk->first_minor = 0;
+    g_disk->minors = 1;
+    strscpy(g_disk->disk_name, "generic-blkdev", DISK_NAME_LEN);   
+    g_disk->flags = GENHD_FL_NO_PART;
+    g_disk->fops = &g_blkdev_ops;
+
+    blk_queue_logical_block_size(g_disk->queue, 512);       /* Mantıksal blok boyutu */
+    blk_queue_physical_block_size(g_disk->queue, 4096);    /* Fiziksel blok boyutu */
+    blk_queue_max_segments(g_disk->queue, 128);            /* Max segment sayısı */
+    blk_queue_max_segment_size(g_disk->queue, 65536);      /* Max segment boyutu */
+    set_capacity(g_disk, TOTAL_CAPACITY);
+
+    if (add_disk(g_disk) != 0) {
+        put_disk(g_disk);
+        unregister_blkdev(g_major, "generic-bloc-driver");
+    }
+
+	return 0;
+}
+
+static void __exit generic_blkdev_exit(void)
+{
+    del_gendisk(g_disk);
+	unregister_blkdev(g_major, "generic-bloc-driver");
+    
+	printk(KERN_INFO "generic-blkdev exit...\n");
+}
+
+static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode)
+{
+    printk(KERN_INFO "generic-blkdev opened...\n");
+    return 0;
+}
+
+static void generic_blkdev_release(struct gendisk *disk)
+{
+    printk(KERN_INFO "generic-blkdev released...\n");
+}
+
+module_init(generic_blkdev_init);
+module_exit(generic_blkdev_exit);
+
+# Makefile
+
+obj-m += $(file).o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+ /* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./$module.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module b $major 0
+
+/* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./$module.ko || exit 1
+rm -f $module
 
 /*-----------------------------------------------------------------------------------------------------------------------------
 
