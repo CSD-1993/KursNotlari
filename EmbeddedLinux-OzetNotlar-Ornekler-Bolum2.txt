@@ -5,6 +5,7 @@
                                    Gömülü Linux Sistemleri - Geliştirme ve Uygulama Kursu
 
                                         Sınıfta Yapılan Örnekler ve Özet Notlar
+                                                        2. Bölüm
 
                                                   Eğitmen: Kaan ASLAN
 
@@ -15842,7 +15843,7 @@ void exit_sys(const char *msg)
     del_gendisk(g_gdisk);
 
     Aşağıda şimdiye kadar görmüş olduğumuz fonksiyonların kullanıldığı bir blok aygıt sürücüsü iskeleti verilmiştir. Ancak 
-    aşağıdkai kodda henüz istek kuyruğuna yönelik bir işlem yapılmamıştır. 
+    aşağıdakii kodda henüz istek kuyruğuna yönelik bir işlem yapılmamıştır. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /* generic-blkdev.c */
@@ -15863,6 +15864,7 @@ static void generic_blkdev_release(struct gendisk *disk);
 static int g_major;
 static struct gendisk *g_disk;
 static struct block_device_operations g_blkdev_ops = {
+    .owner = THIS_MODULE,
     .open = generic_blkdev_open,
     .release = generic_blkdev_release
 };
@@ -15878,7 +15880,7 @@ static int __init generic_blkdev_init(void)
 
     if ((g_disk = blk_alloc_disk(1)) == NULL) {
         printk(KERN_INFO "cannot alloc gendisk!..\n");
-        unregister_blkdev(g_major, "generic-bloc-driver");
+        unregister_blkdev(g_major, "generic-blkdev");
         return -ENOMEM;
     }
 
@@ -15897,7 +15899,7 @@ static int __init generic_blkdev_init(void)
 
     if (add_disk(g_disk) != 0) {
         put_disk(g_disk);
-        unregister_blkdev(g_major, "generic-bloc-driver");
+        unregister_blkdev(g_major, "generic-blkdev");
     }
 
 	return 0;
@@ -15906,7 +15908,7 @@ static int __init generic_blkdev_init(void)
 static void __exit generic_blkdev_exit(void)
 {
     del_gendisk(g_disk);
-	unregister_blkdev(g_major, "generic-bloc-driver");
+	unregister_blkdev(g_major, "generic-blkdev");
     
 	printk(KERN_INFO "generic-blkdev exit...\n");
 }
@@ -15922,41 +15924,141 @@ static void generic_blkdev_release(struct gendisk *disk)
     printk(KERN_INFO "generic-blkdev released...\n");
 }
 
+
 module_init(generic_blkdev_init);
 module_exit(generic_blkdev_exit);
 
-# Makefile
-
-obj-m += $(file).o
-
-all:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
-clean:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
- /* loadblk (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./$module.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module b $major 0
-
-/* unloadblk (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./$module.ko || exit 1
-rm -f $module
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                        121. Ders 26/08/2025 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Blok aygıt sürücülerinde yukarıda belirtilen işlemlerden sonra artık transfer işleminin yapılması için bulundurulan fonksiyonun
+    yazılması aşamasına geldik. Kullanıcı modundaki kodlar tarafından blok transferine yönelik bir istek oluştuğunda (örneğin 
+    blok aygıt sürücüsünden bir sektör okunmak istediğinde) çekirdeğin IO çizelgeleyicisi bunları çizelgeleyerek uygun bir 
+    zamanda transfer edilebilmesi için bizim belirttiğimiz bir fonksiyonu çağırmaktadır. Biz de bu fonksiyon çağrıldığında 
+    fonksiyonun içerisinde aktarımı yapmalıyız. Bu çağırma (callback) mekanizması maalesef Linux çekirdeğinde versiyondan 
+    versiyona çok fazla değişikliklere uğratılmıştır. Biz burada 6.8 ve sonrasındaki çekirdekleri dikkate alarak açıklamalar 
+    yapacağız. 
 
+    Anımsanacağı gibi kullanıcı modundan blok aygıtı için read/write işlemi yapıldığında aşağıdaki gibi bir süreç oluşmaktadır:
+
+    read/write (kullanıcı modu) ---> sys_read/sys_write (çekirdek modu) ---> Okunacak yer "page cache içerisinde var mı"
+    ---> "okunacak yer page cache'te yoksa blok aygıt sürücüsünün fonksiyonunu çağır"
+    
+    Eğer okunacak ya da yazılacak yer çekirdeğin "page cache'inde yoksa" çekirdek blok aygıt sürücüsünün block_device_operations
+    yapısındaki submit_bio elemanında belirtilen fonksiyonu çağırmaktadır. Bu fonksiyonun parametrik yapısı şöyle olmak 
+    zorundadır:
+
+    void submit_bio_proc(struct bio *bio);
+
+    Callback fonksiyonun geri dönüş değerinin void olduğuna, parametresinin ise struct bio türünden bir gösterici olduğuna 
+    dikkat ediniz. Çekirdek bu fonksiyonu çağırırken blok aygıtından aktarılacak sektörleri izleyen paragraflarda açıklayacağımız
+    biçimde bu göstericinin gösterdiği yerdeki bio yapısına yerleştirmektedir. 
+    
+    Örneğin bir blok aygıt sürücüsünü kullanıcı modunda open fonksiyonuyla açıp içerisinden 10 byte'ı read fonksiyonuyla okumak 
+    isteyelim. Eğer bu aygıt sürücü karakter aygıt sürücüsü olsaydı çekirdek doğrudan aygıt sürücünün read fonksiyonunu çağıracaktı. 
+    Aygıt sürücü de istenen 10 byte'ı kullanıcı modundaki adrese aktaracaktı. Halbuki blok aygıt sürücüsü durumunda çekirdek 
+    önce bu 10 byte'ın bulunduğu sektörün page cache içerisinde olup olmadığına bakacaktır. Eğer talep edilen yer page cache'te
+    yoksa blok aygıt sürücüsünün submit_bio fonksiyonunu çağırıp transferin aygıt sürücü tarafından yapılmasını isteyecektir. 
+    Anımsanacağı gibi blok aygıtlarından transfer edilecke en kçük bir bir sektördür. Dolayısıyla kullanıcı modundaki program 
+    blok aygıtından 10 byte okumak istese bile aslında aygıt sürücü en az 1 sektörlük bilgiyi işletim sisteinin page cache'ine 
+    aktaracaktır.    
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Çekirdek blok aygıt sürücüsünün submit_bio fonksiyonunu çağırdığında bio yapısının içerisinde birden fazla aktarım isteği 
+    bulunabilmektedir. bio yapısının içerisinde birtakım gerekli bilgilerin yanı sıra bio_vec isimli yapı türünden bir dizi de 
+    vardır. İşte asıl aktarım istekleri bu bio_vec yapısı içerisindedir. O halde blok aygıt sürücüsünü yazan sistem programcısı 
+    bu bio_vec dizisini dolaşarak gereken aktarımları yapmalıdır. bio_vec içerisinde aktarılacak alanlara "segment" de denilmektedir. 
+    bio_vec yapısı şöyle bildirilmiştir:
+
+    struct bio_vec {
+        struct page *bv_page;   /* hangi fiziksel sayfa */
+        unsigned int bv_len;    /* bu segmentin uzunluğu (bayt cinsinden) */
+        unsigned int bv_offset; /* sayfa içindeki başlangıç offset’i */
+    };
+
+    Yapının bv_page elemanı page cache içerisindeki transfer edilecek sayfa bilgilerini belirtmektedir. Yapının bv_len elemanı
+    transfer edilecek bilginin uzunluğunu belirtir. Tabii bu uzunluk her zaman sektör katları kadardır. bv_offset elemanı page 
+    cache içerisindeki 4K'lık cache page'lerinin içerisindeki aktarım offset'ini belirtmektedir. Çekirdek 4K'lık bir cache 
+    sayfasının aygıt sürücüden belli bir kısmını doldurmasını isteyebilir. Burada önemli bir nokta şudur: bio_vec yapısının 
+    bv_page elemanından biz 4K'lık sayfanın fiziksel adresini elde etmekteyiz. Bu adresin sanal adrese dönüştürülmesi gerekir. 
+    Bunun nasıl yapılacağını izleyen paragraflarda açıklayacağız. 
+
+    Biz bio yapısı içerisindeki bio_vec dizisini dolaşarak aktarım isteklerini ve aktarımın fiziksel RAM'de hangi uzunlukta ve 
+    nereye yapılması gerektiğini elde ettik. Pekiyi blok aygıtının neresinin aktarılacağı bilgisi nerededir? İşte bio_vec 
+    yapıları her zaman blok aygıtında ardışıl sektörleri belirtmektedir. Örneğin bio yapısı içerisindeki bio_vec dizisi üç 
+    elemanlı olsun. Bu üç elemandaki segment uzunlukları şöyle olsun:
+
+    [bio_vec (512), bio_vec(1024), bio_vec(512)]
+
+    Buradaki 512, 1024 ve 512 byte'lık bloklar blok aygıtında ardışıl olmak zorundadır. O halde bizim tek bilmemiz gereken şey 
+    blok aygıtındaki başlangıç offset'idir. Bu sistemde her bio_vec için blok aygıtında bir offset belirtilmediğine toplamda 
+    blok aygıtı için tek bir offaset belirtildiğine dikkat ediniz. Blok aygıtındaki bşalngıç offset değerine bio yapısı 
+    yoluyla (loff_t)bio->bi_iter.bi_sector * SECTOR_SIZE ifadesi ile erişilmektedir. 
+
+    bio yapısı içerisindeki bio_vec dizisini dolaşmanın iki yolu vardır: Birincisi doğrudan dizi indekslemesi yapmaktır. 
+    Bu dizideki eleman sayısı bio yapısının bi_vcnt elemanında bulunmaktadır. O halde gezinti şöyle yapılabilir:
+
+    struct bio_vec *bvec;
+    int i;
+    ...
+
+    for (i = 0; i < bio->bi_vcnt; i++) {
+        bvec = &bio->bi_io_vec[i];
+        ...
+    }
+
+    bio_vec dizi alternatif olarak iteratör yoluyla bir makro döngüsüyle de dolaşılabilmektedir. Aslında bazı senaryolarda 
+    bu makro döngüsü daha uygun işlev görmektedir. Yani bu makro döngüsünü tercih edebilirsiniz:
+
+    struct bio_vec *bvec;
+    struct bvec_iter iter;
+    ...
+
+    bio_for_each_segment(bvec, bio, iter) {
+        ...
+    }
+
+    submit_bio fpnksiyonumuz çekirdek tarafından hem okuma hem de yazma istekleri için çağrılmaktadır. Bu durumda bizim 
+    aygıt sürücü içerisinde bu fonksiyonun hangi amaçla çağrıldığını belirlememiz gerekir. Bu belirleme işlemi bio_op 
+    fonksiyonuyla yapılmaktadır. Bu makroya bio yapısının adresi argüman olarak verilir. Bu fonksiyon bio yapısının içerisindeki
+    uygun alandan submit_bio fonksiyonunun neden çağrıldığı bilgisini elde edip geri dönüş değeri olarak vermektedir. Mevcut 
+    çekirdeklerde bu fonksiyon şöyle yazılmıştır:
+
+    static inline enum req_op bio_op(const struct bio *bio)
+    {
+        return bio->bi_opf & REQ_OP_MASK;
+    }
+
+    Tabii bizim bu fonksiyonun bu bilgiyi nasıl elde ettiğini bilmemize gerek yoktur. Bu fonksiyonun geri dönüş değeri 
+    nedenleri anlatan çok çeşitli değerler olabilir. Ancak tipik olarak blok aygıt sürücüsünü yazan sistem programcısı üç 
+    değeri işlemelidir:
+
+    REQ_OP_READ: Blok aygıtından okuma talep edilmektedir
+    REQ_OP_WRITE: Blok aygıtına yazma talep edilmektedir
+    REQ_OP_DISCARD: Blok aygıtının ilgili yerleri 0'lanmalıdır
+
+    O halde bu işlem aşağıdaki gibi bir switch deyimi ile ele alınabilir:
+
+    switch (bio_op(bio)) {
+        case REQ_OP_READ:
+            ...
+        case REQ_OP_WRITE:
+            ...
+        case REQ_OP_DISCARD:
+            ...
+    }
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Ramdisk aygıt sürücümüzde bizim işin başında (yani aygıt sürücümüzün init fonkssiyonu içerisinde ramdisk için dinamik 
+    biçimde bellek tahsis etmemiz gerekir. Tahsisatı daha önce görmüş olduğumuz kmalloc fonksiyonu ile yapabiliriz. Ancak 
+    kmalloc fonksiyonu ardışıl fiziksel bellek tahsis etmektedir. Ancak bu tür uygulamalarda eğer büyük miktarda tahsisatlar 
+    yapılacaksa fiziksel ardışıllığa gerek yoktur. Fiziksel bellekte ardışıl olmayacak biçimde (ancak sanal adres alanı içerisinde 
+    ardışıllık korunmaktadır) tahsisat yapan vmalloc ve zvalloc fonksiyonları da bulunmaktadır. Her iki fonksiyon da parametre 
+    olarak tahsis edilecek byte miktarını almaktadır. zvalloc aynı zamanda tahsis edilen alanı sıfırlamaktadır. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
@@ -15976,11 +16078,262 @@ rm -f $module
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+// rmd.c — Linux 6.8+ için tek-parça RAMDISK blok aygıt sürücüsü
+// Tek minor, global durum, submit_bio: void
+
+#include <linux/module.h>
+#include <linux/blkdev.h>
+#include <linux/bio.h>
+#include <linux/vmalloc.h>
+#include <linux/mutex.h>
+#include <linux/errno.h>
+#include <linux/string.h>
+
+#define RMD_NAME       "rmd"
+#define RMD_MINORS     1
+#define RMD_SECTOR_SZ  512
+
+/* ---------- modül parametreleri ---------- */
+static int size_mb = 16;                 /* RAMDISK boyutu (MB) */
+module_param(size_mb, int, 0444);
+MODULE_PARM_DESC(size_mb, "RAMDISK size in MB");
+
+/* ---------- global durum ---------- */
+static u8                   *rmd_data;
+static size_t                rmd_size_bytes;   /* toplam bayt */
+static sector_t              rmd_capacity;     /* toplam sektör */
+static int                   rmd_major;
+static struct gendisk       *rmd_gd;
+static struct request_queue *rmd_q;
+static struct mutex          rmd_lock;         /* basit seri erişim */
+
+/* küçük yardımcı: [pos, pos+len) aralığını sıfırla (bounds check içerir) */
+static int rmd_memzero(loff_t pos, size_t len)
+{
+	if (pos >= rmd_size_bytes)
+		return -EINVAL;
+	if (len > rmd_size_bytes - pos)
+		return -EINVAL;
+
+	memset(rmd_data + pos, 0, len);
+	return 0;
+}
+
+/* --------- I/O yolu: submit_bio (6.8+ → void) --------- */
+static void rmd_submit_bio(struct bio *bio)
+{
+	const unsigned op = bio_op(bio);
+	loff_t pos = (loff_t)bio->bi_iter.bi_sector * RMD_SECTOR_SZ;
+	struct bvec_iter iter;
+	struct bio_vec bvec;
+	size_t done = 0;
+	int err = 0;
+
+	/* başlangıç tamamen dışarıdaysa */
+	if (pos >= rmd_size_bytes) {
+		bio_io_error(bio);
+		return;
+	}
+
+	mutex_lock(&rmd_lock);
+
+	switch (op) {
+	case REQ_OP_READ:
+	case REQ_OP_WRITE: {
+		const bool is_write = (op == REQ_OP_WRITE);
+
+		bio_for_each_segment(bvec, bio, iter) {
+			void *kaddr = kmap_local_page(bvec.bv_page);
+			void *iovec = (u8 *)kaddr + bvec.bv_offset;
+			size_t len  = bvec.bv_len;
+
+			if (pos + done + len > rmd_size_bytes) {
+				kunmap_local(kaddr);
+				err = -EIO;
+				break;
+			}
+
+			if (is_write)
+				memcpy(rmd_data + pos + done, iovec, len);
+			else
+				memcpy(iovec, rmd_data + pos + done, len);
+
+			kunmap_local(kaddr);
+			done += len;
+		}
+		break;
+	}
+	case REQ_OP_WRITE_ZEROES:
+	case REQ_OP_DISCARD: {
+		size_t bytes = bio->bi_iter.bi_size;
+		if (pos + bytes > rmd_size_bytes)
+			err = -EIO;
+		else
+			err = rmd_memzero(pos, bytes);
+		break;
+	}
+	case REQ_OP_FLUSH:
+		err = 0; /* kalıcı ortam yok → başarı say */
+		break;
+	default:
+		err = -EOPNOTSUPP;
+		break;
+	}
+
+	mutex_unlock(&rmd_lock);
+
+	if (err)
+		bio_io_error(bio);
+	else
+		bio_endio(bio);
+}
+
+/* --------- bdev_ops (6.8+ imzalar) --------- */
+static int rmd_open(struct gendisk *gd, blk_mode_t mode) { return 0; }
+static void rmd_release(struct gendisk *gd) { }
+
+static const struct block_device_operations rmd_fops = {
+	.owner      = THIS_MODULE,
+	.open       = rmd_open,       /* int (*)(struct gendisk *, blk_mode_t) */
+	.release    = rmd_release,    /* void (*)(struct gendisk *) */
+	.submit_bio = rmd_submit_bio, /* void */
+};
+
+/* --------- init/exit --------- */
+static int __init rmd_init(void)
+{
+	int ret;
+	size_t bytes;
+
+	if (size_mb <= 0) {
+		pr_err(RMD_NAME ": size_mb must be > 0\n");
+		return -EINVAL;
+	}
+	bytes = (size_t)size_mb * 1024ull * 1024ull;
+
+	if (bytes % RMD_SECTOR_SZ) {
+		pr_err(RMD_NAME ": size_mb (%d MB) must yield bytes divisible by %d\n",
+		       size_mb, RMD_SECTOR_SZ);
+		return -EINVAL;
+	}
+
+	mutex_init(&rmd_lock);
+
+	rmd_size_bytes = bytes;
+	rmd_capacity   = bytes / RMD_SECTOR_SZ;
+
+	rmd_data = vzalloc(rmd_size_bytes);
+	if (!rmd_data)
+		return -ENOMEM;
+
+	rmd_major = register_blkdev(0, RMD_NAME);
+	if (rmd_major < 0) {
+		ret = rmd_major;
+		pr_err(RMD_NAME ": register_blkdev failed: %d\n", ret);
+		goto err_vfree;
+	}
+
+	/* 6.8+: blk_alloc_disk(NUMA_NO_NODE) bir queue ile gelir */
+	rmd_gd = blk_alloc_disk(NUMA_NO_NODE);
+	if (!rmd_gd) {
+		ret = -ENOMEM;
+		goto err_unreg;
+	}
+
+	rmd_q = rmd_gd->queue;
+	blk_queue_logical_block_size(rmd_q, RMD_SECTOR_SZ);
+
+	/* isteğe bağlı: flags (derleyicinde yoksa bu iki satırı kaldırabilirsin) */
+#ifdef QUEUE_FLAG_NONROT
+	blk_queue_flag_set(rmd_q, QUEUE_FLAG_NONROT);
+#endif
+#ifdef QUEUE_FLAG_NOWAIT
+	blk_queue_flag_set(rmd_q, QUEUE_FLAG_NOWAIT);
+#endif
+
+	rmd_gd->major        = rmd_major;
+	rmd_gd->first_minor  = 0;
+	rmd_gd->minors       = RMD_MINORS;
+	rmd_gd->fops         = &rmd_fops;
+	rmd_gd->private_data = NULL;
+	snprintf(rmd_gd->disk_name, DISK_NAME_LEN, RMD_NAME "0");
+
+	set_capacity(rmd_gd, rmd_capacity);
+	ret = add_disk(rmd_gd);
+	if (ret) {
+		pr_err(RMD_NAME ": add_disk failed: %d\n", ret);
+		put_disk(rmd_gd);
+		goto err_unreg;
+	}
+
+	pr_info(RMD_NAME ": ready: /dev/%s, %d MB\n", rmd_gd->disk_name, size_mb);
+	return 0;
+
+err_unreg:
+	unregister_blkdev(rmd_major, RMD_NAME);
+err_vfree:
+	vfree(rmd_data);
+	return ret;
+}
+
+static void __exit rmd_exit(void)
+{
+	if (rmd_gd) {
+		del_gendisk(rmd_gd);
+		put_disk(rmd_gd);    /* bazı ağaçlarda blk_cleanup_disk yok; bu doğru eşleşme */
+	}
+	if (rmd_major > 0)
+		unregister_blkdev(rmd_major, RMD_NAME);
+	if (rmd_data)
+		vfree(rmd_data);
+}
+
+module_init(rmd_init);
+module_exit(rmd_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Siz :)");
+MODULE_DESCRIPTION("Basit RAMDISK (Linux 6.8+), tek minor, global durum");
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+struct bio_vec *bvec;
+int i;
 
+for (i = 0; i < bio->bi_vcnt; i++) {
+    bvec = &bio->bi_io_vec[i];
+
+    void *kaddr = kmap_local_page(bvec->bv_page);
+
+    void *data = kaddr + bvec->bv_offset;
+    size_t len = bvec->bv_len;
+
+    // -> data ... 'len' byte uzunluğunda veri buradadır
+
+    kunmap_local(kaddr);
+}
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+struct bio_vec bvec;
+struct bvec_iter iter;
+
+bio_for_each_segment(bvec, bio, iter) {
+    void *kaddr;
+
+    // Segmentin bulunduğu page’i kernel adresine map et
+    kaddr = kmap_local_page(bvec.bv_page);
+
+    // Bu segmentin verisine erişim
+    void *data = kaddr + bvec.bv_offset;
+    size_t len = bvec.bv_len;
+
+    // -> data ... 'len' byte uzunluğunda veri buradadır
+
+    // İşin bitince unmap et
+    kunmap_local(kaddr);
+}
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
