@@ -2335,7 +2335,7 @@
 
     Çekirdek içerisinde bu veri yapıları genelleştirilmiş yani türden bağımsız bir biçimde gerçekleştirilmiştir. 
 
-    Biz bu bölümde "bağlı listelerin (linked list)" Linux çekirdeğindeki gerçekleştirimleri üzerinde duracağız. Diğer 
+    Biz bu bölümde "bağlı listelerin (linked lists)" Linux çekirdeğindeki gerçekleştirimleri üzerinde duracağız. Diğer 
     veri yapılarını çeşitli konular içerisinde yeri geldikçe açıklayacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -2443,6 +2443,10 @@
     container_of makrosunun birinci parametresi yapı elemanın adresini, ikinci parametresi yapının tür ismini ve üçüncü 
     parametresi de ilgili yapı elemanının ismini almaktadır. Bu makro ikinci parametresine girilmiş olan yapı türünden 
     bir adres vermektedir. 
+
+    container_of makrosunu list_entry ismiyle de kullanabilirsiniz:
+
+    #define list_entry(ptr, type, member) container_of(ptr, type, member)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3342,20 +3346,1044 @@ int main(void)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de task_struct yapısı içerisinde proseslerin thread'leri arasındaki ilişkinin nasıl oluşturulduğunu görelim. 
-    Yani çekirdek ya da sistem programcısı bir prosesin tüm thread'lerinin task_struct yapılarını nasıl elde edebilmektedir, 
-    bunun üzerinde duralım. 
+                                        13. Ders 30/08/2025 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-<BURADA KALDIK>
+    Şimdi de task_struct nesneleri arasındaki ilişkilerin bağlı listelerle nasıl oluşturulduğu üzerinde duracağız. Önce 
+    bir prosesin thread'lerinin sonra da alt proses listelerinin nasıl elde edilebildiğini açıklayacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Bir prosesin thread'lerinin belirlenmesi için eskiden task_struct içerisinde thread_group isimli döngüsel bağlı 
+    liste bağı kullanılıyordu:
 
+    struct task_struct {
+        /* ... */
+
+        struct list_head thread_group;
+        
+        /* ... */
+    };
+
+    Bu thread_group listesi herhangi bir thread'ten başlanarak dolaşılırsa bu liste döngüsel olduğu için prosesin tüm 
+    thread'leri elde edilebiliyordu. Yani elimizde bir prosesin herhangi bir thread'inin task_struct yapısı varsa 
+    biz o thread'in ilişkin olduğu prosesin tüm thread'lerini bu bağlı listeyi dolaşarak elde edebiliyorduk. Ancak 
+    4.2 çekirdeği (2015) ile birlikte bu veri yapısında bir değişiklik yapılmıştır. Yeni sistemde prosesin thread'lerine
+    ilişkin bağlı listenin kök düğümü prosesin sinyal bilgilerinin bulunduğu yerde saklanmaktadır. Dolayısıyla artık 
+    thread dolaşımına bu kök düğümden başlanmalıdır. Prosesin sinyal bilgileri task_struct içerisindeki signal göstericisinin 
+    gösterdiği yerdeki signal_struct yapısı içerisinde tutulmaktadır. İşte signal_struct yapısının thread_head elemanı da
+    prosesin thread'lerine ilişkin bu kök düğümü belirtmektedir. Prosesin thread'lerinin bağlı listesi için ise task_struct 
+    içerisindeki thread_node elemanı kullanılmaktadır. Thread listesine ilişkin ilgili elemanları şöyle betimleyebiliriz:
+    
+    struct signal_struct {
+        /* ... */
+        
+        struct list_head thread_head;
+
+        /* ... */
+    };
+
+    struct task_struct {
+        /* ... */
+
+        struct signal_struct *signal;
+        struct list_head thread_node;
+        
+        /* ... */
+    };
+
+    signal_struct nesnesi içerisindeki thread_head kök düğümü prosesin ilk thread'ine ilişkib task_struct nesnesi 
+    içerisindeki thread_node düğümünü göstermektedir. Prosesin thread'leri bu thread_node düğümüyle birbirine bağlanmıştır.
+
+    thread_node bağlı listesi çekirdeğe ilk eklendiğinde bir süre eski thread_group listesi de muhafaza edilmişti. Yani
+    her iki sistem birlikte kullanılabiliyordu. Sonra tamamen eski thread_group listesi task_struct içerisinden kaldırıldı. 
+    Artık yeni çekirdeklerde prosesin thread'lerinin task_struct yapı nesnelerini elde etmek için prosesin signal_struct 
+    nesnesindeki thread_head kök düğümünden başlanarak bağlı listenin thread_node düğümlerinin dolaşılması gerekmektedir. 
+
+    thread_head <---> thread_node <---> thread_node <---> thread_node <---> thread_node <---> thread_head
+
+    signal_struct içerisindeki list_head kök düğümünün hemen önündeki düğümün ana thread'e ilişkin olacağı yönünde 
+    bir garanti verilmemiştir. 
+
+    Aslında Linux çekirdeklerinde prosesin tüm thread'lerine ilişkin task_struct içerisinde bulunan signal göstericisi 
+    aynı signal_struct nesnesini göstermektedir. Yani thread_head kök düğümüne biz prosesin ana thread'inden erişmek 
+    zorunda değiliz. Proesin herhangi bir thread'ine ilişkin task_struct yapısındaki signal göstericisi yoluyla bu 
+    list_head kök düğümüne erişebiliriz. 
+
+    Linux çekirdeğinde terminoloji bağlamında "prosesin ana thread'i" yerine "thread grup lideri (thread group leader)" 
+    terimi tercih edilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Bilindiği gibi UNIX/linux sistemlerinde her prosesin sistem genelinde tek olan (unique) bir "proses id (pid)" değeri 
+    vardır. Linux çekirdeği proses id değerini task_struct içerisindeki pid elemanında saklamaktadır:
+
+    struct task_struct {
+        /* ... */
+
+        pid_t	pid;
+
+        /* ... */
+    };
+
+    Linux'ta her thread'in ayrı bir task_struct yapısı olduğuna göre ve pid değeri de task_struct içerisinde tutulduğuna 
+    göre bu durumda her thread'in de ayrı bir pid değeri mi vardır? Bu konuya açıklık getirelim. POSIX standartlarına göre 
+    thread'lerin pid değeri olmaz, pid değerleri proseslere özgüdür. getpid POSIX fonksiyonu prosesin hangi thread akışı 
+    içerisinde çağrılırsa çağrılsın prosese ilişkin pid değerini vermektedir. İşte Linux çekirdeği bu uyumu korumak için 
+    şöyle bir yöntem izlemiştir: Prosesin pid değeri aslında prosesin ana thread'ine ilişkin task_struct yapısı içerisindeki 
+    pid değeridir. Evet Linux'ta her thread'in task_struct yapısında ayrı bir pid değeri vardır fakat prosesin pid değeri 
+    denildiğinde prosesin ana threadinin pid değeri anlaşılmaktadır. Ana thread'in pid değeri aynı zamanada  task_struct 
+    içerisindeki tgid isimli bir eleman da tutulmaktadır. Bu eleman task_struct hangi thread'e ilişkin olursa olsun her 
+    zaman prosesin ana thread'inin pid değerini tutmaktadır:
+
+    struct task_struct {
+        /* ... */
+
+        pid_t   pid;        /* o thread'e ilişkin pid değeri, POSIX'te böyle bir kavram yok */
+        pid_t   tgid;       /* ana thread'e ilişkin pid değeri, getpid bu değeri veriyor */
+
+        /* ... */
+    };
+
+    Bu durumda biz prosesin thread'lerine ilişkin task_struct yapılarını dolaştığımızda bu task_struct yapılarının 
+    birinde pid == tgid olacaktır. İşte bu thread prosesin ana thread'idir. O halde aslında bazı yarıntıları da göz ardı 
+    edersek getpid POSIX fonksiyonun çağırdığı sys_getpid sistem fonksiyonu prosesin proses id değerini doğrudan current 
+    göstericisinin gösterdiği task_struct nesnesinin içerisindeki tgid değerinden alarak vermektedir:
+
+    getpid (kullanıcı modu) ---> sys_getpid (öekirdek modu) ---> current tarafından gösterilen task_struct nesnesindeki 
+    tgid değeri
+
+    Şimdi aklınıza "neden her thread'te ayrıca ana thread'in pid değeri tgid ismiyle tutuluyor?" sorusu gelebilir. Bunun 
+    iki nedeni vardır: Birincisi prosesin ana thread'i sonlanabilir, bu durumda ana thread'e ilişkin task_struct yapısına 
+    erişilemeyebilir. İkincisi ise bu yolla prosesin id değerine bu yolla daha hızlı erişimin sağlanabilmesidir. 
+
+    Anımsanacağı gibi POSIX thread kütüphanesinde (pthread kütüphanesi) thread'lerin id değerleri sistem genelinde tek 
+    değil proses genelinde tektir. Yani POSIX'teki pthread_t ile temsil edilen thread id değerinin Linux çekirdeğindeki
+    task_struct içerisinde bulunan pid değeri ile bir ilgisi yoktur. Pekiyi Linux'ta "her thread'in ayrı bir pid değerinin 
+    olmasının" Linux için bir anlamı var mıdır? İşte Linux'ta thread'ler sanki birer proses gibi ele alındığı için bu 
+    durum thread'lerin bazı ek yeteneklere sahip olmasını sağlamıştır. Örneğin bu sayede biz POSIX standartlarında 
+    olmayan bazı işlemleri Linux'ta yapabilmekteyiz. Yani Linux çekirdeğinde aslında pid isteyen fonksiyonlara biz 
+    thread'teki pid değerini geçirerek thread'e özgü işlemlerin yapılmasını da sağlayabilmekteyiz. Kullanıcı modundan 
+    thread'e ilişkin pid değeri Linux'a özgü gettid fonksiyonu ile elde edilebilmektedir:
+
+    #define _GNU_SOURCE
+    #include <unistd.h>
+
+    pid_t gettid(void);
+
+    gettid fonksiyonun bir POSIX fonksiyonu olamdığına dikkat ediniz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aslında Linux çekirdeği thread'e ilişkin task_struct yapısında yalnızca ana thread'e ilişkin pid değerini değerini 
+    değil aynı zamanda ana thread'e ilişkin task_struct adresini de task_struct yapısının group_leader elemanında 
+    tutmaktadır. Yani herhangi bir thrad akışı içerisinde o thread'in task_struct yapısındaki group_leader göstericisi 
+    zaten prosesin ana thread'inin task_struct adresini tutmaktadır:
+
+     struct task_struct {
+        /* ... */
+
+        pid_t   pid;                        /* o thread'e ilişkin pid değeri, POSIX'te böyle bir kavram yok */
+        pid_t   tgid;                       /* ana thread'e ilişkin pid değeri, getpid bu değeri veriyor */
+        struct task_struct *group_leader;   /* ana thread'e ilişkin task_struct nesnesinin adresi tutuluyor */
+    
+        /* ... */
+    };
+
+    Pekiyi prosesin ana thread'i sonlandığında bu göstericinin ve signal_struct yapısı içerisindeki list_head düğümünün 
+    durumu ne olacaktır? İşte Linux çekirdeği prosesin ana thread'i sonlandığında istisna olarak ana thread'e ilişkin 
+    task_struct nesnesini yok etmemektedir (başka bir deyişle "hortlak (zombie)" olarak tutmaktadır. Yani bu group_leader 
+    göstericisi her zaman geçerli bir task_struct nesnesini gösteriyor durumda olmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi aklınıza "mademki Linux'ta her thread'in task_struct elemanında zaten prosese ilişkin bilgiler tutuluyor bu 
+    durumda prosesin an thread'ine erişmenin ne gereği var?" sorusu gelebilir. Evet gerçekten de aslında bir prosesin 
+    bilgilerinin çok büyük kısmı zaten thread'lere ilişkin task_struct yapılarında da bulunmaktadır. Ancak yine de bazı 
+    bilgilere yalnızca ana thread'ten hareketle elde edilmektedir. Fakat çekirdeğin ana thread'in task_struct yapısına 
+    erişim gerekliliği çok az düzeydedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de Linux çekirdeğinde posesler arasndaki altlık-üstlük ilişkisinin nasıl sağlandığı üzerinde duralım. Bilindiği 
+    gibi UNIX/Linux sistemlerinde her proses başka bir prosesin thread'i tarafından fork işlemi ile yaratılmaktadır. Bu 
+    durumda prosesi yaratan thread'in ilişkin olduğu prosese üst proses (parent process) yeni yaratılan prosese de "alt 
+    process (child process)" denilmektedir. UNIX/Linux sistemlerinde prosesler arasındaki altlık-üstlük ilişkisi çok 
+    önemlidir. Örneğin wait fonksiyonları alt prosesler sonlanana kadar üst prosesi bekletip alt prosesin exit kodunu 
+    almaktadır. Öte yandan Linux çekirdeğinde yalnızca prosseslerin değil her thread'in bir task_struct nesnesi vardır. 
+    Pekiyi altlık-üstlük ilişkisi task_struct nesnelerinde nasıl sağlanmaktadır?
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Her thread'in task_struct yapısı içerisindeki real_parent ve parent isimli göstericiler o thread'i yaratan thread'in 
+    task_struct nesnesinin adresini tutmaktadır. fork işlemi sırasında alt prosesin ana thread'i için yeni bir task_struct 
+    nesnesi yaratılmakta ve bu nesnenin real_parent ve parent elemanları fork işlemini yapan thread'in task_struct nesnesini 
+    gösterir duruma getirilmektedir. Aynı durum tamamen pthread_create fonksiyonu tarafından yaratılan thread'ler için de  
+    geçerlidir. Dolayısıyla fork işlemi ile artık yeni yaratılan alt prosesin ana thread'ine ilişkin tast_struct nesnesinin 
+    real_parent ve parent elemanaları üst prosese ilişkin thread'in task_struct nesnesini gösteriyor durumda olur.  
+
+    struct task_struct {
+        /* ... */
+
+        pid_t   pid;                                /* o thread'e ilişkin pid değeri, POSIX'te böyle bir kavram yok */
+        pid_t   tgid;                               /* ana thread'e ilişkin pid değeri, getpid bu değeri veriyor */
+        struct task_struct *group_leader;           /* ana thread'e ilişkin task_struct yapısını gösteriyor */
+
+        struct task_struct __rcu	*real_parent;   /* fork yapan üst prosesteki thread'in task_struct yapısını gösteriyor */
+	    struct task_struct __rcu	*parent;        /* fork yapan üst prosesteki thread'in task_struct yapısını gösteriyor */
+
+        /* ... */
+    };
+
+    Burada real_parent üst prosese ilişkin thread'in task_struct nesnesinin adresini tutmaktadır. Normalde real_parent 
+    elemanı ile parent elemanı aynı task_struct nesnesini gösterir. Ancak seyrek durumalarda (örneğin debug işlemlerinde
+    ve ptracce işlemlerinde) geçici olarak parent başka bir task_struct nesnesini de (reparenting işlemi) gösterşyor durumda
+    olabilmektedir. 
+
+    Burada bir noktayı yeniden vurgulamak istiyoruz: fork işlemini yapan thread hangi thread olursa olsun yaratılan alt prosesin 
+    ana thread'ine ilişkin task_struct nesnesindeki real_parent ve parent göstericileri üst prosesteki fork yapan thread'in 
+    task_struct nesnesini göstermektedir. Anımsanacağı gibi getppid POSIX fonksiyonu üst prosesin pid değerini vermektedir. 
+    İşte bu fonksiyonun çağırdığı sys_getppid sistem fonksiyonu real_parent elemanının gösterdiği task_struct içerisindeki 
+    nesnesi içerisindeki tgid değerini geri döndürmektedir. 
+
+    Bir thred başka bir thread'i yarattığında da benzer biçimde yaratılan thread'in task_struct nesnesinin real_parent 
+    ve parent göstericileri onu yaratan thread'in task_struct nesnesini göstermektedir. Thread'ler böyle biribirini 
+    yarattığında bunlara ilişkin task_struct nesnelerinin tgid ve group_leader elemanlarının her zaman ana thread'e ilişkin 
+    olarak kalacağına dikkat ediniz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Pekiyi bir prosesin alt prosesleri nasıl dolaşılmaktadır? Örneğin bir proses üç kez fork yapmış olsun. Bu durumda
+    bu prosesin üç tane alt prosesi olacaktır. Üst prosesleri aynı olan proseslere "kardeş proesler (sibling processes)
+    de denilmektedir. İşte bir prosesin alt prosesleri children isimli kök düğümle erişilen sibling bağları yoluyla bağlı 
+    listede tutulmaktadır:
+
+    struct task_struct {
+        /* ... */
+
+        pid_t   pid;                                /* o thread'e ilişkin pid değeri, POSIX'te böyle bir kavram yok */
+        pid_t   tgid;                               /* ana thread'e ilişkin pid değeri, getpid bu değeri veriyor */
+        struct task_struct *group_leader;           /* ana thread'e ilişkin task_struct yapısını gösteriyor */
+
+        struct task_struct __rcu	*real_parent;   /* fork yapan üst prosesteki thread'in task_struct yapısını gösteriyor */
+	    struct task_struct __rcu	*parent;        /* fork yapan üst prosesteki thread'in task_struct yapısını gösteriyor */
+
+        struct list_head children;                  /* alt proses listesinin kök düğümü */
+        struct list_head sibling;                   /* alt proseslerin bağlı liste bağı */
+
+        /* ... */
+    };
+
+    Burada children bir kök düğüm biçimindedir. children aslında alt proses listesindeki ilk task_struct nesnesinin sibling 
+    elemanını göstermektedir. Sonra her kardeş task_struct nesnesi bir sonraki kardeş task_struct nesnesini gösterir. 
+    O halde br prosesin alt prosesleri bu sibling düğümleri dolaşılarak elde edilmektedir. Proseslerin her thread'inin 
+    ayrı bir task_struct ile temsil edildiğini belirtmiştik. Pekiyi bu durumda sibling bağları hangi task_struct nesnelerini 
+    göstermektedir? İşte sibling bağları her zaman prosesin ana thread'ine ilişkin (grup liderine ilişkin) task_struct 
+    nesnelerini göstermektedir. Örneğin bir prosesin bir thread'i (buna tp1 thread'i diyelim) fork yapsın sonra diğer bir 
+    thread'i de (buna da tp2 diyelim) fork yapsın. İlk fork işleminden elde edilen ana thread'e tc1 ikinci fork işleminden 
+    elde edilen ana thread'e de tc2 diyelim. İşte burada sibling bağlı listesinde tc1 ve tc2 therad'lerine ilişkin 
+    task_struct nesneleri tutulmaktadır. tc1'in parent ve real_parent göstericileri tp1 thread'inin task_struct nesnesini, 
+    tc2'nin parent ve real_parent götericileri ise tp2'nin task_struct nesnesini göstermektedir. (Tabii aslında bu 
+    göstericiler doğrudan task_struct nesnesini göstermemektedir, asıl nesnenin adresi container_of makrosuyla elde 
+    edilmektedir. Biz pratik bir anlatım için durumu böyle ifade ediyoruz.)
+
+    Bir thread akışında yeni bir thread yaratıldığı zaman yaratılan thread bu children/sibling listesinde bulunmaz. 
+    prosesin thread'leri yalnızca list_head/list_node listesinde tutulmaktadır. children/sibling listesinde her zaman 
+    yalnızca alt proseslere ilişkin ana thread'lerin task_struct nesneleri tutulmaktadır.
+
+    Pekiyi bir prosesin tüm thread'lerine ilişkin task_struct nesnelerindeki children elemanları aynı listeyi mi göstermektedir?
+    Yani ben alt proseslerin ana thread'lerine ilişkin task_struct nesnelerini dolaşmak istesem bunu kendi ana thread'imin
+    children kök düğümünden itibaren mi yapmak zorundayım? İşte Linux'ta alt proses listesi ana thread'in children 
+    kök düğümünden hareketle dolaşılmak zorundadır. Alt prosesler yaratıldığında yalnızca ana thread'in children kök 
+    düğümü güncellenmektedir. Yani prosesin diğer thread'lerinin children düğümleri bu işlemlerde kullanılmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek ayrıca tüm task_struct nesnelerini de task_struct içerisindeki tasks isimli bir düğüm ile birbirine bağlamaktadır. 
+    Yani eğer sistemdeki tüm proseslerim tüm thread'lerine ilişkin task_struct nesnelerinin dolaşılması için bu tasks
+    düğümü kullanılabilir:
+
+        struct task_struct {
+        /* ... */
+
+        pid_t   pid;                                /* o thread'e ilişkin pid değeri, POSIX'te böyle bir kavram yok */
+        pid_t   tgid;                               /* ana thread'e ilişkin pid değeri, getpid bu değeri veriyor */
+        struct task_struct *group_leader;           /* ana thread'e ilişkin task_struct yapısını gösteriyor */
+
+        struct task_struct __rcu	*real_parent;   /* fork yapan üst prosesteki thread'in task_struct yapısını gösteriyor */
+	    struct task_struct __rcu	*parent;        /* fork yapan üst prosesteki thread'in task_struct yapısını gösteriyor */
+
+        struct list_head children;                  /* alt proses listesinin kök düğümü */
+        struct list_head sibling;                   /* alt proseslerin tutulduğu liste bağı */
+        struct struct list_head	tasks;              /* tüm task_struct nesnelerinin tutulduğu liste bağı */
+
+        /* ... */
+    };
+
+    Pekiyi bu tasks düğümlerine ilişkin bağlı listenin kök düğümü nerededir? İşte Linux'ta boot işlemi sırasında çekirdek 
+    yüklenip birtakım ilk işlemler yapıldıktan sonra ilk oluşturulan prosese init_task denilmektedir. Bu init_task 
+    prosesine ilişkin task_struct yapısı statik bir biçimde yeni çekirdeklerde "init/init_task.c" dosyasında bulunmaktadır:
+
+    struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
+        /* ... */
+
+        .ptraced	= LIST_HEAD_INIT(init_task.ptraced),
+        .ptrace_entry	= LIST_HEAD_INIT(init_task.ptrace_entry),
+        .real_parent	= &init_task,
+        .parent		= &init_task,
+        .children	= LIST_HEAD_INIT(init_task.children),
+        .sibling	= LIST_HEAD_INIT(init_task.sibling),
+        .group_leader	= &init_task,
+        RCU_POINTER_INITIALIZER(real_cred, &init_cred),
+        RCU_POINTER_INITIALIZER(cred, &init_cred),
+        .comm		= INIT_TASK_COMM,
+        .thread		= INIT_THREAD,
+        .fs		= &init_fs,
+        .files		= &init_files,
+    #ifdef CONFIG_IO_URING
+        .io_uring	= NULL,
+    #endif
+        .signal		= &init_signals,
+        .sighand	= &init_sighand,
+
+        /* ... */
+    };
+
+    init_task prosesinin pid değeri 0'dır. Anımsanacağı gibi pid için 0 değeri POSIX sistemlerinde geçerli bir değer 
+    değildir. Geleneksel olarak UNIX/Linux sistemlerinde sistem boot edildiğinde yaratılan bu tür proseslere "swapper"
+    ya da "pager" da deniliyordu. init_task prosesi init prosesini yarattıktan sonra işlevini sonlandırarak durdurulmaktadır. 
+    Ancak bu prosese ilişkin task_struct nesnesi gerçek anlamda hiçbir zaman yok edilmemektedir. İşte init_task prosesinin 
+    task_struct nesnesi tüm task_struct nesnelerini dolaşmak için bir kök düğüm olarak kullanılmaktadır. O halde tasks 
+    düğümlerinin kök düğümü init_task.tasks elemanıdır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi yukarıda açıkladığımız konuyu madde madde özetleyelim:
+
+    - Her thread'in ayrı bir pid değeri vardır, ancak POSIX'teki getpid fonksiyonu ana thread'in (thread grup liderinin)    
+    pid değerini vermektedir. 
+
+    - Bir prosesin tüm thread'lerini dolaşmak için signal göstericisinin gösterdiği signal_struct yapısı içerisindeki 
+    thread_head bağlı listesi thread_node düğümleriyle dolaşılır.
+
+    - task_struct içerisideki real_parent ve parent göstericileri o prosesi ya da thread'i yaratan thread'in task_struct
+    nesnesini göstermektedir. 
+
+    - task_struct içerisindeki tgid ana thread'in pid değerini, thread_group göstericisi ise ana thread'in task_struct 
+    nesnesinin adresini tutmaktadır. Ana thread sonlansa bile onun task_struct yapısı proses sonlanana kadar muhafaza
+    edilmketedir.
+
+    - Bir prosesin bütün alt proseslerine ilişkin ana thread'lerinin task_struct nesneleri children/sibling bağlı 
+    listesinde tutulmaktadır. 
+
+    - Prosesin alt proseslerini elde etmek için prosesin ana thread'inin children kök düğümünden yola çıkmak gerekir. 
+
+    - Çekirdek yaratılmış olan tüm task_struct nesnelerini ayrıca task_struct içerisindeki tasks düğümüyle birbirine 
+    bağlamaktadır. Bu düğümüm kökü de init_task.tasks elemanıdır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        14. Ders 31/08/2025 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aşağıda tipik amaçların bu bağlı listeler kullanılarak nasıl gerçekleştirileceğine ilişkin ipuçları veriyoruz:
+
+    Soru: Bir prosesin tüm thread'leri nasıl elde edilebilir?
+    Yanıt: Bir prosesin tüm threadleri prosesin signal yapısı içerisinde bulunan thread_head elemanı kök yapılarak 
+    thread_node düğümlerinin dolaşılmasıyla elde edilebilir.
+
+    Soru: Bir prosesin bütün alt prosesleri nasıl elde edilebilir?
+    Yanıt: Prosesin ana thread'indeki children düğümü kök yapılarak sibling düğümlerinin dolaşılmasıyla prosesin tüm alt
+    proesleri elde edilebilir. 
+
+    Soru: Bir task_struct nesnesinin prosesin ana thread'ine ilişkin olduğu nasıl anlaşılır?
+    Yanıt: Eğer task_struct nesnesinde pid == tgid ise bu task_struct ilgili prosesin ana thread'ine ilişkin task_struct 
+    nesnesidir. Zaten prosesin tüm thread'lerine ilişkin task_struct nesnelerinde group_leader göstericisi ana thread'e
+    ilişkin bu task_struct nesnesini göstermektedir. O anda çalışmakta olan thread eğer prosesin ana thread'i ise 
+    current == group_leader koşulunun sağlanacağına da dikkat ediniz. 
+
+    Soru: Sistemdeki tüm task_struct nesneleri nasıl dolaşılır?
+    Yanıt: init_task prosesindeki tasks düğümü kök düğüm yapılıp tasks düğümleri dolaşılırsa tüm task_struct nesneleri 
+    elde edilebilir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de yukarıda gördüğümüz bağlı listelerin nasıl dolaşıldığına yönelik açıklamalar eşliğinde küçk örnekler 
+    yapacağız. Ancak bu biçimdeki küçük testler için çekirdeği yeniden derlememize gerek yoktur. Basit bir karakter aygıt 
+    sürücüsü yazarak da bu işlemleri yapabiliriz. Aygıt sürücülerinin yazımı kursumuzun konusu içerisinde değildir. Bu konu 
+    "UNIX/Linux Sistem Programlama" ve "Gömülü Linux Sistemleri - Geliştirme ve Uygulama" kursunda ele alınmaktadır. Ancak 
+    biz burada bir karakter aygıt sürücüsünün nasıl derlenip yükleneceği ve boşaltılacağı konusunda hedefe yönelik açıklamalar 
+    yapmakla yetineceğiz: 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Genellikle bir Linux sistemini yüklediğimizde zaten çekirdek modüllerini ve aygıt sürücüleri oluşturabilmek için 
+    gereken başlık dosyaları ve diğer gerekli öğeler "/usr/src" dizini içerisindeki "linux-headers-$(uname -r)" dizininde 
+    yüklü biçimde bulunmaktadır. Ancak bunlar yüklü değilse Debian tabanlı sistemlerde bunları şöyle yükleyebilirsiniz:
+    
+    $ sudo apt-get install linux-headers-$(uname -r)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Karakter aygıt sürücüleri bir ya da birden fazla kaynak ".c" dosyası oluşturularak yazılabilmektedir. Tabii bunların 
+    yanı sıra programcı "*.h" uzantılı bazı başlık dosyaları da oluşturabilmektedir. Aygıt sürüclerin derlenmesi oldukça 
+    karmaşık bir süreçle gerçekleşmektedir. Bu nedenle derleme işlemi için hazır "make dosyaları" bulundurulmuştur. Programcı 
+    kendisi bir "Makefile" dosyası oluşturup asıl make dosyalarını buradan devreye sokar. Aygıt sürücüler için en basit 
+    "Makefile" dosyası aşağıdaki gibi oluşturulabilir:
+
+    obj-m += ${file}.o
+
+    all:
+        make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+    clean:
+        make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+    Bu "Makefile" dışarıdan "file" isimli bir argüman almaktadır. Aygıt sürücünün derlenmesi şöyle yapılır:
+
+    make file=<aygıt_sürücü_dosyasmım_ismi>
+
+    Örneğin:
+
+    make file=mydriver
+
+    Kaynak dosya için uzantı belirtilmediğine dikkat ediniz.
+
+    Aygıt sürücüler dernekdikten sonra ".ko" uzantılı bir dosya elde edilecektr. Bu dosya çekirdeğe sisteme yüklenmelidir. 
+    Aygıt sürücü dosyalarını (".ko" dosyalarını) çekirdeğe yükemek için "insmod" ya da "depmod" komutları kullanılmaktadır. 
+    "Ancak "depmod" komutu birtakım bağımlılıklara da bakmaktadır. Biz kursumuzda aygıt sürücüleri "insmod" komutuyla yükleyeceğiz. 
+    Tabii aygıt sürücüleri yükleyebilmek için "root" önceliğine sahip olmak gerekir. Modern UNIX/Linux sistemlerinde bu işlem 
+    "sudo" komutuyla yapılmaktadır. Örneğin:
+
+    $ sudo insmod mydriver.ko
+
+    "insmod" ile yüklenmiş olan aygıt sürücü çekirdekten "rmmod" komutuyla çıkartılır. Komut şöyle kullanılır:
+
+    $ sudo rmmod mydriver.ko
+
+    Burada ".ko" uzantısı belirtilmeyebilir.
+
+    Aygıt sürücünün yüklenip yüklenmediğini anlayabilmek için "/proc/devices" dosyasına başvurabilirsiniz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aygıt sürücüler çekirdek modunda çekirdeğin bir parçasıymış gibi çalışan modüllerdir. Nasıl masaüstü bilgisyarların 
+    genişleme yuvalarına kart takıldığında o kart donanımın bir parçası haline geliyorsa aygıt sürücüler de benzer biçimde 
+    adeta çekirdeğin bir parçası haline gelmektedir. Aygıt sürücüler içerisinde kullanıcı modundaki standart C fonksiyonları 
+    ya da POSIX fonksiyonları kullanılamaz. Aygıt sürücüler yalnızca çekirdek içerisinde "export" edilmiş fonksiyonları 
+    kullanabilirler. (Yani çekirdekteki her fonksiyonu aygıt sürücü kullanamaz, yalnızca export edilmiş olan başka bir 
+    deyişle "kullanılmasına izin verilmiş olan" fonksiyonları kullanabilir.) Bir fonksiyon ya da nesne çekirdek kodlarında 
+    EXPORT_SYMBOLS makrosu ile export edilmektedir. Örneğin:
+
+    ...
+    void clear_nlink(struct inode *inode)
+    {
+        if (inode->i_nlink) {
+            inode->__i_nlink = 0;
+            atomic_long_inc(&inode->i_sb->s_remove_count);
+        }
+    }
+    EXPORT_SYMBOL(clear_nlink);
+    ...
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aslında Linux sistemlerinde bu bağlamda birbirleriyle ilişkili iki kavram vardır: "Çekirdek modülleri (kernel modules)" 
+    ve "aygıt sürücüler (device drivers)". Çekirdeğin içerisine yüklenebilen modüllere "çekirdek modülleri" denilmektedir. 
+    Eğer bir çekirdek modülüne kullanıcı modundan bir dosya (buna "aygıt dosyası (device file)" denilmektedir) yoluyla
+    erişilip aygıt sürücüye işlemler yaptırılabiliyorsa bu tür çekirdek modüllerine "aygıt sürücü (device drivers)" de 
+    denilmektedir. Yani her aygıt sürücü bir çekirdek modülü belirtir ancak her çekirdek modülü bir aygıt sürücü beirtmek 
+    zorunda değildir. Sistemdeki yüklü olan çekirdek modülleri "/proc/modules" dosyası yoluyla, yüklü olan aygıt sürücüler 
+    ise "/proc/devices" dosyası yoluyla görüntülenebilmektedir. 
+    
+    Aşağıda iskelet bir çekirdek modülü görüyorsunuz:
+
+    #include <linux/module.h>
+    #include <linux/kernel.h>
+
+    MODULE_LICENSE("GPL");
+
+    int helloworld_init(void);
+    void helloworld_exit(void);
+
+    int helloworld_init(void)
+    {
+        printk(KERN_INFO "Hello World...\n");
+
+        return 0;
+    }
+
+    void helloworld_exit(void)
+    {
+        printk(KERN_INFO "Goodbye World...\n");
+    }
+
+    module_init(helloworld_init);
+    module_exit(helloworld_exit);
+
+    Bir çekirdek modülü "insmod" ile yüklendiğinde onun module_init makrosouyla belirtilen fonksiyonu çağrılmaktadır. 
+    Çekirdek modülü içerisinde ilk işlemler bu fonksiyonda yapılmaktadır. Çekirdek modülü "rmmod" koutuyla sistemden 
+    çıkartılırken de çekirdek modülündeki module_exit makrosunda belirtilen fonksiyonu çağrılmaktadır. Birtakım son 
+    işlemler (örneğin geri bırakma işlemleri) bu fonksiyonda yapılmaktadır. 
+
+    Çekirdek modülleri içerisinde ekrana birşeyşer yazamayız (mümkün olsa da uygun değildir). Eğer çekirdek modülleri 
+    içerisinde birtakım mesajlar iletilmek isteniyorsa bu mesajlar bir "log" sistemine "yazdırılmkatadır. Bu log sistemine 
+    "kernel ring buffer" da denilmektedir. Bu log sistemine yazdırılan yazılar "dmesg" komutuyla ya da "/var/log/syslog" 
+    dosyası ile görüntülenebilmektedir. Çekirdek modülü içerisinde bu log sistemine mesajlar printk isimli çekirdek 
+    fonksiyonuyla yazılmaktadır. Örneğin:
+
+    printk(KERN_INFO "Goodbye World...\n");
+
+    Burada KERN_INFO mesajın türünü belirtmektedir. KERN_INFO ile diğer argüman arasında virgül atomunun bulunmadığına 
+    dikkat ediniz. KERN_INFO aslında bir bir sembolik sabittir ve bir string açımı yapmaktadır. (C'de yana yana iki 
+    string'in birleştirildiğini anımsayınız.) KERN_INFO mesaj türü ile mesaj yazdırmanın daha basit yolu pr_info 
+    makrosunu kullanmaktadır. Zaten bu makro da printk açılımı yapmaktadır. ÖMrneğin:
+
+    pr_info("Goodbye World...\n");
+
+    printk fonksiyonun kullanımı büyük ölçüde printf fonksiyonuna benzemektedir. Yani bu fonksiyonla değişkenler 
+    içeriisndeki değerler de yazdırılabilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi aygıt sürücülere bir dosya yoluyla kulalnıcı modundan erişilebilmektedir. Aygıt 
+    sürücülere erişmekte kullanılan bu özel dosyalara "aygıt dosyaları (device files)" denilmektedir. Aygıt dosyaları 
+    bir disk dosyası değildir. Yalnızca bir dizin girişi belirtmektedir. Aygıt dosyası open POSIX fonksiyonuyla açıldığında 
+    çekirdek diske değil yüklü olan aygıt sürücüye referans etmektedir. Kullanıcı modundaki programcı aygıt dosyası 
+    üzerinde open, read, write, lseek, close gibi klasik dosya işlemlerini yaptığında aslında programın akışı çekirdek 
+    moduna (kernel mode) geçerek aygıt sürücü içerisindeki ilgili fonksiyonlar çalıştırılmaktadır. Yani biz bu mekanizmayla
+    aslında normalde kullanıcı modunda yapamayacağımız birtakım işlemleri dolaylı bir biçimde yapabilir duruma gelmekteyiz. 
+    
+    Linux sistemlerinde aygıt sürücüler (ve dolayısıyla aygıt dosyaları) iki kısma ayrılmaktadır:
+
+    - Karakter Aygır Sürücüleri (Character Device Drivers)
+    - Blok Aygıt Sürücüleri (Block Device Drivers)
+
+    En çok kullanılan aygıt sürücüler karakter aygıt sürücüleridir. Blok aygıt sürücüleri "hard disk, SSD, CDROM, ramdisk"
+    gibi blok blok transferlerin yapıldığı aygıtlar söz konusu olduğunda kullanılmaktadır. Karakter aygıt sürücülerine 
+    ilişkin aygıt dosyaları UNIX/Linux sistemlerinde 'c' dosya türü ile , blok aygıt sürücülerine ilikin aygıt dosyaları 
+    ise 'b' dosya türü ile temsil edilmektedir. Örneğin:
+
+    ...
+    crw-rw----   1 root disk     21,   0 Ağu 31 10:49 sg0
+    crw-rw----+  1 root cdrom    21,   1 Ağu 31 10:49 sg1
+    drwxrwxrwt   2 root root          40 Ağu 31 12:30 shm
+    crw-------   1 root root     10, 231 Ağu 31 10:49 snapshot
+    drwxr-xr-x   3 root root         200 Ağu 31 10:49 snd
+    brw-rw----+  1 root cdrom    11,   0 Ağu 31 10:52 sr0
+    lrwxrwxrwx   1 root root          15 Ağu 31 10:49 stderr -> /proc/self/fd/2
+    lrwxrwxrwx   1 root root          15 Ağu 31 10:49 stdin -> /proc/self/fd/0
+    lrwxrwxrwx   1 root root          15 Ağu 31 10:49 stdout -> /proc/self/fd/1
+    crw-rw-rw-   1 root tty       5,   0 Ağu 31 11:45 tty
+    crw--w----   1 root tty       4,   0 Ağu 31 10:49 tty0
+    crw--w----   1 root tty       4,   1 Ağu 31 10:49 tty1
+    crw--w----   1 root tty       4,  10 Ağu 31 10:49 tty10
+    ...
+
+    UNIX/Linux sistemlerinde aygıt dosyaları genel olarak "/dev" dizininde bulunmaktadır. Ancak böyle bir zorunluluk 
+    yoktur. Eskiden bu "/dev" dizini disk tabanlı bir dosya sistemi içerisinde bulunuyordu. Sonra zamanla bu dosya 
+    sistemi ramdisk tabanlı hale getirildi. Linux sistemlerinde "udev" denilen bir servis (daemon) ile bu dizinde aygıt 
+    dosyalarının bu dizinde yaratılması mümkün hale getirilmiştir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Her aygıt sürücünün "majör" ve "minör" numarası vardır. Bu majör ve minör numaralar çekirdeğin aygıt sürücüye erişebilmesi 
+    için bir adres görevi görmektedir. Bir aygıt dosyası yaratılırken aygıt dosyasına da bu majör ve minör numara iliştirilmektedir. 
+    (Normal (regular) dosyalarda böyle bir amjör ve minör numara olmadığına dikkat ediniz.) Örneğin:
+
+    crw--w----   1 root tty       4,   0 Ağu 31 10:49 tty0
+
+    Buradaki karakter aygı dosyasının mjör numarası 4, minör numarası 0'dır. Majör numara aygıt sürücünün ana kodunu temsil 
+    eder. Minör numara ise onun örneklerini (instances) temsil etmektedir. Örneğin bir seri port aygıt sürücüsünün tek 
+    bir majör numarası vardır. Eğer sistemimizde 4 tane seri port varsa aynı majör numaraya sahip minör numaraları farklı 
+    4 aygıt dosyasının bulunması gerekir. Aygıt sürücünün aslında toplamda bir tane kodunun bulunduğuna dikkat ediniz. Aygıt 
+    sürücüleri yazanlar zaten birden fazla minör numarayı destekleyecek biçimde kodlarını yazmaktadır. 
+
+    Aygıt dosyaları komut satırında "mknod" isimli programla yaratılmaktadır. Tabii bu program da aslında mknod isimli 
+    POSIX fonksiyonunu çağırarak yazılmıştır. mknod POSIX fonksiyonu da sys_mknod isimli sistem fonksiyonunu çağırmaktadır. 
+    mknod programı ile aygıt dosyası şöyle yaratılmaktadır:
+
+    sudo mknod [-m ya da --mode <erişim_hakları>] <dosya_ismi> <c ya da b> <majör_numara> <minör_numara>
+
+    Örneğin:
+
+    $ sudo mknod -m 666 mydriver c 250 0
+
+    O halde aygıt sürücüyü yazanlar belli bir majör ve minör numara belirleyerek belirledikleri bu majör ve minör numaraya 
+    dayalı olarak aygıt sürücülerini yazarlar ve aygıt sürücülerinin kullanıcı modundan kullanılabilmesini sağlamak için 
+    de aynı majör ve minör numaraya ilişkin aygıt dosyalarını yaratırlar. (Tabii aygıt sürücüler birden fazla minör numarayı 
+    da destekleyebilirler.) Ancak aynı majör ve minör numaraya ilişkin birden fazla aygıt sürücü yüklenememektedir. Bu 
+    nedenle aygıt sürücüleri yazanlar "kullanılmayan bir majör numarayı" çekirdekten isteyip aygıt sürücülerine o majaör 
+    numarayı atayabilmektedir. Tabii bu durumda aygıt sürücünün majör numarası önceden bilinmediği için aygıt dosyası da 
+    ancak aygıt sürücü yüklendikten sonra yaratılabilmektedir. İşte tipik olarak sistem programcısı bir "kabuk betiği 
+    (shell script)" yazarak bu işlemi otomatize etmeye çalışmaktadır. Bu betik önce "insmod" ile aygıt sürücüyü yükler,
+    "/proc/devices" dosyasına başvurup onun majör numarasını elde ederve aygıt dosyasını "mknod" komutuyla dinamik bir 
+    biçimde bu majör numarayı kullanacak biçimde oluşturur. Biz de denemelerimizde böye yapacağız. Bunun için aşağıdaki 
+    gibi bir "load" betiği kullanacağız:
+
+    #!/bin/bash
+
+    module=$1
+    mode=666
+
+    /sbin/insmod ./${module}.ko ${@:2} || exit 1
+    major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+    rm -f $module
+    mknod -m $mode $module c $major 0
+
+    Bu betik dosyasını oluşturduktan sonra dosyaya "x" hakkını vermeyi unutmayınız:
+
+    $ chmod +x load
+
+    Bu betik aşağıdaki gibi çalıştırılmalıdır:
+
+    $ sudo ./load mydriver
+
+    Bu betik hem aygıt sürücüyü yükleyecek hem de ilgili majör numarayı kullanarak minör 0 olacak biçimde karakter 
+    aygıt dosyasını oluşturacktır. Bu biçimde yüklenen aygıt sürücüyü sistemden çıkardıktan sonra aygıt dosyası da 
+    silinmelidir. Bu işlemde bir kabuk betik dosyası ile yapılabilir. Aygıt sürücüyü "rmmod" ile çıkartıp ilgili aygıt 
+    dosyasını silen "unload" isimli bir kabuk betiği aşağıdaki gibi yazılabilir:
+
+    #!/bin/bash
+
+    module=$1
+
+    /sbin/rmmod ./${module}.ko || exit 1
+    rm -f $module
+
+    Tabii yine bu "unload" betiğine de "x" hakkının verilmesi gerekir:
+
+    $ chmod +x unload
+
+    Bu betik şöyle kullanılır:
+
+    sudo ./unload mydriver
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Pekiyi aygıt sürücülere neden gereksinim duyulmaktadır? İşte kullanıcı modunda sistemin çökmesine yol açabilecek 
+    işlemler "işlemcilerin sağladığı koruma mekanizması" yoluyla engellenmektedir. Bu durumda kullanıcı modundaki programlar 
+    aslında yapamayacakaları işlemleri aygıt sürücülere dolaylı olarak yaptıktanırabilir hale gelmektedir. Örneğin ekrana 
+    bir yazının yazdırılması aslında doğrudan kullanıcı modundaki programlar tarafından sağlanamamaktadır. Bunun için 
+    işletim sistemlerinde "terminal aygıt sürücüsü" denilen aygıt sürücüler bulundurulmaktadır. C'deki stdin ve stdout 
+    dosyaları aslında bu aygıt sürücüye ilişkin aygıt dosylarını temsil etmektedir. Programcı bu stdout dosyasına birşeyler 
+    yazdırmak istediğinde programın akışı çekirdek moduna geçer ve aygıt sürücü içerisindeki fonksiyon çalıştırılır, bu 
+    fonksiyon koruma engeli ortadan kalktığı için ekrana yazıları basabilmektedir. Aygıt sürücüler tipik olarak "donanım 
+    aygıtlarıyla kullanıcı modundaki programlar arasında arayüz" oluşturma görevini üstlenirler. Tabii zamanla "aygıt sürücü" 
+    kavramı daha genelleştirilmiştir. Linux sistemlerinde değişik mekanizmayla çalışan aygıt sürücüler bulunmaktadır. 
+    İşlemcilerin "koruma mekanizması (protection mechanism)" kursumuzda izleyen bölümlerde ele alınacaktır.
+
+    Pekiyi çekirdke üzerindeki manipülasyonların hepsi aygıt sürücü yazarak sağlanabilir mi? Hayır, aygıt sürücü çekirdekteki
+    olanakları kullanmaktadır ancak çekirdek kodlarında değişiklik yapamamaktadır. Dolayısıyla bazı çekirdek davranışları 
+    basit bir biçimde aygıt sürücü yazarak gözlemlenebilir ve test edilebilir. Ancak aygıt sürücüler çekirdeğin davranışında 
+    önemli değişikliklere neden olamamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıda aygıt sürücülerin bir dosua gibi kullanıldığını belirtmiştik. Gerçekten de aygıt sürücü üzerinde dosya 
+    işlemleri yapıldığında aslında aygıt sürücüyü yazan sistem programcısının belirlediği fonksiyonlar çağrılmaktadır. 
+    Örneğin:
+
+    open ---> aygıt sürücüdeki open fonksiyonu çağrılır
+    close ---> aygıt sürücüdeki closed fonksiyonu çağrılır
+    read ---> aygıt sürücüdeki read fonksiyonu çağrılır
+    write ---> aygıt sürücüdeki write fonksiyonu çağrılır
+    lseek ---> aygıt sürücüdeki lseek fonksiyonu çağrılır
+
+    Ancak her türlü işlem bir dosya işlemi yoluyla sağlanamamaktadır. Bir dosya kullanımı ile alakası olmayan aygıt dürücüdeki
+    spesifik bir kod ioctl denilen mekanizmayla da çağrılabilmektedir. Aygıt sürücüyü yazanlar aygıt dosyasını açarlar, 
+    ioctl isimli POSIX fonksiyonu bir kod numarasıyla çağırırlar. (Tabii bu POSIX fonksiyonu da aslında arka planda sys_ioctl
+    isimli sistem fobksiyonunu çağırmaktadır.) Böylece aygıt sürücü içerisinde belirlenmiş bir fonksiyon kullanıcı modundan 
+    çağrılabilmektedir. Tabii ioctl çağrısı yapıldığında çağrıyı yapan thread kullanıcı modundan çekirdek moduna geçmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aşağıdaki iskelet bir karakter aygıt sürücüsü oluşturulmuştur. Bu karakter aygıt sürücüsü için bir ioctl kodu da 
+    hazırlanmıştır. Aygıt sürücü kodu şöyledir:
+
+    /* test-driver.c */
+
+    #include <linux/module.h>
+    #include <linux/kernel.h>
+    #include <linux/fs.h>
+    #include <linux/cdev.h>
+    #include "test-driver.h"
+
+    MODULE_LICENSE("GPL");
+    MODULE_AUTHOR("Kaan Aslan");
+    MODULE_DESCRIPTION("test-driver");
+
+    static int test_driver_open(struct inode *inodep, struct file *filp);
+    static int test_driver_release(struct inode *inodep, struct file *filp);
+    static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+    static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+    static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+    static long ioctl_test(struct file *filp, unsigned long arg);
+
+    static dev_t g_dev;
+    static struct cdev g_cdev;
+    static struct file_operations g_fops = {
+        .owner = THIS_MODULE,
+        .open = test_driver_open,
+        .read = test_driver_read,
+        .write = test_driver_write,
+        .release = test_driver_release,
+        .unlocked_ioctl = test_driver_ioctl
+    };
+
+    static int __init test_driver_init(void)
+    {
+        int result;
+
+        printk(KERN_INFO "test-driver module initialization...\n");
+
+        if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+            printk(KERN_INFO "cannot alloc char driver!...\n");
+            return result;
+        }
+        cdev_init(&g_cdev, &g_fops);
+        if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+            unregister_chrdev_region(g_dev, 1);
+            printk(KERN_ERR "cannot add device!...\n");
+            return result;
+        }
+
+        return 0;
+    }
+
+    static void __exit test_driver_exit(void)
+    {
+        cdev_del(&g_cdev);
+        unregister_chrdev_region(g_dev, 1);
+
+        printk(KERN_INFO "test-driver module exit...\n");
+    }
+
+    static int test_driver_open(struct inode *inodep, struct file *filp)
+    {
+        printk(KERN_INFO "test-driver opened...\n");
+
+        return 0;
+    }
+
+    static int test_driver_release(struct inode *inodep, struct file *filp)
+    {
+        printk(KERN_INFO "test-driver closed...\n");
+
+        return 0;
+    }
+
+    static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        printk(KERN_INFO "test-driver read...\n");
+
+        return 0;
+    }
+
+    static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+    {
+        printk(KERN_INFO "test-driver write...\n");
+
+        return 0;
+    }
+
+    static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+    {
+        long result;
+        
+        printk(KERN_INFO "test_driver_ioctl...\n");
+
+        switch (cmd) {
+            case IOC_TEST:
+                result = ioctl_test(filp, arg);
+                break;  
+            default:
+                result = -ENOTTY;
+        }
+
+        return result;
+    }
+
+    long ioctl_test(struct file *filp, unsigned long arg)
+    {
+        printk(KERN_INFO "IOC_test_driver_TEST1\n");
+
+        return 0;
+    }
+
+    module_init(test_driver_init);
+    module_exit(test_driver_exit);
+
+    Burada kullanıcı modundan aygıt dosyası açıldığında aygıt sürücünün test_driver_open fonksiyonu, kapatıldığında 
+    test_driver_release fonksiyonu, aygıt dosyasından okuma yapılmak istedniğinde test_driver_read fonksiyonu ve aygıt 
+    sürücüye yazma yapılmak istendiğinde ise test_driver_write fonksiyonu çağrılacaktır. Bu fonksiyonlar çağrıldığında 
+    log mesajları yazdırılmaktadır. Ayrıca örneğimizde bir ioctl kodu da oluşturulmuştur. Bu ioctl kodu hem aygıt sürücüden
+    hem de kullanıcı modundan kullanıldığı için bir başlık dosyasında define edilmiştir:
+
+    /* test-driver.h */
+
+    #ifndef test_driver_DRIVER_H_
+    #define test_driver_DRIVER_H_
+
+    #include <linux/stddef.h>
+    #include <linux/ioctl.h>
+
+    #define TEST_DRIVER_MAGIC		't'
+    #define IOC_TEST		        _IO(TEST_DRIVER_MAGIC, 0)
+
+    #endif
+
+    İşte kullanıcı modundan biz aşağıdaki getirilebilmekte ioctl işlemi yaptığımızda aygıt sürücümüzdeki ioctl_test 
+    fonksiyonu çağrılacaktır. Bu aygıt sürücüyü kullanan örnek bir kulalnıcı modu programı şöyle yazılabilir:
+
+    /* app.c */
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <sys/ioctl.h>
+    #include "test-driver.h"
+
+    void exit_sys(const char *msg);
+
+    int main(void)
+    {
+        int fd;
+
+        if ((fd = open("test-driver", O_RDONLY)) == -1)
+            exit_sys("open");
+
+        if (ioctl(fd, IOC_TEST) == -1)
+            exit_sys("ioctl");
+
+        close(fd);
+
+        return 0;
+    }
+
+    void exit_sys(const char *msg)
+    {
+        perror(msg);
+
+        exit(EXIT_FAILURE);
+    }
+
+    Aygıt sürücümüzü şöyle derleyebilirsiniz:
+
+    $ make file=test-driver
+
+    Yükleme işlemini"load" betiği ile şöyle yapabilirsiniz:
+
+    $ sudo ./load test-driver
+
+    Bu işlemle dizin içerisinde "test-driver" isimli bir aygıt dosyası da oluşturulacaktır. 
+
+    İlgili C programını derleyerek aşağıdaki gibi çalıştırabilirsiniz:
+
+    $ gcc -Wall -o app app.c
+    $ ./app
+
+    Aygıt sürücüyü sistemden kaldırma işlemini de "unload" betiği ile şöyle yapabilirsiniz:
+
+    $ sudo ./unload test-driver
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-driver.h */
+
+#ifndef test_driver_DRIVER_H_
+#define test_driver_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define TEST_DRIVER_MAGIC		't'
+#define IOC_TEST		        _IO(TEST_DRIVER_MAGIC, 0)
+
+#endif
+
+/* test-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include "test-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("test-driver");
+
+static int test_driver_open(struct inode *inodep, struct file *filp);
+static int test_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_test(struct file *filp, unsigned long arg);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = test_driver_open,
+	.read = test_driver_read,
+	.write = test_driver_write,
+	.release = test_driver_release,
+    .unlocked_ioctl = test_driver_ioctl
+};
+
+static int __init test_driver_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "test-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static int test_driver_open(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "test-driver opened...\n");
+
+	return 0;
+}
+
+static int test_driver_release(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "test-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "test-driver read...\n");
+
+	return 0;
+}
+
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "test-driver write...\n");
+
+	return 0;
+}
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+	
+    printk(KERN_INFO "test_driver_ioctl...\n");
+
+    switch (cmd) {
+        case IOC_TEST:
+            result = ioctl_test(filp, arg);
+            break;  
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+long ioctl_test(struct file *filp, unsigned long arg)
+{
+    printk(KERN_INFO "IOC_test_driver_TEST1\n");
+
+    return 0;
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* app.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+
+    if ((fd = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, IOC_TEST) == -1)
+        exit_sys("ioctl");
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    <BURADA KALDIK>
+----------------------------------------------------------------------------------------------------------------------*/
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
