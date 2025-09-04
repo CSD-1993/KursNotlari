@@ -15626,7 +15626,367 @@ unsafe fn foo(pi32: *mut i32) {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-<BURADA KALDIK>
+                                    46. Ders 03/09/2025 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz önceki paragraflarda & ve &mut operatörlerinin referans türünden değerler ürettiğini ancak referanslardan aynı türden 
+    göstericilere otomatik dönüştürmenin olduğunu belirtmiştik. Ancak bu & ve &mut operatörleri referans ürettiği için ve 
+    referanslar da sahiplik (ownership) kurallarına tabi olduğu için bu durum bazı semantik ve gerçekleştirim (derleyici yazımını 
+    kastediyoruz) sorunlarının oluşmasına yol açmıştır. İşte Rust'ın 1.65.0 versiyonu (Kasım 2022) ile birlikte bu sorunu çözmek 
+    için Rust'a &raw operatörü de eklenmiştir. Bu operatör hiç referans üretmeden doğrudan C'deki & operatörü gibi değişkenin 
+    ya da değerin adresini elde etmektedir. Dolayısıyla "önce referans elde edip sonra otomatik dfönüştürme yapan & ve &mut 
+    operatörlerine doğrudan adres almak için bir seçenek" oluşturmaktadır. Eğer biz bir değişkenin ya da değerin adresini 
+    &raw operatörüyle alırsak referans semantiğini hiç devreye sokmamış oluruz. Bu da bazı durumlarda avantajlar sağlayabilmektedir. 
+
+    &raw operatörü (tabii & ile raw anahtar sözcüğü arasında boşluk karakterleri bulunabilir) yine const ve mut belirleyicileri 
+    ile kullanılmak zorundadır. Yani &raw atomlarını yine const ya da mut anahtar sözcüklerinden biri izlemek zorundadır. 
+    Örneğin:
+
+    let a: i32 = 10;
+    let pi32: *const i32;
+
+    pi32 = &raw const a;
+
+    Biz burada a değişkeninin adresini pi32 göstericisine atadık. Bunu aşağıdaki gibi de yapanbilirdik:
+
+    pi32 = &a;
+
+    Ancak &raw operatörü hiç referans semantiğini devreye sokmadan doğrudan adres alma işlemini yapmaktadır. Pek çok durumda
+    &a ile adres almakla &raw const ile adres almak arasında ya da &mut ile adres almakla &raw mut ile adres almak arasısında 
+    kodumuz bakımından bir farklılık olmamaktadır. Ancak bazı seyrek durumlarda farklılık ortaya çıkabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let a: i32 = 10;
+    let pi32: *const i32;
+
+    pi32 = &raw const a;        // geçerli
+
+    unsafe {
+        println!("{}", *pi32);
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Tabii bu biçimde mut bir değişkenin adresini *mut T türünden bir göstericiye atayacaksak operatörü &raw mut biçiminde 
+    kullanmalıyız. Örneğin:
+
+    let mut a: i32 = 10;
+    let pi32: *mut i32;
+
+    pi32 = &raw mut a;
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let mut a: i32 = 10;
+    let pi32: *mut i32;
+
+    pi32 = &raw mut a;
+
+    unsafe {
+        *pi32 = 20;
+        println!("{}", a);
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz Rust'ta bir değer ifadesinin (yani C'de bir sağ taraf değerinin) adresini alabiliyorduk. Bu durum derleyici o sabiti 
+    önce aynı türden bir geçici değişkenin içine yerleştirip o geçici değişkenin adresni alıyordu. Bu biçimde biz ham göstericilere 
+    de sabitlerinm adresini atayabiliriz. Örneğin:
+
+    let pi32: *const i32;
+
+    pi32 = &10;         // geçerli
+    unsafe {
+        println!("{}", *pi32);
+    }
+
+    Ancak değer ifadelerinin adresleri &raw operatörü ile alınamamaktadır. Yani &raw operatörü bu bağlamda C'deki & operatörü 
+    gibi işlev görmektedir:
+
+    let pi32: *const i32;
+
+    pi32 = &raw const 10;       // error!
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bu bölümde Rust'taki "sahiplik (ownership)" ve "ödünç alma (borrow)" mekanizması üzerinde duracağız. Sahiplik ve ödünç 
+    alma mekanizmaları başka programlama dillerinde tema olarak başka biçimlerde bulunmaktadır. Ancak Rust bu kavramları 
+    dilin semantiğine açık bir biçimde dahil etmiştir. Bu bakımdan bu mekanizma Rust'ı diğer programlama dillerinden ayıran 
+    ve Rust'a özgünlük sağlayan bir özelliktir. Aslında biz kursumuzda çeşitli örneklerde bu kavramlardan bahsetmiştik.
+    Muhtemelen sizlerin kafasında da bu mekanizma hakkında ipuçları oluşmutur. Ancak bu bölümde bu mekanizmayı daha teknik 
+    bir biçimde ele alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Pek çok dilde aynı türden iki nesnesinin (ya da yapı benzeri başka bir veri yapısının) birbirine atanması durumunda yapı 
+    nesnelerinin karşılıklı elemanları birbirine atanmaktadır. Bu durum çoğu kez bir soruna yol açmamaktadır. Öneğin C'de 
+    aşağıdaki gibi bir yapı olsun:
+
+    struct complex {
+        double real;
+        double imag;
+    };
+
+    Bu türden iki yapı nesnesinin birbirine atanması sırasında hiçbir soruna yol açmayacaktır. Örneğin:
+
+    struct complex z1 = {3, 4};
+    struct complex z2 = {5, 3};
+    ...
+
+    z2 = z1;
+
+    Aslında bu atamada derleyci tarafından şu işlem uygulanmaktadır:
+
+    z2.real = z1.real;
+    z2.imag = z1.imag;
+
+    Böyle bir atamanın bir soruna yol açmayacağı açıktır. Ancak eğer yapının bir elemanı tahsis edilmiş olan bir kaynağa referans 
+    ediyorsa bu türden iki yapı nesnesinin birbirine atanması sonucunda kaynak ve hedef yapı nesnelerinin elemanları aynı nesneye 
+    referans eder duruma gelmektedir. Bu durum da potansiyel bazı sorunlara yol açmaktadır. Bu sorunu göstericiler üzerinde örnekle 
+    açıklayalım. C'de aşağıdaki gibi bir yapı söz konusu olsun:
+
+    struct sample {
+        int a;
+        size_t len;
+        char *ptr;
+    };
+
+    Burada sample yapısının ptr elemanı dinamik olarak tahsis edilmiş bir alanı, len ise bu alanın uzunluğunu göstermektedir. 
+    a elemanı ise konumuzla ilgili olmayan herhangi bir elemanı belirtmektedir. Şimdi bu yapı türünden iki nesne yaratalım. 
+    Burada ve aşağıdaki örneklerde malloc fonksiyonunun başarı kontrolünü kodu kısaltmak için bilerek yapmayacağız:
+
+    struct sample s = {10, 100, (char *) malloc(100)};
+    struct sample k = {20, 200, (char *) malloc(200)};
+
+    Şimdi bu yapı nesnelerini birbirine atayalım:
+
+    k = s;
+
+    Burada çözülmesi gereken iki potansiyel sorun vardır:
+
+    1) k nesnesinin ptr elemanı free hale getirilmeden s nesnesinin ptr elemanı ona atanmış olacaktır. Bu atamada bellek 
+    sızıntısı oluşacaktır. 
+
+    2) Atamadan sonra hem s'nin hem de k'nın ptr elemanları aynı dinamik alanı gösteriyor olacaktır. Bu durumda o alanın 
+    free hale getirilmesi bu iki nesnenin ikisi de yok yok olduğunda yapılmalıdır. Bunu ayarlamak da bir çaba gerektirmektedir. 
+
+    Birinci problemi şöyle çözebiliriz:
+
+    free(k.ptr);
+    k = s;
+
+    Ancak ikinci problemin çözümü daha zordur. Programcının bu nesnenin ömürlerini kontrol etmesi ve uygun bir noktada dinamik
+    alanı free hale getirmesi gerekir. Bu ikinci sorunu çözmenin klasik yollarından biri göstericinin gösterdiği yerdeki dinamik 
+    alanda bir "referans sayacı (reference counter)"  tutmaktır. Nesnenin kullanımı bittiğinde programcının bir fonksiyonu 
+    çağırması (örneğin deallocate isminde bir fonksiyon olabilir) istenir. Bu fonksiyon da referans sayacını bir eksiltir,  
+    referans sayacı 0'a düştüğünde free işlemini yapar. Örneğin:
+
+    struct buf {
+        size_t refcount;
+        size_t len;
+        char str[];
+    }
+
+    struct sample {
+        int a;
+        struct buf *ptr;
+    };
+
+    Artık nesneyi yaratan bir fonksiyon yazabiliriz:
+
+    void create_sample(struct sample *s, int a, size_t len)
+    {
+        s->a = a;
+        s->ptr = (struct buf *) malloc(sizeof(size_t) + sizeof(size_t) + len);
+        s->ptr.refcount = 1;
+    }
+   
+    Referans sayacının başlangıç değerinin 1 olduğuna dikkat ediniz. deallocate fonksiyonu şöyle yazılabilir:
+
+    void deallocate(struct sample *ps)
+    {
+        if (--ps->ptr->refcount == 0)
+            free(ps->ptr);
+    }
+
+    Tabii C'de bu referans sayacının artırılmasını programcı kendisi sağlamalıdır. Bunu kolaylaştırmak için bir atama fonksiyonu 
+    yazabilir:
+
+    void assign(struct sample *left, const struct sample *right)
+    {
+        deallocate(left);
+        left->a = right->a;
+        left->len = g->len;
+        left->ptr = right->ptr;
+        ++right->ptr->refcount;     /* left->ptr ve right->ptr zaten aynı yapıyu gösteriyor */
+    }
+
+    Yazdığımız sistemin kullanımı da şöyle olabilir:
+
+    struct sample s;
+    struct sample k;
+
+    create_sample(&s, 10, 100);
+    create_sample(&k, 20, 100);
+    ...
+
+    assign(&k, &s); 
+    ...
+    deallocate(&k);
+    deallocate(&r);
+   
+
+    Böyle bir referans sayacı sistemi manuel bir biçimde yukarıdaki gibi oluşturulabilir. Ancak bunun genelleştirilmesi 
+    o kadar kolay değildir. İşte C++, Java ve C# gibi dillerde bu genelleştirmenin yapılabilmesi için nesneler yaratıldığında
+    ve yok edildiğinde derleyici tarafından otomatik bazı fonksiyonlar çağrılmaktadır (bunlara tipik olarak "constructor" ve 
+    "destructor" denilmektedir.) Programcı da bu tür işlemleri daha lolay gerçekleştirebilmektedir. C++'ta ismine "kopya yapıcı 
+    fonksiyonu (copy constructor)" ve "kopya atama operatör fonksiyonu (copy assignement operator)" denilen özel fonksiyonlar 
+    da yazılabilmektedir. Derleyici iki sınıf nesnesi birbirine atandığında otomatik olarak sınıfın kopya atama operatör 
+    fonksiyonunu çağırmaktadır. Ayrıca bu dillerde genelleştirme için ismine "template" ya da "generic" fonksiyonlar ve sınıflardan 
+    da faydalanılabilmektedir. Böylece bu dillerde referans sayaçlı nesneler daha kolay ve genel biçimde oluşturulabilmektedir. 
+
+    Yukarıdaki sorunu çözmenin ikinci klasik yolu da "derin kopyalama (deep copy)" uygulamaktır. Derin kopyalama ile yapı 
+    nesnelerinin içerisindeki göstericilerin gösterdiği dinamik alanların atama sırasında kopyaları çıkartılır. Böylece
+    nesnelerin aynı yeri göstermesi engellenir. Örneğin:
+
+    struct sample {
+        int a;
+        size_t len;
+        char *ptr;
+    };
+
+    void assign(struct sample *left, struct sample *right)
+    {
+        if (left == right)
+            return;
+        free(left->ptr);
+        left->a = right->a;
+        left->len = right->len;
+        left->ptr = (char *)malloc(right->len);
+        memcpy(left->ptr, right->ptr, right->len);
+    }
+
+    Artık nesnelerin kullanımı bitince doğrudan ptr göstericisi free hale getirilebilir:
+
+    void deallocate(struct sample *ps)
+    {
+        free(ps->ptr);
+    }
+
+    Kullanım şöyle olabilir:
+
+    struct sample s = {10, (char *) malloc(10), 100};
+    struct sample k = {20, (char *) malloc(10), 200};
+    ...
+
+    assign(&s, &k);
+    ...
+
+    deallocate(&k);
+    dealloace(&s);
+
+    Yukarıda da belirttiğimiz gibi C++'ta iki sınıf nesnesi biribirine atandaığında ismine "kopya atama operatör fonksiyonu 
+    (copy assignment operator)" denilen özel bir fonksiyon çağrılmaktadır. Sınıfı yazanlar da bu fonksiyonun içini yazarak 
+    derin kopyalamanın otomatik yapılmasını sağlayabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de yukarıdaki sorunun Rust'ta nasıl çözüldüğü üzerinde duralım. Yukarıdaki problemin Rust'taki çözümü oldukça basit 
+    bir temele dayandırılmıştır. Aynı türden iki yapı ya da enum değişkeni birbirine atandığında artık değişkenin içeriği 
+    "taşınmış ("move" edilmiş)" olur ve kaynak değişken artık kullanılamaz. Derleyici bu durumu derleme aşamasında denetlemektedir. 
+    Böylece Rust'ta zaten hiçbir zaman yukarıdaki sorun ortaya çıkmayacaktır. Örneğin:
+
+    struct Sample {
+        a: i32,
+        ptr: *const u8;
+    }
+
+    Burada Sample yapısının new metodunda bu ptr elemanı için bir alanın tahsis edildiğini varsayalım. Yani yapının ptr elemanı
+    tıpkı yukarıdaki C örneklerindeki gibi tahsis edilmiş olan dinamik alanın başlangıç adresini tutuyor olsun:
+
+    let s: Sample = Sample::new(10, 100);
+    let k: Sample;
+
+    Biz burada aşağıdaki gibi bir atama yapmış olalım:
+
+    k = s;
+
+    Rust böyle bir atamada tıpkı C'de olduğu gibi yapının karşılıklı elemanlarını birbirine atamaktadır. Ancak atamadan sonra 
+    artık s'in kullanılmasına izin vermemektedir. Dolayısıyla yukarıdaki sorun Rust'ta zaten hiç oluşmayacaktır.Çünkü biz bu 
+    atamadan sonra eğer s'i kullanmaya çalışırsak zaten derleme zamanında error oluşacaktır. Ancak burada yine de çözülmesi
+     gereken bir sorun daha vardır. Sorunu açıklayalım:
+
+    let s: Sample = Sample::new(10, 100);
+    let k: Sample = Sample::new(20, 200);
+
+    k = s;
+
+    Burada derleyici s'in tüm elemanlarını k'ya atadığında k'daki ptr göstericisinin gösterdiği yer free hale getirilemeyecektir. 
+    Bu durumda bellek sızıntısı (memory leak) oluşacaktır. İşte Rust'ta bu sorun Drop isimli trait ile çözülmştür. Rust 
+    derleyicisi bu durumda eğer yapı için Drop trait'inin drop metodu yazılmışsa ("implemente" edilmişse) atamadan önce soldaki 
+    değişken için bu drop metodunu çağırmaktadır. Bu tür durumlarda yapıyı yazanın bu drop metodunu yazması ve tahsis edilmiş 
+    olan alanı serbest bırakması beklenmektedir. Tabii drop metodu yalnızca atama sırasında değil bir yapı ya da enum türünden 
+    değişken faaliyet alanını bitirip yaşamını kaybederken de çağrılmaktadır. Bu drop metodunun bir çeşit C++, Java ve C# gibi 
+    dillerdeki "yıkıcı fonksiyon (destructor)" etkisi yarattığına dikkat ediniz. 
+
+    Buradan şöyle bir özet yapabiliriz:
+
+    1) Aynı türden iki yapı ya da enum değişkeni birbirine atandığında aslında sağdaki yapı değişkeninin içeriği soldaki
+    yapı değişkenine taşınmaktadır ("move" edilmektedir.) Atama işleminden sonra artık sağdaki değişken herhangi bir biçimde
+    kullanılamaz. 
+
+    2) Atama sırasında eğer soldaki yapı ya da enum türü için drop metodu yazılmışsa derleyici atamadan önce bu drop metodunu 
+    çağırır. Boşaltımlar tipik olarak programcı tarafından bu drop metotlarında yapılmalıdır. 
+
+    3) Yapı ya da enum değişkeninin faaliyet alanı bittiğinde tıpkı diğer bazı dillerdeki "destructor" mekanizmasında olduğu 
+    gibi eğer değişkenin içerisindeki değer taşınmamışsa ve ilgili yapı ya da enum türü için drop metodu yazılmışsa drop 
+    metodu derleyici tarafından çağrılmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
