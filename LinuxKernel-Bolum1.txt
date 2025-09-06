@@ -4434,44 +4434,46 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                    15. Ders 06/09/2025 - Cumartesi
+                                        15. Ders 06/09/2025 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de görmüş olduğumuz task_struct bağlı listeleri üzerinde gezinme işlemlerine ilişkin örnekler verelim. Daha 
-    önceden de belirttiğimiz gibi böyle testler için çekirdeği yeniden derlememize gerek yoktur. Basit bir çekirdek 
-    modülü ya da aygıt sürücü ile bu tür testleri yapabiliriz. 
+    Şimdi de görmüş olduğumuz task_struct yapına ilişkin bağlı listeler üzerinde gezinme işlemlerine ilişkin örnekler 
+    verelim. Daha önceden de belirttiğimiz gibi böyle testler için çekirdeği yeniden derlememize gerek yoktur. Basit bir 
+    çekirdek modülü ya da aygıt sürücü yazarak da bu tür testleri yapabiliriz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Biz task_struct listelerini dolaşırken çekirdek bu listelere eleman eklerse ya da bu listelerden eleman silerse 
-    bizim dolaşım yapan kodunuzda "tanımsız davranışlar (undefined behaviors)" oluşabilir. Bu durum da tüm sistemin 
-    çökmesine yol açabilir. Bu tür durumlarda dolaşımın senkronizasyon nesneleri kullanılarak yapılması gerekmektedir. 
-    Biz kursumuzda çekirdeğin senkronizasyon nesnelerini ileride ayrı başlık halinde ele alacağız. Birden fazl okumada
-    beklemenin olmadığı ancak bir yazan varsa okuyan ve yazan thread'lerin bekletildiği senkronizasyon nesnelerine 
-    "okuma yazma kilitleri (readers-writer locks)" denilmektedir. Eskiden Linux çekirdeğinde task_struct nesneleri 
-    dolaşılırken çekirdek tasklist_lock isimli bir okuma yazma kilidini kullanıyordu. Biz de dolaşımları bu kilidi 
-    kullanarak yapabiliyorduk. Ancak daha sonra Linux çekirdeğinde "kilitsiz (lock-free) senkronizasyon nesneleri 
-    yaygınlaştı. Artık belli bir süredir çekirdek task_struct listeleri üzerinde kilitsiz bir biçimde "RCU (Read-Copy-Update)" 
-    mekanizamasıyla işlemler yapmaktadır. Dolayısıyşa bizim de çekirdeğin bu mekanizmasına kendimizi uydurarak dolaşım 
-    yapmamız gerekir. Biz mekanizmayı daha sonra ayrı konuda ele alacağız. Ancak bu noktada RCU mekanizması ile task_struct 
-    listelerinin dolaşışması için bazı temel bilgiler de vereceğiz. 
+    Biz task_struct listelerini dolaşırken çekirdek bu listelere eleman eklerse ya da bu listelerden eleman silerse bizim 
+    dolaşım yapan kodunuzda "tanımsız davranışlar (undefined behaviors)" oluşabilir. Bu durum da tüm sistemin çökmesine 
+    yol açabilir. Bu tür durumlarda dolaşımın senkronizasyon nesneleri kullanılarak yapılması gerekmektedir. Biz kursumuzda 
+    çekirdeğin senkronizasyon nesnelerini ileride ayrı başlık halinde ele alacağız. Birden fazla thread'in beklemedne işlem 
+    yaptığı ancak bir yazan thread varsa okuyan ve yazan thread'lerin bekletildiği senkronizasyon nesnelerine "okuma yazma 
+    kilitleri (readers-writer locks)" denilmektedir. Eskiden Linux çekirdeğinde task_struct nesneleri dolaşılırken çekirdek 
+    tasklist_lock isimli bir okuma yazma kilidini kullanıyordu. Biz de dolaşımları bu kilidi kilitleyerek yapabiliyorduk. 
+    Ancak daha sonra Linux çekirdeğinde "kilitsiz (lock-free) senkronizasyon nesneleri yaygınlaştı. Artık belli bir süredir 
+    çekirdek task_struct listeleri üzerinde kilitsiz bir biçimde "RCU (Read-Copy-Update)" mekanizamasıyla işlemler yapmaktadır. 
+    Dolayısıyşa bizim de kendimizi çekirdeğin bu mekanizmasına uydurarak dolaşım yapmamız gerekir. Biz RCU mekanizmasının 
+    ayrıntılarını ileride ayrı konuda ele alacağız. Ancak bu noktada RCU mekanizması ile task_struct listelerinin dolaşılması 
+    için bazı temel bilgiler de vereceğiz. 
+----------------------------------------------------------------------------------------------------------------------*/
 
-    RCU mekanizmasıyla bağlı listeleri dolaşırken işlemin başında rcu_read_lock fonksiyonun ve işlemin sonunda da 
-    rcu_read_unlock fonksiyonun çağrılması gerekir. Fonksiyonların prototipleri şöyledir:
+/*----------------------------------------------------------------------------------------------------------------------
+    RCU mekanizmasıyla bağlı listeleri dolaşırken işlemin başında rcu_read_lock fonksiyonun, işlemin sonunda da rcu_read_unlock 
+    fonksiyonun çağrılması gerekmektedir. Bu fonksiyonların prototipleri şöyledir:
 
     <linux/rcupdate.h>
 
     void rcu_read_lock(void);
     void rcu_read_unlock(void);
 
-    Bizim dolaşım kodunu bu iki çağrı arasına yerleştirmemiz gerekmektedir:
+    Bizim dolaşım kodunu bu iki çağrı arasına yerleştirmemiz gerekir:
 
     rcu_read_lock();
     ...
     rcu_read_unlock();
 
-    RCU mekanizması altında bağlı listelerin bağlarına erişilirken rcu_dereference makrosunun kullanılması gerekir. 
+    RCU mekanizması altında bağlı listelerin bağlarına erişilirken rcu_dereference makrosunun kullanılması kullanılmalıdır. 
     Bu makroya parametre olarak erişeceğiniz bağlı listenin prev ya da next düğümlerini vermelisiniz. Bu durumda örneğin
     sistemdeki bütün proseslerin ana thread'lerine ilişkin task_struct nesneleri aşağıdaki gibi güvenli bir biçimde 
     dolaşılabilir:
@@ -4481,10 +4483,9 @@ void exit_sys(const char *msg)
         struct task_struct *ts;
         struct list_head *lh;
 
-        ts = &init_task;
-
         rcu_read_lock();
-        lh = rcu_dereference(ts->tasks.next);
+
+        lh = rcu_dereference(init_task.tasks.next);
         do { 
             ts = container_of(lh, struct task_struct, tasks);      /* ts = list_entry((lh, struct task_struct, tasks) */
             printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
@@ -4492,20 +4493,42 @@ void exit_sys(const char *msg)
         } while (lh != &init_task.tasks); 
 
         rcu_read_unlock();
-
     }
 
-    container_of makrosı list_entry makrosunun tamamen eşdeğer olduğunu anımsayınız. printk fonksiyonu ile task_struct 
+    container_of makrosunun list_entry makrosunun tamamen eşdeğer olduğunu anımsayınız. printk fonksiyonu ile task_struct 
     içerisindeki pid değerinin yanı sıra comm elemanın da yazıdırıldığına dikkat ediniz. Bu comm elemanında en fazla 
-    16 karakterlik task_struct nesnesini betimleyen bir yazı bulunmaktadır. Bu yazı exec fonksiyonları tarafından 
-    çalıştırılan programın dosya isminden hareketle oluşturulmaktadır. pthread_create fonksiyonu ile yaratılan thread'lerin 
-    de comm alanında yanı yazı bulunur. Bu yazı istenirse prctl isimli kütüphane fonksiyonu ile değiştirilebilir. Tabii
-    bu fonksiyon da sys_prctl isimli sistem fonksiyonunu çağırmaktadır. Thread'lerin isimlerini pthread_setname_np 
-    fonksiyonu ile de değiştirebiliriz. pthread_setname_np bir POSIX fonksiyonu değildir. libc kütüphanesinde bulunmaktadır. 
+    16 karakterlik task_struct nesnesini betimleyen bir yazı bulunmaktadır. fork işlemi sırasında ya da thread yaratımı 
+    sırasında comm elemanındaki yazı bu işlemi yapan thread'in task_struct nesnesindeki comm elemanından kopyalanmaktadır. 
+    exec işlemleri sırasında ise bu yazı çalıştırılan programın dosya isminden hareketle değiştirilmektedir. comm elemanındaki 
+    yazı istenirse prctl isimli kütüphane fonksiyonu ile istenildeiği zaman da değiştirilebilir. Tabii bu fonksiyon da 
+    sys_prctl isimli sistem fonksiyonunu çağırmaktadır. Linux sistemlerinde thread'lere pthread_setname_np fonksiyonu ile 
+    isimlerde de verilebilmektedir. Bu fonksiyonla thread'e bir isim verildiğinde thread'e ilişkin task_struct nesnesini 
+    comm elemanındaki yazı da değiştirilmektedir. (pthread_setname_np bir POSIX fonksiyonu değildir. libc kütüphanesinde 
+    bulunmaktadır.)
 
-    Aşağıda bu dolaşımı yapan örnek bir çekirdek modülü verilmiştir. Modulü aşağıdaki derleyip yüklediniz zaman modülün 
-    init fonksiyonu içerisinde yukarıdaki walk_processes fonksiyonu çağrılacaktır. Yükleme işlemindne sonda "dmesg" komutunu
-    kullandığınızda tüm task_struc nesnelerini "çekirdeğin ring tampununda" görüntüleyebilirsiniz. 
+    <linux/sched/signal.h> dosyası içerisinde next_task isimli bir makro da vardır. Bu makro bir task_struct nesnesi 
+    adresini parametre olarak alıp RCU mekanizmasına uygun olarak onun tasks.next göstericisinin gösterdiği yerdeki 
+    task_struct nesnesini vermektedir. Bu makro kullanılarak walk_process fonksiyonu şöyle de yazılabilir:
+
+    void walk_processes(void)
+    {
+        struct task_struct *ts;
+        
+        rcu_read_lock();
+
+        ts = next_task(&init_task);
+        do { 
+            printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
+            ts = next_task(ts);
+        } while (ts != &init_task); 
+
+        rcu_read_unlock();
+    }
+
+    Aşağıda tüm proseslerin ana thread'leribi dolaşan örnek bir çekirdek modülü verilmiştir. Modulü aşağıdaki derleyip 
+    yüklediğiniz zaman modülün init fonksiyonu içerisinde yukarıdaki walk_processes fonksiyonu çağrılacaktır. Yükleme 
+    işleminden sonda "dmesg" komutunu kullandığınızda proseslerin ana thread'lerine ilişkin task_struct nesnelerini 
+    "çekirdeğin ring tampununda" görüntüleyebilirsiniz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* test-module.c */
@@ -4534,10 +4557,9 @@ void walk_processes(void)
     struct task_struct *ts;
     struct list_head *lh;
 
-    ts = &init_task;
-
     rcu_read_lock();
-    lh = rcu_dereference(ts->tasks.next);
+
+    lh = rcu_dereference(init_task.tasks.next);
     do { 
         ts = container_of(lh, struct task_struct, tasks);      /* ts = list_entry((lh, struct task_struct, tasks) */
         printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
@@ -4545,7 +4567,6 @@ void walk_processes(void)
     } while (lh != &init_task.tasks); 
 
     rcu_read_unlock();
-
 }
 
 static void test_module_exit(void)
@@ -4587,21 +4608,22 @@ module=$1
 rm -f $module
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Aslında tasks listesini daha kolay dolaşmak için çekirdek kodlarında <linux/sched/signal.h> başlık dosyasındaki 
-    for_each_process isimli bir döngü makrosu kullanılmaktadır. Bu makroya parametre olarak task_struct türünden bir 
-    gösterici verilir. Bu makroda her dolaşımda sıradaki task_struct nesnesinin adresini bu göstericiye yerleştirir. 
-    Bu makro kendi içerisinde rcu_dereference işlemini de yapmaktadır. Bu makroyla dolaşım şöyle yapılmaktadır:
+    Aslında tasks listesini daha kolay dolaşmak için çekirdek kodlarında <linux/sched/signal.h> başlık dosyasında bulunan 
+    for_each_process isimli bir döngü makrosu da kullanılmaktadır. Bu makroya parametre olarak task_struct türünden bir 
+    gösterici verilir. Bu makro da her dolaşımda sıradaki task_struct nesnesinin adresini bu göstericiye yerleştirir. 
+    for_each_process makrosu kendi içerisinde rcu_dereference işlemini de yapmaktadır. Bu makroyla dolaşım tipik olarak 
+    şöyle yapılmaktadır:
 
     rcu_read_lock();
     
     for_each_prosess(ts) {
-        ...
+        /* ... */
     }
 
     rcu_read_unlock();
 
     Aslında çoğu kez <linux/sched/signal.h> başlık dosyasının include edilmesine gerek kalmamaktadır. Çünkü bu dosya çok 
-    temel bir dosya olduğu için zaten <linux/kernel.h> başlık dosyalarından include edilmektedir. 
+    temel bir dosya olduğu için zaten <linux/kernel.h> başlık dosyasında include edilmektedir. 
     
     Dolaşımı yapan fonsiyonu şöyle yazabiliriz:
 
@@ -4694,11 +4716,51 @@ module=$1
 rm -f $module
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Bağlı listeleri RCU mekanizmasına uygun biçimde dolaşan list_for_each_entry_rcu isimli bir döngü makrosu da vardır. 
+    Bu makro <linux/rculist.h> dosyasında bulunmaktadır. Bu makrosuunun parametrik yapısı şöyledir:
+
+    <linux/rculist.h> 
+
+    list_for_each_entry_rcu(pos, head, member)
+
+    Makronun birinzi parametresi bağın içinde bulunduğu nesnenin adresinin yerleştirileceği göstericiyi, ikinci parametresi 
+    kök bağ düğümünün adresini ve üçüncü parametresi de kök bağ düğümünn ismini almaktadır. Tüm proseslerin ana thread'lerini 
+    dolaşan fonksiyonu bu makroyu kullanarak da aşağıdaki gibi yazabilirdik:
+
+    void walk_processes(void)
+    {
+        struct task_struct *ts;
+
+        rcu_read_lock();
+
+        list_for_each_entry_rcu(ts, &init_task.tasks, tasks) {
+            printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm); 
+        }
+
+        rcu_read_unlock();
+    }
+
+    Aynı başlık dosyasındaki list_entry_rcu makrosu bir bağın adresini alarak RCU mekanizmasına uygun bir biçimde 
+    bağın bulunduğu nesnesin adresi vermektedir. Bu makronun parametrik yapısı da şöyledir:
+
+    <linux/rculist.h> 
+
+    list_entry_rcu(ptr, type, member)
+
+    Makronun birinci parametresi bağ düğümünün adresini, ikinci parametresi bağın içinde bulunduğu yapının tür ismini,
+    üçüncü paranetresi ise bağ ismini almaktadır. Makro bağın içinde bulunduğu nesnenin adresini vermektedir. Aslında 
+    önceki paragraflarda gördüğümüz next_task makrosu da bu makro kullanılarak aşağıdaki gibi yazılmıştır:
+
+    #define next_task(p) \
+	    list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
     Anımsanacağı gibi belli bir prosesin thread'lerine ilişkin task_struct nesneleri signal nesnesindeki thread_head 
     düğümü kök alınarak thread_node düğümlerinin dolaşılmasıyla elde ediliyordu. Biz de bu dolaşımı aşağıdaki gibi bir 
     kodla sağlayabiliriz:
 
-    
+    <BURADA KALDIK>   
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
