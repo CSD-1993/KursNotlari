@@ -16,7 +16,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 02/09/2025 - Salı
+                                    Son Güncelleme: 06/09/2025 - Cumartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -3603,9 +3603,9 @@ int main(void)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Çekirdek ayrıca tüm task_struct nesnelerini de task_struct içerisindeki tasks isimli bir düğüm ile birbirine bağlamaktadır. 
-    Yani eğer sistemdeki tüm proseslerim tüm thread'lerine ilişkin task_struct nesnelerinin dolaşılması için bu tasks
-    düğümü kullanılabilir:
+    Çekirdek ayrıca proseslerin ana therad'lerine ilişkin task_struct nesnelerini de task_struct içerisindeki tasks 
+    isimli bir düğüm ile birbirine bağlamaktadır. Yani eğer sistemdeki tüm proseslerin ana thread'lerine ilişkin task_struct 
+    nesnelerinin dolaşılması için bu tasks düğümü kullanılabilir:
 
         struct task_struct {
         /* ... */
@@ -3619,7 +3619,7 @@ int main(void)
 
         struct list_head children;                  /* alt proses listesinin kök düğümü */
         struct list_head sibling;                   /* alt proseslerin tutulduğu liste bağı */
-        struct struct list_head	tasks;              /* tüm task_struct nesnelerinin tutulduğu liste bağı */
+        struct struct list_head	tasks;              /* ana thread'lere ilişkin task_struct nesnelerinin tutulduğu liste bağı */
 
         /* ... */
     };
@@ -3657,8 +3657,8 @@ int main(void)
     değildir. Geleneksel olarak UNIX/Linux sistemlerinde sistem boot edildiğinde yaratılan bu tür proseslere "swapper"
     ya da "pager" da deniliyordu. init_task prosesi init prosesini yarattıktan sonra işlevini sonlandırarak durdurulmaktadır. 
     Ancak bu prosese ilişkin task_struct nesnesi gerçek anlamda hiçbir zaman yok edilmemektedir. İşte init_task prosesinin 
-    task_struct nesnesi tüm task_struct nesnelerini dolaşmak için bir kök düğüm olarak kullanılmaktadır. O halde tasks 
-    düğümlerinin kök düğümü init_task.tasks elemanıdır.
+    task_struct nesnesi proseslerin ana thread'lerine ilişkin task_struct nesnelerini dolaşmak için bir kök düğüm olarak 
+    kullanılmaktadır. O halde tasks düğümlerinin kök düğümü init_task.tasks elemanıdır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3682,8 +3682,8 @@ int main(void)
 
     - Prosesin alt proseslerini elde etmek için prosesin ana thread'inin children kök düğümünden yola çıkmak gerekir. 
 
-    - Çekirdek yaratılmış olan tüm task_struct nesnelerini ayrıca task_struct içerisindeki tasks düğümüyle birbirine 
-    bağlamaktadır. Bu düğümüm kökü de init_task.tasks elemanıdır.
+    - Çekirdek yaratılmış olan tüm proseslerin ana thread'lerine ilişkin task_struct nesnelerini ayrıca task_struct 
+    içerisindeki tasks düğümüyle birbirine bağlamaktadır. Bu düğümüm kökü de init_task.tasks elemanıdır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3708,9 +3708,9 @@ int main(void)
     ilişkin bu task_struct nesnesini göstermektedir. O anda çalışmakta olan thread eğer prosesin ana thread'i ise 
     current == group_leader koşulunun sağlanacağına da dikkat ediniz. 
 
-    Soru: Sistemdeki tüm task_struct nesneleri nasıl dolaşılır?
-    Yanıt: init_task prosesindeki tasks düğümü kök düğüm yapılıp tasks düğümleri dolaşılırsa tüm task_struct nesneleri 
-    elde edilebilir. 
+    Soru: Sistemdeki tüm proseslerin ana thread'lerine ilişkin task_struct nesneleri nasıl dolaşılır?
+    Yanıt: init_task prosesindeki tasks düğümü kök düğüm yapılıp tasks düğümleri dolaşılırsa tüm proseslerin ana 
+    thread'lerine ilişkin task_struct nesneleri elde edilebilir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3768,7 +3768,7 @@ int main(void)
 
     Burada ".ko" uzantısı belirtilmeyebilir.
 
-    Aygıt sürücünün yüklenip yüklenmediğini anlayabilmek için "/proc/devices" dosyasına başvurabilirsiniz. 
+    Aygıt sürücünün yüklenip yüklenmediğini anlayabilmek için "/proc/devices" dosyasına başvurabilirsiniz.   
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3808,17 +3808,17 @@ int main(void)
 
     MODULE_LICENSE("GPL");
 
-    int helloworld_init(void);
-    void helloworld_exit(void);
+    static int helloworld_init(void);
+    static void helloworld_exit(void);
 
-    int helloworld_init(void)
+    static int helloworld_init(void)
     {
         printk(KERN_INFO "Hello World...\n");
 
         return 0;
     }
 
-    void helloworld_exit(void)
+    static void helloworld_exit(void)
     {
         printk(KERN_INFO "Goodbye World...\n");
     }
@@ -3848,6 +3848,20 @@ int main(void)
 
     printk fonksiyonun kullanımı büyük ölçüde printf fonksiyonuna benzemektedir. Yani bu fonksiyonla değişkenler 
     içeriisndeki değerler de yazdırılabilmektedir. 
+
+    Çekirdek modüllerini ve aygıt sürücüleri yazarken build sistemi include dosyaları için aşağıdaki dizini kök dizin 
+    kabul etmektedir:
+    
+    "/lib/modules/$(shell uname -r)/build/include" 
+
+    Burada build dizini aslında bir sembolik bağlantı belirtmektedir. Bu sembolik bağlantı başlık dosyalarının (ya da 
+    çekirdek kodlarının bulunduğu) ana dizine referans etmektedir. Dolayısıyla include işlemlerinde kök dizin aslında 
+    çekirdek kodlarındakki "include" dizini olmaktadır. Çekirdke modüllerinde ve aygıt sürücülerde bir başlık dosyasını
+    include ederken bu çekirdeğin kaynak kod ağacındaki "include" dizininden itibaren yol belirtilmesi gerekir. Örneğin:
+
+    #include <linux/module.h>
+
+    Burada aslında Linux kaynak kod ağacındaki include dizininin itibaren bir yol belirtilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -4007,6 +4021,19 @@ int main(void)
     Aşağıda iskelet bir karakter aygıt sürücüsü oluşturulmuştur. Bu karakter aygıt sürücüsü için bir ioctl kodu da 
     hazırlanmıştır. Aygıt sürücü kodu şöyledir:
 
+    /* test-driver.h */
+
+    #ifndef test_driver_DRIVER_H_
+    #define test_driver_DRIVER_H_
+
+    #include <linux/stddef.h>
+    #include <linux/ioctl.h>
+
+    #define TEST_DRIVER_MAGIC		't'
+    #define IOC_TEST		        _IO(TEST_DRIVER_MAGIC, 0)
+
+    #endif
+
     /* test-driver.c */
 
     #include <linux/module.h>
@@ -4113,7 +4140,7 @@ int main(void)
 
     long ioctl_test(struct file *filp, unsigned long arg)
     {
-        printk(KERN_INFO "IOC_test_driver_TEST1\n");
+        printk(KERN_INFO "ioctl_test...\n");
 
         return 0;
     }
@@ -4407,29 +4434,271 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-    <BURADA KALDIK>
-----------------------------------------------------------------------------------------------------------------------*/
-     
+                                    15. Ders 06/09/2025 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-
+    Şimdi de görmüş olduğumuz task_struct bağlı listeleri üzerinde gezinme işlemlerine ilişkin örnekler verelim. Daha 
+    önceden de belirttiğimiz gibi böyle testler için çekirdeği yeniden derlememize gerek yoktur. Basit bir çekirdek 
+    modülü ya da aygıt sürücü ile bu tür testleri yapabiliriz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Biz task_struct listelerini dolaşırken çekirdek bu listelere eleman eklerse ya da bu listelerden eleman silerse 
+    bizim dolaşım yapan kodunuzda "tanımsız davranışlar (undefined behaviors)" oluşabilir. Bu durum da tüm sistemin 
+    çökmesine yol açabilir. Bu tür durumlarda dolaşımın senkronizasyon nesneleri kullanılarak yapılması gerekmektedir. 
+    Biz kursumuzda çekirdeğin senkronizasyon nesnelerini ileride ayrı başlık halinde ele alacağız. Birden fazl okumada
+    beklemenin olmadığı ancak bir yazan varsa okuyan ve yazan thread'lerin bekletildiği senkronizasyon nesnelerine 
+    "okuma yazma kilitleri (readers-writer locks)" denilmektedir. Eskiden Linux çekirdeğinde task_struct nesneleri 
+    dolaşılırken çekirdek tasklist_lock isimli bir okuma yazma kilidini kullanıyordu. Biz de dolaşımları bu kilidi 
+    kullanarak yapabiliyorduk. Ancak daha sonra Linux çekirdeğinde "kilitsiz (lock-free) senkronizasyon nesneleri 
+    yaygınlaştı. Artık belli bir süredir çekirdek task_struct listeleri üzerinde kilitsiz bir biçimde "RCU (Read-Copy-Update)" 
+    mekanizamasıyla işlemler yapmaktadır. Dolayısıyşa bizim de çekirdeğin bu mekanizmasına kendimizi uydurarak dolaşım 
+    yapmamız gerekir. Biz mekanizmayı daha sonra ayrı konuda ele alacağız. Ancak bu noktada RCU mekanizması ile task_struct 
+    listelerinin dolaşışması için bazı temel bilgiler de vereceğiz. 
 
+    RCU mekanizmasıyla bağlı listeleri dolaşırken işlemin başında rcu_read_lock fonksiyonun ve işlemin sonunda da 
+    rcu_read_unlock fonksiyonun çağrılması gerekir. Fonksiyonların prototipleri şöyledir:
+
+    <linux/rcupdate.h>
+
+    void rcu_read_lock(void);
+    void rcu_read_unlock(void);
+
+    Bizim dolaşım kodunu bu iki çağrı arasına yerleştirmemiz gerekmektedir:
+
+    rcu_read_lock();
+    ...
+    rcu_read_unlock();
+
+    RCU mekanizması altında bağlı listelerin bağlarına erişilirken rcu_dereference makrosunun kullanılması gerekir. 
+    Bu makroya parametre olarak erişeceğiniz bağlı listenin prev ya da next düğümlerini vermelisiniz. Bu durumda örneğin
+    sistemdeki bütün proseslerin ana thread'lerine ilişkin task_struct nesneleri aşağıdaki gibi güvenli bir biçimde 
+    dolaşılabilir:
+
+    void walk_processes(void)
+    {
+        struct task_struct *ts;
+        struct list_head *lh;
+
+        ts = &init_task;
+
+        rcu_read_lock();
+        lh = rcu_dereference(ts->tasks.next);
+        do { 
+            ts = container_of(lh, struct task_struct, tasks);      /* ts = list_entry((lh, struct task_struct, tasks) */
+            printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
+            lh = rcu_dereference(ts->tasks.next);
+        } while (lh != &init_task.tasks); 
+
+        rcu_read_unlock();
+
+    }
+
+    container_of makrosı list_entry makrosunun tamamen eşdeğer olduğunu anımsayınız. printk fonksiyonu ile task_struct 
+    içerisindeki pid değerinin yanı sıra comm elemanın da yazıdırıldığına dikkat ediniz. Bu comm elemanında en fazla 
+    16 karakterlik task_struct nesnesini betimleyen bir yazı bulunmaktadır. Bu yazı exec fonksiyonları tarafından 
+    çalıştırılan programın dosya isminden hareketle oluşturulmaktadır. pthread_create fonksiyonu ile yaratılan thread'lerin 
+    de comm alanında yanı yazı bulunur. Bu yazı istenirse prctl isimli kütüphane fonksiyonu ile değiştirilebilir. Tabii
+    bu fonksiyon da sys_prctl isimli sistem fonksiyonunu çağırmaktadır. Thread'lerin isimlerini pthread_setname_np 
+    fonksiyonu ile de değiştirebiliriz. pthread_setname_np bir POSIX fonksiyonu değildir. libc kütüphanesinde bulunmaktadır. 
+
+    Aşağıda bu dolaşımı yapan örnek bir çekirdek modülü verilmiştir. Modulü aşağıdaki derleyip yüklediniz zaman modülün 
+    init fonksiyonu içerisinde yukarıdaki walk_processes fonksiyonu çağrılacaktır. Yükleme işlemindne sonda "dmesg" komutunu
+    kullandığınızda tüm task_struc nesnelerini "çekirdeğin ring tampununda" görüntüleyebilirsiniz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
+/* test-module.c */
 
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/rcupdate.h>
+
+MODULE_LICENSE("GPL");
+
+static int test_module_init(void);
+static void test_module_exit(void);
+void walk_processes(void);
+
+static int test_module_init(void)
+{
+    printk(KERN_INFO "test_module_init...\n");
+    
+    walk_processes();
+
+    return 0;
+}
+
+void walk_processes(void)
+{
+    struct task_struct *ts;
+    struct list_head *lh;
+
+    ts = &init_task;
+
+    rcu_read_lock();
+    lh = rcu_dereference(ts->tasks.next);
+    do { 
+        ts = container_of(lh, struct task_struct, tasks);      /* ts = list_entry((lh, struct task_struct, tasks) */
+        printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
+        lh = rcu_dereference(ts->tasks.next);
+    } while (lh != &init_task.tasks); 
+
+    rcu_read_unlock();
+
+}
+
+static void test_module_exit(void)
+{
+    printk(KERN_INFO "test_module_exit...\n");
+}
+
+module_init(test_module_init);
+module_exit(test_module_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aslında tasks listesini daha kolay dolaşmak için çekirdek kodlarında <linux/sched/signal.h> başlık dosyasındaki 
+    for_each_process isimli bir döngü makrosu kullanılmaktadır. Bu makroya parametre olarak task_struct türünden bir 
+    gösterici verilir. Bu makroda her dolaşımda sıradaki task_struct nesnesinin adresini bu göstericiye yerleştirir. 
+    Bu makro kendi içerisinde rcu_dereference işlemini de yapmaktadır. Bu makroyla dolaşım şöyle yapılmaktadır:
+
+    rcu_read_lock();
+    
+    for_each_prosess(ts) {
+        ...
+    }
+
+    rcu_read_unlock();
+
+    Aslında çoğu kez <linux/sched/signal.h> başlık dosyasının include edilmesine gerek kalmamaktadır. Çünkü bu dosya çok 
+    temel bir dosya olduğu için zaten <linux/kernel.h> başlık dosyalarından include edilmektedir. 
+    
+    Dolaşımı yapan fonsiyonu şöyle yazabiliriz:
+
+    void walk_processes(void)
+    {
+        struct task_struct *ts;
+        
+        rcu_read_lock();
+        
+        for_each_process(ts) {
+            printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm); 
+        }
+
+        rcu_read_unlock();
+    }
+
+    Aşağıda örneğin tamamı verilmiştir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
+/* test-module.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/sched/signal.h>
+
+MODULE_LICENSE("GPL");
+
+static int test_module_init(void);
+static void test_module_exit(void);
+void walk_processes(void);
+
+static int test_module_init(void)
+{
+    printk(KERN_INFO "test_module_init...\n");
+    
+    walk_processes();
+
+    return 0;
+}
+
+void walk_processes(void)
+{
+    struct task_struct *ts;
+    
+    rcu_read_lock();
+    
+    for_each_process(ts) {
+         printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm); 
+    }
+
+    rcu_read_unlock();
+}
+
+static void test_module_exit(void)
+{
+    printk(KERN_INFO "test_module_exit...\n");
+}
+
+module_init(test_module_init);
+module_exit(test_module_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
 /*----------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi belli bir prosesin thread'lerine ilişkin task_struct nesneleri signal nesnesindeki thread_head 
+    düğümü kök alınarak thread_node düğümlerinin dolaşılmasıyla elde ediliyordu. Biz de bu dolaşımı aşağıdaki gibi bir 
+    kodla sağlayabiliriz:
 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
+    
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
