@@ -16,7 +16,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 06/09/2025 - Cumartesi
+                                    Son Güncelleme: 08/09/2025 - Pazartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -3323,6 +3323,8 @@ int main(void)
     çalıştırmakta olan işlemcinin ya da çekirdeğin bir yazmacı (register) özel bir alanı göstermektedir (tabii bu 
     gösterme bağlamsal geçiş sırasında ayarlanmaktadır), çalışmakta olan thread'in task_struct nesnesinin adresi de 
     buradan hareketle elde edilmektedir.  
+
+    Biz kurusumuzda current için "current göstericisi" ya da "current makrosu" terimlerini kullanacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3403,14 +3405,30 @@ int main(void)
 
     thread_head <---> thread_node <---> thread_node <---> thread_node <---> thread_node <---> thread_head
 
-    signal_struct içerisindeki list_head kök düğümünün hemen önündeki düğümün ana thread'e ilişkin olacağı yönünde 
-    bir garanti verilmemiştir. 
+    signal_struct içerisindeki list_head kök düğümünün hemen önündeki düğümün ana thread'e ilişkin olacağı varsayımında 
+    bulunmayınız. Ancak çekirdek kodları incelendiğinde mevcut çekirdeklerde ilk düümün ana thread'e ilişkin olduğu 
+    görülmektedir. Çeekirdek kodlarının bazı yerlerinde bu varsayıma dayanılarak da birtakım işlemler yapılmıştır. 
 
     Aslında Linux çekirdeklerinde prosesin tüm thread'lerine ilişkin task_struct içerisinde bulunan signal göstericisi 
     aynı signal_struct nesnesini göstermektedir. Yani thread_head kök düğümüne biz prosesin ana thread'inden erişmek 
     zorunda değiliz. Proesin herhangi bir thread'ine ilişkin task_struct nesnesindeki signal göstericisi yoluyla bu 
     list_head kök düğümüne erişebiliriz. 
 
+    Çekirdek içerisinde bir task_struct yapısının prosesin ana thread'ine ilişkin olup olmadığını belirleyen 
+    thread_group_leader isimli bir makro da vardır:
+
+    #include <linux/sched/signal.h>
+
+    static inline bool thread_group_leader(struct task_struct *p)
+    {
+        return p->exit_signal >= 0;
+    }
+
+    Tabii aslında bir task_struct nesnesinin ana thread'e ilişkin olup olmadığı p == p->group_leader ya da 
+    p->pid == p->tgid işlemiyle anlaşılabilir. Ancak özel bir bilgi olarak task_struct içerisindeki exit_signal elemanı 
+    da bu bilgiyi verebilmektedir. Bu eleman eğer thread ana thread değilse -1 değerinde, ana threda ise >= 0 değerinde
+    olmaktadır. 
+  
     Linux çekirdeğinde terminoloji bağlamında "prosesin ana thread'i" yerine "thread grup lideri (thread group leader)" 
     terimi tercih edilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -4023,8 +4041,8 @@ int main(void)
 
     /* test-driver.h */
 
-    #ifndef test_driver_DRIVER_H_
-    #define test_driver_DRIVER_H_
+    #ifndef TEST_DRIVER_H_
+    #define TEST_DRIVER_H_
 
     #include <linux/stddef.h>
     #include <linux/ioctl.h>
@@ -4438,31 +4456,32 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de görmüş olduğumuz task_struct yapına ilişkin bağlı listeler üzerinde gezinme işlemlerine ilişkin örnekler 
-    verelim. Daha önceden de belirttiğimiz gibi böyle testler için çekirdeği yeniden derlememize gerek yoktur. Basit bir 
-    çekirdek modülü ya da aygıt sürücü yazarak da bu tür testleri yapabiliriz. 
+    Şimdi de görmüş olduğumuz task_struct yapısına ilişkin bağlı listeler üzerinde gezinme işlemlerine örnekler verelim. 
+    Daha önceden de belirttiğimiz gibi böyle testler için çekirdeği yeniden derlememize gerek yoktur. Basit bir çekirdek 
+    modülü ya da aygıt sürücü yazarak da bu tür testleri yapabiliriz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Biz task_struct listelerini dolaşırken çekirdek bu listelere eleman eklerse ya da bu listelerden eleman silerse bizim 
-    dolaşım yapan kodunuzda "tanımsız davranışlar (undefined behaviors)" oluşabilir. Bu durum da tüm sistemin çökmesine 
-    yol açabilir. Bu tür durumlarda dolaşımın senkronizasyon nesneleri kullanılarak yapılması gerekmektedir. Biz kursumuzda 
-    çekirdeğin senkronizasyon nesnelerini ileride ayrı başlık halinde ele alacağız. Birden fazla thread'in beklemedne işlem 
-    yaptığı ancak bir yazan thread varsa okuyan ve yazan thread'lerin bekletildiği senkronizasyon nesnelerine "okuma yazma 
-    kilitleri (readers-writer locks)" denilmektedir. Eskiden Linux çekirdeğinde task_struct nesneleri dolaşılırken çekirdek 
-    tasklist_lock isimli bir okuma yazma kilidini kullanıyordu. Biz de dolaşımları bu kilidi kilitleyerek yapabiliyorduk. 
-    Ancak daha sonra Linux çekirdeğinde "kilitsiz (lock-free) senkronizasyon nesneleri yaygınlaştı. Artık belli bir süredir 
-    çekirdek task_struct listeleri üzerinde kilitsiz bir biçimde "RCU (Read-Copy-Update)" mekanizamasıyla işlemler yapmaktadır. 
-    Dolayısıyşa bizim de kendimizi çekirdeğin bu mekanizmasına uydurarak dolaşım yapmamız gerekir. Biz RCU mekanizmasının 
-    ayrıntılarını ileride ayrı konuda ele alacağız. Ancak bu noktada RCU mekanizması ile task_struct listelerinin dolaşılması 
-    için bazı temel bilgiler de vereceğiz. 
+    dolaşım yapan kodumuzda "tanımsız davranışlar (undefined behaviors)" oluşabilir. Bu da tüm sistemin çökmesine yol 
+    açabilir. Bu tür durumlarda dolaşımın senkronizasyon nesneleri kullanılarak yapılması gerekmektedir. Biz kursumuzda 
+    çekirdekte kullanılan senkronizasyon nesnelerini ileride ayrı başlık halinde ele alacağız. Birden fazla thread'in 
+    beklemeden okuma işlemi yapabildiği ancak bir yazan thread varsa okuyan ve yazan thread'lerin bekletildiği senkronizasyon 
+    nesnelerine "okuma yazma kilitleri (readers-writer locks)" denilmektedir. Eskiden Linux çekirdekleri task_struct 
+    nesnelerini dolaşırken tasklist_lock isimli bir okuma yazma kilidini kullanılıyordu. Biz de dolaşımları aynı kilidi
+    kullanarak güvenli bir biçimde yapabiliyorduk. Ancak daha sonraları Linux çekirdeklerinde "kilitsiz (lock-free) 
+    senkronizasyon nesneleri kullanılmaya başlandı. Artık belli bir süredir çekirdek task_struct listeleri üzerinde kilitsiz 
+    bir biçimde "RCU (Read-Copy-Update)" mekanizamasıyla işlemler yapmaktadır. Dolayısıyşa bizim de kendimizi çekirdeğin 
+    kullandığı bu RCU mekanizmasına uydurarak dolaşım yapmamız gerekir. RCU mekanizmasının ayrıntılarını ileride ayrı 
+    başlıkta ele alacağız. Ancak bu noktada RCU mekanizması ile task_struct listelerinin dolaşılması için bazı temel 
+    bilgileri de vereceğiz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     RCU mekanizmasıyla bağlı listeleri dolaşırken işlemin başında rcu_read_lock fonksiyonun, işlemin sonunda da rcu_read_unlock 
     fonksiyonun çağrılması gerekmektedir. Bu fonksiyonların prototipleri şöyledir:
 
-    <linux/rcupdate.h>
+    #include <linux/rcupdate.h>
 
     void rcu_read_lock(void);
     void rcu_read_unlock(void);
@@ -4473,12 +4492,11 @@ void exit_sys(const char *msg)
     ...
     rcu_read_unlock();
 
-    RCU mekanizması altında bağlı listelerin bağlarına erişilirken rcu_dereference makrosunun kullanılması kullanılmalıdır. 
-    Bu makroya parametre olarak erişeceğiniz bağlı listenin prev ya da next düğümlerini vermelisiniz. Bu durumda örneğin
-    sistemdeki bütün proseslerin ana thread'lerine ilişkin task_struct nesneleri aşağıdaki gibi güvenli bir biçimde 
-    dolaşılabilir:
+    RCU mekanizması altında bağlı listelerin bağlarına erişilirken rcu_dereference makrosu kullanılmalıdır. Bu makroya 
+    parametre olarak erişeceğiniz bağlı listenin prev ya da next düğümlerini vermelisiniz. Bu durumda örneğin sistemdeki 
+    bütün proseslerin ana thread'lerine ilişkin task_struct nesneleri aşağıdaki gibi güvenli bir biçimde dolaşılabilir:
 
-    void walk_processes(void)
+    static void walk_processes(void)
     {
         struct task_struct *ts;
         struct list_head *lh;
@@ -4486,11 +4504,11 @@ void exit_sys(const char *msg)
         rcu_read_lock();
 
         lh = rcu_dereference(init_task.tasks.next);
-        do { 
+        while (lh != &init_task.tasks) { 
             ts = container_of(lh, struct task_struct, tasks);      /* ts = list_entry((lh, struct task_struct, tasks) */
             printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
             lh = rcu_dereference(ts->tasks.next);
-        } while (lh != &init_task.tasks); 
+        } 
 
         rcu_read_unlock();
     }
@@ -4502,25 +4520,31 @@ void exit_sys(const char *msg)
     exec işlemleri sırasında ise bu yazı çalıştırılan programın dosya isminden hareketle değiştirilmektedir. comm elemanındaki 
     yazı istenirse prctl isimli kütüphane fonksiyonu ile istenildeiği zaman da değiştirilebilir. Tabii bu fonksiyon da 
     sys_prctl isimli sistem fonksiyonunu çağırmaktadır. Linux sistemlerinde thread'lere pthread_setname_np fonksiyonu ile 
-    isimlerde de verilebilmektedir. Bu fonksiyonla thread'e bir isim verildiğinde thread'e ilişkin task_struct nesnesini 
+    isimlerde de verilebilmektedir. Bu fonksiyonla thread'e bir isim verildiğinde thread'e ilişkin task_struct nesnesinin 
     comm elemanındaki yazı da değiştirilmektedir. (pthread_setname_np bir POSIX fonksiyonu değildir. libc kütüphanesinde 
     bulunmaktadır.)
 
-    <linux/sched/signal.h> dosyası içerisinde next_task isimli bir makro da vardır. Bu makro bir task_struct nesnesi 
+    <linux/sched/signal.h> dosyası içerisinde next_task isimli bir makro da vardır. Bu makro bir task_struct nesnesinin 
     adresini parametre olarak alıp RCU mekanizmasına uygun olarak onun tasks.next göstericisinin gösterdiği yerdeki 
-    task_struct nesnesini vermektedir. Bu makro kullanılarak walk_process fonksiyonu şöyle de yazılabilir:
+    task_struct nesnesininin adresini vermektedir:
 
-    void walk_processes(void)
+    #include <linux/sched/signal.h>
+
+    next_task(p)
+        
+    Bu makro kullanılarak walk_process fonksiyonu şöyle de yazılabilir:
+
+    static void walk_processes(void)
     {
         struct task_struct *ts;
         
         rcu_read_lock();
 
         ts = next_task(&init_task);
-        do { 
+        while (ts != &init_task) { 
             printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
             ts = next_task(ts);
-        } while (ts != &init_task); 
+        } 
 
         rcu_read_unlock();
     }
@@ -4541,7 +4565,7 @@ MODULE_LICENSE("GPL");
 
 static int test_module_init(void);
 static void test_module_exit(void);
-void walk_processes(void);
+static void walk_processes(void);
 
 static int test_module_init(void)
 {
@@ -4552,19 +4576,18 @@ static int test_module_init(void)
     return 0;
 }
 
-void walk_processes(void)
+static void walk_processes(void)
 {
     struct task_struct *ts;
     struct list_head *lh;
 
     rcu_read_lock();
 
-    lh = rcu_dereference(init_task.tasks.next);
-    do { 
-        ts = container_of(lh, struct task_struct, tasks);      /* ts = list_entry((lh, struct task_struct, tasks) */
+    ts = next_task(&init_task);
+    while (ts != &init_task) { 
         printk(KERN_INFO "PID = %d, COMM = %s", ts->pid, ts->comm);
-        lh = rcu_dereference(ts->tasks.next);
-    } while (lh != &init_task.tasks); 
+        ts = next_task(ts);
+    }  
 
     rcu_read_unlock();
 }
@@ -4627,7 +4650,7 @@ rm -f $module
     
     Dolaşımı yapan fonsiyonu şöyle yazabiliriz:
 
-    void walk_processes(void)
+    static void walk_processes(void)
     {
         struct task_struct *ts;
         
@@ -4653,7 +4676,7 @@ MODULE_LICENSE("GPL");
 
 static int test_module_init(void);
 static void test_module_exit(void);
-void walk_processes(void);
+static void walk_processes(void);
 
 static int test_module_init(void)
 {
@@ -4664,7 +4687,7 @@ static int test_module_init(void)
     return 0;
 }
 
-void walk_processes(void)
+static void walk_processes(void)
 {
     struct task_struct *ts;
     
@@ -4719,15 +4742,15 @@ rm -f $module
     Bağlı listeleri RCU mekanizmasına uygun biçimde dolaşan list_for_each_entry_rcu isimli bir döngü makrosu da vardır. 
     Bu makro <linux/rculist.h> dosyasında bulunmaktadır. Bu makrosuunun parametrik yapısı şöyledir:
 
-    <linux/rculist.h> 
+    #include <linux/rculist.h> 
 
     list_for_each_entry_rcu(pos, head, member)
 
-    Makronun birinzi parametresi bağın içinde bulunduğu nesnenin adresinin yerleştirileceği göstericiyi, ikinci parametresi 
-    kök bağ düğümünün adresini ve üçüncü parametresi de kök bağ düğümünn ismini almaktadır. Tüm proseslerin ana thread'lerini 
-    dolaşan fonksiyonu bu makroyu kullanarak da aşağıdaki gibi yazabilirdik:
+    Makronun birinci parametresi bağın içinde bulunduğu nesnenin adresinin yerleştirileceği göstericiyi, ikinci parametresi 
+    kök bağ düğümünün adresini ve üçüncü parametresi de kök bağ düğümün ismini almaktadır. Tüm proseslerin ana thread'lerini 
+    dolaşan fonksiyonu bu makroyu kullanarak aşağıdaki gibi de yazabilirdik:
 
-    void walk_processes(void)
+    static void walk_processes(void)
     {
         struct task_struct *ts;
 
@@ -4747,36 +4770,556 @@ rm -f $module
 
     list_entry_rcu(ptr, type, member)
 
-    Makronun birinci parametresi bağ düğümünün adresini, ikinci parametresi bağın içinde bulunduğu yapının tür ismini,
-    üçüncü paranetresi ise bağ ismini almaktadır. Makro bağın içinde bulunduğu nesnenin adresini vermektedir. Aslında 
-    önceki paragraflarda gördüğümüz next_task makrosu da bu makro kullanılarak aşağıdaki gibi yazılmıştır:
+    Makronun birinci parametresi bağ düğümünün list_head adresini, ikinci parametresi bağın içinde bulunduğu yapının 
+    tür ismini, üçüncü parametresi ise bağ ismini almaktadır. Makro bağın içinde bulunduğu nesnenin adresini vermektedir. 
+    Aslında önceki paragraflarda gördüğümüz next_task makrosu da bu makro kullanılarak yazılmıştır:
 
     #define next_task(p) \
 	    list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Anımsanacağı gibi belli bir prosesin thread'lerine ilişkin task_struct nesneleri signal nesnesindeki thread_head 
-    düğümü kök alınarak thread_node düğümlerinin dolaşılmasıyla elde ediliyordu. Biz de bu dolaşımı aşağıdaki gibi bir 
-    kodla sağlayabiliriz:
-
-    <BURADA KALDIK>   
+                                        16. Ders 07/09/2025 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de thread'lerle ilişkin task_struct nesnelerinin dolaşılmasına örnekler verelim. Anımsanacağı gibi yeni çekirdeklerde 
+    belli bir prosesin thread'lerine ilişkin task_struct nesneleri signal nesnesindeki thread_head düğümü kök alınarak 
+    thread_node düğümlerinin dolaşılmasıyla elde ediliyordu. 
 
+    Belli bir prosesin thread'lerinin dolaşılabilmesi için çekirdek modülü yetersiz kalmaktadır. Çünkü çekirdek modüllerindeki
+    fonksiyonlar dışarıdan prosesler tarafından (yani proseslerin thread'leri tarafından) çağrılamamaktadır. Biz bir çekirdek 
+    modülünü yüklediğimizde onun init fonksiyonu çalıştırılır. Biz bu init fonksiyonunda current makrosunu kullanırsak onu
+    yükleyen "insmod" prosesinin ilgili thread'inin (muhtemelen ana thread'inin) task_struct adresine erişiriz. Benzer biçimde 
+    çekirdek modülünün exit fonksiyonunda current makrosunu kullanırsak "rmmod" prosesine ilişkin thread'in (muhtemelen ana 
+    thread'inin) task_struct nesnesine erişiriz. O halde biz thread dolaşım testlerimizi ancak aygıt sürücü yazarak oluşturabiliriz. 
+    Aygıt sürücülerdeki fonksiyonlar kullanıcı modundaki thread'ler tarafından çağrılabilmektedir. Bu fonksiyonlarda current
+    makrosu kullanıldığında ilgili fonksiyonu çağıran thread'in task_struct nesnesinin adresi elde edilecektir. 
+
+    Biz daha önce iskelet bir aygıt sürücü yazmıştık. Bu aygıt sürücümüz için bir ioctl kodu da oluşturmuştuk. O halde 
+    testimizi bu ioctl fonskiyonu içerisinde yapabiliriz:
+
+    long ioctl_test(struct file *filp, unsigned long arg)
+    {
+        walk_process_thread();
+
+        return 0;
+    }
+
+    void walk_process_thread(void)
+    {
+        /* ... */
+    }
+
+    Şimdi artık walk_process_thread fonksiyonunda current makrosunu kullanırsak ioctl işlemini yapan thread'e ilişkin 
+    task_struct nesnesine erişebiliriz. 
+    
+    Prosesin thread'leri aşağıdaki gibi dolaşılabilir:
+
+    static void walk_process_thread(void)
+    {
+        struct list_head *lh;
+        struct task_struct *ts;
+
+        rcu_read_lock();
+
+        lh = rcu_dereference(current->signal->thread_head.next);
+        
+        while (lh != &current->signal->thread_head) { 
+            ts = container_of(lh, struct task_struct, thread_node);      /* ts = list_entry((lh, struct task_struct, thread_node) */
+            printk(KERN_INFO "Thread PID = %d, COMM = %s", ts->pid, ts->comm);
+            lh = rcu_dereference(ts->thread_node.next);
+        }  
+
+        rcu_read_unlock();	
+    }
+
+    Tabii aynı işlemi daha önce görmüş olduğumuz list_for_each_entry_rcu makrosuyla da yapabilirdik:
+
+    static void walk_process_thread(void)
+    {
+        struct task_struct *ts;
+
+        rcu_read_lock();
+
+        list_for_each_entry_rcu(ts, &current->signal->thread_head, thread_node) {
+            printk(KERN_INFO "Thread PID = %d, COMM = %s", ts->pid, ts->comm);
+        }
+
+        rcu_read_unlock();	
+    }
+
+    Bir task_struct adresini alıp onun thread_node.next göstericisinin gösterdiği yerdeki task_struct adresini veren 
+    next_thread isimli bir fonksiyon da vardır. next_thread fonksiyonu şöyle tanımlanmıştır:
+
+    #include <linux/sched/signal.h>
+
+    static inline struct task_struct *next_thread(struct task_struct *p)
+    {
+        return __next_thread(p) ?: p->group_leader;
+    }
+
+    Fonksiyondaki ?: operatöründe gcc eklentisi kullanılmıştır. Biz burada bu fonksiyonun içini açıklamayacağız. Ancak 
+    bu fonksiyon ile biz prosesin herhangi bir thread'inden başlayarak tüm thread'lerini dolaşabilmekteyiz. Bu fonksiyon 
+    dolaşım sırasında signal yapısındaki thread_head düğümüne gelindiğinde onu atlayabilmektedir. Bu durumda biz prosesin 
+    thread'lerini bu fonksiyonu kullanarak aşağıdaki gibi de yapabiliriz:
+
+    static void walk_process_thread(void)
+    {
+        struct task_struct *ts;
+
+        rcu_read_lock();
+        
+        ts = current;
+
+        do { 
+            printk(KERN_INFO "Thread PID = %d, COMM = %s", ts->pid, ts->comm);
+            ts = next_thread(ts);
+        } while (ts !=  current); 
+
+        rcu_read_unlock();	
+    }
+
+    Fonksiyonun yazımına dikkat edildiğinde, dolaşım sırasında yeniden signal yapısı içerisindeki thread_head düğümüne 
+    gelindiğinde onu atlamak için group_leader düğümüne geçildiği görülmektedir. Buradaki kod bağlı listenin ilk elemanının 
+    group_leader olduğu garantisi ile yazılmıştır. (Fonksiyon bu garantiye dayalı olmadan daha anlaşılır biçimde de 
+    yazılabilirdi. Böyle yazılmasının bir gerekçesi de olabilir. Bunun için daha fazla incelemenin yapılması gerekir.)
+
+    Aslında prosesin thread'lerini basit bir biçimde dolaşmak için for_each_thread döngü makrosu tercih edilmektedir:
+
+    #include </linux/sched/signal.h>
+
+    for_each_thread(p, t)
+
+    Makronun birinci parametresi prosesin herhangi bir thread'inin task_struct adresini almaktadır. Döngü her yinelendikçe
+    yeni bir thread'e ilişkin task_struct yapının adresi ikinci parametreyle belirtilen task_struct türünden göstericinin
+    içerisine yerleştirilmektedir. Dolaşım her zaman signal yapısındaki thread_head düğümden başlatılmaktadır. (Bu bağlı 
+    listenin ilk elemanı ana thread olduğu için aslında dolaşım ana thread'ten başlatılmaktadır.) 
+    
+    for_each_thread döngü makrosu kullanılarak dolaşım aşağıdaki gibi basit bir biçimde yayapışabilmektedir:
+    
+    static void walk_process_thread(void)
+    {
+        struct task_struct *ts;
+
+        rcu_read_lock();
+        
+        for_each_thread(current, ts) {
+            printk(KERN_INFO "Thread PID = %d, COMM = %s", ts->pid, ts->comm);
+        }
+
+        rcu_read_unlock();	
+    }
+
+    Aşağıda prosesin thread'lerini dolaşan örnek aygıt sürücü kodlarının tamamı verilmiştir. Aygıt sürücüyü yükledikten 
+    sonra "app" programı çalıştırmalısınız. Bu program önce 10 tane thread yaratıp sonra aygıt sürücüdeki ioctl kodunu 
+    çalıştırmaktadır. Ekrana çıkan thread'lere ilişkin pid değerleriyle "dmesg" komutunun çıktısını karşılaştırınız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-driver.h */
+
+#ifndef TEST_DRIVER_H_
+#define TEST_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define TEST_DRIVER_MAGIC		't'
+#define IOC_TEST		        _IO(TEST_DRIVER_MAGIC, 0)
+
+#endif
+
+/* test-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include "test-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("test-driver");
+
+static int test_driver_open(struct inode *inodep, struct file *filp);
+static int test_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_test(struct file *filp, unsigned long arg);
+static void walk_process_thread(void);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = test_driver_open,
+	.read = test_driver_read,
+	.write = test_driver_write,
+	.release = test_driver_release,
+    .unlocked_ioctl = test_driver_ioctl
+};
+
+static int __init test_driver_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "test-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static int test_driver_open(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "test-driver opened...\n");
+
+	return 0;
+}
+
+static int test_driver_release(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "test-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "test-driver read...\n");
+
+	return 0;
+}
+
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "test-driver write...\n");
+
+	return 0;
+}
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+	
+    printk(KERN_INFO "test_driver_ioctl...\n");
+
+    switch (cmd) {
+        case IOC_TEST:
+            result = ioctl_test(filp, arg);
+            break;  
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+long ioctl_test(struct file *filp, unsigned long arg)
+{
+    walk_process_thread();
+
+    return 0;
+}
+
+static void walk_process_thread(void)
+{
+	struct task_struct *ts;
+
+	rcu_read_lock();
+	
+	for_each_thread(current, ts) {
+		printk(KERN_INFO "Thread PID = %d, COMM = %s", ts->pid, ts->comm);
+	}
+
+	rcu_read_unlock();	
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* app.c */
+
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+#define NTHREADS        10
+
+void exit_sys(const char *msg);
+void *thread_proc(void *param);
+
+int main(void)
+{
+    int fd;
+    int result;
+    pthread_t tids[NTHREADS];
+
+    for (int i = 0; i < NTHREADS; ++i) {
+        if ((result = pthread_create(&tids[i], NULL, thread_proc, NULL)) != 0) {
+            fprintf(stderr, "pthread_create: %s\n", strerror(result));
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if ((fd = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, IOC_TEST) == -1)
+        exit_sys("ioctl");
+
+    close(fd);
+
+    for (int i = 0; i < NTHREADS; ++i)
+        pthread_join(tids[i], NULL);
+
+    return 0;
+}
+
+void *thread_proc(void *param)
+{
+    printf("Thread PID: %jd\n", (intmax_t)gettid());
+
+    sleep(120);
+
+    return NULL;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Pekiyi sistemdeki bütün task_struct nesnelerini dolaşabilir miyiz? Bunu yapmanın en pratik yolu init_task nesnesinden
+    hareketle tüm proseslerin ana thread'lerine ilişkin task_struct nesnelerini elde edip o ana thread'lerden faydalanarak 
+    onların diğer thread'lerine ilişkin task_struct nesnelerini elde etmektir. Aslında bunu iç içe iki döngü oluşturarak 
+    RCU mekanizması eşliğinde yapan for_each_process_thread isimli bir makro vardır:
+
+    #include <linux/sched/signal.h>
+
+    #define for_each_process_thread(p, t)	        \
+	    for_each_process(p) for_each_thread(p, t)
+
+    Makroya biz iki task_struct göstericisi veririz. Makro her yinelemede prosin ana thread'ine ilişkin task_struct 
+    nesnesinin adresini birinci parametreyle verilen göstericinin içerisine, o prosesin thread'lerine ilişkin task_struct
+    nesnelerinin adresleri de ikinci parametreyle verilen göstericinin içerisine yerleştirmektedir. O halde tüm therad'lere 
+    ilişkin task_struct nesneleri aşağıdaki gibi elde edilebilir:
+    
+    static void walk_all_threads(void)
+    {
+        struct task_struct *tsp;
+        struct task_struct *tst;
+
+        rcu_read_lock();
+
+        for_each_process_thread(tsp, tst) {
+            printk(KERN_INFO "Process Main Thread PID = %d, Thread PID == %d COMM = %s\n", tsp->pid, tst->pid, tst->comm);
+        }
+
+        rcu_read_unlock();
+    }
+
+    Tabii proseslerin thread'lerini girinti biçimde göstermek için kodu aşağıdaki gibi de düzenleyebiliriz:
+
+    static void walk_all_threads(void)
+    {
+        struct task_struct *tsp;
+        struct task_struct *tst;
+
+        rcu_read_lock();
+
+        for_each_process_thread(tsp, tst) {
+            if (tsp == tst) {
+                printk(KERN_INFO "Process Main Thread PID = %d, COMM = %s\n", tsp->pid, tst->comm);    
+            }
+            else {
+                printk(KERN_INFO "    Thread PID == %d COMM = %s\n", tst->pid, tst->comm);
+            }
+        }
+
+        rcu_read_unlock();
+    }
+
+    "dmesg" çıktısı aşağıdakine benzer biçimde elde edilecektir:
+
+    ...
+    [ 6022.928026] Process Main Thread PID = 3494, COMM = kworker/u257:2
+    [ 6022.928027] Process Main Thread PID = 3997, COMM = kworker/1:0
+    [ 6022.928042] Process Main Thread PID = 4271, COMM = kworker/0:0
+    [ 6022.928044] Process Main Thread PID = 4279, COMM = kworker/u259:0
+    [ 6022.928045] Process Main Thread PID = 4543, COMM = kworker/3:1
+    [ 6022.928048] Process Main Thread PID = 4546, COMM = kworker/5:2
+    [ 6022.928049] Process Main Thread PID = 4547, COMM = kworker/u264:2
+    [ 6022.928051] Process Main Thread PID = 4565, COMM = bash
+    [ 6022.928053] Process Main Thread PID = 4599, COMM = app
+    [ 6022.928054]     Thread PID == 4600 COMM = app
+    [ 6022.928056]     Thread PID == 4601 COMM = app
+    [ 6022.928057]     Thread PID == 4602 COMM = app
+    [ 6022.928059]     Thread PID == 4603 COMM = app
+    [ 6022.928060]     Thread PID == 4604 COMM = app
+    [ 6022.928062]     Thread PID == 4605 COMM = app
+    [ 6022.928064]     Thread PID == 4606 COMM = app
+    [ 6022.928081]     Thread PID == 4607 COMM = app
+    [ 6022.928083]     Thread PID == 4608 COMM = app
+    [ 6022.928084]     Thread PID == 4609 COMM = app
+    [ 6022.928087] Process Main Thread PID = 4610, COMM = sudo
+    [ 6022.928089] Process Main Thread PID = 4611, COMM = sudo
+    [ 6022.928090] Process Main Thread PID = 4612, COMM = insmod
+    ...
+
+    Aşağıda bu işlemi yapan çekirde modülünün tüm kodları verilmiştir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-module.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/sched/signal.h>
+
+MODULE_LICENSE("GPL");
+
+static int test_module_init(void);
+static void test_module_exit(void);
+static void walk_all_threads(void);
+
+static int test_module_init(void)
+{
+    printk(KERN_INFO "test_module_init...\n");
+    
+    walk_all_threads();
+
+    return 0;
+}
+
+static void walk_all_threads(void)
+{
+    struct task_struct *tsp;
+    struct task_struct *tst;
+
+    rcu_read_lock();
+
+    for_each_process_thread(tsp, tst) {
+        if (tsp == tst) {
+            printk(KERN_INFO "Process Main Thread PID = %d, COMM = %s\n", tsp->pid, tst->comm);    
+        }
+        else {
+            printk(KERN_INFO "    Thread PID == %d COMM = %s\n", tst->pid, tst->comm);
+        }
+    }
+
+    rcu_read_unlock();
+}
+
+static void test_module_exit(void)
+{
+    printk(KERN_INFO "test_module_exit...\n");
+}
+
+module_init(test_module_init);
+module_exit(test_module_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de son olarak bir prosesin alt proseslerini dolaşalım. Anımsanacağı gibi prosesin alt proses listesinin kök 
+    düğümü ana thread'e ilişkin task_struct nesnesinin children elemanında tutulmaktadır. Bu children elemanı task_struct
+    içerisindeki sibling düğümlerini dolaşmakta kullanılmaktadır. children/sbling listesinde yalnızca alt proseslerin ana
+    thread'lerine ilişkin task_struct nesnelerinin bulunduğunu anımsayınız. 
+
+    Alt proesesleri dolaşan hazır bir döngü makrosu yoktur. Biz yukarıaki tekniklerle dolaşımı yapabiliriz. Örneğin 
+    bunun için RCU mekanizmasıyla bağlı listeyi dolaşan list_for_each_entr_rcu döngü makrosunu kullanabiliriz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
+<BURADA KALDIK
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
