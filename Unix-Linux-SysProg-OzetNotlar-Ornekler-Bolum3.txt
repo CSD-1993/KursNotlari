@@ -44,8 +44,8 @@
     sisteme yüklenmesidir.
 
     Genellikle bir Linux sistemini yüklediğimizde zaten çekirdek modüllerini ve aygıt sürücüleri oluşturabilmek için gereken 
-    başlık dosyaları ve diğer gerekli öğeler zaten "/usr/src" dizini içerisindeki "linux-headers-$(uname -r)" dizininde yüklü 
-    biçimde bulunmaktadır. Ancak bunlar yüklü değilse Debian tabanlı sistemlerde bunları şöyle yükleyebilirsiniz:
+    başlık dosyaları ve diğer gerekli öğeler "/usr/src" dizini içerisindeki "linux-headers-$(uname -r)" dizininde yüklü biçimde 
+    bulunmaktadır. Ancak bunlar yüklü değilse Debian tabanlı sistemlerde bunları şöyle yükleyebilirsiniz:
 
     $ sudo apt install linux-headers-$(uname -r)
 
@@ -16611,6 +16611,7 @@ static void generic_blkdev_release(struct gendisk *disk);
 static int g_major;
 static struct gendisk *g_disk;
 static struct block_device_operations g_blkdev_ops = {
+    .owner = THIS_MODULE,
     .open = generic_blkdev_open,
     .release = generic_blkdev_release
 };
@@ -16626,7 +16627,7 @@ static int __init generic_blkdev_init(void)
 
     if ((g_disk = blk_alloc_disk(1)) == NULL) {
         printk(KERN_INFO "cannot alloc gendisk!..\n");
-        unregister_blkdev(g_major, "generic-bloc-driver");
+        unregister_blkdev(g_major, "generic-blkdev");
         return -ENOMEM;
     }
 
@@ -16645,7 +16646,7 @@ static int __init generic_blkdev_init(void)
 
     if (add_disk(g_disk) != 0) {
         put_disk(g_disk);
-        unregister_blkdev(g_major, "generic-bloc-driver");
+        unregister_blkdev(g_major, "generic-blkdev");
     }
 
 	return 0;
@@ -16654,7 +16655,7 @@ static int __init generic_blkdev_init(void)
 static void __exit generic_blkdev_exit(void)
 {
     del_gendisk(g_disk);
-	unregister_blkdev(g_major, "generic-bloc-driver");
+	unregister_blkdev(g_major, "generic-blkdev");
     
 	printk(KERN_INFO "generic-blkdev exit...\n");
 }
@@ -16670,505 +16671,158 @@ static void generic_blkdev_release(struct gendisk *disk)
     printk(KERN_INFO "generic-blkdev released...\n");
 }
 
+
 module_init(generic_blkdev_init);
 module_exit(generic_blkdev_exit);
 
-# Makefile
-
-obj-m += $(file).o
-
-all:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
-clean:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
- /* loadblk (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./$module.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module b $major 0
-
-/* unloadblk (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./$module.ko || exit 1
-rm -f $module
-
-<BURADA KALDIK>
 /*--------------------------------------------------------------------------------------------------------------------------
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                                164. Ders 18/08/2024 - Pazar
+                                            164. Ders 18/08/2024 - Pazar
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
     Blok aygıt sürücülerinde yukarıda belirtilen işlemlerden sonra artık transfer işleminin yapılması için bulundurulan fonksiyonun
-    (örneğimizde request_proc) yazılması aşamasına geldik. User mode kodlar tarafından blok transferine yönelik bir istek oluştuğunda 
-    (örneğin blok aygıt sürücüsünden bir sektör okunmak istediğinde) çekirdeğin IO çizelgeleyicisi bunları çizelgeleyerek uygun bir 
-    zamanda transfer edilebilmesi için bizim belirttiğimiz ve yukarıdaki örnekte ismini request_proc olarak verdiğimiz fonksiyonu 
-    çağırmaktadır. Yani örneğimizdeki request_proc bizim tarafımızdan değil, çekirdek tarafından callback fonksiyon olarak çağrılmaktadır. 
-    Bizim de bu fonksiyon içerisinde kuyruğa bırakılmış blok transfer isteklerini kuyruktan alarak gerçekleştirmemiz gerekir.
+    yazılması aşamasına geldik. Kullanıcı modundaki kodlar tarafından blok transferine yönelik bir istek oluştuğunda (örneğin 
+    blok aygıt sürücüsünden bir sektör okunmak istediğinde) çekirdeğin IO çizelgeleyicisi bunları çizelgeleyerek uygun bir 
+    zamanda transfer edilebilmesi için bizim belirttiğimiz bir fonksiyonu çağırmaktadır. Biz de bu fonksiyon çağrıldığında 
+    fonksiyonun içerisinde aktarımı yapmalıyız. Bu çağırma (callback) mekanizması maalesef Linux çekirdeğinde versiyondan 
+    versiyona çok fazla değişikliklere uğratılmıştır. Biz burada 6.8 ve sonrasındaki çekirdekleri dikkate alarak açıklamalar 
+    yapacağız. 
 
-    Örneğin bir blok aygıt sürücüsünü user mode'da open fonksiyonuyla açıp içerisinden 10 byte'ı read fonksiyonuyla okumak isteyelim. 
-    Eğer bu aygıt sürücü karakter aygıt sürücüsü olsaydı çekirdek doğrudan aygıt sürücünün read fonksiyonunu çağıracaktı. Aygıt 
-    sürücü de istenen 10 byte'ı user mode'daki adrese transfer edecekti. Halbuki blok aygıt sürücüsü durumunda çekirdek aygıt 
-    sürücüden 10 byte transfer istemeyecektir. İlgili 10 byte'ın bulunduğu bloğun (blok ardışıl n sektördür) transferini isteyecektir. 
-    User mode programa o bloğun içerisindeki 10 byte'ı vermek çekirdeğin görevidir. Blok aygıt sürücülerinden transferler byte 
-    düzeyinde değil, blok düzeyinde yapılmaktadır. Yani blok aygıt sürücülerinden transfer edilecek en küçük birim 1 sektör 
-    yani 512 byte'tır. Şüphesiz kernel 10 byte okuma isteğine konu olan yerin aygıttaki sektör numarasını hesap eder ve o sektörden 
-    itibaren blok transferi ister.
+    Anımsanacağı gibi kullanıcı modundan blok aygıtı için read/write işlemi yapıldığında aşağıdaki gibi bir süreç oluşmaktadır:
 
-    Kernel aygıt sürücünün transfer edeceği blokları bir kuyruk sistemine yerleştirir. Bu kuyruk sistemi request_queue denilen 
-    bir yapı ile temsil edilmiştir. Bu kuyruğun içerisindeki kuyruk elemanları request isimli yapı nesnelerinden oluşmaktadır. 
-    (Yani request_queue aslında request yapılarının oluşturduğu bir kuyruk sistemidir.)
+    read/write (kullanıcı modu) ---> sys_read/sys_write (çekirdek modu) ---> Okunacak yer "page cache içerisinde var mı"
+    ---> "okunacak yer page cache'te yoksa blok aygıt sürücüsünün fonksiyonunu çağır"
+    
+    Eğer okunacak ya da yazılacak sektör çekirdeğin "page cache'inde yoksa" çekirdek blok aygıt sürücüsünün block_device_operations
+    yapısındaki submit_bio elemanında belirtilen fonksiyonu çağırmaktadır. Bu fonksiyonun parametrik yapısı şöyle olmak 
+    zorundadır:
 
-    Her request nesnesi kendi içerisinde bio isimli yapı nesnelerinden oluşmaktadır. request nesnesinin içerisindeki bio nesneleri 
-    bir bağlı liste biçiminde tutulmaktadır. Her bio yapısının sonunda ise değişken sayıda (yani n tane) bio_vec yapıları bulunmaktadır. 
-    İşte transfer işini yapacak fonksiyon transfere ilişkin bilgileri bu bio_vec yapısından elde etmektedir.
+    void submit_bio_proc(struct bio *bio);
 
-    request_queue: request ---> request ---> request ---> request ...
-    request: bio ---> bio ---> bio ---> bio ---> bio ---> ...
-    bio: bio_vec[N]
+    Callback fonksiyonun geri dönüş değerinin void olduğuna, parametresinin ise struct bio türünden bir gösterici olduğuna 
+    dikkat ediniz. Çekirdek bu fonksiyonu çağırırken blok aygıtından aktarılacak sektörleri izleyen paragraflarda açıklayacağımız
+    biçimde bu göstericinin gösterdiği yerdeki bio yapısına yerleştirmektedir. 
+    
+    Örneğin bir blok aygıt sürücüsünü kullanıcı modunda open fonksiyonuyla açıp içerisinden 10 byte'ı read fonksiyonuyla okumak 
+    isteyelim. Eğer bu aygıt sürücü karakter aygıt sürücüsü olsaydı çekirdek doğrudan aygıt sürücünün read fonksiyonunu çağıracaktı. 
+    Aygıt sürücü de istenen 10 byte'ı kullanıcı modundaki adrese aktaracaktı. Halbuki blok aygıt sürücüsü durumunda çekirdek 
+    önce bu 10 byte'ın bulunduğu sektörün page cache içerisinde olup olmadığına bakacaktır. Eğer talep edilen yer page cache'te
+    yoksa çekirdek blok aygıt sürücüsünün submit_bio fonksiyonunu çağırıp transferin aygıt sürücü tarafından yapılmasını 
+    isteyecektir. Anımsanacağı gibi blok aygıtlarından transfer edilecek en küçük birim bir sektördür. Dolayısıyla kullanıcı 
+    modundaki program blok aygıtından 10 byte okumak istese bile aslında aygıt sürücü en az 1 sektörlük bilgiyi işletim 
+    sisteminin page cache'ine aktaracaktır.     
+---------------------------------------------------------------------------------------------------------------------------*/
 
-    Buradan da görüldüğü gibi request_queue nesneleri request nesnelerinden, request nesneleri bio nesnelerinden, bio nesneleri de 
-    bio_vec nesnelerinden oluşmaktadır.
+/*--------------------------------------------------------------------------------------------------------------------------
+    Çekirdek blok aygıt sürücüsünün submit_bio fonksiyonunu çağırdığında bio yapısının içerisinde birden fazla aktarım isteği 
+    bulunabilmektedir. bio yapısının içerisinde birtakım gerekli bilgilerin yanı sıra bio_vec isimli yapı türünden bir dizi de 
+    vardır. İşte asıl aktarım istekleri bu bio_vec yapısı içerisindedir. O halde blok aygıt sürücüsünü yazan sistem programcısı 
+    bu bio_vec dizisini dolaşarak gereken aktarımları yapmalıdır. bio_vec içerisinde aktarılacak alanlara "segment" de denilmektedir. 
+    bio_vec yapısı şöyle bildirilmiştir:
 
-    İşte transfer fonksiyonu kernel tarafından çağrıldığında "request_queue içerisindeki request nesnelerine elde edip, bu request 
-    nesnelerinin içerisindeki bio nesnelerini elde edip, bio nesneleri içerisindeki bio_vec dizisinde belirtilen transfer bilgilerine 
-    ilişkin transferleri" yapması gerekir. Şüphesiz bu işlem ancak açık ya da örtük iç içe 3 döngü ile yapılabilir. Yani bir döngü 
-    request nesnelerini elde etmeli, onun içerisindeki bir döngü bio nesnelerini elde etmeli, onun içerisindeki bir döngü de bio_vec 
-    nesnelerini elde etmelidir.
+    struct bio_vec {
+        struct page *bv_page;           /* hangi fiziksel sayfa */
+        unsigned int bv_len;            /* bu segmentin uzunluğu (bayt cinsinden) */
+        unsigned int bv_offset;         /* sayfa içindeki başlangıç offset’i */
+    };
 
-    request_queue içerisindeki request nesnelerinin elde edilmesi birkaç biçimde yapılabilmektedir. Yöntemlerden tipik olanı şöyledir:
+    Yapının bv_page elemanı page cache içerisindeki transfer edilecek sayfaya ilişkin sayfa bilgilerini belirtmektedir. Yapının 
+    bv_len elemanı transfer edilecek bilginin uzunluğunu belirtir. Tabii bu uzunluk her zaman sektör katları kadardır. bv_offset 
+    elemanı page cache içerisindeki 4K'lık cache page'lerinin içerisindeki aktarım offset'ini belirtmektedir. Çekirdek 4K'lık 
+    bir cache sayfasının aygıt sürücüden belli bir kısmını doldurmasını isteyebilir. Burada önemli bir nokta şudur: bio_vec 
+    yapısının bv_page elemanından biz 4K'lık sayfanın fiziksel adresini elde etmekteyiz. Bu adresin sanal adrese dönüştürülmesi 
+    gerekir. Bunun nasıl yapılacağını izleyen paragraflarda açıklayacağız. 
 
-    static void request_proc(struct request_queue *rq)
-    {
-        struct request *rqs;
+    Biz bio yapısı içerisindeki bio_vec dizisini dolaşarak aktarım isteklerini ve aktarımın fiziksel RAM'de hangi uzunlukta ve 
+    nereye yapılması gerektiğini elde ettik. Pekiyi blok aygıtının neresinin aktarılacağı bilgisi nerededir? İşte bio_vec 
+    yapıları her zaman blok aygıtında ardışıl sektörleri belirtmektedir. Örneğin bio yapısı içerisindeki bio_vec dizisi üç 
+    elemanlı olsun. Bu üç elemandaki segment uzunlukları şöyle olsun:
 
-        for (;;) {
-            if ((rqs = blk_fetch_request(rq)) == NULL)
-                break;
+    [bio_vec (512), bio_vec(1024), bio_vec(512)]
 
-            if (blk_rq_is_passthrough(rqs)) {
-                __blk_end_request_all(rqs, -EIO);
-                continue;
-            }
+    Buradaki 512, 1024 ve 512 byte'lık bloklar blok aygıtında ardışıl olmak zorundadır. O halde bizim tek bilmemiz gereken şey 
+    blok aygıtındaki başlangıç offset'idir. Bu sistemde her bio_vec için blok aygıtında bir offset belirtilmediğine toplamda 
+    blok aygıtı için tek bir offset belirtildiğine dikkat ediniz. Blok aygıtındaki bşalngıç offset değerine bio yapısı 
+    yoluyla (loff_t)bio->bi_iter.bi_sector * SECTOR_SIZE ifadesi ile erişilmektedir. 
 
-            ...
+    bio yapısı içerisindeki bio_vec dizisini dolaşmanın iki yolu vardır: Birincisi doğrudan dizi indekslemesi yapmaktır.
+    bi_vec dizisinin adresi nio yapısının bi_io_vec elemanındadır Bu dizideki eleman sayısı da bio yapısının bi_vcnt elemanında 
+    bulunmaktadır. O halde gezinti şöyle yapılabilir:
 
-            __blk_end_request_all(rqs, 0);
-        }
-    }
-
-    Burada blk_fetch_request fonksiyonu kuyruğun hemen başındaki request nesnesini alarak onu kuyruktan siler. Böylece döngü 
-    içerisinde tek tek request nesneleri elde edilmiştir. blk_rq_is_passthrough fonksiyonu dosya sistemi ile alakalı olmayan request 
-    nesnelerini geçmek için kullanılır. Bazı request nesneleri transferle ilgili değildir. Bunların geçilmesi gerekmektedir. Bir 
-    request nesnesi kuyruktan alındıktan sonra akıbeti konusunda çekirdeğe bilgi verilmesi gerekmektedir. İşte bu işlem 
-    __blk_end_request_all fonksiyonuyla yapılmaktadır. Bu fonksiyonun ikinci parametresi -EIO girilirse bu durum bu işlemin 
-    yapılmadığını, 0 girilirse bu da bu işlemin başarılı bir biçimde yapıldığını belirtmektedir.
-
-    Pekiyi çekirdek ne zaman kuyruğa request nesnesi yerleştirmektedir? Şüphesiz çekirdeğin böyle bir nesneyi kuyruğa yerleştirmesi 
-    için aygıt üzerinde bir okuma ya da yazma olayının gerçekleşmiş olması gerekir. Bunun tipik yolu aygıt dosyasının open fonksiyonuyla 
-    açılıp read ya da write yapılmasıdır. Tabii blok aygıt sürücüsü bir dosya sistemi yani bir disk bölümü haline getirilmiş olabilir. 
-    Bu durumda formatlama gibi, mount etme gibi eylemlerde de gizli bir okuma yazma işlemleri söz konusu olmaktadır.
-
-    Pekiyi çekirdek aygıt sürücü açılıp aşağıdaki gibi iki ayrı read işleminde iki ayrı request nesnesi mi oluşturmaktadır?
-
-      if ((fd = open("generic-bdriver", O_RDONLY)) == -1)
-        exit_sys("open");
-
-      if ((result = read(fd, buf, 10)) == -1)
-            exit_sys("read");
-
-      if ((result = read(fd, buf, 10)) == -1)
-            exit_sys("read");
-
-    Aslında çekirdek burada iki okumanın aynı blok içerisinde kaldığını anladığı için aygıttan yalnızca tek blokluk okuma talep 
-    edecektir. Çünkü okunan iki kısım da aynı blok içerisindedir. (Çekirdeğin bu biçimde düzenleme yapan kısmına "IO çizelgeleyicisi
-    (IO scheduler)" denilmektedir.) Eğer bu iki okuma aşağıdaki gibi yapılmış olsaydı bu durumda çekirdek iki farklı blok için 
-    iki farklı request nesnesi oluşturacaktı:
-
-    if ((fd = open("generic-bdriver", O_RDONLY)) == -1)
-        exit_sys("open");
-
-    if ((result = read(fd, buf, 10)) == -1)
-        exit_sys("read");
-
-    lseek(fd, 5000, 0);
-
-    if ((result = read(fd, buf, 10)) == -1)
-        exit_sys("read");
-
-    Pekiyi çekirdek aygıt sürücüden kaç byte'lık bir bloğun transferini istemektedir? Bunun bir sektör olması gerektiğini düşünebilirsiniz. 
-    Ancak çekirdek sektör küçük olduğu için aygıt sürücüden bir "blok" transfer istemektedir. Bir blok ardışıl n tane sektörden 
-    oluşmaktadır (örneğin bir blok 8 sektörden yani 4K'dan oluşabilir) ve bu durum çekirdek konfigürasyonuna bağlıdır. Ancak çekirdek 
-    transfer isteklerinde istenen bloğu her zaman sektör olarak ifade etmektedir. Başka bir deyişle çekirdek aygıt sürücüden "şu 
-    sektörden itibaren 4096 byte transfer et" gibi bir istekte bulunmaktadır.
-
-    Şimdi biz request nesnesinin içerisinden bio nesnelerini, bio nesnelerinin içerisinden de bio_vec nesnelerini elde edelim. 
-    Pekiyi çekirdek neden transfer bilgilerini doğrudan request nesnelerinin içerisine kodlamak yerine böylesi iç nesneler 
-    oluşturmuştur? İşte aslında bir request nesnesi ardışıl sektör transferi ile ilgilidir. Ancak bu ardışıl sektörler read ya da 
-    write biçiminde olabilir. İşte bu read ve write yönleri o request nesnesinin ayrı bio nesnelerinde kodlanmıştır. Read ve write 
-    işlemleri ise aslında birden fazla tampon ile (yani aktarılacak hedef adres ile) ilgili olabilir. Bu bilgiler de bio_vec 
-    içerisine kodlanmıştır. Dolayısıyla aslında programcı tüm bio'lar içerisindeki bio_vec'leri dolaşmalıdır.
-
-    Bir süre önceye kadar request içerisindeki bio nesnelerinin dolaşılması normal kabul ediliyordu. Ancak belli bir çekirdekten
-    sonra bu tavsiye edilmemeye başlanmıştır. Fakat yine de request içerisindeki bio nesneleri şöyle dolaşılabilir:
-
-    struct bio *bio;
+    struct bio_vec *bvec;
+    int i;
     ...
-    bio = rqs->bio;
-    for_each_bio(bio) {
+
+    for (i = 0; i < bio->bi_vcnt; ++i) {
+        bvec = &bio->bi_io_vec[i];
         ...
     }
 
-    for_each_bio makrosunun artık doğrudan yukarıdaki biçimde kullanılması önerilmemektedir. Artık bugünlerde bio nesnelerini 
-    dolaşmak yerine zaten bio nesnelerini ve onların içerisindeki bio-vec'leri dolaşan (yani içteki iki döngünün işlevini tek 
-    başına yapan) rq_for_each_segment isimli makronun kullanılması tavsiye edilmektedir. Bu makro şöyle yazılmıştır:
+    bio_vec dizisi alternatif olarak iteratör yoluylabir makro döngüsüyle de dolaşılabilmektedir. Aslında bazı senaryolarda 
+    bu makro döngüsü daha uygun işlev görmektedir. Yani bu makro döngüsünü tercih edebilirsiniz:
 
-    #define rq_for_each_segment(bvl, _rq, _iter)            \
-    __rq_for_each_bio(_iter.bio, _rq)                        \
-        bio_for_each_segment(bvl, _iter.bio, _iter.iter)
+    struct bio_vec bvec;
+    struct bvec_iter iter;
+    ...
 
-    Görüldüğü gibi aslında bu makro request nesnesi içerisindeki bio nesnelerini, bio nesneleri içerisindeki bio_vec nesnelerini 
-    dolaşmaktadır. rq_for_each_segment makrosunun birinci parametresi bio_vec türünden nesneyi almaktadır. Makronun ikinci parametresi 
-    request nesnesinin adresini almaktadır. Üçüncü parametre ise dolaşım sırasında kullanılacak bir iteratör nesnesidir. Bu nesne 
-    req_iterator isimli bir yapı türünden olmalıdır. Bu durumda transfer fonksiyonunun yeni durumu aşağıdaki gibi olacaktır:
+    bio_for_each_segment(bvec, bio, iter) {
+        ...
+    }
 
-    static void request_proc(struct request_queue *rq)
+    Makroya biz bio_vec türünden bir değişkeni, bio türünden göstericiyi ve iteratör görevini yapan bvec_iter türünden bir 
+    değişkeni veririz. Bu makro döngüsü her yinelendiğinde bvec göstericisinin içerisine bio_vec dizisinin sıradaki elemanı
+    yerleştirilmektedir.
+
+    submit_bio fonksiyonumuz çekirdek tarafından hem okuma hem de yazma istekleri için çağrılmaktadır. Bu durumda bizim aygıt 
+    sürücü içerisinde bu fonksiyonun hangi amaçla çağrıldığını belirlememiz gerekir. Bu belirleme işlemi bio_op fonksiyonuyla 
+    yapılmaktadır. Bu makroya bio yapısının adresi argüman olarak verilir. Bu fonksiyon bio yapısının içerisindeki uygun alandan 
+    submit_bio fonksiyonunun neden çağrıldığı bilgisini elde edip geri dönüş değeri olarak vermektedir. Mevcut çekirdeklerde 
+    bu fonksiyon şöyle yazılmıştır:
+
+    static inline enum req_op bio_op(const struct bio *bio)
     {
-        struct request *rqs;
-        struct bio_vec biov;
-        struct req_iterator iterator;
-        struct BLOCKDEV *bdev = (struct BLOCKDEV *) rq->queuedata;
-
-        for (;;) {
-            if ((rqs = blk_fetch_request(rq)) == NULL)
-                break;
-
-            if (blk_rq_is_passthrough(rqs)) {
-                __blk_end_request_all(rqs, -EIO);
-                continue;
-            }
-
-            rq_for_each_segment(biov, rqs, iterator) {
-                /* biov kullanılarak transfer yapılır */
-            }
-
-            __blk_end_request_all(rqs, 0);
-
-            printk(KERN_INFO "new request object\n");
-        }
+        return bio->bi_opf & REQ_OP_MASK;
     }
 
-    Gerçek transfer bilgileri bio_vec yapılarının içerisinde olduğuna göre acaba bu yapı nasıldır? İşte bu yapı şöyle bildirilmiştir:
+    Tabii bizim bu fonksiyonun bu bilgiyi nasıl elde ettiğini bilmemize gerek yoktur. Bu fonksiyonun geri dönüş değeri bazı 
+    bayraklardan oluşmaktadır. Blok aygıt sürücüsünü yazanlar bu bayrakları ele alıp işleyebilmektedir. Buradaki her bayrağın
+    blok aygıtında işlenmesine aslında gerek yoktur. Ancak tipik olarak üç bayrağın submit_bio fonksiyonu içerisinde işlenmesi 
+    gerekir:
+    
+    REQ_OP_READ: Blok aygıtından okuma talep edilmektedir.
+    REQ_OP_WRITE: Blok aygıtına yazma talep edilmektedir.
+    REQ_OP_DISCARD: Blok aygıtının ilgili yerlerinin 0'lanması talep ediliyor.
 
-    #include <linux/bvec.h>
+    O halde bu işlem aşağıdaki gibi bir switch deyimi ile ele alınabilir:
 
-    struct bio_vec {
-        struct page    *bv_page;
-        unsigned int bv_len;
-        unsigned int bv_offset;
-    };
-
-    Yapının bv_page elemanı transferin yapılacağı adresi belirtmektedir. Çekirdek ismine eskiden "buffer cache" denilen daha sonra 
-    "page cache" denilen bir cache veri yapısı kullanmaktadır. İşletim sistemi read/write işlemlerinde önce bu "page cache"e 
-    başvurmakta eğer ilgili blok cache'te varsa buradan almaktadır. Eğer ilgili blok cache'te yoksa blok aygıt sürücüsünden 
-    transfer istemektedir. Blok aygıt sürücüleri karakter aygıt sürücülerinin yaptığı gibi transferleri user alanına kopyalamamaktadır. 
-    Blok aygıt sürücüleri transferi çekirdek tarafından tahsis edilen cache'teki sayfalara yapar. Çekirdek o sayfalardaki bilgiyi
-    user alanına transfer eder. Ancak bu sayfa adresinin özellikle 32 bit Linux sistemlerinde sayfa tablosunda girişi olmayabilir. 
-    Programcının bu girişi oluşturması gerekmektedir. Bu girişi oluşturmak için kmap_atomic isimli fonksiyon ve girişi boşaltmak için 
-    ise kunmap_atomic isimli fonksiyon kullanılmaktadır. Yapının ikinci elemanı olan bv_len transfer edilecek byte sayısını barındırmaktadır. 
-    (Bu elemanda transfer edilecek sektör sayısı değil doğrudan byte sayısı bulunmaktadır.) Nihayet yapının üçüncü elemanı olan 
-    bv_offset birinci elemanında belirtilen adresten uzaklığı tutmaktadır. Yani aslında gerçek transfer adresi bv_page değildir. 
-    bv_page + bv_offset'tir. Bu yapıda en önemli bilgi olan transferin söz konusu olduğu sektör bilgisi yoktur. İşte aslında 
-    transfere konu olan sektör numarası bio yapısının içerisindedir. Her ne kadar biz yukarıdaki makroda bio yapısına erişemiyor 
-    olsak da buna dolaylı olarak iterator nesnesi yoluyla iterator.iter.bi_sect ifadesi ile erişilebilmektedir. Bu durumda 
-    rq_for_each_segment fonksiyonu içerisinde transfer tipik olarak şöyle yapılmaktadır:
-
-    rq_for_each_segment(biov, rqs, iterator) {
-        sector_t sector = iterator.iter.bi_sector;
-        char *buf = (char *)kmap_atomic(biov.bv_page);
-        size_t len = biov.bv_len;
-        int direction = bio_data_dir(iterator.bio);
-        transfer_block(bdev, sector, buf + biov.bv_offset, len, direction);
-        kunmap_atomic(buf);
+    switch (bio_op(bio)) {
+        case REQ_OP_READ:
+            ...
+        case REQ_OP_WRITE:
+            ...
+        case REQ_OP_DISCARD:
+            ...
     }
 
-    Burada transferin yapılacağı sektörün numarası bio_vec içerisinde bulunmadığından bu bilgi iterator yolu ile iterator.iter.bi_sector 
-    ifadesiyle alınmıştır. Transfer adresi olan buf adresi biov.bv_page adresinden biov.bv_offset kadar ileridedir. Yine transferin 
-    yönü doğrudan bio_vec yapısının içerisinde değildir. Bu yön bilgisinin bio_data_dir makrosuyla iterator yoluyla alındığına 
-    dikkat ediniz. (Aslında yön bilgisi bio yapısının içerisindedir. Bu makro onu buradan almaktadır.) Örneğimizde transferin 
-    transfer_block isimli fonksiyonla yapıldığını görüyorsunuz. Bu fonksiyon bizim tarafımızdan yazılan gerçek transferin yapıldığı 
-    fonksiyondur. Aygıt sürücünün en önemli bilgilerinin bizim tarafımızdan oluşturulan BLOCKDEV isimli yapıda tutulduğunu 
-    anımsayınız. Her ne kadar bu yapı nesnesinin adresi global g_bdev göstericisinde tutuluyor olsa da örneğimizde request_queue 
-    nesnesinin queuedata elemanından çekilerek alınıp transfer_block fonksiyonuna verilmiştir. Bu durum yukarıdaki örnek için 
-    gereksiz olsa da birden fazla minör numarayla çalışıldığı durumda aygıt bilgilerinin yerinin belirlenebilmesi için genel bir 
-    çözüm oluşturmak amacıyla transfer_block fonksiyonuna aktarılmıştır. Aygıt bilgilerinin request_queue yapısının queuedata 
-    elemanına nesne tahsis edildikten sonra yerleştirildiğini anımsayınız. Buradaki bizim tarafımızdan yazılması gereken 
-    transfer_block fonksiyonun parametrik yapısı şöyle olabilir:
-
-    static void transfer_block(struct BLOCKDEV *bdev, sector_t sector, char *buf, size_t len, int direction);
-
-    direction değeri READ (0) ve WRITE (1) sembolik sabitleriyle define edilmiştir.
-
-    Aşağıda RAMDISK 5'li çekirdekler öncesinde kullanabileceğiniz blok aygıt sürücüsünün tüm kodlarını görüyorsunuz.
+    Diğer bayrakların işlenmemesi genel olarak bir sorun oluşturmamaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
-
-/* ramdisk-driver.c */
-
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/slab.h>
-#include <linux/blkdev.h>
-
-#define KERNEL_SECTOR_SIZE        512
-#define CAPACITY                (KERNEL_SECTOR_SIZE * 1000)
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Ramdisk Device Driver");
-MODULE_AUTHOR("Kaan Aslan");
-
-int g_major = 0;
-
-struct BLOCKDEV {
-    spinlock_t sl;
-    struct gendisk *gdisk;
-    struct request_queue *rq;
-    size_t capacity;
-    void *data;
-};
-
-static int generic_open(struct block_device *bdev, fmode_t mode);
-static void generic_release(struct gendisk *gdisk, fmode_t mode);
-static void request_proc(struct request_queue *rq);
-static void transfer_block(struct BLOCKDEV *bdev, sector_t sector, char *buf, size_t len, int direction);
-
-static struct block_device_operations g_devops = {
-    .owner = THIS_MODULE,
-    .open = generic_open,
-    .release = generic_release
-};
-
-static struct BLOCKDEV *g_bdev;
-
-static int __init generic_init(void)
-{
-    int result = 0;
-
-    if ((g_major = register_blkdev(g_major, "generic-bdriver")) < 0) {
-        printk(KERN_ERR "cannot register block driver!...\n");
-        return g_major;
-    }
-
-    if ((g_bdev = kmalloc(sizeof(struct BLOCKDEV), GFP_KERNEL)) == NULL) {
-        printk(KERN_ERR "cannot allocate memory!...\n");
-        result = -ENOMEM;
-        goto EXIT1;
-    }
-    memset(g_bdev, 0, sizeof(struct BLOCKDEV));
-    g_bdev->capacity = CAPACITY;
-
-    if ((g_bdev->data = vmalloc(CAPACITY)) == NULL) {
-        printk(KERN_ERR "cannot allocate memory!...\n");
-        result = -ENOMEM;
-        goto EXIT2;
-    }
-
-    spin_lock_init(&g_bdev->sl);
-    if ((g_bdev->rq = blk_init_queue(request_proc, &g_bdev->sl)) == NULL) {
-        printk(KERN_ERR "cannot allocate queue!...\n");
-        result = -ENOMEM;
-        goto EXIT3;
-    }
-    g_bdev->rq->queuedata = g_bdev;
-    if ((g_bdev->gdisk = alloc_disk(1)) == NULL) {
-        result = -ENOMEM;
-        goto EXIT4;
-    }
-    g_bdev->gdisk->major = g_major;
-    g_bdev->gdisk->first_minor = 0;
-    g_bdev->gdisk->flags = GENHD_FL_NO_PART_SCAN;
-    g_bdev->gdisk->fops = &g_devops;
-    g_bdev->gdisk->queue = g_bdev->rq;
-    set_capacity(g_bdev->gdisk, g_bdev->capacity >> 9);
-    g_bdev->gdisk->private_data = g_bdev;
-    strcpy(g_bdev->gdisk->disk_name, "blockdev");
-
-    add_disk(g_bdev->gdisk);
-
-    printk(KERN_INFO "Module initialized with major number %d...\n", g_major);
-
-    return result;
-
-EXIT4:
-    blk_cleanup_queue(g_bdev->rq);
-EXIT3:
-    vfree(g_bdev->data);
-EXIT2:
-    kfree(g_bdev);
-EXIT1:
-    unregister_blkdev(g_major, "generic-bdriver");
-
-    return result;
-}
-
-static int generic_open(struct block_device *bdev, fmode_t mode)
-{
-    printk(KERN_INFO "device opened...\n");
-
-    return 0;
-}
-
-static void generic_release(struct gendisk *gdisk, fmode_t mode)
-{
-    printk(KERN_INFO "device closed...\n");
-}
-
-static void request_proc(struct request_queue *rq)
-{
-    struct request *rqs;
-    struct bio_vec biov;
-    struct req_iterator iterator;
-    struct BLOCKDEV *bdev = (struct BLOCKDEV *)rq->queuedata;
-
-    for (;;) {
-        if ((rqs = blk_fetch_request(rq)) == NULL)
-            break;
-
-        if (blk_rq_is_passthrough(rqs)) {
-            __blk_end_request_all(rqs, -EIO);
-            continue;
-        }
-
-        rq_for_each_segment(biov, rqs, iterator) {
-            sector_t sector = iterator.iter.bi_sector;
-            char *buf = (char *)kmap_atomic(biov.bv_page);
-            size_t len = biov.bv_len;
-            int direction = bio_data_dir(iterator.bio);
-
-            transfer_block(bdev, sector, buf + biov.bv_offset, len, direction);
-
-            kunmap_atomic(buf);
-        }
-
-        __blk_end_request_all(rqs, 0);
-    }
-}
-
- static void transfer_block(struct BLOCKDEV *bdev, sector_t sector, char *buf, size_t len, int direction)
- {
-     if (direction == READ)
-        memcpy(buf, (char *)bdev->data + sector * KERNEL_SECTOR_SIZE, len);
-    else
-        memcpy((char *)bdev->data + sector * KERNEL_SECTOR_SIZE, buf, len);
- }
-
-static void __exit generic_exit(void)
-{
-    del_gendisk(g_bdev->gdisk);
-    blk_cleanup_queue(g_bdev->rq);
-    vfree(g_bdev->data);
-    kfree(g_bdev);
-    unregister_blkdev(g_major, "generic-bdriver");
-
-    printk(KERN_INFO "Goodbye...\n");
-}
-
-module_init(generic_init);
-module_exit(generic_exit);
-
-# Makefile
-
-obj-m += generic.o
-
-all:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
-clean:
-    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
-/* loadblk (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./$module.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module b $major 0
-
-/* unloadblk (bu satırı dosyaya kopyalamayınız ) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./$module.ko || exit 1
-rm -f $module
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Yukarıdaki örneklerdeki request kuyruk yapısı Linux'un 5'ten önceki çekirdeklerine özgüdür. Maalesef blok aygıt sürücülerinin
-    içsel yapısı birkaç kere değiştirilmiştir. Burada yeni çekirdeklerdeki request kuyruk yapısı üzerinde duracağız. Yeni 
-    çekirdeklerde bu kuyruk yapısı şöyle kullanılmaktadır:
-
-    1) Programcı blk_mq_tag_set isimli yapı türünden bir yapı nesnesi oluşturur. Bu yapı nesnesi blok aygıt sürücüsünün 
-    bilgilerinin tutulacağı yapının bir elemanı olarak alınabilir. Ya da global bir değişken olarak alınabilir.
-
-    #include <linux/blk-mq.h>
-
-    struct BLOCKDEV {
-        spinlock_t sl;
-        struct gendisk *gdisk;
-        struct blk_mq_tag_set ts;
-        struct request_queue *rq;
-        size_t capacity;
-        void *data;
-    };
-    static struct BLOCKDEV *g_bdev;
-
-    2) Bu blk_mq_tag_set yapısının içi aşağıdaki gibi doldurulur:
-
-    g_bdev->ts.ops = &g_mqops;
-    g_bdev->ts.nr_hw_queues = 1;
-    g_bdev->ts.queue_depth = 128;
-    g_bdev->ts.numa_node = NUMA_NO_NODE;
-    g_bdev->ts.cmd_size = 0;
-    g_bdev->ts.flags = BLK_MQ_F_SHOULD_MERGE;
-    g_bdev->ts.driver_data = &g_bdev;
-
-    Buradaki elemanlar çekirdeğin blok aygıt sürücü mimarisiyle ilgilidir. Biz burada tipik değerler kullandık. blk_mq_tag_set
-    yapısının ops elemanı transfer isteklerini yerine getiren ana fonksiyonun adresini almaktadır. Bu fonksiyonun parametrik 
-    yapısı şöyle olmalıdır:
-
-    static blk_status_t request_proc(struct blk_mq_hw_ctx *ctx, const struct blk_mq_queue_data *data);
-
-    Yapının driver_data elemanına bu fonksiyon içerisinde erişilebilecek nesnenin adresi girilmelidir. Örneğimizde bu elemana 
-    g_bdev nesnesinin adresini girdik. Tabii aslında bu nesne global olduğu için zaten bu nesneye her yerden erişilebilmektedir. 
-    Ancak birden fazla minör numaranın desteklendiği durumda buraya ilgili minör numaraya ilişkin aygıt bilgisi girilebilir.
-
-    3) İçi doldurulan blk_mq_tag_set nesnesi blk_mq_alloc_tag_set fonksiyonu ile tahsis edilip set edilmelidir. Fonksiyonun 
-    prototipi şöyledir:
-
-    #include <linux/blk-mq.h>
-
-    int blk_mq_alloc_tag_set(struct blk_mq_tag_set *set);
-
-    Fonksiyon blk_mq_tag_set yapı nesnesinin adresini alır. Başarı durumunda 0 değerine, başarısızlık durumunda negatif errno 
-    değerine geri döner.
-    <DEVAM EDECEK>
+    Ramdisk aygıt sürücümüzde bizim işin başında (yani aygıt sürücümüzün init fonksiyonu içerisinde ramdisk için dinamik 
+    biçimde bellek tahsis etmemiz gerekir. Tahsisatı daha önce görmüş olduğumuz kmalloc fonksiyonu ile yapabiliriz. Ancak 
+    kmalloc fonksiyonu ardışıl fiziksel bellek tahsis etmektedir. Ancak bu tür uygulamalarda eğer büyük miktarda tahsisatlar 
+    yapılacaksa fiziksel ardışıllığa gerek yoktur. Fiziksel bellekte ardışıl olmayacak biçimde (ancak sanal adres alanı içerisinde 
+    ardışıllık korunmaktadır) tahsisat yapan vmalloc ve zvalloc fonksiyonları da bulunmaktadır. Her iki fonksiyon da parametre 
+    olarak tahsis edilecek byte miktarını almaktadır. zvalloc aynı zamanda tahsis edilen alanı sıfırlamaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
 
 /*--------------------------------------------------------------------------------------------------------------------------
     Yukarıdaki blok aygıt sürücüsü bir dosya sistemi ile formatlanarak sanki bir disk bölümüymüş gibi de kullanılabilir. Bunun 
