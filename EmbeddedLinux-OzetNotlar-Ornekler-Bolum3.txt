@@ -1,0 +1,1356 @@
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+                                            C ve Sistem Programcıları Derneği
+
+                                   Gömülü Linux Sistemleri - Geliştirme ve Uygulama Kursu
+
+                                        Sınıfta Yapılan Örnekler ve Özet Notlar
+                                                        3. Bölüm
+
+                                                  Eğitmen: Kaan ASLAN
+
+        Bu notlar Kaan ASLAN tarafından oluşturulmuştur. Kaynak belirtmek koşulu ile her türlü alıntı yapılabilir.
+        Kaynak belirtmek için aşağıdaki referansı kullanabilirsiniz:           
+
+        Aslan, K. (2025), "Gömülü Linux Sistemleri - Geliştirme ve Uygulama Kursu", Sınıfta Yapılan Örnekler ve Özet Notlar, 
+            C ve Sistem Programcıları Derneği, İstanbul.
+
+                            (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
+                                    (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
+
+                                            Son Güncelleme: o1/09/2025 - Çarşamba
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            129. Ders 23/09/2025 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    GPIO (General Purpose Input Output) sistemlerinin elektronik (yani donanımsal) kısmı Gürbüz Hoca (Gürbüz Aslan) tarafından 
+    anlatılmıştı. Bu bölümde biz GPIO sisteminin gömülü Linux sistemlerindeki yazılımsal kullanımı üzerinde duracağız. Önce BBB 
+    üzerinde sonra Raspberry Pi üzerinde çalışacağız. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    BBB'de her iki yanda iki GPIO soketi vardır. Bu soketlerde ikişer sütun bulunmaktadır. Her sütunda 23 GPIO pin vardır. 
+    BBB'de GPIO sistemi için ilk öğrenilecek şey bu GPIO pinlerinin numaralandırılma biçimidir. Numaralandırma kartın "Ethernet 
+    ve 5V girişinin bulunduğu ucu karşı tarafa bakacak biçimde konumlandırılmasıyla" yapılmıştır. Konumlandırma yapıldıktan 
+    sonra sol taraftaki sokete P9, sağ taraftaki sokete ise P8 denilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Kart konumlandırıldıktan sonra pin görümleri şöyle olmaktadır:
+
+            P9 (solda)                        P8 (sağda)
+    ┌─────────────┬──────────────┐   ┌─────────────┬──────────────┐
+    │ P9_01  GND  │ P9_02  GND   │   │ P8_01  DGND │ P8_02  DGND  │
+    │ P9_03  3.3V │ P9_04  3.3V  │   │ P8_03  03   │ P8_04  04    │
+    │ P9_05  5V   │ P9_06  5V    │   │ P8_05  05   │ P8_06  06    │
+    │ P9_07  SYS5V│ P9_08  SYS5V │   │ P8_07  07   │ P8_08  08    │
+    │ P9_09 PWR_BT│ P9_10 SYS_RST│   │ P8_09  09   │ P8_10  10    │
+    │ P9_11  11   │ P9_12  12    │   │ P8_11  11   │ P8_12  12    │
+    │ P9_13  13   │ P9_14  14    │   │ P8_13  13   │ P8_14  14    │
+    │ P9_15  15   │ P9_16  16    │   │ P8_15  15   │ P8_16  16    │
+    │ P9_17  17   │ P9_18  18    │   │ P8_17  17   │ P8_18  18    │
+    │ P9_19  19   │ P9_20  20    │   │ P8_19  19   │ P8_20  20    │
+    │ P9_21  21   │ P9_22  22    │   │ P8_21  21   │ P8_22  22    │
+    │ P9_23  23   │ P9_24  24    │   │ P8_23  23   │ P8_24  24    │
+    │ P9_25  25   │ P9_26  26    │   │ P8_25  25   │ P8_26  26    │
+    │ P9_27  27   │ P9_28  28    │   │ P8_27  27   │ P8_28  28    │
+    │ P9_29  29   │ P9_30  30    │   │ P8_29  29   │ P8_30  30    │
+    │ P9_31  31   │ P9_32  32    │   │ P8_31  31   │ P8_32  32    │
+    │ P9_33  33   │ P9_34  34    │   │ P8_33  33   │ P8_34  34    │
+    │ P9_35  35   │ P9_36  36    │   │ P8_35  35   │ P8_36  36    │
+    │ P9_37  37   │ P9_38  38    │   │ P8_37  37   │ P8_38  38    │
+    │ P9_39  39   │ P9_40  40    │   │ P8_39  39   │ P8_40  40    │
+    │ P9_41  41   │ P9_42  42    │   │ P8_41  41   │ P8_42  42    │
+    │ P9_43  43   │ P9_44  44    │   │ P8_43  43   │ P8_44  44    │
+    │ P9_45  45   │ P9_46  46    │   │ P8_45  45   │ P8_46  46    │
+    └─────────────┴──────────────┘   └─────────────┴──────────────┘
+
+    Buradaki tüm pinler GPIO amacıyla kullanılmamaktadır. Bazı pinler başka işlemler için bulundurulmuştur. BBB'nin P9 ve P8
+    soketi üzerindeki tüm pinleri işlevlerine göre bir liste biçiminde aşağıdaki tabloda veriyoruz:
+
+    P9 HEADER (sol)
+
+    P9_01 : GND
+    P9_02 : GND
+    P9_03 : 3.3V
+    P9_04 : 3.3V
+    P9_05 : 5V
+    P9_06 : 5V
+    P9_07 : SYS_5V
+    P9_08 : SYS_5V
+    P9_09 : PWR_BUT
+    P9_10 : SYS_RESETn
+    P9_11 : UART4_RXD
+    P9_12 : GPIO / GPIO1_28
+    P9_13 : UART4_TXD
+    P9_14 : EHRPWM1A
+    P9_15 : GPIO / GPIO1_16
+    P9_16 : EHRPWM1B
+    P9_17 : I2C1_SCL / SPI0_CS0
+    P9_18 : I2C1_SDA / SPI0_MISO
+    P9_19 : I2C2_SCL
+    P9_20 : I2C2_SDA
+    P9_21 : UART2_TXD / SPI0_D0
+    P9_22 : UART2_RXD / SPI0_SCLK
+    P9_23 : GPIO / GPIO1_17
+    P9_24 : UART1_TXD
+    P9_25 : GPIO / GPIO3_21
+    P9_26 : UART1_RXD
+    P9_27 : GPIO / GPIO3_19
+    P9_28 : SPI1_CS0
+    P9_29 : SPI1_D0
+    P9_30 : SPI1_D1
+    P9_31 : SPI1_SCLK
+    P9_32 : VDD_ADC (1.8V)
+    P9_33 : AIN4
+    P9_34 : GND
+    P9_35 : AIN6
+    P9_36 : AIN5
+    P9_37 : AIN2
+    P9_38 : AIN3
+    P9_39 : AIN0
+    P9_40 : AIN1
+    P9_41 : GPIO / CLKOUT2 / UART5_TXD
+    P9_42 : GPIO / GPIO0_7 / UART5_RXD
+    P9_43 : GND
+    P9_44 : GND
+    P9_45 : GND
+    P9_46 : GND
+        
+    P8 HEADER (sağ)
+
+    P8_01 : GND
+    P8_02 : GND
+    P8_03 : GPIO / LCD_DATA2
+    P8_04 : GPIO / LCD_DATA3
+    P8_05 : GPIO / LCD_DATA4
+    P8_06 : GPIO / LCD_DATA5
+    P8_07 : GPIO / LCD_DATA6
+    P8_08 : GPIO / LCD_DATA7
+    P8_09 : GPIO / LCD_DATA0
+    P8_10 : GPIO / LCD_DATA1
+    P8_11 : GPIO / GPIO1_13
+    P8_12 : GPIO / GPIO1_12
+    P8_13 : GPIO / EHRPWM2B
+    P8_14 : GPIO / GPIO0_26
+    P8_15 : GPIO / GPIO1_15
+    P8_16 : GPIO / GPIO1_14
+    P8_17 : GPIO / GPIO0_27
+    P8_18 : GPIO / GPIO2_1
+    P8_19 : GPIO / EHRPWM2A
+    P8_20 : GPIO / GPIO1_31
+    P8_21 : GPIO / GPIO1_30
+    P8_22 : GPIO / GPIO1_5
+    P8_23 : GPIO / GPIO1_4
+    P8_24 : GPIO / GPIO1_1
+    P8_25 : GPIO / GPIO1_0
+    P8_26 : GPIO / GPIO1_29
+    P8_27 : GPIO / GPIO2_22
+    P8_28 : GPIO / GPIO2_24
+    P8_29 : GPIO / GPIO2_23
+    P8_30 : GPIO / GPIO2_25
+    P8_31 : GPIO / UART5_CTSN
+    P8_32 : GPIO / UART5_RTSN
+    P8_33 : GPIO / UART4_RTSN
+    P8_34 : GPIO / UART3_RTSN / PWM
+    P8_35 : GPIO / UART4_CTSN
+    P8_36 : GPIO / UART3_CTSN / PWM
+    P8_37 : GPIO / UART5_TXD
+    P8_38 : GPIO / UART5_RXD
+    P8_39 : GPIO / GPIO2_12
+    P8_40 : GPIO / GPIO2_13
+    P8_41 : GPIO / GPIO2_10
+    P8_42 : GPIO / GPIO2_11
+    P8_43 : GPIO / GPIO2_8
+    P8_44 : GPIO / GPIO2_9
+    P8_45 : GPIO / GPIO2_6 / PWM
+    P8_46 : GPIO / GPIO2_7 / PWM
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    BBB'de pin numaralandırması üç farklı biçimde yapılmaktadır. Birinci numaralandırma biçimi tamamen sokete göre yapılan 
+    numaralandırmadır. Bu numaralandırmaya "fiziksel numaralandırma" diyeceğiz. Yukarıdaki ilk şekide bu fiziksel numaralandırma 
+    kullanılmıştır. Bu numaralandırma P9_XX ve P8_XX biçiminde yapılmaktadır. Buradaki P9 ve P8 soketin yerini belirtmektedir. 
+    Bizim konumlandırmamıza göre P9 soldaki soket, P8 sağdaki sokettir. Bu soketlerin solundaki 23 pinlik sütun tek sayılarla, 
+    sağındaki 23 pinlik sütun çift sayılarla numaralndırılmaktadır. Numaralandırma 1'den başlanarak aşağıdaki gibi yapılmıştır:
+
+    1   2
+    3   4
+    5   6
+    7   8
+    9   10
+    11  12
+    13  14
+    15  16
+    17  18
+    19  20
+    21  22
+    23  24
+    25  26
+    27  28
+    29  30
+    31  32
+    33  34
+    35  36
+    37  38
+    39  40
+    41  42
+    43  44
+    45  46
+
+    Örneğin P9_12 fiziksel pin numarası soldaki soketin 12 numaralı pini anlamına gelmektedir. Örneğin P8_07 sağdaki soketin 
+    7 numaralı pini anlamına gelmektedir. 
+
+    İkinci numaralandırma sistemi AM335x SoC tasarımında kullanılan içsel numaralandırma sistemidir. Buna "SoC numaralandırması" 
+    diyeceğiz. Bu numaralandırma sisteminde bu GPIO pinlerini kontrol eden denetleyici temel alınmıştır. AM335x SoC tasarımında 
+    aslında içsel olarak GPIO uçlarını kontrol eden 4 denetleyici vardır. Bu denetleyicilerin her biri 32 çıkışlıdır. Ancak bu 
+    32 çıkışın hepsi P9 ve P8 soketlerine bağlanmamıştır. (Bağlanmayanların bazıları kart üzerindeki LED'leri yakmakta, bazıları 
+    ise başka amaçlarla kullanılmaktadır. Bazıları da tamamen boş bırakılmıştır. Eğer sütunlarda 23'den daha fazla pin olsaydı 
+    kartın boyutlarının da değiştirilmesi gerekebilirdi.) SoC içerisindeki denetleyicilerin uçları P9 ve P8 soketlerindeki pinlere 
+    karışık dağıtılmıştır. Yani fiziksel numaradan hareketle SoC numaralandırması elde edilememektedir. SoC numaralandırılması 
+    GPIOX_Y biçiminde yapılmaktadır. Buradaki X harfiSoC içerisindeki denetleyicinin numarasını belirtmektedir. YY harfleri ise 
+    denetleyicinin 32 ucundan hangisinin pine bağlandığını belirtmeektedir. Aşağıda fiziksel pin numaralarına karşı gelen SoC 
+    ve aygıt sürücü numaraları bir tablo halinde verilmiştir. Bu tabloda P9 ve P8 soketlerinde olmayan pinler de belirtilmiştir:
+
+                             P9 Soketi
+    ┌──────┬──────────┬─────────────────┬──────────────┬─────────────┐
+    │ Pin  │ Proc Pin │  Ana Fonksiyon  │ GPIO Göst.   │ GPIO Sayısı │
+    ├──────┼──────────┼─────────────────┼──────────────┼─────────────┤
+    │ P9_1 │    -     │      GND        │      -       │      -      │
+    │ P9_2 │    -     │      GND        │      -       │      -      │
+    │ P9_3 │    -     │    DC_3.3V      │      -       │      -      │
+    │ P9_4 │    -     │    DC_3.3V      │      -       │      -      │
+    │ P9_5 │    -     │    VDD_5V       │      -       │      -      │
+    │ P9_6 │    -     │    VDD_5V       │      -       │      -      │
+    │ P9_7 │    -     │    SYS_5V       │      -       │      -      │
+    │ P9_8 │    -     │    SYS_5V       │      -       │      -      │
+    │ P9_9 │    -     │    PWR_BUT      │      -       │      -      │
+    │P9_10 │   A10    │  SYS_RESETn     │      -       │      -      │
+    │P9_11 │   T17    │  UART4_RXD      │   GPIO0_30   │     30      │
+    │P9_12 │   U18    │   GPIO1_28      │   GPIO1_28   │     60      │
+    │P9_13 │   U17    │  UART4_TXD      │   GPIO0_31   │     31      │
+    │P9_14 │   U14    │   EHRPWM1A      │   GPIO1_18   │     50      │
+    │P9_15 │   R13    │   GPIO1_16      │   GPIO1_16   │     48      │
+    │P9_16 │   T14    │   EHRPWM1B      │   GPIO1_19   │     51      │
+    │P9_17 │   A16    │   I2C1_SCL      │   GPIO0_5    │     5       │
+    │P9_18 │   B16    │   I2C1_SDA      │   GPIO0_4    │     4       │
+    │P9_19 │   D17    │   I2C2_SCL      │   GPIO0_13   │     13      │
+    │P9_20 │   D18    │   I2C2_SDA      │   GPIO0_12   │     12      │
+    │P9_21 │   B17    │  UART2_TXD      │   GPIO0_3    │     3       │
+    │P9_22 │   A17    │  UART2_RXD      │   GPIO0_2    │     2       │
+    │P9_23 │   V14    │   GPIO1_17      │   GPIO1_17   │     49      │
+    │P9_24 │   D15    │  UART1_TXD      │   GPIO0_15   │     15      │
+    │P9_25 │   A14    │   GPIO3_21      │   GPIO3_21   │    117      │
+    │P9_26 │   D16    │  UART1_RXD      │   GPIO0_14   │     14      │
+    │P9_27 │   C13    │   GPIO3_19      │   GPIO3_19   │    115      │
+    │P9_28 │   C12    │   SPI1_CS0      │   GPIO3_17   │    113      │
+    │P9_29 │   B13    │   SPI1_D0       │   GPIO3_15   │    111      │
+    │P9_30 │   D12    │   SPI1_D1       │   GPIO3_16   │    112      │
+    │P9_31 │   A13    │  SPI1_SCLK      │   GPIO3_14   │    110      │
+    │P9_32 │    -     │     VADC        │      -       │      -      │
+    │P9_33 │   C8     │     AIN4        │      -       │      -      │
+    │P9_34 │    -     │     AGND        │      -       │      -      │
+    │P9_35 │   A8     │     AIN6        │      -       │      -      │
+    │P9_36 │   B8     │     AIN5        │      -       │      -      │
+    │P9_37 │   B7     │     AIN2        │      -       │      -      │
+    │P9_38 │   A7     │     AIN3        │      -       │      -      │
+    │P9_39 │   B6     │     AIN0        │      -       │      -      │
+    │P9_40 │   C7     │     AIN1        │      -       │      -      │
+    │P9_41 │   D14    │   CLKOUT2       │   GPIO0_20   │     20      │
+    │P9_41 │   D13    │   GPIO3_20      │   GPIO3_20   │    116      │
+    │P9_42 │   C18    │   GPIO0_7       │   GPIO0_7    │     7       │
+    │P9_42 │   B12    │   GPIO3_18      │   GPIO3_18   │    114      │
+    │P9_43 │    -     │      GND        │      -       │      -      │
+    │P9_44 │    -     │      GND        │      -       │      -      │
+    │P9_45 │    -     │      GND        │      -       │      -      │
+    │P9_46 │    -     │      GND        │      -       │      -      │
+    └──────┴──────────┴─────────────────┴──────────────┴─────────────┘
+
+                             P8 Soketi
+    ┌──────┬──────────┬─────────────────┬──────────────┬─────────────┐
+    │ Pin  │ Proc Pin │  Ana Fonksiyon  │ GPIO Göst.   │ GPIO Sayısı │
+    ├──────┼──────────┼─────────────────┼──────────────┼─────────────┤
+    │ P8_1 │    -     │      GND        │      -       │      -      │
+    │ P8_2 │    -     │      GND        │      -       │      -      │
+    │ P8_3 │    R9    │   GPIO1_6       │   GPIO1_6    │     38      │
+    │ P8_4 │    T9    │   GPIO1_7       │   GPIO1_7    │     39      │
+    │ P8_5 │    R8    │   GPIO1_2       │   GPIO1_2    │     34      │
+    │ P8_6 │    T8    │   GPIO1_3       │   GPIO1_3    │     35      │
+    │ P8_7 │    R7    │    TIMER4       │   GPIO2_2    │     66      │
+    │ P8_8 │    T7    │    TIMER7       │   GPIO2_3    │     67      │
+    │ P8_9 │    T6    │    TIMER5       │   GPIO2_5    │     69      │
+    │P8_10 │    U6    │    TIMER6       │   GPIO2_4    │     68      │
+    │P8_11 │   R12    │   GPIO1_13      │   GPIO1_13   │     45      │
+    │P8_12 │   T12    │   GPIO1_12      │   GPIO1_12   │     44      │
+    │P8_13 │   T10    │   EHRPWM2B      │   GPIO0_23   │     23      │
+    │P8_14 │   T11    │   GPIO0_26      │   GPIO0_26   │     26      │
+    │P8_15 │   U13    │   GPIO1_15      │   GPIO1_15   │     47      │
+    │P8_16 │   V13    │   GPIO1_14      │   GPIO1_14   │     46      │
+    │P8_17 │   U12    │   GPIO0_27      │   GPIO0_27   │     27      │
+    │P8_18 │   V12    │   GPIO2_1       │   GPIO2_1    │     65      │
+    │P8_19 │   U10    │   EHRPWM2A      │   GPIO0_22   │     22      │
+    │P8_20 │    V9    │   GPIO1_31      │   GPIO1_31   │     63      │
+    │P8_21 │    U9    │   GPIO1_30      │   GPIO1_30   │     62      │
+    │P8_22 │    V8    │   GPIO1_5       │   GPIO1_5    │     37      │
+    │P8_23 │    U8    │   GPIO1_4       │   GPIO1_4    │     36      │
+    │P8_24 │    V7    │   GPIO1_1       │   GPIO1_1    │     33      │
+    │P8_25 │    U7    │   GPIO1_0       │   GPIO1_0    │     32      │
+    │P8_26 │    V6    │   GPIO1_29      │   GPIO1_29   │     61      │
+    │P8_27 │    U5    │   GPIO2_22      │   GPIO2_22   │     86      │
+    │P8_28 │    V5    │   GPIO2_24      │   GPIO2_24   │     88      │
+    │P8_29 │    R5    │   GPIO2_23      │   GPIO2_23   │     87      │
+    │P8_30 │    R6    │   GPIO2_25      │   GPIO2_25   │     89      │
+    │P8_31 │    V4    │  UART5_CTSN     │   GPIO0_10   │     10      │
+    │P8_32 │    T5    │  UART5_RTSN     │   GPIO0_11   │     11      │
+    │P8_33 │    V3    │  UART4_RTSN     │   GPIO0_9    │     9       │
+    │P8_34 │    U4    │  UART3_RTSN     │   GPIO2_17   │     81      │
+    │P8_35 │    V2    │  UART4_CTSN     │   GPIO0_8    │     8       │
+    │P8_36 │    U3    │  UART3_CTSN     │   GPIO2_16   │     80      │
+    │P8_37 │    U1    │  UART5_TXD      │   GPIO2_14   │     78      │
+    │P8_38 │    U2    │  UART5_RXD      │   GPIO2_15   │     79      │
+    │P8_39 │    T3    │   GPIO2_12      │   GPIO2_12   │     76      │
+    │P8_40 │    T4    │   GPIO2_13      │   GPIO2_13   │     77      │
+    │P8_41 │    T1    │   GPIO2_10      │   GPIO2_10   │     74      │
+    │P8_42 │    T2    │   GPIO2_11      │   GPIO2_11   │     75      │
+    │P8_43 │    R3    │   GPIO2_8       │   GPIO2_8    │     72      │
+    │P8_44 │    R4    │   GPIO2_9       │   GPIO2_9    │     73      │
+    │P8_45 │    R1    │   GPIO2_6       │   GPIO2_6    │     70      │
+    │P8_46 │    R2    │   GPIO2_7       │   GPIO2_7    │     71      │
+    └──────┴──────────┴─────────────────┴──────────────┴─────────────┘
+
+    Üçüncü numaralandırma sistemi de Linux aygıt sürücülerinin kullandığı numaralandırma sistemidir. Bu numaralandırma
+    sistemine "aygıt sürücü numaralandırması" diyebiliriz. Bu numaralandırma sistemi Linux'un sysfs dosya sisyeminde kullanılan 
+    numaralandırma sistemidir. Aygıt sürücüler bu sistemi kullanmaktadır. Bu sistemdeki pin numalararı GPIOXX biçiminde 
+    belirtilmektedir. Her pinin bir numarası vardır. GPIO_X_Y SoC numarası Z = X * 32 + Y biçiminde aygıt sürücü GPIOZ 
+    numarasına dönüştürülmektedir. 
+    Örneğin GPIO1_14 pininin aygıt sürücü numarası GPIO46'dır. Örneğin GPIO3_21 pininin aygıt sürücü numarası GPIO117 
+    biçimindedir. Yukarıdaki tablolarda her pinin üç numaraladırma sistemindeki karşılıklar tek tek verilmiştir. 
+
+    Pekiyi yukarıda üç numaralandırma biçimini gördük. Hangi numaralandırmalar hangi bağlamlarda kullanılmaktadır? Fiziksel 
+    bağlantılar yapılıken genellikle diziksel numaralandırma kullanılmaktadır. Aşağı seviyeli SoC denetleyicisi üzerinde 
+    işlemler yapılacaksa (örneğin aygıt sürücüler yazılacaksa) mecburen SoC numaralandırılmasının kullanılması gerekmektedir. 
+    Ancak Linux'un sys dosyas sistemindeki dizin girişleri kullanılacaksa yani kullanıcı modunda programlar yazılacaksa bu 
+    bağlamda aygıt sürücü numaralandırması kullanılmaktadır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    GPIO devrelerinin donanımsal özelliklerini Gürbüz Hoca anlatmıştı. Pekiyi biz gömülü sistem mühendisi olarak bu GPIO pinleriyle 
+    ne yapabiliriz? Temelde bu GPIO pinleri üç amaçla kullanılabilmektedir:
+
+    OUT 
+    IN
+    Interrupt
+
+    Bu pinleri biz önce belli bir yön için programlarız. OUT işlemi ilgili pine elektirksek işaret uygulamak anlamına gelmektedir. 
+    Dolayısıyla bir pin elektirksel olarak Lojik 1 seviyesine çekildiğinde o başka elktronik devreyi sürebilir. IN işlemi 
+    ters işlemdir. Dış dünyadaki bir birimin o uca uyguladığı elektriksel işaretin okunması anlamına gelir. O hade kartımızdan 
+    dış dünyaya elektiriksel ileti göndermek için OUT işlemi, dış dünyadan bu iletileri almak için IN işlemi yapmak gerekir. 
+    GPIO pinlerinin diğer bir özelliği de "kesme (interrupt)" oluşturabilmesidir. Biz bu pinleri başka aygıtlara bağladığımızda 
+    onların bu uçlar yoluyla kesme oluşturmsını sağlayabilmekteyiz. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    GPIO pinleriyle OUT ve In işlemlerinin testi için basit devreler kullanacağız. OUT testi için en basit devre şüphesiz bir 
+    ED'in yakılığ söndürülmesini sağlayan devredir. LED'in yakılması için test devresi şöyle oluşturulabilir:
+
+    GPIO pin
+    │    
+    ├───[R 470Ω]───|>|───⏚ GND
+                   A K
+
+    Bu devrede LED'in kısa ucu (katot) toprağa uzun ucu (anot) önce bir dirence sonra da GPIO uçlarından birine bağlanmıştır. 
+    Burada 470Ω gibi küçük dirençler kullanabilirsiniz. Ancak dirençsiz bağlamayınız. Biz örneklerimizde bu amaçla P9_12 (GPIO1_28, 
+    GPIO60) pinini kullanacağız. 
+
+    IN testi için en basit devre bir düğme (button) devresidir. Bu devrede düğmeye basılmamışsa GPIO ucundan lojik 1 değeri 
+    basılmışsa 0 değeri okunmaktadır. Protoborta yerleştirebileceğiniz çok küçük düğmeler (push buttons) bulunmaktadır. Bunlardan 
+    satın alabilirsiniz. Devre şöyledir:
+
+    +3.3V
+    │
+    [10kΩ]
+    │
+    ├─── GPIO
+    │
+    [ Buton ]
+    │
+    ⏚ GND
+
+    Burada düğmenin bir ucunun toprağa bağlı, diğer ucunun GPIO pinlerinden birine bağlı olduğuna dikkat ediniz. GPIO pinine 
+    bağlı olan uç aynı zamanda 10K gibi büyük bir dirençle soketteki 3.3V ucuna bağlnmıştır. Böylece düğmeye basılmamışsa 
+    ilgili uçtan lojik 1 değeri, basılmışsa 0 değeri okunacaktır. Biz örneklerimizde bu amaçla P9_16 (GPIO1_19, GPIO51) pinini 
+    kullanacağız. 
+
+    P9 soketinde toprak (GND) uçlarının ve 3.3V ile 5V uçlarının bulunduğuna dikkat ediniz. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    GPIO programlaması için Linux'ta çeşitli seçenekler vardır:
+
+    - sysfs dosya sistemini kullanarak programlama.
+    - "/dev/gpiochipX" aygıt sürücüsünü kullanarak programlama.
+    - "gpiod" kütüphanesini kullanarak programlama (zaten gpiod kütüphanesi /dev/gpiochipX" aygıt sürücüsünü kullanıyor). 
+    - Aygıt sürücü yazıp, bellek tabanlı IO (memory-mapped IO) işlemleriyle AM335x SoC içerisindeki GPIO denetleyicisine 
+    komutlar göndererek programlama.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                        130. Ders 25/09/2025 - Perşembe 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi bir aygıt sürücü class_create çekirdek fonksiyonu ile "/sys/class" dizininde bir giriş yaratabilmekteydi. 
+    Daha sonra device_create fonksiyonuyla da bir device nesnesi yaratılıp bu sysfs dosya sistemi üzerinde işlemler yapılabilmektedir.. 
+    Yine anımsayacağınız gibi sysfs dosya sistemi amaç olarak proc dosya sistemine benzemekteydi. proc dosya sisteminin bazı 
+    yetersizlikleri görüldüğü için o dosya sistemi muhafaza edilerek sysfs dosya sisteminin çekirdeğe eklendiğinden bahsetmiştik. 
+    İşte çekirdek içerisindeki gpio aygıt sürücüsü dosya tabanlı erişimler için "/sys/class/gpio" dizinini kullanmaktadır. 
+
+    "/sys/class/gpio" dizininde "export", "unexport" dosyalarının yanı sıra GPIO pinlerini temsil eden "gpioxx" isminde (buradaki 
+    "xx" GPIO aygıt sürücü numaralandırmasına ilişkin sayıyı belirtmektedir) dizinler vardır. Örneğin BBB'deki Linux dağıtımında 
+    bu dizini görüntülediğimizde aşağıdaki girişleri görmekteyiz:
+
+    $ debian@BeagleBone:/sys/class/gpio$ ls
+    export   gpio114  gpio15  gpio3   gpio36  gpio46  gpio60  gpio68  gpio74  gpio80  gpiochip0
+    gpio10   gpio115  gpio2   gpio30  gpio37  gpio47  gpio61  gpio69  gpio75  gpio81  gpiochip32
+    gpio11   gpio116  gpio20  gpio31  gpio38  gpio48  gpio62  gpio7   gpio76  gpio86  gpiochip64
+    gpio110  gpio117  gpio22  gpio32  gpio39  gpio49  gpio63  gpio70  gpio77  gpio87  gpiochip96
+    gpio111  gpio12   gpio23  gpio33  gpio4   gpio5   gpio65  gpio71  gpio78  gpio88  unexport
+    gpio112  gpio13   gpio26  gpio34  gpio44  gpio50  gpio66  gpio72  gpio79  gpio89
+    gpio113  gpio14   gpio27  gpio35  gpio45  gpio51  gpio67  gpio73  gpio8   gpio9
+
+    Şimdi bu dizinlerden birine girelim. Örneğin LED'imizi bağladığımız gpio60 dizinine geçelim. Bu dizinin içeriği şöyledir:
+
+    debian@BeagleBone:/sys/class/gpio/gpio60$ ls
+    active_low  device  direction  edge  label  power  subsystem  uevent  value
+
+    Burada üç dosya bizim için önemlidir. "direction" dosyası ilgili pini OUT ya da IN biçiminde konfigüre etmek için kullanılmaktadır. 
+    Bu dosyaya biz "out" ya da "in" yazısını yazdırdığımızda ilgili pin bu amaçla konfigüre edilmiş olur. Örneğin biz GPIO60 
+    pinini (P9_12, GPIO1_28 pinini) OUT biçiminde şöyle konfigüre edebiliriz:
+
+    $ echo "ou"t" | sudo tee direction
+
+    Örneğin biz GPIO51 numaralı pini IN olarak konfigüre etmek için önce "gpio51" dizinine geçip aşağıdaki komutu uygulayabiliriz:
+
+    $ echo "in" | sudo tee direction
+
+    Artık sıra ilgili pin OUT olarak konfigüre edilmişse o pine lojik 1 ya da lojik 0 değerini göndermeye, IN olarak konfigüre
+    edilmişse o pine uygulanan işareti okumaya gelmiştir. Bunun için "value" dosyası kullanılmaktadır. Örneğin LED'imizin bağlı 
+    olduğu GPIO60 pinini lojik 1 seviyesine (3.3 volt) çekmek için aşağıdaki komutu kullanabiliriz:
+
+    $ echo "1" | sudo tee value
+
+    Tekrar 0'a çekmek için ise aşağıdaki komutu kullanabiliriz:
+
+    $ echo "0" | sudo tee value
+
+    Şimdi de düğmeyi bağladığımız GPIO51 numaralı pini okumak için "gpio51" dizinine geçelim. "value" dosyası zaten herkes 
+    tarafından okunabilmektedir. (Bu dosyasının erişim hakları "-rw-rw-r--" biçimindedir.) O halde bu pini şöyle okuyabiliriz:
+
+    $ cat value
+    1
+
+    Düğümeye basarak okuma yaparsak 0 okumamız gerekir. Şimdi aynı denemeyi düğmeye basarak yapalım:
+
+    $ cat value
+    0
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Tabii yularıda açıkladığımız "direction" ve "value" dosyalarını bir C programınyla açıp oraya "1" ve "0" karakterlerini 
+    de gönderebiliriz. Örneğin LED'imizi 1 saniye süreyle yakıp söndüren bir programı aşağıdaki gibi yazabiliriz:
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+
+    void write_file(const char *path, const char *cmd);
+    void exit_sys(const char *msg);
+
+    int main(void)
+    {
+        int fd;
+
+        write_file("/sys/class/gpio/gpio60/value", "out");
+
+        if ((fd = open("/sys/class/gpio/gpio60/value", O_RDWR)) == -1) 
+            exit_sys("open");
+        
+        for (;;) {
+            lseek(fd, 0, 0);
+            if (write(fd, "1", 1) == -1)
+                exit_sys("write");
+            sleep(1);
+            lseek(fd, 0, 0);
+            if (write(fd, "0", 1) == -1)
+                exit_sys("write");
+            sleep(1);
+        }
+
+        close(fd);      /* unreacable code */
+
+        return 0;
+    }
+
+    void write_file(const char *path, const char *cmd)
+    {
+        int fd;
+
+        if ((fd = open(path, O_WRONLY)) == -1) 
+            exit_sys("open");
+
+        if (write(fd, cmd, strlen(cmd)) == -1)
+            exit_sys("write");
+
+        close(fd);
+    }
+
+    void exit_sys(const char *msg)
+    {
+        perror(msg);
+
+        exit(EXIT_FAILURE);
+    }
+
+    Programdaki for döngüsüne dikkat ediniz:
+
+    for (;;) {
+        if (write(fd, "1", 1) == -1)
+            exit_sys("write");
+        sleep(1);
+        if (write(fd, "0", 1) == -1)
+            exit_sys("write");
+        sleep(1);
+    }
+
+    Aslında bildiğiniz gibi write işlemlerinde dosya göstericisi ilerletilmektedir. Yani yazma işlemlerinden önce bizim 
+    dosya göstericisini lseek fonksiyonuyla başa çekmemiz gerekir. Ancak aygıt sürücüler konusunda da gördüğümüz gibi
+    bazen aygıt sürücüleri yazanlar bu tür amaçlarla oluşturdukları küçük arayüz dosyalarında dosya göstericisinin konumunu 
+    dikkate almadan okumayı ve yazmayı hep baştan itibaren yapabilmektedir. Tabii siz bu bilgiyi bilmek zorunda olmadığınız 
+    için daha temkinli bir biçimde yazma işleminden önce dosya göstericisini dosyanın başına çekmelisiniz. (BBB'deki "value" 
+    dosyasına dosya göstericisini başa çekmeden de "1" ve "0" yazılabilmektedir.)  
+
+    Yukarıdaki programda sonsuz döngü oluşturulduğu için programı Ctrl+C tuşları ile sonlandırabilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de bir döngü içerisinde GPIO51 pinini okumak isteyelim. Okumayı sonsuz bir döngü içerisinde "polling" yöntemiyle 
+    yapıp yalnızca değişiklik oluştuğunda pinin değerini yazdıralım. Böyle bir C programını aşağıdaki gibi yazabiliriz:
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+    
+    void write_file(const char *path, const char *cmd); 
+    void exit_sys(const char *msg);  
+    
+    int main(void)
+    {
+        int fd;
+        char status, prev_status = '1';
+
+        write_file("/sys/class/gpio/gpio51/direction", "in");
+
+        if ((fd = open("/sys/class/gpio/gpio51/value", O_RDONLY)) == -1) 
+            exit_sys("open");
+        
+        for (;;) {
+            lseek(fd, 0, 0);
+            if (read(fd, &status, 1) == -1)
+                exit_sys("read");
+            if (status != prev_status) {
+                printf("%c\r", status);
+                fflush(stdout);
+                prev_status = status;
+            }
+        }
+
+        close(fd);      /* unreacable code */
+
+        return 0;
+    }
+
+    void write_file(const char *path, const char *cmd)
+    {
+        int fd;
+
+        if ((fd = open(path, O_WRONLY)) == -1) 
+            exit_sys("open");
+
+        if (write(fd, cmd, strlen(cmd)) == -1)
+            exit_sys("write");
+
+        close(fd);
+    }
+
+    void exit_sys(const char *msg)
+    {
+        perror(msg);
+
+        exit(EXIT_FAILURE);
+    }
+
+    Burada da sonsuz döngü söz konusu olduğu için programı sonlandrımak için Ctrl+C tuşlarını kullanabilirsiniz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Pekiyi yukarıdaki programlarda POSIX fonksiyonları yerine C'nin standart dosya fonksiyonlaırını kullanabilir miydik? Evet 
+    kullanabilirdik. Ancak C'nin standart dosya fonksiyonlaırnın "tamponlu (buffered)" biçimde çalıştığını göz önünde bulundurmak
+    gerekir. Biz standart C fonksiyonlarıyla bir dosyaya yazma yaptığımızda aslında yazılanlar önce bir tampona yazılıp 
+    biriktirilmekte sonra hedefe aktarılmaktadır. Bu tür durumlarda yazma yaptıktan sonra fflush çağrısı yapmayı unutmayınız. 
+    (C standartlarına göre fseek işlemi fflush işlemine de yol açmaktadır.) Örneğin:
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <unistd.h>
+
+    void write_file(const char *path, const char *cmd); 
+
+    int main(void)
+    {
+        FILE *f;
+
+        write_file("/sys/class/gpio/gpio60/value", "out");
+
+        if ((f = fopen("/sys/class/gpio/gpio60/value", "w")) == NULL) {
+            fprintf(stderr, "cannot open file!..\n");
+            exit(EXIT_FAILURE);
+        }
+
+        for (;;) {
+            fseek(f, 0, 0);
+            fprintf(f, "1");        /* fputc('1', f); */
+            fflush(f);
+            
+            sleep(1);
+            
+            fseek(f, 0, 0);     
+            fprintf(f, "0");        /* fputc('0', f); */
+            fflush(f);
+
+            sleep(1);
+        }
+
+        fclose(f);
+
+        return 0;
+    }
+
+    void write_file(const char *path, const char *cmd);
+    {
+        FILE *f;
+
+        if ((f = fopen(path, "w")) == NULL) {
+            fprintf(stderr, "cannot open file: %s\n", path);
+            exit(EXIT_FAILURE);
+        }
+        fprintf(f, "%s", cmd);
+        fclose(f);
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Tabii aslında biz yukarıdaki programları başka dillerde de yazabiliriz. Örneğin LED yakma programı Python'da birkaç satırla 
+    aşağıdaki gibi yazılabilir:
+                                         
+    import time
+
+    with open('/sys/class/gpio/gpio60/value', 'w') as f:
+        while True:
+            f.write('1')
+            f.flush()
+            time.sleep(0.2)
+            f.write('0')
+            f.flush()
+            time.sleep(0.2)
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        131. Ders 30/09/2025 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki programları biz doğrudan BBB üzerinde derleyerek çalıştırdık. Her ne kadar BBB ortamı zayıf bir geliştirme 
+    ortamı sunuyor olsa da basit programların doğrudan BBB üzerinde derlenmesi performans bakımından bir sorun doğurmamaktadır. 
+    Şimdi de yukarıdaki programlardan birini host sistem olarak kullandığımız Linux sistelerinde çapran derleyici ilr derleyelim 
+    ve çalıştırılabilen kodu BBB'ye aktaralım. Bunun için daha önce yaptığımız gibi önce PATH çevre değişkenine çapraz derleyicimizin 
+    "bin" dizinini eklememiz gerekir:
+
+    $ PATH=$PATH:/home/kaan/Study/EmbeddedLinux/DriverDevelopment/BBB/gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf/bin
+
+    Daha sonra ARCH çevre değişkenini "arm" biçiminde oluşturmamız gerekir:
+
+    $ export ARCH=arm
+
+    Artık herhangi bir yerde çapraz derleyicimizi "arm-none-linux-gnueabihf-gcc" ismiyle çalıştırabiliriz. Ancak daha kısa 
+    isim kullanmak istersek CC gibi bir çevre değişkenini de bu ismi belirtecek biçimde oluşturabiliriz:
+
+    $ export CC=arm-none-linux-gnueabihf-gcc
+
+    Derlemeyi şöyle yapabiliriz:
+
+    $ $CC -o led-blink led-blink.c
+
+    Elde edilen çalıştırılabilir dosyayı "scp" komutuyla BBB'ye aşağıdaki gibi aktarabiliriz:
+
+    $ scp led-blink debian@192.168.7.2:
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de GPIO pinlerinde kesme mekanizmasının kullanılmasında bir örnek verelim. GPIO pinini "kesme (interrupt)" için 
+    konfigüre etmeden önce IN biçiminde konumlandırmak gerekir. sysfs arayüzünde kesme mekanizması için "edge" isimli dosya 
+    kullanılmaktadır. Bu dosyaya "rising" ya da "falling" yazısı yazdırılır. "rising" kesmenin pin değeri 0'dan 1'e geçerken 
+    oluşacağını "falling" 1'den 0'a geçerken oluşacağını belirtmektedir. Biz düğme devremizde düğmeye bastığımızda kesme 
+    oluşmasını istiyorsak bu dosyaya "falling" yazmalıyız. Çünkü anımsayacağınız gibi bizim devremizde düğmeye basılmadığı 
+    sürece pinden okunuyordu. Düğmeye basıldığında 0 okunuyordu. Bu durumda düğmeye bastığımızda 1'den 0'a geçiş oluşacak 
+    bu da kesmeyi tetikleyecektir. Tabii tam ters biçimde kesmenin parmağımızı düğmeden çektiğimizde tetiklenmesini istiyorsak 
+    bu durumda "edge" dosyasına "rising" yazmalıyız. Bu işlemler komut satırında yapılabileceği gibi bir C programıyla da 
+    yapılabilir. 
+
+    sysfs dosya sistemi ile GPIO kesme işlemlerinin ele alınması için "mupliplexed IO" fonksiyonları denilen select, poll 
+    ya da epoll fonksiyonlarının kullanılması gerekmektedir. Biz bir pini kesme olarak konfigüre ettiğimizde o pinin "value" 
+    dosyasını okursak bloke olmayız. Bu value dosyasının select, poll ya da epoll fonksiyonlarıyla ele alınması gerekmektedir. 
+    select ve poll fonksiyonları POSIX fonksiyonalrıdır. Ancak epoll fonksiyonu Linux sistemlerine özgüdür. epoll fonksiyonu 
+    poll fonksiyonunun Linux sistemleri için iyileşirilmiş bir biçimi gibidir. select, poll ve epoll fonksiyonları çekirdek 
+    içerisindeki sys_select, sys_poll ve sys_epoll sistem fonksiyonlarını çağırmaktadır. Bu fonksiyonlar aslında belli bir 
+    noktadan sonra ortak kodları çalıştırmaktadır. Biz aygıt sürücüler konusunda aygıt sürücülerin bu fonksiyonlarla nasıl 
+    kullanılacağı üzerinde durmadık. Ancak bu üç fonksiyon da en sonunda karakter aygıt sürücülerinin file_operations yapısının 
+    poll elemanında adresi tutulan fonksiyonu çağırmaktadır. Çekirdeğe gömüşmüş olan GPIO aygıt sürücüsü bu poll fonksiyonunu 
+    uygun biçimde ele almıştır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi sysfs arayüzü ile GPIO pinlerindeki kesme işlemlerini select fonksiyonuyla ele alabilmek 
+    için önce pinleri uygun biçimde konfigüre etmek gerekir. Bu işlemi şöyle yapabiliriz:
+
+    write_file("/sys/class/gpio/gpio51/direction", "in");
+    write_file("/sys/class/gpio/gpio51/edge", "falling");
+
+    Buradaki write_file fonksiyonunu yukarıdakş örneklerde de kullanmıştık:
+
+    void write_file(const char *path, const char *cmd)
+    {
+        int fd;
+
+        if ((fd = open(path, O_WRONLY)) == -1) 
+            exit_sys("open");
+
+        if (write(fd, cmd, strlen(cmd)) == -1)
+            exit_sys("write");
+
+        close(fd);
+    }
+
+    Daha sonra "value" dosyasını open fonksiyonuyla açmak gerekir. Açma işlemini "read-only" biçimde O_RDONLY bayrağıyla 
+    yapabilirsiniz:
+
+    if ((fd = open("/sys/class/gpio/gpio51/value", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    Kesme işlemleri select, poll ve epoll fonksiyonlarında aygıt sürücü tarafından "exceptional" işlem olarak ele alınmıştır. 
+    Dolayısıyla select fonksiyonunda bizim fonksiyonun exceptfds parametresini kullanmamız gerekir. O halde tipik bir kesme
+    döngüsü şöyle oluşturulabilir:
+
+    fd_set se;  
+    ...
+
+    if (read(fd, &buf, 1) == -1) 
+        exit_sys("read");
+
+    for (;;) {
+        printf("waiting for intterupt...\n");
+
+        FD_ZERO(&se);
+        FD_SET(fd, &se);
+
+        if (select(fd + 1, NULL, NULL, &se, NULL) == -1) 
+            exit_sys("select");
+
+        if (FD_ISSET(fd, &se)) {  
+            lseek(fd, 0, SEEK_SET);     
+            if (read(fd, &buf, 1) == -1) 
+                exit_sys("read");
+            printf("intterupt occured...\n");
+        }
+    }
+
+
+    Burada biz tek bir pin üzerinde kesme durumunu ele aldık. Aynı işlemi birden fazla in üzerinde de yapabilirdik. Tabii
+    bu durumda FD_SET ile izlenecek tüm pinlere ilişkin betimleyicileri FD_SET makrosuyla fd_set nesnesine set etmemiz 
+    gerekir. Aslında tek bir betimleyici için FD_ISSET kontrolünü yapmaya gerek yoktur. Burada bir noktaya dikkatinizi çekmek 
+    istiyoruz. Aygıt sürücünün poll desteğini yazanlar blokeli bir dosya semantiği uygulamışlardır. Dolayısıyla select blokeyi 
+    çözdüğü zaman eğer "value" dosyasından değer okunmazsa sonrakş select çağrıları dosyada bilgi olduğu gerekçesiyle artık 
+    blokeye yol açmayacaktır. Bu nedenle select fonksiyonunun blokesi çözüldükten sonra "value"" dosyasının okunması gerekmektedir.  
+    Yukarıdaki kodda bir ayrıntı daha vardır. Yagıt sürücüyü yazanlar işlemlere başlarken "value" dosyasında bir değer oluşmuş 
+    gibi bir semantik uygulamışlardır. Eğer dosya açıldıktan sonra "value" dosyasından değer okunmazsa sanki bir kez kesme 
+    oluşmuş gibi durum oluşmaktadır. Bu nedenle biz yukarıdaki kodda döngüye girmeden önce bir kez "value" dosyasını read 
+    fonksiyonuyla okuduk. 
+
+    Aşağıda uygulamanın tüm kodlarını veriyoruz. Programı için Ctrl+C tuşlarına basarak sonlandırabilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-intr.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/select.h>
+
+void exit_sys(const char *msg);
+void write_file(const char *path, const char *cmd);
+
+int main(void)
+{
+    int fd;
+    fd_set se;
+    char buf;
+    
+    write_file("/sys/class/gpio/gpio51/direction", "in");
+    write_file("/sys/class/gpio/gpio51/edge", "falling");
+
+    if ((fd = open("/sys/class/gpio/gpio51/value", O_RDONLY)) == -1)
+        exit_sys("open");
+    
+    if (read(fd, &buf, 1) == -1) 
+        exit_sys("read");
+
+    for (;;) {
+        printf("waiting for intterupt...\n");
+
+        FD_ZERO(&se);
+        FD_SET(fd, &se);
+
+        if (select(fd + 1, NULL, NULL, &se, NULL) == -1) 
+            exit_sys("select");
+
+        if (FD_ISSET(fd, &se)) {  
+            lseek(fd, 0, SEEK_SET);     
+            if (read(fd, &buf, 1) == -1) 
+                exit_sys("read");
+            printf("intterupt occured...\n");
+        }
+    }
+
+    close(fd);      /* unreachable code */
+
+    return 0;
+}
+
+void write_file(const char *path, const char *cmd)
+{
+    int fd;
+
+    if ((fd = open(path, O_WRONLY)) == -1) 
+        exit_sys("open");
+
+    if (write(fd, cmd, strlen(cmd)) == -1)
+        exit_sys("write");
+
+    close(fd);
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki örnekte akış select fonksiyonunda bloke olmaktadır. (Zaten amacımız da bunu sağlamaktır.) Ancak bu tür durumlarda 
+    eğer başka birtakım işlemler de yapmak istiyorsanız yukarıdaki kod parçasını bir thread'in çalıştırmasını sağlamalısınız.
+     Aşağıda böyle bir örnek verdik. Programı Ctrl+C tuşlarına basarak sonlandırabilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-intr.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/select.h>
+#include <pthread.h>
+
+void exit_sys(const char *msg);
+void exit_sys_err(const char *msg, int err);
+
+void write_file(const char *path, const char *cmd);
+void *thread_proc(void *param);
+
+int main(void)
+{
+    int fd;
+    pthread_t tid;
+    int result;
+    
+    write_file("/sys/class/gpio/gpio51/direction", "in");
+    write_file("/sys/class/gpio/gpio51/edge", "falling");
+
+    if ((fd = open("/sys/class/gpio/gpio51/value", O_RDONLY)) == -1)
+        exit_sys("open");
+    
+    if ((result = pthread_create(&tid, NULL, thread_proc, (void *)fd)) != 0) 
+        exit_sys_err("pthread_create", result);
+
+    for (;;) {
+        printf("main thread running...\n");
+        sleep(1);
+    }
+
+    close(fd);  /* unreacahble code */
+
+    return 0;
+}
+
+void write_file(const char *path, const char *cmd)
+{
+    int fd;
+
+    if ((fd = open(path, O_WRONLY)) == -1) 
+        exit_sys("open");
+
+    if (write(fd, cmd, strlen(cmd)) == -1)
+        exit_sys("write");
+
+    close(fd);
+}
+
+void *thread_proc(void *param)
+{
+    int fd = (int)param;
+    fd_set se;
+    char buf;
+
+    if (read(fd, &buf, 1) == -1) 
+        exit_sys("read");
+
+    for (;;) {
+        printf("waiting for intterupt...\n");
+
+        FD_ZERO(&se);
+        FD_SET(fd, &se);
+
+        if (select(fd + 1, NULL, NULL, &se, NULL) == -1) 
+            exit_sys("select");
+
+        if (FD_ISSET(fd, &se)) {  
+            lseek(fd, 0, SEEK_SET);     
+            if (read(fd, &buf, 1) == -1) 
+                exit_sys("read");
+            printf("intterupt occured...\n");
+        }
+    }
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+void exit_sys_err(const char *msg, int err)
+{
+    fprintf(stderr, "%s: %s\n", msg, strerror(err));
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    GPIO pinleri üzerinde işlem yapmanın diğer bir yolu da "gpiod" isimli kütüphaneyi kullanmaktır. Bu kütüphane artık bu 
+    konuda en yaygın kullanılan kütüphane haline gelmiştir. Kütüphane "sysfs" dosya sistemini değil doğrudan çekirdeğe gömülmüş 
+    olan "gpiochip" aygıt sürücüsünü kullanmaktadır. Yani bu kütüphane aslında arka planda bu aygıt sürücüyü açıp aygıt sürücüye 
+    ioctl komutlarını göndermektedir. "gpiod" yüksek seviyeli bir kütüphanedir. Kütüphanenin dokümantasyonuna aşağıdaki bağlantıdan 
+    erişebilirsiniz:
+
+    https://libgpiod.readthedocs.io/en/latest/
+
+    Kütüphane default durumda yüklü değildir. Kütüphaneyi Debian tabanlı sistemlerde aşağıdaki gibi yükleyebilirsiniz:
+
+    $ sudo apt install libgpiod-dev
+
+    gpiod kütüphanesini kullanan bir grup komut satırından çalışan utilty programlar da vardır. Bu programlar sayesinde 
+    tıpkı sysfs arayüzünde yaptığımız gibi komut satırından temel test işlemlerini yapabilirsiniz. Sözünü ettiğimiz bu 
+    utility programları da aşağıdaki gibi kurabilirsiniz:
+
+    $ sudo apt install gpiod
+
+    Yukarıdaki kurulumları ARM işlemcili gömülü sistemine yaparsanız ve kodu o sistemde derlerseniz bir sorun oluşmaz. Bu 
+    kütüphaneyi ve utility programları Intel tabanlı bilgisayarlarınızdaki Linux sistemlerine kurmanızın uç bazı durumlar 
+    dışında bir anlamı yoktur. 
+
+    Biz BBB gibi bir ortam için geliştirmeyi genel olarak Intel tabanlı masaüstü Linux sistemlerindeki çapraz derleyicileri 
+    kullanarak yapmaktayız. Ancak çapraz derleyicilerimizde gpiod kütüphanesi bulunmamaktadır. O zaman bizim bu kütüphanenin
+    kaynak kodlarını indirerek ARM çapraz derleyicimize ilişkin araç znicirini kullanarak host makinede derlememiz gerekir. 
+    (Maalesef bu kütüphanelerin ARM için derlenmiş binary dosyaları yoktur.)
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    sudo apt install gpiod
+    sudo apt install libgpiod-dev
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <linux/gpio.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+int main() {
+    int chip_fd, gpio_fd, ret;
+    struct gpio_v2_line_request req;
+    struct gpio_v2_line_values values;
+    
+    // GPIO çip aygıtını aç
+    chip_fd = open("/dev/gpiochip0", O_RDWR);
+    if (chip_fd < 0) {
+        perror("/dev/gpiochip0 açılamadı");
+        return -1;
+    }
+    
+    // GPIO hattını talep et
+    memset(&req, 0, sizeof(req));
+    req.offsets[0] = 18;  // GPIO 18
+    req.num_lines = 1;
+    strcpy(req.consumer, "led-blink");
+    req.config.flags = GPIO_V2_LINE_FLAG_OUTPUT;
+    
+    ret = ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, &req);
+    if (ret < 0) {
+        perror("GPIO hattı talep edilemedi");
+        close(chip_fd);
+        return -1;
+    }
+    
+    gpio_fd = req.fd;
+    close(chip_fd);  // Artık gereksiz
+    
+    // LED yanıp sönsün
+    values.mask = 1ULL;
+    for (int i = 0; i < 10; i++) {
+        // LED'i yak
+        values.bits = 1ULL;
+        ioctl(gpio_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &values);
+        usleep(500000); // 500ms bekle
+        
+        // LED'i söndür
+        values.bits = 0ULL;
+        ioctl(gpio_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &values);
+        usleep(500000); // 500ms bekle
+    }
+    
+    close(gpio_fd);
+    return 0;
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+#!/bin/bash
+set -e
+
+# Gerekli paketleri yükle
+sudo apt-get update
+sudo apt-get install -y autoconf-archive autoconf automake libtool pkg-config build-essential autotools-dev build-essential
+
+# Libgpiod indir
+wget https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/snapshot/libgpiod-1.6.3.tar.gz
+tar -xzf libgpiod-1.6.3.tar.gz
+cd libgpiod-1.6.3/
+
+# PATH'e toolchain ekle
+export PATH=$HOME/mytoolchain/bin:$PATH
+
+# Configure et
+./autogen.sh --host=arm-linux-gnueabihf \
+             --enable-tools=no \
+             --enable-bindings-cxx=no \
+             --prefix=/usr
+
+# Derle
+make -j$(nproc)
+
+# Sysroot'a yükle
+SYSROOT=$HOME/mytoolchain/arm-linux-gnueabihf/sysroot
+make install DESTDIR=$SYSROOT
+
+echo "Libgpiod başarıyla kuruldu: $SYSROOT"
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+// gpio_read.c - GPIO pin durumunu okuma
+#include <gpiod.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(int argc, char *argv[]) {
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    int gpio_pin = 67;  // Default pin (BeagleBone P8_8)
+    int value;
+    
+    if (argc > 1) {
+        gpio_pin = atoi(argv[1]);
+    }
+    
+    printf("GPIO %d durumunu okuma testi...\n", gpio_pin);
+    
+    chip = gpiod_chip_open_by_name("gpiochip0");
+    if (!chip) {
+        perror("GPIO chip açılamadı");
+        return 1;
+    }
+    
+    line = gpiod_chip_get_line(chip, gpio_pin);
+    if (!line) {
+        fprintf(stderr, "GPIO %d hattı alınamadı\n", gpio_pin);
+        gpiod_chip_close(chip);
+        return 1;
+    }
+    
+    // GPIO'yu giriş olarak yapılandır
+    if (gpiod_line_request_input(line, "read-test") < 0) {
+        perror("GPIO giriş olarak yapılandırılamadı");
+        gpiod_chip_close(chip);
+        return 1;
+    }
+    
+    printf("GPIO %d giriş olarak yapılandırıldı\n", gpio_pin);
+    printf("Pin durumunu sürekli okuyorum (Ctrl+C ile çık)...\n");
+    
+    while (1) {
+        value = gpiod_line_get_value(line);
+        if (value < 0) {
+            perror("GPIO değeri okunamadı");
+            break;
+        }
+        
+        printf("GPIO %d = %d %s\r", gpio_pin, value, value ? "HIGH" : "LOW ");
+        fflush(stdout);
+        usleep(100000);  // 100ms bekle
+    }
+    
+    // Temizlik
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+    
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+
