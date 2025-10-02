@@ -7443,21 +7443,23 @@ unsigned int hash_func(unsigned int key)
 /*----------------------------------------------------------------------------------------------------------------------
     Pekiyi disk denetleyicisi işletim sistemi tarafından "falanca sektörleri oku" ya da "falanca sektörlere yaz" biçiminde 
     programlandıktan sonra aktarım nasıl yapılmaktadır? Aktarım CPU tarafından tek tek byte'ların denetleyiciden alınarak 
-    RAM'e yerleştirilmesi yoluyla yapılmamaktadır. Çünkü CPU'nun bu işle meşgul olması önemli bir zaman kaybı oluşturur. 
-    Bu tür disk ile RAM arasındaki aktarımlar için "DMA (Direct Memory Access)" denilen yardımcı denetleyiciler kullanılmaktadır. 
-    Tipik olarak CPU'da çalışan kod (yani iişletim sistemi) disk denetleyicisine transfer isteğini bildirir. Sonra DMA 
-    denetleyicisini de dolaylı biçimde programlayarak aktarımın DMA üzerinden doğrudan RAM'e yapılmasını sağlar. Aktarım 
-    sırasında artık CPU bu işle meşgul olmaz, işletim sistemi de CPU'yu başka bir thread'i çalıştırması için bağlamsal 
-    geçişe (task switch) sokar. Tabii aktarım işlemi bittiğinde disk denetleyicisi CPU'yu bir donanım kesmesi yoluyla durumdan 
-    haberdar etmektedir. Yani disk ile RAM arasındaki aktarım işlemleri tipik olarak şöyle yapılmaktadır:
+    RAM'e yerleştirilmesi yoluyla yapılmamaktadır. (Çok eskiden ilk PC mimarisinde aktarım böyle de yapılabiliyordu.) Çünkü 
+    CPU'nun bu işle meşgul olması önemli bir zaman kaybı oluşturmaktadır. Bu tür disk ile RAM arasındaki aktarımlar için 
+    "DMA (Direct Memory Access)" denilen yardımcı denetleyiciler kullanılmaktadır. Tipik olarak CPU'da çalışan kod (yani 
+    işletim sistemi) disk denetleyicisine transfer isteğini ve aktarımda kullanılacak bellek alanlarının aresini bildirir. 
+    disk denetleyicisi de disk birimini ve DMA'yı elektirksel düzeyde programlayarak aktarımın DMA üzerinden doğrudan RAM'e 
+    yapılmasını sağlar. Aktarım sırasında artık CPU bu işle meşgul olmaz, işletim sistemi de CPU'yu başka bir thread'i 
+    çalıştırması için bağlamsal geçişe (task switch) sokar. Tabii aktarım işlemi bittiğinde disk denetleyicisi CPU'yu bir 
+    donanım kesmesi yoluyla durumdan haberdar etmektedir. Yani disk ile RAM arasındaki aktarım işlemleri tipik olarak şöyle 
+    yapılmaktadır:
 
-    1) İşletim sistemi disk denetleyicisine aktarılacak sektörlere ilişkin bilgileri CPU yoluyla elektriksel olarak iletir.
-    2) İşletim sistemi DMA denetleyicisini disk deneteleyicisinin de yardımıyla programlar. Bu işlemler de elektriksel 
-    düzeyde yapılmaktadır.
-    3) Okuma söz konusuysa disk denetleyicisi sektörleri okur ve DMA yoluyla bunların RAM'de uygun yerlere aktarılmasını 
-    sağlar. Eğer yazma söz konusuysa yine DMA yoluyla RAM'deki adresten bilgiler disk birimine iletilerek yazma gerçekleştirilit.
-    4) Aktarım işlemi bittiğinde disk denetleyicisi bir donanım kesmesi yoluyla CPU'yu durumdan haberdar eder.
-    5) CPU aktarım için gereken kodları çalıştırdıktan sonra aktarım bitene kadar meşgul bir döngüde beklemez.
+    1) İşletim sistemi disk denetleyicisine aktarılacak sektörlere ilişkin bilgileri ve transfer adreslerini CPU yoluyla 
+    elektriksel olarak iletir.
+    2) Okuma söz konusuysa disk denetleyicisi disk birimine elektriksel düzeyde komutlar göndererek sektörlerin okunmasını 
+    ve DMA yoluyla bunların RAM'de uygun yerlere aktarılmasını sağlar. Eğer yazma söz konusuysa RAM'de belirtilen adresteki 
+    bilgiler yine DMA yoluyla disk birimine iletilerek yazma gerçekleştirilir.
+    3) Aktarım işlemi bittiğinde disk denetleyicisi bir donanım kesmesi yoluyla CPU'yu durumdan haberdar eder.
+    4) CPU aktarım için gereken kodları çalıştırdıktan sonra aktarım bitene kadar meşgul bir döngüde beklemez.
     Başka thread'ler çalıştırılabiliyorsa "bağlamsal geçiş (context switch)" yapılarak CPU'nun boşta kalması engellenir.
 
     Yukarıdaki süreci bir diyagramla aşağıdaki gibi özetleyebiliriz:
@@ -7488,9 +7490,13 @@ unsigned int hash_func(unsigned int key)
                                             │ (HDD: kafa hareketi, SSD: FTL) │
                                             └────────────────────────────────┘
 
-    Kullandığımız masaüstü bilgisayarlarda zaman içerisinde DMA denetleyicileri de geliştirilmiştir. Bugün kullanılan 
-    modern DMA denetleyicileri ile disk denetleyici arasında bir bağlantı vardır. DMA'nın programlanması büyük ölçüde 
-    elektriksel olarak disk denetleyicisi tarafından yapılmaktadır.
+    Kullandığımız masaüstü bilgisayarlarda zaman içerisinde DMA denetleyicileri de geliştirilmiştir. Eskiden Intel 
+    tabanlı PC mimarisinde ISA bus kullanıldığı zamanlarda tek bir merkezi DMA denetleyicisi (Intel 8237) vardı. 
+    Ancak daha sonra Intel tabanlı PC mimarisinde PCI bus kullanılmaya başlanmasıyla birlikte artık transfer 
+    yapabilen her donanım birimi kendi DMA denetleyicisini de içermeye başladı. Bugün Intel tabanlı ve Apple Silicon 
+    tabanlı bilgisayar mimarilerinde disk denetleyicisi kendi içerisindeki DMA denetleyicisini programlayarak transferi 
+    gerçekleştirmektedir. Disk denetleyicilerinin programlanması ise artık uzunca bir süredir "bellekten tabanlı IO 
+    (memory-mapped IO)" tekniği ile yapılmaktadır.
 
     Hard disklerde disk birimi içerisinde bir cache bellek de bulundurulmaktadır. Böylece disk denetleyicisi aynı 
     sektörleri disk biriminden istediği zaman disk birimi eğer daha önce ilgili sektörler cache içerisindeyse kafa 
@@ -7506,21 +7512,21 @@ unsigned int hash_func(unsigned int key)
     tipik olarak 512 byte uzunluğundadır. Ancak aslında sektör uzunlukları da disk üreticilerine bağlı olarak değişebilir 
     bir niceliktir. 512 byte sektör uzunlukları bugün için standart bir uzunluktur. Tabii zaman geçtikçe diskler büyüdüğü 
     için sektör uzunluklarının da büyüyebileceğini söylemek istiyoruz. Nitekim 4K uzunluğunda sektörlere sahip olan diskler 
-    özellikle büyük sistemlerde gittikçe yaygınlaşmaktadır. Disk birimi her sektöre ilk sektör 0 olmak üzere mantıksal bir 
-    numara vermektedir. Yani adeta disk üzeründeki her sektörün bir adresi vardır. Disk denetleyicisi disk birimine transfer 
-    edilecek sektörlerin numaralarını iletmektedir. (Bu biçimde mantıksal sektör numaraları kullanılmadan önce 80'lerde ve 
-    90'ların ilk yarısında sektörlerin yerleri "fiziksel koordinat sistemi" denilen "hangi yüz (head)", "hangi track", "hangi 
-    sektör dilimi" biçiminde üç parametreyle belirtiliyordu.)
+    özellikle büyük sistemlerde gittikçe yaygınlaşmaktadır. Disk birimi her sektöre ilk sektör 0 olmak üzere mantıksal 
+    bir numara vermektedir. Yani adeta disk üzeründeki her sektörün bir adresi vardır. Disk denetleyicisi disk birimine 
+    transfer edilecek sektörlerin numaralarını elektriksel düzyde iletmektedir. (Bu biçimde mantıksal sektör numaraları 
+    kullanılmadan önce 80'lerde ve 90'ların ilk yarısında sektörlerin yerleri "fiziksel koordinat sistemi" denilen "hangi y
+    üz (head)", "hangi track", "hangi sektör dilimi" biçiminde üç parametreyle belirtiliyordu.)
 
     Sektör kavramı aslında dosya sistemleri için küçük bir depolama birimidir. İşletim sistemleri bir dosyanın parçası 
-    olabilecek minimum disk alanı için sektör yerine "blok (block)" ya da "cluster" denilen daha büyük birimleri 
-    kullanmaktadır. Blok terimi daha çok UNIX/Linux sistemlerinde kullanılmaktadır. Microsoft ise blok yerine "cluster" 
-    terimini kullanmaktadır. Bir blok ardışıl n tane sektörden oluşmaktadır. Uygulamada bu n değeri 2'nin bir kuvveti 
-    olur. Ardışıllık hard disklerde önemli bir unsurdur. Çünkü hard disklerde en önemli zaman kaybı mekanik bir birim 
-    olan disk kafasının track hizasına çekilmesinde yaşanmaktadır. Disk kafası track hizasına çekildiğinde disk dönerken 
-    artık ardışıl sektörler hiç kafa hareketi yapılmadan okunup yazılabilmektedir. Pekiyi neden işletim sistemi dosyalar 
-    söz konusu olduğunda bir dosyanın parçası olabilecek en küçük birim için sektör değil de ardışıl n tane sektör 
-    kullanmaktadır? İşte bunun birkaç nedeni vardır:
+    olabilecek minimum disk alanı için sektör yerine "blok (block)" ya da "cluster" denilen daha büyük birimleri kullanmaktadır. 
+    Blok terimi daha çok UNIX/Linux sistemlerinde kullanılmaktadır. Microsoft ise blok yerine "cluster" terimini kullanmaktadır. 
+    Bir blok ardışıl n tane sektörden oluşmaktadır. Uygulamada bu n değeri 2'nin bir kuvveti olur. Ardışıllık hard disklerde 
+    önemli bir unsurdur. Çünkü hard disklerde en önemli zaman kaybı mekanik bir birim olan disk kafasının track hizasına 
+    çekilmesinde yaşanmaktadır. Disk kafası track hizasına çekildiğinde disk dönerken artık ardışıl sektörler hiç kafa 
+    hareketi yapılmadan okunup yazılabilmektedir. Pekiyi neden işletim sistemi dosyalar söz konusu olduğunda bir dosyanın 
+    parçası olabilecek en küçük birim için sektör değil de ardışıl n tane sektör kullanmaktadır? İşte bunun birkaç nedeni 
+    vardır:
 
     1) Dosyaların parçaları disk üzerinde ardışıl yerlerde olmak zorunda değildir. Dosyaların parçaları üzerinde yayılmış 
     bir biçimde bulunabilmektedir. Eğer dosyalar çok fazla parçadan oluşursa hard disklerde (ve kısmen de olsa SSD'lerde 
