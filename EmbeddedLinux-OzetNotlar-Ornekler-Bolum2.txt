@@ -8792,6 +8792,9 @@ EXIT:
     return esize;
 }
 
+module_init(pipe_driver_init);
+module_exit(pipe_driver_exit);
+
 # Makefile
 
 obj-m += $(file).o
@@ -15011,7 +15014,7 @@ void exit_sys(const char *msg)
     ioremap fonksiyonu ile sanal adres elde edildikten sonra biz C'de göstericilerle doğrudan aygıta erişebilir miyiz? Aslında 
     erişebiliriz. Ancak önceki paragrafta açıkladığımız gibi erişimi sorunsuz yapabilmek için platforma bağlı olarak bellek 
     bariyerlerinin kullanılması gerekir. Bu nedenle erişimin doğrudan göstericilerle değil özel çekirdek fonksiyonlarıyla 
-    yapılması tavsiye edilmektedir. Memory-mapped IO ile aygıta erişen çekirdek fonksiyonları çekirdeğin belli bir verisyonundan 
+    yapılması tavsiye edilmektedir. Memory-mapped IO ile aygıta erişen çekirdek fonksiyonları çekirdeğin belli bir versiyonundan 
     sonra daha modern hale getirilmiştir. Biz burada daha taşınabilir daha yeni fonksiyonları tanıtacağız. Aşağıdaki fonksiyonlar 
     addr ile belirtilen bellek adresinden 1 byte, 2 byte ve 4 byte okurlar.
 
@@ -15031,11 +15034,22 @@ void exit_sys(const char *msg)
     void iowrite32(u32 value, void __iomem *addr);
     void iowrite64(u64 value, void __iomem *addr);  
 
+    Bazı platformlarda ioread64 ve iowrite64 fonksiyonları yoktur. Bu platformlarda 32 bitten daha fazla okumalar için 
+    izleyen paragraflarda açıklayacağımız memcpy_fromio ve memcpy_toio fonksiyonlarını kullanmalısınız.  
+
     Bu ioreadxxx ve iowritexxx fonksyonları yerine eskiden readxxx ve writexxx fonksiyonları kullanılıyordu. ioradxxx ve 
     iowritexxx fonksiyonları 2.6 sürümleriyle çekirdeğe eklenmiştir. Ancak eski readxxx ve writexxx fonksiyonları yeni 
-    çekirdeklerde de muhafaza edilmektedir. Bazı platformlarda ioread64 ve iowrite64 fonksiyonları yoktur. Bu platformlarda 
-    32 bitten daha fazla okulamalar için izleyen paragraflarda açıklayacağımız memcpy_fromio ve memcpy_toio fonksiyonlarını 
-    kullanmalısınız. 
+    çekirdeklerde de muhafaza edilmektedir. writexxx ve readxxx fonksiyonlarının listesi de şöyledir:
+
+    readb
+    readw
+    readl
+    readq
+
+    writeb
+    writew
+    wrirel
+    writeq 
 
     Yukarıdaki fonksiyonların rep'li (repetition/tekrar) versiyonları da vardır:
 
@@ -15927,6 +15941,36 @@ static void generic_blkdev_release(struct gendisk *disk)
 module_init(generic_blkdev_init);
 module_exit(generic_blkdev_exit);
 
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./$module.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module b $major 0
+
+/* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./$module.ko || exit 1
+rm -f $module
+
 /*-----------------------------------------------------------------------------------------------------------------------------
                                         121. Ders 26/08/2025 - Salı
 -----------------------------------------------------------------------------------------------------------------------------*/
@@ -16060,7 +16104,7 @@ module_exit(generic_blkdev_exit);
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-                                        127. Ders 16/09/2025 - Salı
+                                            127. Ders 16/09/2025 - Salı
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
@@ -16231,6 +16275,10 @@ module_exit(generic_blkdev_exit);
 
     cache_addr = (u8 *)kmap_local_page(bvec.bv_page) + bvec.bv_offset;
 
+    İşimiz bittiğinde de bu işlemi kunmap_local fonksiyonuyla geri almalıyız:
+
+    kunmap_local(cache_addr);   
+
     Artık elimizde ramdiskimizdeki transfer adresi ve çekirdeğin page cache sisteminde transfer adresi vardır. Şimdi artık sıra 
     gerçek transfer işlemine gelmiştir. Bizim transferin yönüne bakıp bu işlemi yapmamız gerekir:
 
@@ -16269,279 +16317,342 @@ module_exit(generic_blkdev_exit);
 
     Tabii transfer işleminden sonra kmap_local_page fonksiyonuyla değiştirilen safta tablosunun eski haline getirilmesi gerekir. 
     Bu işlem kunmap_local fonksiyonuyla yapılmaktadır. Aslında kunmap_local bir makro olarak yazılmıştır. Bu makrı sanal adresi 
-    alıp ters işlemi yapmaktadır 
+    alıp ters işlemi yapmaktadır. 
+
+    Örnel ramdisk aygıt sürücümüzü basit bir programla kullanabiliriz:
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <stdint.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+
+    void exit_sys(const char *msg);
+
+    int main(void)
+    {
+        int fd;
+        unsigned char buf[10];
+            
+        if ((fd = open("ramdisk-blkdev", O_RDWR)) == -1)
+            exit_sys("open");
+
+        if (read(fd, buf, 10) == -1)
+            exit_sys("read");
+        
+        for (int i = 0; i < 10; ++i)
+            printf("%02X ", buf[i]);
+        printf("\n");
+
+        lseek(fd, 0, 0);
+
+        if (write(fd, "abcdefghij", 10) == -1)
+            exit_sys("write");
+        
+
+        close(fd);
+
+        return 0;
+    }
+
+    void exit_sys(const char *msg)
+    {
+        perror(msg);
+
+        exit(EXIT_FAILURE);
+    }
+
+    Aşağıda aygıt sürücünün tüm kodları verilmiştir. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-// rmd.c — Linux 6.8+ için tek-parça RAMDISK blok aygıt sürücüsü
-// Tek minor, global durum, submit_bio: void
+/* ramdisk-blkdev.c */
 
 #include <linux/module.h>
+#include <linux/kernel.h>
 #include <linux/blkdev.h>
-#include <linux/bio.h>
 #include <linux/vmalloc.h>
-#include <linux/mutex.h>
-#include <linux/errno.h>
-#include <linux/string.h>
 
-#define RMD_NAME       "rmd"
-#define RMD_MINORS     1
-#define RMD_SECTOR_SZ  512
-
-/* ---------- modül parametreleri ---------- */
-static int size_mb = 16;                 /* RAMDISK boyutu (MB) */
-module_param(size_mb, int, 0444);
-MODULE_PARM_DESC(size_mb, "RAMDISK size in MB");
-
-/* ---------- global durum ---------- */
-static u8                   *rmd_data;
-static size_t                rmd_size_bytes;   /* toplam bayt */
-static sector_t              rmd_capacity;     /* toplam sektör */
-static int                   rmd_major;
-static struct gendisk       *rmd_gd;
-static struct request_queue *rmd_q;
-static struct mutex          rmd_lock;         /* basit seri erişim */
-
-/* küçük yardımcı: [pos, pos+len) aralığını sıfırla (bounds check içerir) */
-static int rmd_memzero(loff_t pos, size_t len)
-{
-	if (pos >= rmd_size_bytes)
-		return -EINVAL;
-	if (len > rmd_size_bytes - pos)
-		return -EINVAL;
-
-	memset(rmd_data + pos, 0, len);
-	return 0;
-}
-
-/* --------- I/O yolu: submit_bio (6.8+ → void) --------- */
-static void rmd_submit_bio(struct bio *bio)
-{
-	const unsigned op = bio_op(bio);
-	loff_t pos = (loff_t)bio->bi_iter.bi_sector * RMD_SECTOR_SZ;
-	struct bvec_iter iter;
-	struct bio_vec bvec;
-	size_t done = 0;
-	int err = 0;
-
-	/* başlangıç tamamen dışarıdaysa */
-	if (pos >= rmd_size_bytes) {
-		bio_io_error(bio);
-		return;
-	}
-
-	mutex_lock(&rmd_lock);
-
-	switch (op) {
-	case REQ_OP_READ:
-	case REQ_OP_WRITE: {
-		const bool is_write = (op == REQ_OP_WRITE);
-
-		bio_for_each_segment(bvec, bio, iter) {
-			void *kaddr = kmap_local_page(bvec.bv_page);
-			void *iovec = (u8 *)kaddr + bvec.bv_offset;
-			size_t len  = bvec.bv_len;
-
-			if (pos + done + len > rmd_size_bytes) {
-				kunmap_local(kaddr);
-				err = -EIO;
-				break;
-			}
-
-			if (is_write)
-				memcpy(rmd_data + pos + done, iovec, len);
-			else
-				memcpy(iovec, rmd_data + pos + done, len);
-
-			kunmap_local(kaddr);
-			done += len;
-		}
-		break;
-	}
-	case REQ_OP_WRITE_ZEROES:
-	case REQ_OP_DISCARD: {
-		size_t bytes = bio->bi_iter.bi_size;
-		if (pos + bytes > rmd_size_bytes)
-			err = -EIO;
-		else
-			err = rmd_memzero(pos, bytes);
-		break;
-	}
-	case REQ_OP_FLUSH:
-		err = 0; /* kalıcı ortam yok → başarı say */
-		break;
-	default:
-		err = -EOPNOTSUPP;
-		break;
-	}
-
-	mutex_unlock(&rmd_lock);
-
-	if (err)
-		bio_io_error(bio);
-	else
-		bio_endio(bio);
-}
-
-/* --------- bdev_ops (6.8+ imzalar) --------- */
-static int rmd_open(struct gendisk *gd, blk_mode_t mode) { return 0; }
-static void rmd_release(struct gendisk *gd) { }
-
-static const struct block_device_operations rmd_fops = {
-	.owner      = THIS_MODULE,
-	.open       = rmd_open,       /* int (*)(struct gendisk *, blk_mode_t) */
-	.release    = rmd_release,    /* void (*)(struct gendisk *) */
-	.submit_bio = rmd_submit_bio, /* void */
-};
-
-/* --------- init/exit --------- */
-static int __init rmd_init(void)
-{
-	int ret;
-	size_t bytes;
-
-	if (size_mb <= 0) {
-		pr_err(RMD_NAME ": size_mb must be > 0\n");
-		return -EINVAL;
-	}
-	bytes = (size_t)size_mb * 1024ull * 1024ull;
-
-	if (bytes % RMD_SECTOR_SZ) {
-		pr_err(RMD_NAME ": size_mb (%d MB) must yield bytes divisible by %d\n",
-		       size_mb, RMD_SECTOR_SZ);
-		return -EINVAL;
-	}
-
-	mutex_init(&rmd_lock);
-
-	rmd_size_bytes = bytes;
-	rmd_capacity   = bytes / RMD_SECTOR_SZ;
-
-	rmd_data = vzalloc(rmd_size_bytes);
-	if (!rmd_data)
-		return -ENOMEM;
-
-	rmd_major = register_blkdev(0, RMD_NAME);
-	if (rmd_major < 0) {
-		ret = rmd_major;
-		pr_err(RMD_NAME ": register_blkdev failed: %d\n", ret);
-		goto err_vfree;
-	}
-
-	/* 6.8+: blk_alloc_disk(NUMA_NO_NODE) bir queue ile gelir */
-	rmd_gd = blk_alloc_disk(NUMA_NO_NODE);
-	if (!rmd_gd) {
-		ret = -ENOMEM;
-		goto err_unreg;
-	}
-
-	rmd_q = rmd_gd->queue;
-	blk_queue_logical_block_size(rmd_q, RMD_SECTOR_SZ);
-
-	/* isteğe bağlı: flags (derleyicinde yoksa bu iki satırı kaldırabilirsin) */
-#ifdef QUEUE_FLAG_NONROT
-	blk_queue_flag_set(rmd_q, QUEUE_FLAG_NONROT);
-#endif
-#ifdef QUEUE_FLAG_NOWAIT
-	blk_queue_flag_set(rmd_q, QUEUE_FLAG_NOWAIT);
-#endif
-
-	rmd_gd->major        = rmd_major;
-	rmd_gd->first_minor  = 0;
-	rmd_gd->minors       = RMD_MINORS;
-	rmd_gd->fops         = &rmd_fops;
-	rmd_gd->private_data = NULL;
-	snprintf(rmd_gd->disk_name, DISK_NAME_LEN, RMD_NAME "0");
-
-	set_capacity(rmd_gd, rmd_capacity);
-	ret = add_disk(rmd_gd);
-	if (ret) {
-		pr_err(RMD_NAME ": add_disk failed: %d\n", ret);
-		put_disk(rmd_gd);
-		goto err_unreg;
-	}
-
-	pr_info(RMD_NAME ": ready: /dev/%s, %d MB\n", rmd_gd->disk_name, size_mb);
-	return 0;
-
-err_unreg:
-	unregister_blkdev(rmd_major, RMD_NAME);
-err_vfree:
-	vfree(rmd_data);
-	return ret;
-}
-
-static void __exit rmd_exit(void)
-{
-	if (rmd_gd) {
-		del_gendisk(rmd_gd);
-		put_disk(rmd_gd);    /* bazı ağaçlarda blk_cleanup_disk yok; bu doğru eşleşme */
-	}
-	if (rmd_major > 0)
-		unregister_blkdev(rmd_major, RMD_NAME);
-	if (rmd_data)
-		vfree(rmd_data);
-}
-
-module_init(rmd_init);
-module_exit(rmd_exit);
+#define DEF_TOTAL_CAPACITY      1000
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Siz :)");
-MODULE_DESCRIPTION("Basit RAMDISK (Linux 6.8+), tek minor, global durum");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("generic-blkdev");
+
+static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode);
+static void generic_blkdev_release(struct gendisk *disk);
+static void submit_bio_proc(struct bio *bio);
+
+static int g_major;
+static struct gendisk *g_disk;
+static struct block_device_operations g_blkdev_ops = {
+    .owner = THIS_MODULE,
+    .open = generic_blkdev_open,
+    .release = generic_blkdev_release,
+    .submit_bio = submit_bio_proc
+};
+
+static int capacity = DEF_TOTAL_CAPACITY;
+static u8 *g_diskmem;
+
+module_param(capacity, int, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+
+static int __init generic_blkdev_init(void)
+{
+	printk(KERN_INFO "ramdisk-blkdev initialization with capacity = %d\n", capacity);
+
+    if ((g_major = register_blkdev(0, "ramdisk-blkdev")) < 0) {
+        printk(KERN_INFO "cannot register block device!..\n");
+        return g_major;
+    }
+
+    if ((g_disk = blk_alloc_disk(1)) == NULL) {
+        printk(KERN_INFO "cannot alloc gendisk!..\n");
+        goto EXIT1;
+    }
+
+    g_disk->major = g_major;
+    g_disk->first_minor = 0;
+    g_disk->minors = 1;
+    strscpy(g_disk->disk_name, "ramdisk-blkdev", DISK_NAME_LEN);   
+    g_disk->flags = GENHD_FL_NO_PART;
+    g_disk->fops = &g_blkdev_ops;
+
+    blk_queue_logical_block_size(g_disk->queue, SECTOR_SIZE);       /* Mantıksal blok boyutu */
+    blk_queue_physical_block_size(g_disk->queue, 4096);             /* Fiziksel blok boyutu */
+    blk_queue_max_segments(g_disk->queue, 128);                     /* Max segment sayısı */
+    blk_queue_max_segment_size(g_disk->queue, 65536);               /* Max segment boyutu */
+    set_capacity(g_disk, capacity);
+
+    if (add_disk(g_disk) != 0) {
+        printk(KERN_INFO "cannot add disk!..\n");
+        goto EXIT2;
+    }
+
+    if ((g_diskmem = (u8 *)vzalloc(capacity * SECTOR_SIZE)) == NULL) {
+        printk(KERN_INFO "cannot allocate memory!..\n");
+        goto EXIT3;
+    }
+
+    return 0;
+EXIT3:
+    del_gendisk(g_disk);
+EXIT2:
+    put_disk(g_disk);
+EXIT1:
+    unregister_blkdev(g_major, "ramdisk-blkdev");
+
+	return -ENOMEM;
+}
+
+static void __exit generic_blkdev_exit(void)
+{
+    vfree(g_diskmem);
+    del_gendisk(g_disk);
+	unregister_blkdev(g_major, "ramdisk-blkdev");
+    
+	printk(KERN_INFO "ramdisk-blkdev exit...\n");
+}
+
+static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode)
+{
+    printk(KERN_INFO "ramdisk-blkdev opened...\n");
+
+    return 0;
+}
+
+static void generic_blkdev_release(struct gendisk *disk)
+{
+    printk(KERN_INFO "ramdisk-blkdev released...\n");
+}
+
+static void submit_bio_proc(struct bio *bio)
+{
+    struct bio_vec bvec;
+    struct bvec_iter iter;
+    sector_t sector;
+    size_t offset;
+    unsigned int len;
+    void *ramdisk_addr, *cache_addr;
+    
+    sector = bio->bi_iter.bi_sector;
+    
+    printk(KERN_INFO "submit_bio_proc called\n");
+
+    bio_for_each_segment(bvec, bio, iter) {
+        len = bvec.bv_len;
+        offset = (size_t)sector * SECTOR_SIZE;
+
+        if (offset + len > (size_t)capacity * SECTOR_SIZE) {
+            printk(KERN_INFO "ramdisk-blkdev: out-of-range I/O (off=%zu len=%u cap=%zu)\n",
+                   offset, len, (size_t)capacity * SECTOR_SIZE);
+            bio_io_error(bio);
+            return;
+        }
+
+        ramdisk_addr = g_diskmem + offset;
+        cache_addr = (u8 *)kmap_local_page(bvec.bv_page) + bvec.bv_offset;
+
+        switch (bio_op(bio)) {
+            case REQ_OP_READ:
+                printk(KERN_INFO "submit_bio_proc read called\n");
+                memcpy(cache_addr, ramdisk_addr, len);
+                break;
+            case REQ_OP_WRITE:
+                memcpy(ramdisk_addr, cache_addr, len);
+                break;
+            case REQ_OP_DISCARD:
+                memset(ramdisk_addr, 0, len);
+                break;
+            default:
+                break;  
+        }
+        kunmap_local(cache_addr); 
+
+        sector += len / SECTOR_SIZE;
+    }
+    bio_endio(bio);
+}
+
+module_init(generic_blkdev_init);
+module_exit(generic_blkdev_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./$module.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module b $major 0
+
+/* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./$module.ko || exit 1
+rm -f $module
+
+/* blkdev.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+	unsigned char buf[10];
+		
+	if ((fd = open("ramdisk-blkdev", O_RDWR)) == -1)
+		exit_sys("open");
+
+	if (read(fd, buf, 10) == -1)
+		exit_sys("read");
+	
+	for (int i = 0; i < 10; ++i)
+		printf("%02X ", buf[i]);
+	printf("\n");
+
+	lseek(fd, 0, 0);
+
+    if (write(fd, "abcdefghij", 10) == -1)
+		exit_sys("write");
+	
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            128. Ders 18/09/2025 - Perşembe 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki örnekte oluşturduğumuz ramdisk blok aygıt sürücüsü bir dosya sistemi ile formatlanarak sanki bir disk bölümüymüş 
+    gibi de kullanılabilir. Zaten artık tüm işlemler rad/write gibi dosya fonksiyonlarıyla yapılmaktadır. Ramdisk aygıt sürücümüzü
+    mkfs.ext4 programıyla "ext-4" ile aşağıdaki gibi formatlayabiliriz: 
+
+    $ sudo mkfs.ext4 ramdisk-blkdev
+
+    Formatlama işleminden sonra artık sıra blok aygıt sürücümüzün mount edilmesine gelmiştir. Anımsanacağı gibi mount işlemi 
+    bir blok aygıt sürücüsü içerisindeki dosya sisteminin dizin ağacının belli bir dizinine monte edilmesi anlamına gelmektedir. 
+    Dolayısıyla mount komutunda kullanıcı blok aygıt sürücüsünü ve mount edilecek dizini belirtir. Örneğin:
+
+    $ mkdir ramdisk-drive
+    $ sudo mount ramdisk-blkdev ramdisk-drive
+
+    Burada mount noktası (mount point) ramdisk-drive dizinidir. Artık bu dizinin içerisine geçip dosya işlemleri yapabiliriz. 
+    Tüm bu işlemler yapılırken aslında arka planda ramdisk aygıt sürücümüzün submit_bio fonksiyonu çağrılacaktır. 
+    
+    İşlemleri geri almak için önce umount işlemi yapılmalıdır:
+
+    $ sudo umount ramdisk-drive
+
+    Ramdisk aygıt sürücüsü kullanım bittikten sonra çekirdek alanından çıkarılabilir:
+
+    $ sudo ./unloadblk ramdisk-blkdev
+
+    Tabii ramdisk aygıt sürücümüzü unmount ettikten sonra artık onun içeriğine erişemeyiz. Yani yaptığımız her şey kaybolur. 
+    Biz aygıt sürücümüzü yeniden yüklesek artık yeniden içi sıfırlarla dolu bir ramdisk oluşturulacaktır. Tabii aygıt sürücümüzü 
+    unmount etmeden önce onun içerisindeki bilgileri "dd" programıyla bir dosyada saklayabiliriz:
+
+    $ sudo dd if=ramdisk-blkdev of=ramdisk-drive.dat
+
+    Aygıt sürücümüzü yeniden load ettikten sonra ters işlemi yaparak onun içeriğini oluşturabiliriz:
+
+    dd if=ramdisk-drive.dat of=ramdisk-blkdev
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    BBB ya da Raspberry Pi'da nasıl aygıt sürücü geliştirebiliriz? Aslında daha önceden de belirttiğimiz gibi Raspberry Pi 
+    zaten yeterli bir masaüstü bilgisayar gibidir. Geliştirme doğrudan onun üzerinde yapılabilir. Yani geliştirmenin Intel 
+    tabanlı makinede yapılıp aygıt sürücü dosyalarının oraya aktarılmasına hiç gerek yoktur. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    BBB için aygıt sürücüleri BBB'nin üzerinde derlemek oldukça yavaştır. Çünkü BBB Raspberry Pi kadar güçlü bir donanıma 
+    sahip değildir. Bu nedenle BBB için aygıt sürücülerin tercihen Intel tabanlı Linux sistemlerinde derlenip BBB'ye aktarılması 
+    uygundur. Tabii bunun için çapraz derleyicilerin kurulu olması gerekmektedir.
+
+    make modules_pepare
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-struct bio_vec *bvec;
-int i;
 
-for (i = 0; i < bio->bi_vcnt; i++) {
-    bvec = &bio->bi_io_vec[i];
-
-    void *kaddr = kmap_local_page(bvec->bv_page);
-
-    void *data = kaddr + bvec->bv_offset;
-    size_t len = bvec->bv_len;
-
-    // -> data ... 'len' byte uzunluğunda veri buradadır
-
-    kunmap_local(kaddr);
-}
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-struct bio_vec bvec;
-struct bvec_iter iter;
 
-bio_for_each_segment(bvec, bio, iter) {
-    void *kaddr;
-
-    // Segmentin bulunduğu page’i kernel adresine map et
-    kaddr = kmap_local_page(bvec.bv_page);
-
-    // Bu segmentin verisine erişim
-    void *data = kaddr + bvec.bv_offset;
-    size_t len = bvec.bv_len;
-
-    // -> data ... 'len' byte uzunluğunda veri buradadır
-
-    // İşin bitince unmap et
-    kunmap_local(kaddr);
-}
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------

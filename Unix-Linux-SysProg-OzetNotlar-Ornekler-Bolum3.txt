@@ -15696,27 +15696,42 @@ void exit_sys(const char *msg)
     ioremap fonksiyonu ile sanal adres elde edildikten sonra biz C'de göstericilerle doğrudan aygıta erişebilir miyiz? Aslında 
     erişebiliriz. Ancak önceki paragrafta açıkladığımız gibi erişimi sorunsuz yapabilmek için platforma bağlı olarak bellek 
     bariyerlerinin kullanılması gerekir. Bu nedenle erişimin doğrudan göstericilerle değil özel çekirdek fonksiyonlarıyla 
-    yapılması tavsiye edilmektedir. Memory-mapped IO ile aygıta erişen çekirdek fonksiyonları çekirdeğin belli bir verisyonundan 
+    yapılması tavsiye edilmektedir. Memory-mapped IO ile aygıta erişen çekirdek fonksiyonları çekirdeğin belli bir versiyonundan 
     sonra daha modern hale getirilmiştir. Biz burada daha taşınabilir daha yeni fonksiyonları tanıtacağız. Aşağıdaki fonksiyonlar 
     addr ile belirtilen bellek adresinden 1 byte, 2 byte ve 4 byte okurlar.
 
     #include <asm/io.h>
 
-    unsigned int ioread8(void *addr);
-    unsigned int ioread16(void *addr);
-    unsigned int ioread32(void *addr);
+    u8   ioread8(const void __iomem *addr);
+    u16  ioread16(const void __iomem *addr);
+    u32  ioread32(const void __iomem *addr);
+    u64  ioread64(const void __iomem *addr);
 
     Aşağıdaki fonksiyonlar ise addr ile belirtilen bellek adresine 1 byte, 2 byte ve 4 byte bilgi yazmaktadır:
 
     #include <asm/io.h>
 
-    void iowrite8(u8 value, void *addr);
-    void iowrite16(u16 value, void *addr);
-    void iowrite32(u32 value, void *addr);
+    void iowrite8(u8 value, void __iomem *addr);
+    void iowrite16(u16 value, void __iomem *addr);
+    void iowrite32(u32 value, void __iomem *addr);
+    void iowrite64(u64 value, void __iomem *addr);  
 
-    Bu ioreadxxx ve iowritexxx fonksyonları yerine eskiden readxxx ve writexxx fonksiyonları kullanılıyordu. ioradxxx ve 
-    iowritexxx fonksiyonları 2.6 sürümleriyle çekirdeğe eklenmiştir. Ancak eski readxxx ve writexxx fonksiyonları yeni 
-    çekirdeklerde de muhafaza edilmektedir. 
+    Bazı platformlarda ioread64 ve iowrite64 fonksiyonları yoktur. Bu platformlarda 32 bitten daha fazla okumalar için izleyen 
+    paragraflarda açıklayacağımız memcpy_fromio ve memcpy_toio fonksiyonlarını kullanmalısınız.  
+
+    Bu ioreadxxx ve iowritexxx fonksyonları yerine eskiden readxxx ve writexxx fonksiyonları kullanılıyordu. ioradxxx ve iowritexxx 
+    fonksiyonları 2.6 sürümleriyle çekirdeğe eklenmiştir. Ancak eski readxxx ve writexxx fonksiyonları yeni çekirdeklerde de 
+    muhafaza edilmektedir. writexxx ve readxxx fonksiyonlarının listesi de şöyledir:
+
+    readb
+    readw
+    readl
+    readq
+
+    writeb
+    writew
+    wrirel
+    writeq 
 
     Yukarıdaki fonksiyonların rep'li (repetition/tekrar) versiyonları da vardır:
 
@@ -16671,9 +16686,38 @@ static void generic_blkdev_release(struct gendisk *disk)
     printk(KERN_INFO "generic-blkdev released...\n");
 }
 
-
 module_init(generic_blkdev_init);
 module_exit(generic_blkdev_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./$module.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module b $major 0
+
+/* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./$module.ko || exit 1
+rm -f $module
 
 /*--------------------------------------------------------------------------------------------------------------------------
 
@@ -16810,49 +16854,515 @@ module_exit(generic_blkdev_exit);
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Ramdisk aygıt sürücümüzde bizim işin başında (yani aygıt sürücümüzün init fonksiyonu içerisinde ramdisk için dinamik 
-    biçimde bellek tahsis etmemiz gerekir. Tahsisatı daha önce görmüş olduğumuz kmalloc fonksiyonu ile yapabiliriz. Ancak 
-    kmalloc fonksiyonu ardışıl fiziksel bellek tahsis etmektedir. Ancak bu tür uygulamalarda eğer büyük miktarda tahsisatlar 
-    yapılacaksa fiziksel ardışıllığa gerek yoktur. Fiziksel bellekte ardışıl olmayacak biçimde (ancak sanal adres alanı içerisinde 
-    ardışıllık korunmaktadır) tahsisat yapan vmalloc ve zvalloc fonksiyonları da bulunmaktadır. Her iki fonksiyon da parametre 
-    olarak tahsis edilecek byte miktarını almaktadır. zvalloc aynı zamanda tahsis edilen alanı sıfırlamaktadır. 
+    Blok aygıt sürücüleri için en tipik örnek ramdisk aygıt sürücüleridir. Ramdisk aygıt sürücüleri çekirdeğin alanı içerisindeki 
+    bir bölgeyi sanki bir diskmiş gibi kullanmaktadır. Biz kurusumuzun başında zaten Linux sistemlerinde hazır bir biçimde 
+    bulunan ramdisk dosyas sistemini ve blok aygıt sürücülerini kullanmıştık. 
+        
+    Ramdisk aygıt sürücümüzde bizim işin başında (yani aygıt sürücümüzün init fonksiyonu içerisinde ramdisk için dinamik bellek 
+    tahsisatı yapmamız gerekir. Bu tahsisatı daha önce görmüş olduğumuz kmalloc fonksiyonu ile yapabiliriz. Ancak kmalloc 
+    fonksiyonu ardışıl fiziksel bellek tahsis etmektedir. Ancak bu tür uygulamalarda eğer büyük miktarda tahsisatlar yapılacaksa 
+    fiziksel ardışıllığa gerek yoktur. Fiziksel bellekte ardışıl olmayacak biçimde (ancak sanal adres alanı içerisinde ardışıllık 
+    korunmaktadır) tahsisat yapan vmalloc ve zvalloc fonksiyonları da bulunmaktadır. Her iki fonksiyon da parametre olarak 
+    tahsis edilecek byte miktarını almaktadır. zvalloc aynı zamanda tahsis edilen alanı da sıfırlamaktadır. Örneğin:
+
+    ...
+    if ((g_diskmem = (u8 *)vzalloc(capacity * SECTOR_SIZE)) == NULL) {
+        printk(KERN_INFO "cannot allocate memory!..\n");
+        goto EXIT3;
+    }
+    ...
+
+    vzalloc ile tahsis edilen alan vfree fonksiyonu ile serbest bırakılabilir. Örneğin:
+
+    vfree(g_diskmem);
+
+    Ramdisk aygıt sürücümüzün init fonksiyonu şöyle olabilir:
+
+    static int __init generic_blkdev_init(void)
+    {
+        printk(KERN_INFO "ramdisk-blkdev initialization with capacity = %d\n", capacity);
+
+        if ((g_major = register_blkdev(0, "ramdisk-blkdev")) < 0) {
+            printk(KERN_INFO "cannot register block device!..\n");
+            return g_major;
+        }
+
+        if ((g_disk = blk_alloc_disk(1)) == NULL) {
+            printk(KERN_INFO "cannot alloc gendisk!..\n");
+            goto EXIT1;
+        }
+
+        g_disk->major = g_major;
+        g_disk->first_minor = 0;
+        g_disk->minors = 1;
+        strscpy(g_disk->disk_name, "ramdisk-blkdev", DISK_NAME_LEN);   
+        g_disk->flags = GENHD_FL_NO_PART;
+        g_disk->fops = &g_blkdev_ops;
+
+        blk_queue_logical_block_size(g_disk->queue, SECTOR_SIZE);       /* Mantıksal blok boyutu */
+        blk_queue_physical_block_size(g_disk->queue, 4096);             /* Fiziksel blok boyutu */
+        blk_queue_max_segments(g_disk->queue, 128);                     /* Max segment sayısı */
+        blk_queue_max_segment_size(g_disk->queue, 65536);               /* Max segment boyutu */
+        set_capacity(g_disk, capacity);
+
+        if (add_disk(g_disk) != 0) {
+            printk(KERN_INFO "cannot add disk!..\n");
+            goto EXIT2;
+        }
+
+        if ((g_diskmem = (u8 *)vzalloc(capacity * SECTOR_SIZE)) == NULL) {
+            printk(KERN_INFO "cannot allocate memory!..\n");
+            goto EXIT3;
+        }
+
+        return 0;
+    EXIT3:
+        del_gendisk(g_disk);
+    EXIT2:
+        put_disk(g_disk);
+    EXIT1:
+        unregister_blkdev(g_major, "ramdisk-blkdev");
+
+        return -ENOMEM;
+    }
+
+    Burada blok aygıt sürücüleri için daha önce açıkladığımız tipik işlemler yapılmıştır. Bu işlemler aygıt sürücünün exit 
+    fonksiyonunda geri alınmalıdır:
+
+    static void __exit generic_blkdev_exit(void)
+    {
+        vfree(g_diskmem);
+        del_gendisk(g_disk);
+        unregister_blkdev(g_major, "ramdisk-blkdev");
+        
+        printk(KERN_INFO "ramdisk-blkdev exit...\n");
+    }
+
+    Tabii aygıt sürücümüzün en önemli fonksiyonu submit_bio fonksiyonudur. sumit_bio fonksiyonunda bizim indeksleme yoluyla
+    ya da iteratör yoluyla bio yapısı içerisindeki bio_vec elemanlarını alıp işleme sokmamız gerekir:
+
+    static void submit_bio_proc(struct bio *bio)
+    {
+        struct bio_vec bvec;
+        struct bvec_iter iter;
+        sector_t sector;
+        size_t offset;
+        unsigned int len;
+        
+        sector = bio->bi_iter.bi_sector;
+        
+        printk(KERN_INFO "submit_bio_proc called\n");
+
+        bio_for_each_segment(bvec, bio, iter) {
+            len = bvec.bv_len;
+            offset = (size_t)sector * SECTOR_SIZE;
+            ...
+        }
+        ...
+    }
+
+    Burada döngü makrosuna dikkat ediniz:
+
+    bio_for_each_segment(bvec, bio, iter) {
+        len = bvec.bv_len;
+        offset = (size_t)sector * SECTOR_SIZE;
+        ...
+    }
+
+    Buradaki len çekirdeğin transfer edilmesini istediği uzunluktur. Bu zuunluğun aslında 512'nin (yani sektörün) katları 
+    olduğunu belirtmiştirk. offset ise transfer edilecek alanın tam olarak blok aygıtının (örneğimizde ramdisk) neresinden 
+    başladığını belirtmektedir. bio_vec içerisindeki segment'lerin sektörleri ardışıl olduğu için biz her yienelmede bu sector 
+    değerini artırmalıyız:
+
+    bio_for_each_segment(bvec, bio, iter) {
+        len = bvec.bv_len;
+        offset = (size_t)sector * SECTOR_SIZE;
+
+
+        ...
+        sector += len / SECTOR_SIZE;
+    }
+
+    Kullanıcı modundaki program lseek ile dosya göstericisini bizim blok aygıtımızının kapasitesinin ötesine konumlandırıp 
+    read/write işlemi yapmış olabilir. Çekirdek burada aygıt kapasitesin kendisi kontrol etmemektedir. Çünkü blok aygıtları
+    bu tür durumlarda bazı özel işlemler uygulayabilmektedir. Programcının buradaki offset değerinin kendi blok aygıtının 
+    sınırları dışında olup olmadığını kontrol etmesi gerekir. Bu kontrol şöyle yapılabilir:
+
+    bio_for_each_segment(bvec, bio, iter) {
+        len = bvec.bv_len;
+        offset = (size_t)sector * SECTOR_SIZE;
+
+        if (offset + len > (size_t)capacity * SECTOR_SIZE) {
+            printk(KERN_INFO "ramdisk-blkdev: out-of-range I/O (off=%zu len=%u cap=%zu)\n",
+                    offset, len, (size_t)capacity * SECTOR_SIZE);
+            bio_io_error(bio);
+            return;
+        }
+        ramdisk_addr = g_diskmem + offset;
+        ...
+        sector += len / SECTOR_SIZE;
+    }
+
+    Burada eğer IO isteği blok aygıtımızın sınırları dışına çıkmışsa biz submit IO fonksiyonunu sonlandırdırdık. bio_vec 
+    vektörlerinin ardışıl sektörlere ilişkin segment'ler içerdiğini anımsayınız. Bir kere kapasi,te dışına çıkılmışsa döngünün
+    diğer bio_vec elemanları da kapasite dışına çıkmış olacaktır. Burada önemli bir nokta fonksiyon başarısız olduğunda 
+    bio_io_error(bio) fonksiyonun çağrılması zorunluluğudur. Çünkü submit_bio fonksiyonunun geri dönüş değeri void biçimdedir. 
+    Başarısızlık bu fonksiyonla çekirdeğe bildirilmektedir. Bu fonksiyonun prototipi şöyledir:
+
+    void bio_io_error(struct bio *bio);
+
+    Fonksiyon bio yapısının adresini almaktadır. bio yapısının bir elemanına başarısılık bilgisi yerleştirilmektedir. Biz 
+    bu aşamada blok aygıtının hangi offset'inden ne kadar byte transfer yapılacağını biliyor durumdayız. Ancak henüz transfer 
+    ediecek adres üzerinde (transfer daha önceden de belirtitğimiz gibi "page cache" içerisinde bir yere yapılmaktadır) bir 
+    işlem uygulamadık. Şimdi o kısmı halledelim. kmap_local_page isimli çekirdek fonksiyonu bizden bir page yapıs nesnesinin 
+    adresini alır, bu page yapısının içerisindeki fiziksel adresi elde eder, sonra o fiziksel adrese erişmek için sayfa 
+    tablosunda düzenleme yaparak bize sanal adresi verir. O halde biz bio_vec yapısı içeisindeki fiziksel adrese erişmek için 
+    şu üzenlemeyi yapabiliriz:
+
+    cache_addr = (u8 *)kmap_local_page(bvec.bv_page) + bvec.bv_offset;
+
+    Artık elimizde ramdiskimizdeki transfer adresi ve çekirdeğin page cache sisteminde transfer adresi vardır. Şimdi artık sıra 
+    gerçek transfer işlemine gelmiştir. Bizim transferin yönüne bakıp bu işlemi yapmamız gerekir:
+
+    bio_for_each_segment(bvec, bio, iter) {
+        len = bvec.bv_len;
+        offset = (size_t)sector * SECTOR_SIZE;
+
+        if (offset + len > (size_t)capacity * SECTOR_SIZE) {
+            printk(KERN_INFO "ramdisk-blkdev: out-of-range I/O (off=%zu len=%u cap=%zu)\n",
+                   offset, len, (size_t)capacity * SECTOR_SIZE);
+            bio_io_error(bio);
+            return;
+        }
+
+        ramdisk_addr = g_diskmem + offset;
+        cache_addr = (u8 *)kmap_local_page(bvec.bv_page) + bvec.bv_offset;
+
+        switch (bio_op(bio)) {
+            case REQ_OP_READ:
+                memcpy(cache_addr, ramdisk_addr, len);
+                break;
+            case REQ_OP_WRITE:
+                memcpy(ramdisk_addr, cache_addr, len);
+                break;
+            case REQ_OP_DISCARD:
+                memset(ramdisk_addr, 0, len);
+                break;
+            default:
+                break;  
+        }
+        kunmap_local(cache_addr);
+
+        sector += len / SECTOR_SIZE;
+    }
+
+    Tabii transfer işleminden sonra kmap_local_page fonksiyonuyla değiştirilen safta tablosunun eski haline getirilmesi gerekir. 
+    Bu işlem kunmap_local fonksiyonuyla yapılmaktadır. Aslında kunmap_local bir makro olarak yazılmıştır. Bu makrı sanal adresi 
+    alıp ters işlemi yapmaktadır. 
+
+    Örnel ramdisk aygıt sürücümüzü basit bir programla kullanabiliriz:
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <stdint.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+
+    void exit_sys(const char *msg);
+
+    int main(void)
+    {
+        int fd;
+        unsigned char buf[10];
+            
+        if ((fd = open("ramdisk-blkdev", O_RDWR)) == -1)
+            exit_sys("open");
+
+        if (read(fd, buf, 10) == -1)
+            exit_sys("read");
+        
+        for (int i = 0; i < 10; ++i)
+            printf("%02X ", buf[i]);
+        printf("\n");
+
+        lseek(fd, 0, 0);
+
+        if (write(fd, "abcdefghij", 10) == -1)
+            exit_sys("write");
+        
+
+        close(fd);
+
+        return 0;
+    }
+
+    void exit_sys(const char *msg)
+    {
+        perror(msg);
+
+        exit(EXIT_FAILURE);
+    }
+
+    Aşağıda aygıt sürücünün tüm kodları verilmiştir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/* ramdisk-blkdev.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/blkdev.h>
+#include <linux/vmalloc.h>
+
+#define DEF_TOTAL_CAPACITY      1000
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("generic-blkdev");
+
+static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode);
+static void generic_blkdev_release(struct gendisk *disk);
+static void submit_bio_proc(struct bio *bio);
+
+static int g_major;
+static struct gendisk *g_disk;
+static struct block_device_operations g_blkdev_ops = {
+    .owner = THIS_MODULE,
+    .open = generic_blkdev_open,
+    .release = generic_blkdev_release,
+    .submit_bio = submit_bio_proc
+};
+
+static int capacity = DEF_TOTAL_CAPACITY;
+static u8 *g_diskmem;
+
+module_param(capacity, int, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+
+static int __init generic_blkdev_init(void)
+{
+	printk(KERN_INFO "ramdisk-blkdev initialization with capacity = %d\n", capacity);
+
+    if ((g_major = register_blkdev(0, "ramdisk-blkdev")) < 0) {
+        printk(KERN_INFO "cannot register block device!..\n");
+        return g_major;
+    }
+
+    if ((g_disk = blk_alloc_disk(1)) == NULL) {
+        printk(KERN_INFO "cannot alloc gendisk!..\n");
+        goto EXIT1;
+    }
+
+    g_disk->major = g_major;
+    g_disk->first_minor = 0;
+    g_disk->minors = 1;
+    strscpy(g_disk->disk_name, "ramdisk-blkdev", DISK_NAME_LEN);   
+    g_disk->flags = GENHD_FL_NO_PART;
+    g_disk->fops = &g_blkdev_ops;
+
+    blk_queue_logical_block_size(g_disk->queue, SECTOR_SIZE);       /* Mantıksal blok boyutu */
+    blk_queue_physical_block_size(g_disk->queue, 4096);             /* Fiziksel blok boyutu */
+    blk_queue_max_segments(g_disk->queue, 128);                     /* Max segment sayısı */
+    blk_queue_max_segment_size(g_disk->queue, 65536);               /* Max segment boyutu */
+    set_capacity(g_disk, capacity);
+
+    if (add_disk(g_disk) != 0) {
+        printk(KERN_INFO "cannot add disk!..\n");
+        goto EXIT2;
+    }
+
+    if ((g_diskmem = (u8 *)vzalloc(capacity * SECTOR_SIZE)) == NULL) {
+        printk(KERN_INFO "cannot allocate memory!..\n");
+        goto EXIT3;
+    }
+
+    return 0;
+EXIT3:
+    del_gendisk(g_disk);
+EXIT2:
+    put_disk(g_disk);
+EXIT1:
+    unregister_blkdev(g_major, "ramdisk-blkdev");
+
+	return -ENOMEM;
+}
+
+static void __exit generic_blkdev_exit(void)
+{
+    vfree(g_diskmem);
+    del_gendisk(g_disk);
+	unregister_blkdev(g_major, "ramdisk-blkdev");
+    
+	printk(KERN_INFO "ramdisk-blkdev exit...\n");
+}
+
+static int generic_blkdev_open(struct gendisk *disk, blk_mode_t mode)
+{
+    printk(KERN_INFO "ramdisk-blkdev opened...\n");
+
+    return 0;
+}
+
+static void generic_blkdev_release(struct gendisk *disk)
+{
+    printk(KERN_INFO "ramdisk-blkdev released...\n");
+}
+
+static void submit_bio_proc(struct bio *bio)
+{
+    struct bio_vec bvec;
+    struct bvec_iter iter;
+    sector_t sector;
+    size_t offset;
+    unsigned int len;
+    void *ramdisk_addr, *cache_addr;
+    
+    sector = bio->bi_iter.bi_sector;
+    
+    printk(KERN_INFO "submit_bio_proc called\n");
+
+    bio_for_each_segment(bvec, bio, iter) {
+        len = bvec.bv_len;
+        offset = (size_t)sector * SECTOR_SIZE;
+
+        if (offset + len > (size_t)capacity * SECTOR_SIZE) {
+            printk(KERN_INFO "ramdisk-blkdev: out-of-range I/O (off=%zu len=%u cap=%zu)\n",
+                   offset, len, (size_t)capacity * SECTOR_SIZE);
+            bio_io_error(bio);
+            return;
+        }
+
+        ramdisk_addr = g_diskmem + offset;
+        cache_addr = (u8 *)kmap_local_page(bvec.bv_page) + bvec.bv_offset;
+
+        switch (bio_op(bio)) {
+            case REQ_OP_READ:
+                printk(KERN_INFO "submit_bio_proc read called\n");
+                memcpy(cache_addr, ramdisk_addr, len);
+                break;
+            case REQ_OP_WRITE:
+                memcpy(ramdisk_addr, cache_addr, len);
+                break;
+            case REQ_OP_DISCARD:
+                memset(ramdisk_addr, 0, len);
+                break;
+            default:
+                break;  
+        }
+        sector += len / SECTOR_SIZE;
+
+    }
+    bio_endio(bio);
+}
+
+module_init(generic_blkdev_init);
+module_exit(generic_blkdev_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./$module.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module b $major 0
+
+/* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./$module.ko || exit 1
+rm -f $module
+
+/* blkdev.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+	unsigned char buf[10];
+		
+	if ((fd = open("ramdisk-blkdev", O_RDWR)) == -1)
+		exit_sys("open");
+
+	if (read(fd, buf, 10) == -1)
+		exit_sys("read");
+	
+	for (int i = 0; i < 10; ++i)
+		printf("%02X ", buf[i]);
+	printf("\n");
+
+	lseek(fd, 0, 0);
+
+    if (write(fd, "abcdefghij", 10) == -1)
+		exit_sys("write");
+	
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
 /*--------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki örnekte oluşturduğumuz ramdisk blok aygıt sürücüsü bir dosya sistemi ile formatlanarak sanki bir disk bölümüymüş 
+    gibi de kullanılabilir. Zaten artık tüm işlemler rad/write gibi dosya fonksiyonlarıyla yapılmaktadır. Ramdisk aygıt sürücümüzü
+    mkfs.ext4 programıyla "ext-4" ile aşağıdaki gibi formatlayabiliriz: 
 
----------------------------------------------------------------------------------------------------------------------------*/
+    $ sudo mkfs.ext4 ramdisk-blkdev
 
+    Formatlama işleminden sonra artık sıra blok aygıt sürücümüzün mount edilmesine gelmiştir. Anımsanacağı gibi mount işlemi 
+    bir blok aygıt sürücüsü içerisindeki dosya sisteminin dizin ağacının belli bir dizinine monte edilmesi anlamına gelmektedir. 
+    Dolayısıyla mount komutunda kullanıcı blok aygıt sürücüsünü ve mount edilecek dizini belirtir. Örneğin:
 
+    $ mkdir ramdisk-drive
+    $ sudo mount ramdisk-blkdev ramdisk-drive
 
-/*--------------------------------------------------------------------------------------------------------------------------
-    Yukarıdaki blok aygıt sürücüsü bir dosya sistemi ile formatlanarak sanki bir disk bölümüymüş gibi de kullanılabilir. Bunun 
-    için önce aygıt sürücünün idare ettiği alanın formatlanması gerekir. Formatlama işlemi mkfs isimli utility programla yapılmaktadır:
+    Burada mount noktası (mount point) ramdisk-drive dizinidir. Artık bu dizinin içerisine geçip dosya işlemleri yapabiliriz. 
+    Tüm bu işlemler yapılırken aslında arka planda ramdisk aygıt sürücümüzün submit_bio fonksiyonu çağrılacaktır. 
+    
+    İşlemleri geri almak için önce umount işlemi yapılmalıdır:
 
-    $ sudo mkfs -t ext2 generic-bdriver
+    $ sudo umount ramdisk-drive
 
-    Burada -t seçeneği volümün hangi dosya sistemi ile formatlanacağını belirtmektedir. Formatlama aslında volümdeki bazı 
-    sektörlerde özel meta alanlarının yaratılması anlamına gelmektedir. Dolayısıyla mkfs komutu aslında ilgili aygıt sürücüyü 
-    açıp onun bazı sektörlerine bazı bilgileri yazmaktadır.
+    Ramdisk aygıt sürücüsü kullanım bittikten sonra çekirdek alanından çıkarılabilir:
 
-    Formatlama işleminden sonra artık blok aygıt sürücüsünün mount edilmesi gerekmektedir. mount işlemi bir dosya sisteminin dizin 
-    ağacının belli bir dizinine monte edilmesi anlamına gelmektedir. Dolayısıyla mount komutunda kullanıcı blok aygıt sürücüsünü 
-    ve mount edilecek dizini girmektedir. Örneğin:
+    $ sudo ./unloadblk ramdisk-blkdev
 
-    $ sudo mount generic-bdriver /mnt/myblock
+    Tabii ramdisk aygıt sürücümüzü unmount ettikten sonra artık onun içeriğine erişemeyiz. Yani yaptığımız her şey kaybolur. 
+    Biz aygıt sürücümüzü yeniden yüklesek artık yeniden içi sıfırlarla dolu bir ramdisk oluşturulacaktır. Tabii aygıt sürücümüzü 
+    unmount etmeden önce onun içerisindeki bilgileri "dd" programıyla bir dosyada saklayabiliriz:
 
-    Burada mount noktası (mount point) /ment dizinin altında myblock isimli dizindir. Bu dizinin kullanıcı tarafından önceden 
-    mkdir komutu ile yaratılması gerekir. Tabii mount noktalarının /mnt dizinin altında bulundurulması gibi zorunluluk yoktur. Mount 
-    noktasına ilişkin dizinin içinin boş olması da gerekmez. Fakat mount işleminden sonra artık o dizinin altı görünmez. Dosya 
-    sisteminin kök dizini o dizin olacak biçimde dosya sistemi ağaca monte edilmiş olur. mount komutu aslında mount isimli bir 
-    sistem fonksiyonu çağrılarak gerçekleştirilmektedir. Yani aslında bu işlem programlama yoluyla da yapılabilmektedir.
+    $ sudo dd if=ramdisk-blkdev of=ramdisk-drive.dat
 
-    Aygıt sürücümüzü mount ettikten sonra artık onu unmount etmeden rmmod komutuyla boşaltamayız. mount edilen dosya sistemi umount 
-    komutuyla eski haline getirilmektedir. Örneğin:
+    Aygıt sürücümüzü yeniden load ettikten sonra ters işlemi yaparak onun içeriğini oluşturabiliriz:
 
-    $ sudo umount /mnt/myblock
-
-    umount komutunun komutu argümanının mount noktasını belirten dizin olduğuna dikkat ediniz. Tabii aslında umount komutu 
-    da işlemini umount isimli sistem fonksiyonuyla yapmaktadır.
+    dd if=ramdisk-drive.dat of=ramdisk-blkdev
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
