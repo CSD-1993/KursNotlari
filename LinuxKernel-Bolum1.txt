@@ -16,7 +16,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 17/10/2025 - Cuma
+                                    Son Güncelleme: 24/10/2025 - Cuma
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -9157,11 +9157,127 @@ unsigned int hash_func(unsigned int key)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    
+                                        27. Ders 19/10/2025 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Şimdi dosya sisteminin temel veri yapıları üzerinde görmüş olduğumuz konulara ilişkin bazı testler yapalım. 
+----------------------------------------------------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------------------------------------------------  
+    İlk örneğimizde bir dosya betimleyicisine ilişkin dosya nesnesini elde ederek onun f_pos elemanını yazdırmaya çalışalım. 
+    Dosya nesnesindeki f_pos elemanının dosya göstericisinin değerini tuttuğunu anımsayınız. Bu işlemi bir aygıt sürücü 
+    yazarak ioctl yoluyla gerçekleştirebiliriz. (Kursumuzda kullandığımız Linux makinedeki çekirdek sürümü 6.9.2'dir.) 
+    Bunun şçin oluşturduğumuz ioctl fonksiyonuna dikkat ediniz:
+
+    long ioctl_test1(struct file *filp, unsigned long arg)
+    {
+        struct file *f;
+        int fd = (int) arg;
+
+        if (fd < 0 || fd >= current->files->fdt->max_fds) {
+            printk(KERN_INFO "file descriptor is not valid!..\n");
+            return -EINVAL;
+        }
+
+        f = current->files->fdt->fd[fd];
+        if (f == NULL) {
+            printk(KERN_INFO "file descriptor is not valid!..\n");
+            return -EINVAL;
+        }
+
+        printk(KERN_INFO "File pointer offset: %lld\n", (long long)f->f_pos);
+
+        return 0;
+    }
+
+    Burada daha önceden de belirttiğimiz gibi dosya betimleyicisinden hareketle dosya nesnesine current->files->fdt->fd[fd]
+    ifadesiyle erişilmiştir. Ancak erişmeden önce fd ile belirtilen betimleyicinin o anda çekirdek tarafından tahsis 
+    edilmiş olan dosya betimeleyici tablosunun uzunluğundan büyük olup olmadığına da bakılmıştır:
+
+    if (fd < 0 || fd >= current->files->fdt->max_fds) {
+        printk(KERN_INFO "file descriptor is not valid!..\n");
+        return -EINVAL;
+    }
+
+    Burada önemli bir nokta üzerinde durmak istiyoruz. Biz test amacıyla dosya betimleyicisinden hareketle dosya 
+    nesnesine current->files->fdt->fd[fd] ifadesiyle eriştik. Ancak bu erişim aslında güvenli değildir. Çünkü tam bu 
+    erişim yapılırken eğer dosya betimleyici tablosu büyütülürse ya da bu betimleyici üzerinde işlem yapılırsa bizim 
+    kodumuz kararsız bir durumla karşı karşıya kalır. Tabii çekirdek durup dururken dosya betimleyici tablomuz üzerinde 
+    işlem yapmaz. Çekirdek ancak biz bir dosya işlemi yaptığımızda bizim dosya betimleyici tablomuza erişmektedir. Çünkü 
+    dosya betimleyici tablosu prosese özgüdür. O halde biz ioctl çağrısı yaparken aynı zamanda başka bir thread'te 
+    (ya da alt proseste) dosya işlemi yapmıyorsak bir sorun da oluşmayacaktır. Ancak genel olarak çekirdeğin uyguladığı 
+    senkronizyan mekanizmasına uygun hareket etmek gerekir. Linux çekirdeklerinin bir süredir "kilitsiz (lock-free)" 
+    veri yapılarından olan RCU mekanizmasının kullandığını belirtmiştik. Biz bu veri yapısı üzerindeki ayrıntıları 
+    "çekirdeğin senkronizasyon mekanizmalarını" anlattığımız bölümde açıklayacağız. 
+
+    Burada diğer bir nokta da nesnelerin referans sayaçlarıyla ilgilidir. Daha önceden de belirttiğimiz gibi çekirdek 
+    nesneleri farklı amaçlarla birden fazla kaynak tarafından kullanılabilmektedir. Bu tür çekirdek nesnelerinde bu 
+    nedenle hep bir sayaç tutulmaktadır. Bir çekirdek nesnesi üzerinde işlem yapacak kişi eğer bu sayacı artırmazsa 
+    çekirdek onu boşaltabilir. İşlem yapan kişi de tanımsız davranışla karşılaşabilir. Tabii yukarıdaki gibi prosese
+    özgü test işlemlerinde çekirdek bizim programımız talep etmedikten sonra kapatma işlemleri yapmayacaktır. Ancak 
+    genel olarak bu tür durumlarda "çekirdek kaynağı boşaltmasın diye" nesnenin referans sayacı artırılmalı, kullanım 
+    bittikten sonra da azaltılmalıdır. Daha önceden de  belirttiğimiz gibi Linux çekirdeklerinde sayacı artırarak nesneyi 
+    elde eden fonksiyonlar "get" soneki ile sayacı azaltarak nesneyi bırakan fonksiyonlar ise "put" soneki ile isimlendirilmiştir. 
+    Örneğin fget isimli yüksek seviyeli çekirdek fonksiyonu dosya betimelicisinden hareketle bize dosya nesnesini 
+    RCU mekanizmasını kullanarak dosya nesnesinin sayacını da artırarak vermektedir. fput fonksiyonu da sayacı azaltarak
+    dosya nesnesini geri bırakmaktadır. fget ve fput fonksiyonlarının prototipleri şöyledir:
+
+    struct file *fget(unsigned int fd);
+    void fput(struct file *);
+
+    Bu fonksiyonların prototipleri "include/linux.file.h" dosyası içerisindedir. Güncel çekirdeklerde fget fonksiyonun 
+    tanımlaması "fs/file.c" dosyası içerisinde fput fonksiyonun tanımlaması ise "fs/file_table.c" içerisinde yapılmıştır. 
+    fget ve fput fonksiyonları export edildiği için aygıt sürücüler içerisinde de kullanılabilmektedir. Bu durumda biz 
+    yukarıdaki testi daha basit bir biçimde fget ve fput fonksiyonlarını kullanarak aşağıdaki gibi de yapabiliriz:
+
+    long ioctl_test2(struct file *filp, unsigned long arg)
+    {
+        struct file *f;
+        int fd = (int) arg;
+
+        if ((f = fget(fd)) == NULL) {
+            printk(KERN_INFO "file descriptor is not valid!..\n");
+            return -EINVAL;
+        }
+        
+        printk(KERN_INFO "File pointer offset: %ld\n", (long)f->f_pos);
+
+        fput(f);
+
+        return 0;
+    }
+        
+    Güncel çekirdeklere fget ve fput işlemlerini daha etkin gerçekleştirmek için fdget ve fdput isimli fonksiyonlar da
+    eklenmiştir. Bu fonksiyonların ptototipleri şöyledir:
+
+    static struct fd fdget(unsigned int fd);
+    static void fdput(struct fd fd);
+
+    Kursun yapıldığı makinede bulunan 6.9.2 çekirdeğinde struct fd yapısı şöyle bildirilmiştir:
+
+    struct fd {
+        struct file *file;
+        unsigned int flags;
+    };
+    
+    Ancak en yeni çekirdeklerde fd yapısı şöyledir:
+
+    struct fd {
+        unsigned long word;
+    };
+
+    En yeni çekirdeklerde dosya nesnesine erişim için yalnızca fdget değil fd_file fonksiyonun da kullanılması gerekmektedir. 
+    Örneğin:
+
+    struct fd f = fdget(fd);
+	struct file *file = fd_file(f);
+
+    Güncel çekirdeklerde artık fdget ve fdput fonksiyonları export edilmiştir. Ancak kurusumuzun yapıldığı 6.9.2 
+    çekirdeklerinde bu fonksiyonlar export edilmemişti. 
+
+    Her ne kadar yeni çekirdeklerde fdget ve fdput daha hızlı çalışıyorsa da fget ve fput basit arayüzü ve kullanım 
+    kolaylığı ve eskiden beri aynı biçimde bulunması nedeniyle tercih edilebilir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
