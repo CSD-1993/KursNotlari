@@ -16,7 +16,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 24/10/2025 - Cuma
+                                    Son Güncelleme: 28/10/2025 - Salı
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -4213,8 +4213,8 @@ int main(void)
 
     /* test-driver.h */
 
-    #ifndef test_driver_DRIVER_H_
-    #define test_driver_DRIVER_H_
+    #ifndef TEST_DRIVER_H_
+    #define TEST_DRIVER_H_
 
     #include <linux/stddef.h>
     #include <linux/ioctl.h>
@@ -4302,8 +4302,8 @@ int main(void)
 
 /* test-driver.h */
 
-#ifndef test_driver_DRIVER_H_
-#define test_driver_DRIVER_H_
+#ifndef TEST_DRIVER_H_
+#define TEST_DRIVER_H_
 
 #include <linux/stddef.h>
 #include <linux/ioctl.h>
@@ -4429,7 +4429,7 @@ module_exit(test_driver_exit);
 
 # Makefile
 
- obj-m += ${file}.o
+obj-m += ${file}.o
 
 all:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
@@ -8885,7 +8885,7 @@ unsigned int hash_func(unsigned int key)
         void			        *private_data;
     };
 
-    Çekirdein 2.4 versiyonunda file yapısı şöyleydi:
+    Çekirdeğin 2.4 versiyonunda file yapısı şöyleydi:
 
     struct file {
         struct list_head	    f_list;
@@ -9170,20 +9170,20 @@ unsigned int hash_func(unsigned int key)
     yazarak ioctl yoluyla gerçekleştirebiliriz. (Kursumuzda kullandığımız Linux makinedeki çekirdek sürümü 6.9.2'dir.) 
     Bunun şçin oluşturduğumuz ioctl fonksiyonuna dikkat ediniz:
 
-    long ioctl_test1(struct file *filp, unsigned long arg)
+    static long ioctl_test1(struct file *filp, unsigned long arg)
     {
         struct file *f;
         int fd = (int) arg;
 
         if (fd < 0 || fd >= current->files->fdt->max_fds) {
             printk(KERN_INFO "file descriptor is not valid!..\n");
-            return -EINVAL;
+            return -EBADF;
         }
 
         f = current->files->fdt->fd[fd];
         if (f == NULL) {
             printk(KERN_INFO "file descriptor is not valid!..\n");
-            return -EINVAL;
+            return -EBADF;
         }
 
         printk(KERN_INFO "File pointer offset: %lld\n", (long long)f->f_pos);
@@ -9197,7 +9197,7 @@ unsigned int hash_func(unsigned int key)
 
     if (fd < 0 || fd >= current->files->fdt->max_fds) {
         printk(KERN_INFO "file descriptor is not valid!..\n");
-        return -EINVAL;
+        return -EBADF;
     }
 
     Burada önemli bir nokta üzerinde durmak istiyoruz. Biz test amacıyla dosya betimleyicisinden hareketle dosya 
@@ -9231,14 +9231,14 @@ unsigned int hash_func(unsigned int key)
     fget ve fput fonksiyonları export edildiği için aygıt sürücüler içerisinde de kullanılabilmektedir. Bu durumda biz 
     yukarıdaki testi daha basit bir biçimde fget ve fput fonksiyonlarını kullanarak aşağıdaki gibi de yapabiliriz:
 
-    long ioctl_test2(struct file *filp, unsigned long arg)
+    static long ioctl_test2(struct file *filp, unsigned long arg)
     {
         struct file *f;
         int fd = (int) arg;
 
         if ((f = fget(fd)) == NULL) {
             printk(KERN_INFO "file descriptor is not valid!..\n");
-            return -EINVAL;
+            return -BADF;
         }
         
         printk(KERN_INFO "File pointer offset: %ld\n", (long)f->f_pos);
@@ -9281,14 +9281,1153 @@ unsigned int hash_func(unsigned int key)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+                                    28. Ders 25/10/2025 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de dup POSIX fonksiyonun işlevini yerine getiren (yani sys_dup sistem fonksiyonu gibi çalışan) bir fonksiyonu 
+    kendimiz yazalım. Çekirdeği yeniden derlememek için bu işlemi de bir aygıt sürücüye yaptırabiliriz. Bunun için bir 
+    ioctl kodu oluşturabiliriz. Bu ioctl kodu kullanıcı modundan çağrılırken ioctl fonksiyonunun üçüncü parametresine
+    aşağıdaki gibi bir yapı nesnesinin adresini geçebiliriz:
+
+    struct FDDUP {
+        int fd;
+        int fd_dup;
+    };
+
+    Burada yapının fd elemanı çiftlenecek dosya betimleyicisini belirtmektedir. fd_dup elemanı ise çiftleme sonucunda 
+    elde edilecek yeni betimleyiciyi belirtmektedir. (Yani biz fonksiyonu çağırmadan önce yapının fd elemanına çiftlenecek 
+    betimleyiciyi yerleştireceğiz, fonksiyon da bunu çiftleyip yeni betimleyiciyi yapının fd_dup elemanına yerleştirecek.)
+    Bu elemanların dup fonksiyonu ile ilişkisini şöyle temsil edebiliriz:
+
+    fd_dup = dup(fd);
+    
+    Dosya betimleyicisini çiftleyen ioctl kodu düz bir biçimde test amaçlı olarak (yani bazı kusurlarla) şöyle 
+    yazılabilir:
+
+    static long ioctl_test3(struct file *filp, unsigned long arg)
+    {
+        struct file *f;
+        struct fdtable *fdt;
+        struct file **fd_table;
+        struct FDDUP fddup;
+        int i;
+
+        f = NULL;
+
+        if (copy_from_user(&fddup, (struct FDDUP *)arg, sizeof(fddup)) != 0)
+            return -EFAULT;
+
+        fdt = current->files->fdt;
+        fd_table = fdt->fd;
+
+        if (fddup.fd < 0 || fddup.fd >= fdt->max_fds)
+            return -EBADF;
+        if (fd_table[fddup.fd] == NULL)
+            return -EBADF;
+
+        for (i = 0; i < fdt->max_fds; ++i)
+            if (fd_table[i] == NULL) {
+                f = fd_table[fddup.fd];	
+                fd_table[i] = f;
+                ++f->f_count.counter;			/* atomic_long_inc(&f->f_count); */
+                fddup.fd_dup = i;
+                break;
+            }
+        if (f == NULL)
+            return -EMFILE;
+
+        if (copy_to_user((struct FDDUP *)arg, &fddup, sizeof(fddup)) != 0)
+            return -EFAULT;
+        
+        return 0;
+    }
+
+    Fonksiyonumuzda önce kullanıcı modundaki fddup nesnesini çekirdek moduna copy_drom_user fonksiyonu ile kopyaldık:
+
+    if (copy_from_user(&fddup, (struct FDDUP *)arg, sizeof(fddup)) != 0)
+        return -EFAULT;
+
+    Sonra fonksiyonumuzda çiftlenecek dosya betimelycisinin geçerli bir betimleyici olup olamdığına baktık:
+
+    fdt = current->files->fdt;
+    fd_table = fdt->fd;
+
+    if (fddup.fd < 0 || fddup.fd >= fdt->max_fds)
+        return -EBADF;
+    if (fd_table[fddup.fd] == NULL)
+        return -EBADF;
+
+    Bu işlemden sonra fonksiyonumuzda bir döngü içerisinde ilk boş betimleyiciyi bulup, çiftlenecek olan betimeleyicinin
+    gösterdiği dosya nesnesinin adresini bu boş betimleyiciye yerleştirdik. Bu tür işlemlerde dosya nesnesinin sayacının
+    artırılması gerektiğini anımsayınız:
+
+	for (i = 0; i < fdt->max_fds; ++i)
+		if (fd_table[i] == NULL) {
+			f = fd_table[fddup.fd];	
+			fd_table[i] = f;
+			++f->f_count.counter;			/* atomic_long_inc(&f->f_count); */
+			fddup.fd_dup = i;
+			break;
+		}
+	if (f == NULL)
+		return -EMFILE;
+
+    Kursumuzun yapıldığı 6.9.2 çekirdeğinde dosya nesnesinin sayacının file yapısının içerisinde şöyle tutulduğunu yeniden
+    anımsatmak istiyoruz:
+
+    struct file {
+        /* ... */
+
+        atomic_long_t		f_count;
+
+        /* ... */
+    };
+
+    Burada aslında atomic_long_t türü bir yapı biçiminde bildirilmiştir:
+
+    typedef struct {
+        long counter;
+    } atomic_long_t;
+
+    Neden bu sayacın doğrudan long bir yapı elemanında tutulmayıp başka bir yapının elemanı yapıldığını merak eedebilirsiniz. 
+    Bunun amacı aslında bu elemanın gizlenmek istenmesidir. Bu atomic_long_t türüyle belirtilen değerler üzerinde işlemler
+    atomik düzeyde özel fonksiyonlarla yapılmaktadır. Aslında atomic_long_t türünün atomic_t isimi int versiyonu da vardır. 
+    Eskiden çekirdeklerde atomic_long_t yerine yalnızca atomic_t türü bulunuyordu. Sonra atomic_long_t türü de eklendi. 
+    atomic_long_t türü üzerinde atomik işlem yapan fonksiyonların bizim için bu konu bağlamında önemli olan birkaçını 
+    aşağıda veriyoruz:
+
+    void atomic_long_set(atomic_long_t *v, long i);
+    long atomic_long_read(const atomic_long_t *v);
+    void atomic_long_inc(atomic_long_t *v);
+    void atomic_long_dec(atomic_long_t *v);
+
+    atomic_t ve atomic_long_t türleri hakkında ayrıntıları başka bir başlıkta ele alacağız. 
+
+    Fonksiyonumuzda en sonunda yeniden çekirdek modundaki fddup nesnesi kullanıcı modundaki prosesin fddup nesnesine
+    copy_to_user fonksiyonu ile kopyalanmıştır:
+
+    if (copy_to_user((struct FDDUP *)arg, &fddup, sizeof(fddup)) != 0)
+            return -EFAULT;
+
+    Fonksiyonumuzdaki döngüde aslında mantıksal bir kusur da vardır. Biz döngüde yalnızca o andaki dosya betimleyici 
+    tablosunda arama yaptık. Halbuki çekirdek aslında başlangıçta küçük bir dosya betimleyci tablosunu tutarken daha 
+    sonra bunu gerektiğinde proses limitinin izin verdiği kadar yükseltebilmektedir. Halbuki bizim kodumuz bunu göz 
+    ardı etmiştir. Yani aslında işin başında anımsayacağınız gibi max_fds 64 bit sistemlerde 64 elemanlı bir dosya 
+    betimeleyici tablousunun uzunluğunu tutmaktadır. Halbuki default durumda prosesin dosya betimleyici tablosu 1024 
+    geçerli uzunluğa sahiptir. O halde aslında bizim max_fds ile belirtilen dosya betimleyici tablosu elemanlarının 
+    hepsi doluysa dosya betimleyici tablosunu prosesin kaynak limitlerinde belirtilen değere (default durumda 1024) 
+    büyütüp arama işlemini oradan devam ettirmemiz gerekirdi. Ancak bunu biz yapmadık.
+
+    Fonksiyonumuzda ilk boş betimleyicinin aranmasının düz mantıkla bir for döngüsü içerisinde -tıpkı çekirdeğin 
+    ilkel versiyonlarındaki gibi- yapıldığına dikkat ediniz. Aslında testi yaptığımız makinedeki Linux çekirdeğinde 
+    anımsayacağınız gibi ilk boş betimleyiciyi hızlı bir biçimde bulabilmek için iki düzey bitmap kullanılıyordu. 
+    Bu versiyonlarda ilk boş betimleyiciyi bulan get_unused_fd_flags isimli daha yüksek seviyeli bir çeekirdek 
+    fonksiyonu bulunmaktadır. Bu fonksiyon export edildiği için aygıt sürücülerden de kullanılabilmektedir. Fonksiyon 
+    şöyle yazılmıştır:
+
+    int get_unused_fd_flags(unsigned flags)
+    {
+        return __get_unused_fd_flags(flags, rlimit(RLIMIT_NOFILE));
+    }
+    EXPORT_SYMBOL(get_unused_fd_flags);
+
+    Fonksiyonun başka bir fonksiyonu çağırdığını görüyorsunuz. fonksiyonun flags parametresi boş dosya betimleycisini 
+    bulurken aynı zamanda dosyaya ilişkin O_CLOEXEC bayrağının da set edilmesini sağlayabilmektedir. Tabii böyle bir 
+    şeyi istemiyorsanız bu parametreye 0 geçebilirsiniz. (Yani bu fonksiyonun parametresi ya O_CLOEXEC biçiminde ya da
+    0 biçiminde geçilebilmektedir.) get_unused_fd_flags fonksiyonu aynı zamanda "gerektiğinde dosya betimleyici tablosunu 
+    büyütme işlemini de" kendisi yapmaktadır. Dolayısıyla bu yüksek seviyeli fonksiyon hem aygıt sürücüler tarafından 
+    hem de çekirdek kodları üzerinde değişilik yapacak kişiler tarafından bu tür durumlarda tercih edilmektedir. 
+    get_unused_fd_flags fonksiyonu başarı durumunda yeni boş betimleyiciye başarısızlık durumunda ise -EMFILE ya da -ENOMEM 
+    değerlerinden birine geri dönmektedir. Eskiden (örneğm çekirdeğin 2.2, 2.4 ve 2.6 versiyonlarında) get_unused_fd_flags 
+    fonksiyonu yerine flags'siz get_unused_fd fonksiyonu bulunuyordu:
+
+    int get_unused_fd(void);
+
+    get_unused_fd_flags fonksiyonu çekirdeğin 2.6.23 versiyonunda eklenmiştir. 
+
+    Aslında çekirdek içerisinde RCU mekanizması eşliğinde files_struct yapısının adresini alarak current->files->fdt 
+    gösterisini elde eden files_fdtable isimli bir çekirdek fonksiyonu da bulunmaktadır. Bu durumda dosya betimleyici 
+    tablosuna şöyle de erişebilirdik:
+
+    fdt = files_fdtable(current->files);
+    fd_table = fdt->fd;
+
+    RCU mekanizması eşliğinde dosya nesnesini (strcut file nesnesini) dosya betimelyeici tablosuna yerleştiren 
+    fd_install isimli export edilmiş yüksek seviyeli bir çekirdek fonksiyonu da bulunmaktadır:
+
+    void fd_install(unsigned int fd, struct file *file);
+
+    Eğer işlemler RCU mekanizmasına uyumlu olacaksa dosya betimeleyicisini dosya betimleyici tablosuna yerleştirilmesi 
+    için fd_install fonksiyonu tercih edilmelidir. 
+
+    Böylece yukarıdaki fonksiyonu şu hale getirebiliriz:
+ 
+    static long ioctl_test4(struct file *filp, unsigned long arg)
+    {
+        struct file *f;
+        struct FDDUP fddup;
+        
+        if (copy_from_user(&fddup, (struct FDDUP *)arg, sizeof(fddup)) != 0)
+            return -EFAULT;
+
+        if ((f = fget(fddup.fd)) == NULL)
+            return -EBADF;
+            
+        if ((fddup.fd_dup = get_unused_fd_flags(0)) < 0) {
+            fput(f);
+            return fddup.fd_dup;
+        }
+
+        if (copy_to_user((struct FDDUP *)arg, &fddup, sizeof(fddup)) != 0) {
+            fput(f);
+            return -EFAULT;
+        }
+
+        fd_install(fddup.fd_dup, f);
+
+        /*
+        fd_table = current->files->fdt->fd;
+        fd_table[fddup.fd_dup] = f;	
+        */
+
+        return 0;
+    }
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki test işlemlerine ilişkin aygıt sürücü kodunu bir bütün olarak aşağıda veriyoruz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-driver.h */
+
+#ifndef TEST_DRIVER_H_
+#define TEST_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define TEST_DRIVER_MAGIC		't'
+#define IOC_TEST1		        _IO(TEST_DRIVER_MAGIC, 0)
+#define IOC_TEST2		        _IO(TEST_DRIVER_MAGIC, 1)
+#define IOC_TEST3		        _IO(TEST_DRIVER_MAGIC, 3)
+#define IOC_TEST4		        _IO(TEST_DRIVER_MAGIC, 4)
+
+struct FDDUP {
+    int fd;
+    int fd_dup;
+};
+
+#endif
+
+/* test-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/fdtable.h>
+#include <linux/file.h>
+#include "test-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("test-driver");
+
+static int test_driver_open(struct inode *inodep, struct file *filp);
+static int test_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_test1(struct file *filp, unsigned long arg);
+static long ioctl_test2(struct file *filp, unsigned long arg);
+static long ioctl_test3(struct file *filp, unsigned long arg);
+static long ioctl_test4(struct file *filp, unsigned long arg);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = test_driver_open,
+	.read = test_driver_read,
+	.write = test_driver_write,
+	.release = test_driver_release,
+    .unlocked_ioctl = test_driver_ioctl
+};
+
+static int __init test_driver_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "test-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static int test_driver_open(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "test-driver opened...\n");
+
+	return 0;
+}
+
+static int test_driver_release(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "test-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "test-driver read...\n");
+
+	return 0;
+}
+
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	printk(KERN_INFO "test-driver write...\n");
+
+	return 0;
+}
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+	
+    printk(KERN_INFO "test_driver_ioctl...\n");
+
+    switch (cmd) {
+        case IOC_TEST1:
+            result = ioctl_test1(filp, arg);
+            break;  
+		case IOC_TEST2:
+            result = ioctl_test2(filp, arg);
+            break;  
+		case IOC_TEST3:
+            result = ioctl_test3(filp, arg);
+            break;  
+		case IOC_TEST4:
+            result = ioctl_test4(filp, arg);
+            break;  
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+static long ioctl_test1(struct file *filp, unsigned long arg)
+{
+	struct file *f;
+	int fd = (int) arg;
+
+	if (fd < 0 || fd >= current->files->fdt->max_fds) {
+		printk(KERN_INFO "file descriptor is not valid!..\n");
+		return -EBADF;
+	}
+
+	f = current->files->fdt->fd[fd];
+	if (f == NULL) {
+		printk(KERN_INFO "file descriptor is not valid!..\n");
+		return -EBADF;
+	}
+
+	printk(KERN_INFO "File pointer offset: %ld\n", (long)f->f_pos);
+
+    return 0;
+}
+
+static long ioctl_test2(struct file *filp, unsigned long arg)
+{
+	struct file *f;
+	int fd = (int) arg;
+
+	if ((f = fget(fd)) == NULL) {
+		printk(KERN_INFO "file descriptor is not valid!..\n");
+		return -EBADF;
+	}
+	
+	printk(KERN_INFO "File pointer offset: %ld\n", (long)f->f_pos);
+
+	fput(f);
+
+    return 0;
+}
+
+static long ioctl_test3(struct file *filp, unsigned long arg)
+{
+	struct file *f;
+	struct fdtable *fdt;
+	struct file **fd_table;
+	struct FDDUP fddup;
+	int i;
+
+	f = NULL;
+
+	if (copy_from_user(&fddup, (struct FDDUP *)arg, sizeof(fddup)) != 0)
+		return -EFAULT;
+
+	fdt = current->files->fdt;
+	fd_table = fdt->fd;
+
+	if (fddup.fd < 0 || fddup.fd >= fdt->max_fds)
+		return -EBADF;
+	if (fd_table[fddup.fd] == NULL)
+		return -EBADF;
+
+	for (i = 0; i < fdt->max_fds; ++i)
+		if (fd_table[i] == NULL) {
+			f = fd_table[fddup.fd];	
+			fd_table[i] = f;
+			++f->f_count.counter;			/* atomic_long_inc(&f->f_count); */
+			fddup.fd_dup = i;
+			break;
+		}
+	if (f == NULL)
+		return -EMFILE;
+
+	if (copy_to_user((struct FDDUP *)arg, &fddup, sizeof(fddup)) != 0)
+		return -EFAULT;
+	
+    return 0;
+}
+
+static long ioctl_test4(struct file *filp, unsigned long arg)
+{
+	struct file *f;
+	struct FDDUP fddup;
+	
+	if (copy_from_user(&fddup, (struct FDDUP *)arg, sizeof(fddup)) != 0)
+		return -EFAULT;
+
+	if ((f = fget(fddup.fd)) == NULL)
+		return -EBADF;
+		
+	if ((fddup.fd_dup = get_unused_fd_flags(0)) < 0) {
+		fput(f);
+		return fddup.fd_dup;
+	}
+
+	if (copy_to_user((struct FDDUP *)arg, &fddup, sizeof(fddup)) != 0) {
+		fput(f);
+		return -EFAULT;
+	}
+
+	fd_install(fddup.fd_dup, f);
+
+	/*
+	fd_table = current->files->fdt->fd;
+	fd_table[fddup.fd_dup] = f;	
+	*/
+
+	return 0;
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+	make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+	make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* app.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+void exit_sys(const char *msg);
+
+
+int main(int argc, char *argv[])
+{
+    int fd_dev;
+    int fd;
+    struct FDDUP fddup;
+    off_t pos;
+    
+    if (argc != 2) {
+        fprintf(stderr, "wrong number of arguments!..\n");
+        exit(EXIT_FAILURE);
+    }
+       
+    if ((fd_dev = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+   
+    if ((fd = open(argv[1], O_RDONLY)) == -1)
+        exit_sys("open");
+    lseek(fd, 100, 0);
+   
+    fddup.fd = fd;
+    if (ioctl(fd_dev, IOC_TEST4, &fddup) == -1)
+        exit_sys("ioctl");
+
+    pos = lseek(fddup.fd_dup, 0, 1);
+    printf("%jd\n", (intmax_t)pos);
+
+    close(fd);
+    close(fddup.fd);
+    close(fd_dev);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi dosyanın açılması ve kapatılması sürecini temel düzeyde inceleyelim. Bir dosya açılırken çekirdek kabaca neler 
+    yapmaktadır? Bilindiği gibi kullanıcı modundan open POSIX fonksiyonuyle bir dosya açılmak istendiğinde open fonksiyonu 
+    sys_open sistem fonksiyonunu çağırmaktadır. Dosya açma işlemi sys_open fonksiyonu tarafından yapılmaktadır. 2.6 
+    çekirdeğinden itibaren sys_open sistem fonksiyonun kodlarında önemli bir değişiklik olmamıştır. Güncel çekirdeklerde 
+    sys_open fonksiyonu "fs/open.c"" dosyası içerisinde şöyle tanımlanmıştır:
+
+    SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
+    {
+        if (force_o_largefile())
+            flags |= O_LARGEFILE;
+        return do_sys_open(AT_FDCWD, filename, flags, mode);
+    }
+
+    2.6 çekirdeğinden bu yana asıl açım işlemleri do_sys_open fonksiyonu tarafından yapılmaktadır. Ancak fonksiyonların 
+    kodları üzerinde zamanla çeşitli değişiklikler yapılmıştır. do_sys_open fonksiyonu export edilmemiştir. Fonksiyonun 
+    prototiği şöyledir:
+
+    int do_sys_open(int dfd, const char __user *filename, int flags, mode_t mode);
+    
+    do_sys_open fonksiyonu aynı zamanda openat fonksiyonu (yani sys_openat sistem fonksyonu) tarafından da çağrılan ortak 
+    bir fonksiyondur. Bu nedenle fonksiyonun birinci parametresi openat fonksiyonundaki "göreli yol ifadeleri için orijin 
+    olarak kullanılacak dosya betimleyicisini" belirtmektedir. do_sys_open fonksiyonun birinci parametresine dikkat eediniz. 
+    Bu parametreye AT_FDCWD özel değeri geçilmiştir. openat fonksiyonunun birinci parametresindeki betimleyiciye AT_FDCWD 
+    özel değeri geçilirse fonksiyonun tamamen open gibi gibi davrandığını anımsayınız. sys_openat sistem fonksiyonu da 
+    güncel çekirdeklerde "fs/open.c" dosaysında şöyle tanımlanmıştır:
+
+    SYSCALL_DEFINE4(openat, int, dfd, const char __user *, filename, int, flags,
+		umode_t, mode)
+    {
+        if (force_o_largefile())
+            flags |= O_LARGEFILE;
+        return do_sys_open(dfd, filename, flags, mode);
+    }
+
+    Görüldüğü gibi openat sistem fonksiyonu da aslında do_sys_open fonksiyonunu çağırmaktadır.
+
+    Şimdi çağrıu zincirin dvam edelim. Güncel çekirdeklerde do_sys_open fonksiyonu "fs/open.c" dosyasında şöyle 
+    tanımanmıştır:
+
+    long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
+    {
+        struct open_how how = build_open_how(flags, mode);
+        return do_sys_openat2(dfd, filename, &how);
+    }
+
+    Fonksiyonda önce build_open_how fonksiyonu çağrılmıştır. Bu fonksiyon açış bayraklarını ve erişim haklarını bazı 
+    kontroller uygulayarak ek bir yapı içinde toplamaktadır. Fonksiyonun bu işlemden sonra do_sys_openat2 fonksiyonunu 
+    çağırdığını görüyorsunuz. Güncel çekirdeklerde bu fonksiyon da "fs/open.c" dosyasında şöyle tanımlanmıştır:
+
+    static long do_sys_openat2(int dfd, const char __user *filename,
+			   struct open_how *how)
+    {
+        struct open_flags op;
+        int fd = build_open_flags(how, &op);
+        struct filename *tmp;
+
+        if (fd)
+            return fd;
+
+        tmp = getname(filename);
+        if (IS_ERR(tmp))
+            return PTR_ERR(tmp);
+
+        fd = get_unused_fd_flags(how->flags);
+        if (fd >= 0) {
+            struct file *f = do_filp_open(dfd, tmp, &op);
+            if (IS_ERR(f)) {
+                put_unused_fd(fd);
+                fd = PTR_ERR(f);
+            } else {
+                fd_install(fd, f);
+            }
+        }
+        putname(tmp);
+        return fd;
+    }
+
+    Fonksiyondaki bazı ayrıntıları göz ardı edersek birkaç noktaya dikkatinizi çekmek istiyoruz. build_open_flags fonksiyonu 
+    open fonksiyonunda verilen bayrakları çekirdeğin işleyebilmesi için daha uygun bir hale getirmektedir. Bu fonksiyon 
+    tarafından daha uygun hale getirilen açış bayrakları open_flags isimli bir yapı nesnesinde saklanmaktadır. getname 
+    fonksiyonu ise kullanıcı modundaki yol ifadesini çekirdek moduna kopyalayarak çekirdek bir yapıya yerleştirmektedir. 
+    Bundan sonra yukarıda görmüş olduğumuz get_unused_fd_flags fonksiyonu çağrılarak ilk boş betimleyici elde edilmiştir. 
+    (POSIX standartlarına göre open fonksiyonunun dosya betimleyici tablosundaki ilk boş betimleyiciyi vermek zorunda 
+    oldupuna dikkat ediniz.) Bundan sonra bütün geri kalan önemli işlemler do_filp_open fonksiyonu tarafından yapılmaktadır. 
+    do_sys_open ve do_sys_openat2 fonksiyonları aygıt sürücüler için export edilmemiştir. Ancak do_filp open fonksiyonu 
+    export edilmiş bir fonksiyondur. Güncel çekirdeklerdeki bu çağrı silsilesini şöyle gösterebiliriz:
+
+    ┌────────────┐
+    │  sys_open  │
+    └───────┬────┘
+            │
+            ├──► ┌──────────────┐
+            │    │ do_sys_open  │
+            │    └──────┬───────┘
+            │           │
+            │           ├──► ┌─────────────────┐
+            │           │    │ do_sys_openat2  │
+            │           │    └────────┬────────┘
+            │           │             │
+            │           │             ├──► ┌───────────────┐
+            │           │             │    │ do_filp_open  │
+            │           │             │    └───────────────┘
+            │           │             │
+            └───────────┴─────────────┘
+
+    Akış do_filp_open fonksiyonuna geldiğinde artık dosya betimleyici tablosunda boş betimleyici bulunmuştur. "filp"
+    sözcüğü Linux çekirdeklerinde dosya nesnesini (yani struct file nesnesi) gösteren göstericiler için kullanılmaktadır. 
+    (Yani "filp" sizcüğü struct file * anlamında kullanılmaktadır.)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                            29. Ders 26/10/2025 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    do_filp_open fonksiyonu güncel çekirdeklerde "fs/namei.c" dosyasında şöyle tanımlanmıştır:
+
+    struct file *do_filp_open(int dfd, struct filename *pathname,
+		const struct open_flags *op)
+    {
+        struct nameidata nd;
+        int flags = op->lookup_flags;
+        struct file *filp;
+
+        set_nameidata(&nd, dfd, pathname, NULL);
+        filp = path_openat(&nd, op, flags | LOOKUP_RCU);
+        if (unlikely(filp == ERR_PTR(-ECHILD)))
+            filp = path_openat(&nd, op, flags);
+        if (unlikely(filp == ERR_PTR(-ESTALE)))
+            filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
+        restore_nameidata();
+        return filp;
+    }
+    
+    Fonksiyon kabaca şu bilgileri parametre yoluyla almaktadır:
+
+    - Göreli yol ifadelerinin nereden itibaren çözüleceğine ilişkin dosya betimleyicisini
+    - Açılacak dosyanın yol ifadesini 
+    - Dosya açış bayraklarını
+
+    do_flip_open fonksiyonu çekirdek modülleri ve aygıt sürücüler için export edilmemiştir.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeklerinde çok eskiden beri çekirdek modülleri aygıt sürücüler tarafından kullanım için tasarlanmış 
+    filp_open isimli bir fonksiyon da bulunmaktadır. do_filp_open fonksiyonu çekirdek tarafından kullanılan bir fonksiyondur. 
+    Halbuki filp_open fonksiyonu aygıt sürücüler tarafından kullanılabilsin diye tasarlanmıştır.do_filp_open foksiyonu 
+    yol ifadesini kullanıcı alanından çekerken filp_open fonksiyonunda yol ifadesi zaten çekirdek alanı içerisinde bulunmak 
+    zorundadır. Tabii filp_open fonksiyonu da nihayetinde do_filp_open fonksiyonunu çağırmaktadır. Güncel çekirdeklerde 
+    filp_open fonksiyonu "fs/open.c" dosyasında şöyle tanımlanmıştır:
+
+    struct file *filp_open(const char *filename, int flags, umode_t mode)
+    {
+        struct filename *name = getname_kernel(filename);
+        struct file *file = ERR_CAST(name);
+
+        if (!IS_ERR(name)) {
+            file = file_open_name(name, flags, mode);
+            putname(name);
+        }
+        return file;
+    }
+    EXPORT_SYMBOL(filp_open);
+
+    filp_open fonksiyonunun parametrelerinin open fonksiyonuna (dolayısıyla sys_open sistem fonksiyonuna) benzediğinde 
+    dikkat ediniz. filp_open fonksiyonunun birinci parametresi olan yol ifadesi kullanıcı modunda bir adres değil çekirdek 
+    modunda bir adres belirtmektedir. Buradaki file_open_name fonksiyonu da "fs/open.c" dosyasında şöyle tanımlanmıştır:
+
+    struct file *file_open_name(struct filename *name, int flags, umode_t mode)
+    {
+        struct open_flags op;
+        struct open_how how = build_open_how(flags, mode);
+        int err = build_open_flags(&how, &op);
+        if (err)
+            return ERR_PTR(err);
+        return do_filp_open(AT_FDCWD, name, &op);
+    }
+
+    Görüldüğü gibi bu fonksiyon da aslında çekirdek alanındaki yol ifadesini uygun biçime dönüştürerek do_filp_open 
+    fonksiyonunu çağırmaktadır. do_filp_open fonksiyonun hangi fonksiyonlar tarafından çağrıldığını aşağdaki şeekille 
+    görselleştirmek istiyoruz:
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │           Kullanıcı Alanı (User Space)                      │
+    │                                                             │
+    │     open()                    openat()                      │
+    │       │                          │                          │
+    └───────┼──────────────────────────┼──────────────────────────┘
+            │                          │
+            │ (syscall)                │ (syscall)
+            │                          │
+    ┌─── ───▼──────────────────────────▼───────────────────────────┐
+    │           Çekirdek Alanı (Kernel Space)                      │
+    │                                                              │
+    │    sys_open()              sys_openat()                      │
+    │       │                         │                            │
+    │       └──────────┬──────────────┘                            │
+    │                  │                                           │
+    │                  ▼                                           │
+    │          do_sys_open()                                       │
+    │                  │                                           │
+    │                  ▼                                           │
+    │          do_sys_openat2()                                    │
+    │                  │                                           │
+    │                  │                                           │
+    │       ┌──────────┴──────────┐                                │
+    │       │                     │                                │
+    │       ▼                     ▼                                │
+    │  filp_open()         ┌─────────────────┐                     │
+    │       └─────────────►│ do_filp_open()  │  ◄─── Ortak Nokta   │
+    │                      └─────────────────┘                     │
+    │                              │                               │
+    │                              ▼                               │
+    │                    [Dosya Açma İşlemleri]                    │
+    └──────────────────────────────────────────────────────────────┘  
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek modülleri ve aygıt sürücüleer için bulundurulmuş olan filp_open fonksiyonu çağrıldığında bir dosya nesnesi 
+    oluşturulup o dosya nesnesinin adresi (yani struct file nesnesinin adresi) geri dönüş değeri olarak verilmektedir. 
+    filp_open fonksiyonunun parametrik yapısına dikkat ediniz:
+
+    struct file *file_open_name(struct filename *name, int flags, umode_t mode);
+
+    filp_open fonksiyonunun herhngi bir prosesle ilişkili bir dosya açmamaktadır. Yani bu fonksiyon oluşturduğu bu dosya 
+    nesnesinin adresini herhangi bir prosesin dosya betimleyici tablosuna yazmamaktadır. Açılan dosya herhangi bir prroses 
+    tarafından kullanılabilecek bir dosya değildir. Bu dosya yalnızca çekirdek modülleri ve aygıt sürücüler tarafından 
+    kullanılabilmektedir. filp_open fonksiyonuyla açılmış olan dosyalar filp_close fonksiyonuyla kapatılabilirler. 
+    Güncel çekirdeklerde filp_close fonksiyonu da "fs/open.c"" içerisinde şöyle tanımlanmıştır:
+
+    int filp_close(struct file *filp, fl_owner_t id)
+    {
+        int retval;
+
+        retval = filp_flush(filp, id);
+        fput_close(filp);
+
+        return retval;
+    }
+    EXPORT_SYMBOL(filp_close);
+
+    filp_open fonksiyonu ile çekirdek modülü ya da aygıt sürücü bir dosyayı açtığında artık o dosyadan okuma ve o dosyaya 
+    yazma işlemleri güncel çekirdeklerde "fs/read_write.c" dosyası içerisineki kernel_read ve kernel_write fonksiyoları 
+    yoluyla yapılmaktadır. Bu fonksiyonların da prototipleri şçyledir:
+
+    ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos);
+    ssize_t kernel_write(struct file *file, const void *buf, size_t count, loff_t *pos);
+
+    Fonksiyonların parametrik yapılarının read ve write POSIX fonksiyonlarını andırdığına dikkat ediniz. Ancak bu fonksiyonlar 
+    dosya betimeleyicisini değil dosya nesnesinin adresini parametre olarak almaktadır. Ayrıca fonksiyonalar dosya göstericisinin 
+    gösterdiği yerden itibaren değil son parametreleri ile belirtilen offset'ten işlemlerini yapmaktadır. Bu fonksiyonlardaki 
+    aktarım adresleri kullanıcı modundaki adresler değil çekirdek modundaki adreslerdir. Her ne kadar bu fonksiyonlar zaten 
+    dosya göstericisini de parametre olarak alıyorsa da dosya göstericisini konumlandırmak için ayrıca vfs_llseek isimli 
+    bir fonksiyon da bulunmaktadır:
+
+    loff_t vfs_llseek(struct file *file, loff_t offset, int whence);
+
+    kernel_read, kernel_write ve vfs_llseek fonksiyonlarrının hepsi export edilmiş durumdadır. 
+
+    Aşağıda çekirdek modülü içerisinde dosya işlemlerinin yapılmasına yönelik basit bir örnek veriyoruz. İşlemler çekirdek 
+    modülünün init fonksiyonunda yaoılmaktadır:
+
+    static int test_module_init(void)
+    {
+        struct file *f;
+        char *buf;
+        ssize_t nread;
+        loff_t pos;
+
+        if ((f = filp_open("/etc/hostname", O_RDONLY, 0)) == NULL) {
+            printk(KERN_INFO "cannot open file!...\n");
+            return PTR_ERR(f);
+        }
+
+        if ((buf = kzalloc(100 + 1, GFP_KERNEL)) == NULL) {
+            printk(KERN_INFO "cannot allocate memory!...\n");
+            filp_close(f, NULL);
+            return -ENOMEM;
+        }
+
+        pos = 0;
+        if ((nread = kernel_read(f, buf, 100, &pos)) < 0) {
+            kfree(buf);
+            filp_close(f, NULL);
+            return (int)nread;
+        }
+
+        buf[nread] = '\0';
+        printk(KERN_INFO "%s\n", buf);
+
+        kfree(buf);
+        filp_close(f, NULL);
+
+        return 0;
+    }
+
+    Burada dosyanın filp_open fonksiyonuyla açıldığını, kernel_read fonksiyonuyla dosyadan okuma yapıldığını ve dosyanın
+    filp_close fonksiyonuyla kaapatıldığını görüyorsunuz. kzalloc fonksiyonu çekirdek alanında içi 0'larla dolu dinamik
+    tahsisat yapmaktadır. Modülü yükledikten sonra okunanları görmek için "dmesg" komutunu çalıştırmalınınız.
+----------------------------------------------------------------------------------------------------------------------*/
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/sched/signal.h>
+
+MODULE_LICENSE("GPL");
+
+static int test_module_init(void);
+static void test_module_exit(void);
+
+static int test_module_init(void)
+{
+    struct file *f;
+    char *buf;
+    ssize_t nread;
+    loff_t pos;
+
+    if ((f = filp_open("/etc/hostname", O_RDONLY, 0)) == NULL) {
+        printk(KERN_INFO "cannot open file!...\n");
+        return PTR_ERR(f);
+    }
+
+    if ((buf = kzalloc(100 + 1, GFP_KERNEL)) == NULL) {
+        printk(KERN_INFO "cannot allocate memory!...\n");
+        filp_close(f, NULL);
+        return -ENOMEM;
+    }
+
+    pos = 0;
+    if ((nread = kernel_read(f, buf, 100, &pos)) < 0) {
+        kfree(buf);
+        filp_close(f, NULL);
+        return (int)nread;
+    }
+
+    buf[nread] = '\0';
+    printk(KERN_INFO "%s\n", buf);
+
+    kfree(buf);
+    filp_close(f, NULL);
+
+    return 0;
+}
+
+static void test_module_exit(void)
+{
+    printk(KERN_INFO "test_module_exit...\n");
+}
+
+module_init(test_module_init);
+module_exit(test_module_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Pekiyi prosesin sys_open sistem fonksiyonuyla açtığı bir dosya nasıl kapatılmaktadır? Dosya kapatılırken çekirdeğin  
+    dosya betimleyici tablosunda ilgili betimleyicinin boşaltması, dosyanın blokları page cache içerisinde kirlenmiş 
+    (dirty) olarak bulunuyorsa onların da flush etmesi gerekir. Ancak dosya nesnesi başka prosesler tarafından da 
+    (alt prosesleri kastediyoruz) kullanılabilidiği için ve dup gibi fonksiyonlarla çiftlenmiş olabileceği için doğrudan 
+    serbest bırakılmamakta yalnızca sayacı eksiltilmektedir. Tabii dosya betimleyicisi serebest bırakıldığında aynı 
+    zamanda artık bu dosya betimleyicisinin boş olduğunu gösteren ilgili bitmap'lerde de güncellemeler yapılmaktadır. 
+    Kapatılan dosyaların dentry ve inode nesneleri dentry ve inode öncelleklerinden (cache) atılmak zorunda değildir. 
+    Ancak dosyanın dentry ve inode nesnesi üzerinde de bazı güncellemeler yapılmaktadır. Güncel çekirdeklerde sys_close 
+    fonksiyonu "fs/open.c" dosyasında şöyle tanımlanmıtır:
+
+    SYSCALL_DEFINE1(close, unsigned int, fd)
+    {
+        int retval;
+        struct file *file;
+
+        file = file_close_fd(fd);
+        if (!file)
+            return -EBADF;
+
+        retval = filp_flush(file, current->files);
+
+        /*
+        * We're returning to user space. Don't bother
+        * with any delayed fput() cases.
+        */
+        fput_close_sync(file);
+
+        if (likely(retval == 0))
+            return 0;
+
+        /* can't restart close syscall because file table entry was cleared */
+        if (retval == -ERESTARTSYS ||
+            retval == -ERESTARTNOINTR ||
+            retval == -ERESTARTNOHAND ||
+            retval == -ERESTART_RESTARTBLOCK)
+            retval = -EINTR;
+
+        return retval;
+    }
+
+    Bu fonksiyonda kabaca şunlar yapılmaktadır:
+
+    - file_close_fd fonksiyonu ile prosesin dosya betimleyici tablosundaki ilgili betimleyiciye ilişkin adrese NULL 
+    yerleştirilir ve betimeleyici için boş betimleyicilerin hızlı bulunmasını sağlayan için iki düzey bitmap'te 
+    güncellenemeler yapılır. Bu fonksiyon aynı zamanda betimleyiciye ilişkin dosya nesnesini adresini de geri 
+    döndürmektedir. 
+
+    - filp_flush fonksiyonu dosyanın page cache içerisinde bulunan kirlenmiş bloklarını flush etmektedir. Dosyanın 
+    meta data bilgileri de bu sırada flush edilmektedir. 
+
+    - fput_close_sync fonksiyonu dosya nesnesinin sayacını azaltıp dosyaya ilişkin dentry ve inode nesneleri üzerinde 
+    ayrıntıları daha sonra anlatılacak olan bazı güncellemeleri yapmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi yeniden çekirdeğim öğrenci ödevi gibi olan ilkel 0.01 versiyonundaki sys_open fonksiyonuna göz gezdirelim:
+
+    int sys_open(const char * filename,int flag,int mode)
+    {
+        struct m_inode * inode;
+        struct file * f;
+        int i,fd;
+
+        mode &= 0777 & ~current->umask;
+        for(fd=0 ; fd<NR_OPEN ; fd++)
+            if (!current->filp[fd])
+                break;
+        if (fd>=NR_OPEN)
+            return -EINVAL;
+        current->close_on_exec &= ~(1<<fd);
+        f=0+file_table;
+        for (i=0 ; i<NR_FILE ; i++,f++)
+            if (!f->f_count) break;
+        if (i>=NR_FILE)
+            return -EINVAL;
+        (current->filp[fd]=f)->f_count++;
+        if ((i=open_namei(filename,flag,mode,&inode))<0) {
+            current->filp[fd]=NULL;
+            f->f_count=0;
+            return i;
+        }
+    /* ttys are somewhat special (ttyxx major==4, tty major==5) */
+        if (S_ISCHR(inode->i_mode))
+            if (MAJOR(inode->i_zone[0])==4) {
+                if (current->leader && current->tty<0) {
+                    current->tty = MINOR(inode->i_zone[0]);
+                    tty_table[current->tty].pgrp = current->pgrp;
+                }
+            } else if (MAJOR(inode->i_zone[0])==5)
+                if (current->tty<0) {
+                    iput(inode);
+                    current->filp[fd]=NULL;
+                    f->f_count=0;
+                    return -EPERM;
+                }
+        f->f_mode = inode->i_mode;
+        f->f_flags = flag;
+        f->f_count = 1;
+        f->f_inode = inode;
+        f->f_pos = 0;
+        return (fd);
+    }
+
+    Bu ilkel versiyonda sistemde neredeyse modern işletim sistemlerinin sahip olduğu hiçbir cache sistemi ve hızlandırıcı 
+    unsur yoktur. Fonksiyon işlemine şöyle başlatılmıştır:
+
+    mode &= 0777 & ~current->umask;
+    
+    Burada önce porsesin umask değeri ile dosya açış modu maskelenmiştir. Sonra dosya betimeleyici tablosundaki ilk 
+    boş betimleyici bir döngü ile elde edilmiştir:
+
+    for(fd=0 ; fd<NR_OPEN ; fd++)
+        if (!current->filp[fd])
+            break;
+    if (fd>=NR_OPEN)
+		return -EINVAL;
+
+    Bu ilkel versiyonda zaten prosesin açabileceği dosya sayısı (NR_OPEN değeri) 20 idi. Bundan sonra prosesin close-on-exec 
+    bayrağı reset edilmiştir:
+
+    current->close_on_exec &= ~(1<<fd);
+
+    Tüm dosyaların close-on-exec bayrakları task_struct içerisindeki unsigned long türden  close_on_exec elemanında 
+    tutulmaktadır. Zaten bu versiyonda prosesin açabileceği dosya sayısı 20 ile kısıtlıdır. 
+
+    Bu ilkel versiyonda henüz çekirdekte bir heap sistemi yoktu. Dolayısıyla bütün dosya nesneleri baştan statik düzeyde 
+    bir dizide saklanmıştır:
+
+    struct file file_table[NR_FILE];
+
+    Bütün dosya nesnelerinin toplam sayısı da (NR_FILE değeri) 64'tü. Fonksiyonda daha sonra bu 64 dosya betimleyicisi 
+    dolaşılarak sıralı arama ile boş olan bir tanesi elde edilmiştir:
+
+    f=0+file_table;
+    for (i=0 ; i<NR_FILE ; i++,f++)
+        if (!f->f_count) break;
+    if (i>=NR_FILE)
+        return -EINVAL;
+
+    Dosya nesnesinin o zamanlarda da f_count isimli bir sayaç elemanı bulunmaktaydı. Burada sayacı 0 olan dosya nesnesinin 
+    elde edildiğine dikkat ediniz. Bundan sonra bu nesnein adresi dosya betimleeyici tablosndaki ilgili betimleyicinin
+    belirttiği dizi elemanına yerleştirilmiştir:
+    
+    (current->filp[fd]=f)->f_count++;
+
+    Bu noktada henüz dosya nesnesinin elemanlarına atamalar yapılmamıştır. Bu versiyonda dosya açım işleminin büyük kısmı 
+    open_nami isimli fonksiyon tarafından yapılmaktadır:
+
+    if ((i=open_namei(filename,flag,mode,&inode))<0) {
+		current->filp[fd]=NULL;
+		f->f_count=0;
+		return i;
+	}
+
+    open_namei fonksyionu isimsel olarak uzun süre kullanılmıştır. Nihayet bu ilkel versiyonda dosya nesnesinin elemanlarrına 
+    ilkdeğerler verilerek fonksiyon dosya betimleyicisiyle geri döndürülmüştür:
+
+    f->f_mode = inode->i_mode;
+    f->f_flags = flag;
+    f->f_count = 1;
+    f->f_inode = inode;
+    f->f_pos = 0;
+    return (fd);
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de dosya açım işleminde kullanılan çekirdek mekanizmaları üzerinde duracağız. Yukarıda da belirttiğimiz gibi 
+    bu ana işlevler güncel çeekirdeklerde do_filp_open fonksiyonu tarafından ilk versiyonlarda da open_namei fonksiyonu 
+    tarafından yapılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    İşletim sistemlerinde bir yol ifadesi verildiğinde çekirdek yol ifadesine ilişkin dosya ya da dizinin ve onun içinde
+    bulunduğu dizininin dentry ve inode nesnelerini bulmaya çalışır. (Bir dizindeki dosya ya da dizin üzerinde işlem 
+    yapıldığında o dosya ya da dizinin içersinde bulunduğu dizinler üzerinde de işlemlerin yapılması gerekebilmektedir.)
+    Bu sürece işletim sistemlerinde "yol ifadesinin çözümlenmesi (pathname resolution)" ya da "yol ifadesinin aranması 
+    (pathname lookup)" denilmektedir. Örneğin open fonksiyonuyla aşağıdaki gibi bir dosya açmak isteyelim:
+
+    fd = open("/home/kaan/Study/LinuxKernel/sample.c", O_RDONLY);
+
+    İşletim sistemi "/home/kaan/Study/LinuxKernel/sample.c" biçiminde yol ifadesini aldığında öncelikle çekirdek bu 
+    yol ifadesine hedef olan dosya ya da dizinin (burada "sample.c") ve o dosya ya da dizinin içinde bulunduğu dizinin 
+    ("burada "LinuxKernel") inode ve dentry nesnelerini bulmaya çalışır. Çekirdek bu işlemi bir döngü içerisinde yol 
+    ifadesini "yol bileşenlerine (path component)" ayırarak adım adım gerçekleştirir. Yukarıda yol ifadesinin yol 
+    bileşenleri şunlardır:
+
+    "home"
+    "kaan"
+    "Study"
+    "LinuxKernel"
+    "sample.c"
+
+    Tabii çekirdeğin bu yol bileşenlerini tek tek doğrulaması da gerekmektedir. Örneğin burada "kaan"" dizin girişinin 
+    bir dizin belirtmesi gerekir. Eğer "kaan"" girişi "home" dizinin altında varsa ama bir dosya belirtiyorsa (yani bir 
+    dizin belirtmiyorsa) çözümleme işlemine devam etmenin bir anlamı yoktur. Ayrıca çekirdeğin yol ifadesini çözümlerken 
+    ilgili dizinler için erişim haklarını da kontrol etmesi gerekmektedir. Bir yol ifadesindeki tüm dizinlerin "x" 
+    hakkına sahip olması gerektiğini anımsayınız. 
+
+    Yol ifadelerinin çözümlenmesi (pathname resolution) sırasında yol bileşenleri öncelikle "dentry önbelliğinde (dentry
+    cache)" aranmaktadır. Örneğin "kökün altında home dizini var mı?" araması yapılırken. "home" dizininine ilişkin 
+    dentry nesnesi dentry önbelleğinden hızlı bir biçimde elde edilebilmektedir. İzleyen paragraflarda da açıklayacağımız 
+    gibi dentry önbelleği içerisindeki bir dentry nesnesi "negatif değilse" zaten ona ilişkin inode nesnesi de inode 
+    önbelleği içerisinde bulunmaktadır. Böylece pek çok yol ifadesi aslında hiç diske başvurulmadan dentry ve inode 
+    önbellek mekanizması sayesinde hızlı bir biçimde çözülebilmektedir. Tabii bir yol bileşeni bu önbelleklerde yoksa 
+    bu durumda artık disk okumaları yapılıp ilgili yol bileşenine ilişkin dentry ve inode nesneleri önbelleklere alınacaktır. 
+    Daha önceden de belirttiğimiz gibi aslında diskte son okunan bloklar da "sayfa önbelliğinin (page cache)" içerisindedir. 
+    Disk okuması sırasında hemen diske yönelinmemekte önce bu önbelleğe de bakılmaktadır. Şimdi yol ifadesinin bu önbelleklek 
+    sistemleri kullanılarak nasıl çözüldüğüne ilişkin örnek verelim. Yol ifadesi aşağıdaki gibi olsun:
+
+    "/home/kaan/Study/LinuxKernel/sample.c"
+
+    Çekirdek önce dentry önbelleğinde üst dizini kök olan "home" isminde dizin belirten bir giriş var mı diye arama 
+    yapar. Bu girişin bulunduğunu düşünelim. Bundan sonra çekirdek bu sefer üst dizini "home" olan "kaan" isminde dizin 
+    belirten bir giriş var mı diye bakar. Aramalar böyle devam eder. Örneğin çekirdeğin üst dizini "LinuxKernel" olan 
+    "sample.c" isimli girişi dentry önbelleğinde bulamadığını varsayalım. Bu durumda artık gerçekten bu bilgiler 
+    diskten alınacak ve ""sample.c" dosyasına ilişkin dentry nesnesi ve inode nesnesi ilgili önbelleklere yerleştirilecektir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+<BURADA KALDIK>
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
+*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+*----------------------------------------------------------------------------------------------------------------------
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
