@@ -18,7 +18,7 @@
                             (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                                     (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: o1/09/2025 - Çarşamba
+                                            Son Güncelleme: 20/08/2025 - Çarşamba
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
@@ -325,12 +325,11 @@
     Üçüncü numaralandırma sistemi de Linux aygıt sürücülerinin kullandığı numaralandırma sistemidir. Bu numaralandırma
     sistemine "aygıt sürücü numaralandırması" diyebiliriz. Bu numaralandırma sistemi Linux'un sysfs dosya sisyeminde kullanılan 
     numaralandırma sistemidir. Aygıt sürücüler bu sistemi kullanmaktadır. Bu sistemdeki pin numalararı GPIOXX biçiminde 
-    belirtilmektedir. Her pinin bir numarası vardır. GPIO_X_Y SoC numarası Z = X * 32 + Y biçiminde aygıt sürücü GPIOZ 
-    numarasına dönüştürülmektedir. 
-    Örneğin GPIO1_14 pininin aygıt sürücü numarası GPIO46'dır. Örneğin GPIO3_21 pininin aygıt sürücü numarası GPIO117 
-    biçimindedir. Yukarıdaki tablolarda her pinin üç numaraladırma sistemindeki karşılıklar tek tek verilmiştir. 
+    belirtilmektedir. Her pinin bir numarası vardır. GPIOX_Y SoC numarası Z = X * 32 + Y biçiminde aygıt sürücü GPIOZ numarasına 
+    dönüştürülmektedir. Örneğin GPIO1_14 pininin aygıt sürücü numarası GPIO46'dır. Örneğin GPIO3_21 pininin aygıt sürücü numarası 
+    GPIO117 biçimindedir. Yukarıdaki tablolarda her pinin üç numaraladırma sistemindeki karşılıkları tek tek verilmiştir. 
 
-    Pekiyi yukarıda üç numaralandırma biçimini gördük. Hangi numaralandırmalar hangi bağlamlarda kullanılmaktadır? Fiziksel 
+    Peki yukarıda üç numaralandırma biçimini gördük. Hangi numaralandırmalar hangi bağlamlarda kullanılmaktadır? Fiziksel 
     bağlantılar yapılıken genellikle diziksel numaralandırma kullanılmaktadır. Aşağı seviyeli SoC denetleyicisi üzerinde 
     işlemler yapılacaksa (örneğin aygıt sürücüler yazılacaksa) mecburen SoC numaralandırılmasının kullanılması gerekmektedir. 
     Ancak Linux'un sys dosyas sistemindeki dizin girişleri kullanılacaksa yani kullanıcı modunda programlar yazılacaksa bu 
@@ -338,7 +337,7 @@
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    GPIO devrelerinin donanımsal özelliklerini Gürbüz Hoca anlatmıştı. Pekiyi biz gömülü sistem mühendisi olarak bu GPIO pinleriyle 
+    GPIO devrelerinin donanımsal özelliklerini Gürbüz Hoca anlatmıştı. Peki biz gömülü sistem mühendisi olarak bu GPIO pinleriyle 
     ne yapabiliriz? Temelde bu GPIO pinleri üç amaçla kullanılabilmektedir:
 
     OUT 
@@ -599,7 +598,7 @@
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Pekiyi yukarıdaki programlarda POSIX fonksiyonları yerine C'nin standart dosya fonksiyonlaırını kullanabilir miydik? Evet 
+    Peki yukarıdaki programlarda POSIX fonksiyonları yerine C'nin standart dosya fonksiyonlaırını kullanabilir miydik? Evet 
     kullanabilirdik. Ancak C'nin standart dosya fonksiyonlaırnın "tamponlu (buffered)" biçimde çalıştığını göz önünde bulundurmak
     gerekir. Biz standart C fonksiyonlarıyla bir dosyaya yazma yaptığımızda aslında yazılanlar önce bir tampona yazılıp 
     biriktirilmekte sonra hedefe aktarılmaktadır. Bu tür durumlarda yazma yaptıktan sonra fflush çağrısı yapmayı unutmayınız. 
@@ -778,7 +777,6 @@
             printf("intterupt occured...\n");
         }
     }
-
 
     Burada biz tek bir pin üzerinde kesme durumunu ele aldık. Aynı işlemi birden fazla in üzerinde de yapabilirdik. Tabii
     bu durumda FD_SET ile izlenecek tüm pinlere ilişkin betimleyicileri FD_SET makrosuyla fd_set nesnesine set etmemiz 
@@ -965,11 +963,118 @@ void exit_sys_err(const char *msg, int err)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
+                                            132. Ders 07/10/2025 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de kesme olaylarını select yerine poll fonksiyonu ile ele alan bir örnek yapalım. Yukarıda da belirttiğimiz gibi
+    GPIO uçlarında kesme olduğunda bu olay poll fonksiyonunda POLLPRI biçiminde ortaya çıkmaktadır. Programın poll çağrısını
+    yapan kısmı şöyledir:
+
+    if (read(fd, &buf, 1) == -1) 
+        exit_sys("read");
+
+    pollfds[0].fd = fd;
+    pollfds[0].events = POLLPRI;
+
+    for (;;) {
+        printf("waiting for intterupt...\n");
+        if (poll(pollfds, 1, -1) == -1) 
+            exit_sys("poll");
+        
+        if (pollfds[0].revents & POLLPRI) {
+            if (read(fd, &buf, 1) == -1) 
+                exit_sys("read");
+            printf("intterupt occured...\n");
+        }
+    }
+
+    poll fonksiyonun ayrıntıları için "UNIX/Linux Sistem Programlama Kursunun" dokğmanlarını inceleyebilirsiniz. Aşağıda 
+    örneği bir bütün olarak veriyoruz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-intr.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/poll.h>
+
+void exit_sys(const char *msg);
+void write_file(const char *path, const char *cmd);
+
+int main(void)
+{
+    int fd;
+    unsigned char buf;
+    struct pollfd pollfds[1];
+    
+    write_file("/sys/class/gpio/gpio51/direction", "in");
+    write_file("/sys/class/gpio/gpio51/edge", "falling");
+
+    if ((fd = open("/sys/class/gpio/gpio51/value", O_RDONLY)) == -1)
+        exit_sys("open");
+    
+    if (read(fd, &buf, 1) == -1) 
+        exit_sys("read");
+
+    pollfds[0].fd = fd;
+    pollfds[0].events = POLLPRI;
+
+    for (;;) {
+        printf("waiting for intterupt...\n");
+        if (poll(pollfds, 1, -1) == -1) 
+            exit_sys("poll");
+        
+        if (pollfds[0].revents & POLLPRI) {
+            if (read(fd, &buf, 1) == -1) 
+                exit_sys("read");
+            printf("intterupt occured...\n");
+        }
+    }
+
+    close(fd);  /* unreacahble code */
+
+    return 0;
+}
+
+void write_file(const char *path, const char *cmd)
+{
+    int fd;
+
+    if ((fd = open(path, O_WRONLY)) == -1) 
+        exit_sys("open");
+
+    if (write(fd, cmd, strlen(cmd)) == -1)
+        exit_sys("write");
+
+    close(fd);
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
     GPIO pinleri üzerinde işlem yapmanın diğer bir yolu da "gpiod" isimli kütüphaneyi kullanmaktır. Bu kütüphane artık bu 
     konuda en yaygın kullanılan kütüphane haline gelmiştir. Kütüphane "sysfs" dosya sistemini değil doğrudan çekirdeğe gömülmüş 
-    olan "gpiochip" aygıt sürücüsünü kullanmaktadır. Yani bu kütüphane aslında arka planda bu aygıt sürücüyü açıp aygıt sürücüye 
-    ioctl komutlarını göndermektedir. "gpiod" yüksek seviyeli bir kütüphanedir. Kütüphanenin dokümantasyonuna aşağıdaki bağlantıdan 
-    erişebilirsiniz:
+    olan "gpiochip" aygıt sürücüsünü kullanmaktadır. Yani bu kütüphane aslında arka planda bu aygıt sürücüyü açıp aygıt 
+    sürücüye ioctl komutlarını göndermektedir. "gpiod" yüksek seviyeli bir kütüphanedir. Ancak gpiod kütüphanesinin bir 
+    süredir 2'li yeni versiyonları oluşturulmuştur. Fakat bu versiyonlar yerine default kurulumda hala 1'li versiyonlar 
+    kurulmaktadır. Maalesef 2'li versiyonlarla 1'li versiyonlar arasında bir API uyumu da yoktur. Çünkü kütüphanein ikili 
+    versiyonlarında işlemlerin akışı da değiştirilmiştir. Biz burada kütüphanein halen default olarak kullanılan 1'li 
+    versiyonlarını ele alacağız. Ancak 2'li versiyonlarındaki farklılıklar üzerinde de kısaca duracağız. 
+
+    Kütüphanenin 1'li versiyonlarının dokümantasyonuna PDF dosyası oalrak aşağıdaki bağlantıdan erişebilirsiniz: 
+    
+    http://phwl.org/assets/images/2021/02/libgpiod-ref.pdf
+    
+    Kütüphanenin 2'li versiyonlarının dokümantasyonuna da aşağıdaki bağlantıdan erişebilirsiniz:
 
     https://libgpiod.readthedocs.io/en/latest/
 
@@ -977,182 +1082,2934 @@ void exit_sys_err(const char *msg, int err)
 
     $ sudo apt install libgpiod-dev
 
+    Yukarıda da belirttiğimiz gibi bu default yüklemede kütüphanein 1'li versiyonu (1.63 versiyonu) yüklenmektedir. 
+
     gpiod kütüphanesini kullanan bir grup komut satırından çalışan utilty programlar da vardır. Bu programlar sayesinde 
     tıpkı sysfs arayüzünde yaptığımız gibi komut satırından temel test işlemlerini yapabilirsiniz. Sözünü ettiğimiz bu 
     utility programları da aşağıdaki gibi kurabilirsiniz:
 
     $ sudo apt install gpiod
 
-    Yukarıdaki kurulumları ARM işlemcili gömülü sistemine yaparsanız ve kodu o sistemde derlerseniz bir sorun oluşmaz. Bu 
+    Yukarıdaki kurulumları ARM işlemcili gömülü sisteminize yaparsanız ve kodu o sistemde derlerseniz bir sorun oluşmaz. Bu 
     kütüphaneyi ve utility programları Intel tabanlı bilgisayarlarınızdaki Linux sistemlerine kurmanızın uç bazı durumlar 
     dışında bir anlamı yoktur. 
 
     Biz BBB gibi bir ortam için geliştirmeyi genel olarak Intel tabanlı masaüstü Linux sistemlerindeki çapraz derleyicileri 
     kullanarak yapmaktayız. Ancak çapraz derleyicilerimizde gpiod kütüphanesi bulunmamaktadır. O zaman bizim bu kütüphanenin
-    kaynak kodlarını indirerek ARM çapraz derleyicimize ilişkin araç znicirini kullanarak host makinede derlememiz gerekir. 
-    (Maalesef bu kütüphanelerin ARM için derlenmiş binary dosyaları yoktur.)
+    kaynak kodlarını indiripi ARM çapraz derleyicimize ilişkin araç zincirini kullanarak kütüphaneyi host makinede gerekir. 
+    (Maalesef bu kütüphanelerin ARM için derlenmiş binary dosyaları yoktur.) 
+
+    gpiod kütüphanesini çapraz derkeyici ile derleme işlemi şu adımlardan geçilerek yapılabilir:
+
+    1) Kütüphanenin kaynak koları indirilir. İndirme işlemini wget komutuyla aşağıdaki gibi yapabiliriniz:
+
+    $ wget https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/snapshot/libgpiod-1.6.3.tar.gz
+
+    Buradan kaynak kodlar tar.gz formatında indirilmektedir. Açımı şöyle yapabilirziniz:
+
+    $ tar -xzf libgpiod-1.6.3.tar.gz
+
+    Artık kaynak kodlar "libgpiod-1.6.3" isimli bir dizine açılmıştır. 
+
+    2) Derleme için host makinede bazı programların da bulunyor olması gerekir. Bunların bazıları zaten sisteminizde muhtemelen 
+    yüklü olacaktır. Ancak aşağıdaki komutla yüklü olmayan programları da yükleyebilirsiniz:
+
+    3) sudo apt-get install -y autoconf-archive autoconf automake libtool pkg-config build-essential autotools-dev build-essential
+
+    4) Çapraz derleyici ayarlarını yapmamız gerekir:
+
+    $ PATH=$PATH:/home/kaan/Study/EmbeddedLinux/DriverDevelopment/BBB/gcc-arm-9.2-2019.12-x86_64-arm-none-linux-gnueabihf/bin
+    $ export ARCH=arm
+    $ export CC=arm-none-linux-gnueabihf-gcc
+
+    Derleme işlemi için kaynak kod dizinine geçilip "autogen.sh" dosyası aşağıdaki komut satırı arümanlarıyla çalıştırılır:
+
+    ./autogen.sh --host=arm-linux-gnueabihf --enable-tools=no --enable-bindings-cxx=no --prefix=/usr
+
+    Bu program Makefile oluşturmaktadır. Makefile dosyası içerisinde derleyici $CC komutuyla çalıştırılmaktadır. 
+
+    5) "autogen.sh" tarafında oluşturulan Makefile osyası "make" programıyle işletilir:
+
+    $ make
+
+    6) Artık derleme sonrasında ARM işlemcileri için statik ve dinamik kütüphane dosyaları oluşturulmuştur. Bu dosyaların ve
+    include dosyalarının araç zincirinin ilgili dizinlerine çekilmesi gerekir. Bu işlemler manuel olarak yapılabilir. Ancak 
+    bu işlemleri kolaylaştırmak için "make install" komutu da bulundurulmuştur. Komutu şöyle kullanabilirsiniz:
+
+    $ make install DESTDIR=$($CC --print-sysroot)
+
+    Burada $($CC --print-sysroot) işlemi çapraz araç zincirinde ilgili dosyaların çekileceği kök dizini elde etmek için 
+    kullanılmıştır. --print-sysroot masaüstü gcc derleyicilerinde bir çıktı vermemektedir. Bu seçenek çapraz derleyiciler 
+    için kütüphanelerin ve include dosyalarının kunuşlandırılacaağı yerin kök dizinini vermektedir. 
+
+    7) Artık uygulama programımızın derlenmesi işlemi çağraz derleyici ile aşağıdaki gibi yapılabilir:
+
+    $ $CC -o gpiod-sample gpiod-sample.c -lgpiod
+
+    Elde edilen çalıştırılabilir dosya BBB'ye kopyalanabilir.
+
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. Daha önceden de belirttiğimiz gibi gpiod kütüphanesi aslında "/dev/gpiochipN"
+    aygıt dosyalatını kullanmaktadır. Bu aygıt dosyalarının erişim haklarına dikkat ediniz:
+
+    crw-rw---- 1 root gpio 254, 0 Feb  4 22:05 /dev/gpiochip0
+    crw-rw---- 1 root gpio 254, 1 Feb  4 22:05 /dev/gpiochip1
+    crw-rw---- 1 root gpio 254, 2 Feb  4 22:05 /dev/gpiochip2
+    crw-rw---- 1 root gpio 254, 3 Feb  4 22:05 /dev/gpiochip3
+
+    Burada dosyanın sahibinin "root" olduğu ve grubunun da "gpio" olduğunu görüyorsunuz. Linux'un BBB için oluşturulmuş 
+    orijinal imajındaki "debian" kullanıcısı "ek grup (supplementary groups)" olarak "gpio" grubunu da içermektedir. Yani 
+    bu "debian" kullanıcısı aynı zamanda sanki "gpio" grubundaymış gibi de davranmaktadır. Dolayısıyla bizim bu aygıt 
+    sürücü dosyalarını açıp, okuma yazma yapmak için sudo kullanmamıza gerek kalmamaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+                                    133. Ders 09/10/2025 - Perşembe
 ---------------------------------------------------------------------------------------------------------------------------*/
-
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    sudo apt install gpiod
-    sudo apt install libgpiod-dev
+    Burada önce gpiod kütüphanesinin utility ptogramlarından da kısaca bhastemek istiyoruz. 
+
+    - gpiodetect isimli program GPIO aygıt sürücülerinin listesini bize vermektedir. Mrneğin:
+
+    $ gpiodetect
+    gpiochip0 [gpio-0-31] (32 lines)
+    gpiochip1 [gpio-32-63] (32 lines)
+    gpiochip2 [gpio-64-95] (32 lines)
+    gpiochip3 [gpio-96-127] (32 lines)
+
+    - Kütüphanede pin yerine "hat (line)" sözcüğü kullanılmıştır. Belli bir GPIO aygıtındaki hatlar hakkında bilgiler şöyle
+    edinilebilir:
+
+    $ gpioinfo gpiochip0
+    gpiochip0 - 32 lines:
+        line   0: "[mdio_data]" unused input active-high 
+        line   1: "[mdio_clk]"       unused   input  active-high 
+        line   2: "P9_22 [spi0_sclk]" "P9_22" input active-high [used]
+        line   3: "P9_21 [spi0_d0]" "P9_21" input active-high [used]
+        line   4: "P9_18 [spi0_d1]" "P9_18" input active-high [used]
+        line   5: "P9_17 [spi0_cs0]" "P9_17" input active-high [used]
+        line   6:  "[mmc0_cd]"         "cd"   input   active-low [used]
+        line   7: "P8_42A [ecappwm0]" "P9_42" input active-high [used]
+        line   8: "P8_35 [lcd d12]" "P8_35" input active-high [used]
+        line   9: "P8_33 [lcd d13]" "P8_33" input active-high [used]
+        line  10: "P8_31 [lcd d14]" "P8_31" input active-high [used]
+        line  11: "P8_32 [lcd d15]" "P8_32" input active-high [used]
+        line  12: "P9_20 [i2c2_sda]" "P9_20" input active-high [used]
+        line  13: "P9_19 [i2c2_scl]" "P9_19" input active-high [used]
+        line  14: "P9_26 [uart1_rxd]" "P9_26" input active-high [used]
+        line  15: "P9_24 [uart1_txd]" "P9_24" input active-high [used]
+        line  16: "[rmii1_txd3]" unused input active-high 
+        line  17: "[rmii1_txd2]" unused input active-high 
+        line  18: "[usb0_drvvbus]" unused input active-high 
+        line  19: "[hdmi cec]"       unused   input  active-high 
+        line  20:     "P9_41B"      "P9_41"   input  active-high [used]
+        line  21: "[rmii1_txd1]" unused input active-high 
+        line  22: "P8_19 [ehrpwm2a]" "P8_19" input active-high [used]
+        line  23: "P8_13 [ehrpwm2b]" "P8_13" input active-high [used]
+        line  24:         "NC"       unused   input  active-high 
+        line  25:         "NC"       unused   input  active-high 
+        line  26:      "P8_14"      "P8_14"   input  active-high [used]
+        line  27:      "P8_17"      "P8_17"   input  active-high [used]
+        line  28: "[rmii1_txd0]" unused input active-high 
+        line  29: "[rmii1_refclk]" unused input active-high 
+        line  30: "P9_11 [uart4_rxd]" "P9_11" input active-high [used]
+        line  31: "P9_13 [uart4_txd]" "P9_13" input active-high [used]
+
+    Burada [used] belirteci ilgili GPIO ucunun pine bağlandığı anlamına geşmektedir. 
+
+    - Belli bir pini (gpiod terminolojisi ile "hattı") çıkış olarak konfigüre etmek ve ilgili pini lojik 1 ya da lojik 0 
+    seviyesine çekmek için "gpioset" komutu kullanılmaktadır. Komutun birinci parametresi gpio chip'inin ismini (yani "/dev" 
+    dizinindeki aygıt sürücü ismini) almaktadır. Bunu "<numara>=1" ya da "<numara>=0" argümanları izler. Bu argümanlar birden 
+    fazla girilebilmektedir. Buradaki <numara> daha önce görmüş olduğumuz GPIOX_Y SoC numaralandırmasındaki Y değeridir. 
+    Örneğin biz LED'imizi GPIO1_28 SoC numarasına ilişkin pine bağlamıştık. Ancak gpioset programı sonlanırken ilgili pini 
+    default duruma çekmektedir. Dolayısıyla örneğin bu programla bir LED'i yakmak istiyorsanız programın hemen sonlanmaması 
+    gerekir. Bunu yapmanın tipik iki yolu vardır. Eğer --mode=wait kullanılırsa klavyeden CTRL+D (EOF) tuşlarına basılana 
+    kadar program sonlanmaz. Eğer --mode=signal kullamılırsa bu durumda ancak bir sinyal oluştuğunda program sonlandırılır. 
+    Tabii buradaki tipik sinyal Ctrl+C tuşlarıyla oluşturulan SIGINT sinyalidir. Örneğin GPIO60 (yani GPIO1_28) pinini OUT 
+    olarak konfigüre edip onu lojik 1 seviyesine şöyle çekebiliriz:
+
+    $ gpioset --mode=wait gpiochip1 28=1
+
+    "gpioset" komutu her zaman ilgili pini önce OUT olarak konfigüre eder sonra da onu lojik 1 ya da lojik 0 düzeyine çeker. 
+    
+    Peki biz gpioset komutunu kullanarak LED'i 1 saniye yakıp bir saniye söndürmek istesek ve bunu bir döngü içerisinde 
+    yapmak istesek bunu nasıl yapabiliriz? Bunun için --mode=time komut satırı argümanı ile -s <saniye_sayısı> ya da 
+    --sec <saniye_sayısı> argümanın birlikte kullanılması gerekir. Örneğin:
+
+    $ gpioset --mode=time --sec 1 gpiochip1 28=1
+
+    Beklemeyi milisaniye cinsindne belirtmek için --usec <milisaniye_sayısı> argümanı kullanılmaktadır.
+
+    Burada artık program 1 saniye sonra sonlanacaktır. 
+    
+    Aslında aynı işlemler timeout isimli kabuk komutuyla da yapılabilir. 
+    Bu komut şöyle kullanılmaktadır:
+
+    timeout <süre> <komut> [argümanlar...]
+
+    Örneğin:
+
+    timeout 1 gpioset --mode=wait gpiochip1 28=1
+
+    Burada 1 saniye ilgili pin lojik 1 seviyesine çekilecektir. timeout programı dafult olarak çalıştırdığı programa SIGTERM 
+    sinyalin göndermektedir. Başka sinyal göndermek isteniyorsa --signal=sinyal_numarası biiminde komut satırı argümanı 
+    kullanılmalıdır. 
+
+    Tabii bu işlemlerin bir "kabuk betiği (shell script)" ile bir döngü içerisinde aşağıdaki yapılması gerekir:
+
+    #!/bin/bash
+    while true; do
+        gpioset --mode=time ---sec 1 gpiochip1 28=1
+        gpioset --mode=time --sec 1 gpiochip1 28=0
+    done
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-#include <linux/gpio.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <errno.h>
-#include <stdio.h>
-#include <string.h>
+/*---------------------------------------------------------------------------------------------------------------------------
+    - "gpioget" komutu ilgili pini IN biçiminde knfigüre edip o pindeki işareti okumaktadır. Komutun argümanları şöyledir:
 
-int main() {
-    int chip_fd, gpio_fd, ret;
-    struct gpio_v2_line_request req;
-    struct gpio_v2_line_values values;
+    gpioget aygıt_ismi   pin_numarası
     
-    // GPIO çip aygıtını aç
-    chip_fd = open("/dev/gpiochip0", O_RDWR);
-    if (chip_fd < 0) {
-        perror("/dev/gpiochip0 açılamadı");
-        return -1;
-    }
+    Örneğin biz düğmemizi GPIO1_19 (GPIO51) pinine bağlamıştık. Bu pini IN durumuna çekip okuduğumuzda düğüme basılmamışsa 1, 
+    basılmışsa 0 okuduğumuzu,  anımsayınız. O halde okumayı şöyle yapabiliriz:
+
+    $ gpioget gpiochip1 19
+
+    - Belli pinlerdeki olayları izlemek için "gpiomon" komutu kullanılmaktadır. Bu komut ilgili pinleri kesme moduna sokar 
+    ve ilgili olana kadar bekleme yapar. Kesmeyi çıkan kenar olarak konfigüre edip izlemek için --rising-edge argümanı, düşen
+    kenar olarak konfigüre edip izlemek için --falling-edge arümanı kullanılmaktadır. Örneğin amacımız GPIO1_19 (GPIO51) 
+    pinine basıldığında bunun anlaşılması olsun. Bizim devremizde bu uçtan default olarak lojik 1 okunuyordu. Biz düğümeye
+    bastığımızda "düşen kener tetiklemeli kesme oluşacaktır. Bu izleme şöyle yapılabilir:
+
+    $ gpiomon --falling-edge gpiochip1 19
+
+    Bu komutla program sonsuz döngü oluşturacaktır. Her düğmeye bastığımızda oluşan kesmeyi yakalıp ekrana mesaj çıkartacaktır. 
+    Sonsuz döngüden çkmak için Ctrl+C tuşlarını kullanabilirsiniz. 
     
-    // GPIO hattını talep et
-    memset(&req, 0, sizeof(req));
-    req.offsets[0] = 18;  // GPIO 18
-    req.num_lines = 1;
-    strcpy(req.consumer, "led-blink");
-    req.config.flags = GPIO_V2_LINE_FLAG_OUTPUT;
+    Yukarıda açıkladığımız utility programların aslında bazı kullanım ayrıntıları da vardır. Bunları ilgili dokğmanlardan 
+    inceleyebilirsiniz. Ancak bu programlar kütüphane 2 versiyonları ile daha fazla komut argümanına sahip olmuştur. Bulduğunuz
+    örneklerdeki komut satırı argümanlarının kendi makinenizda çalışmadığını görürseniz şaşırmayınız. 
+
+    "gpiod" utility programları sysfs arayüzü ile uyumsuzluk oluşturabilmektedir. Bu komutları çalıştırdığınızda ilgili 
+    pinin "/sys/class/gpiod" dizinin silindiğini görürseniz şaşırmayınız. Bu durumda makineyi reset etmeden ilgili pin 
+    dosyasını aşağıaki gibi yeniden export edebilirsiniz:
+
+    $ echo 60 | sudo tee /sys/class/gpio/export
+
+    Bu örnek komut GPIO60 pinini yenidne export ederek dosya sisteminde görünür hale getirmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda "gpiod" kütüphanesinin komut satırından kullanılan utility programlarını (komutlarını da diyebiliriz) ele 
+    aldık. Şimdi kütüphanenin C içerisinden nasıl kullanılacağı üzerinde duralım. Kütüphanedeki tüm fonksiyonların prototipleri, 
+    sembolik sabitler ve yapı bildirimleri <gpiod.h> dosyası içerisindedir. Bu dosyayı programınzda include etmelisiniz. 
+    Ayrıca kütüphanein link aşamasında devreye girmesi için komut satırında -lgpiod seçeneğini kullanmayı unutmayınız. Örneğin:
+
+    $ gcc -Wall -o gpio-sample gpio-sample.c -lgpiod
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    gpiod kütüphanesinin arka planda aslında "/dev/gpiochipN" aygıt dosyalarını açıp onlara ioctl komutlarını göndererek 
+    yazılmış olduğunu belirtmiştik. Bu kütüphanede ilk yapılacak işlem ilgili GPIO chip'ini kütüpahnedeki fonksiyonları 
+    kullanarak açmaktır. Bunun için gpiod_chip_open_by_name fonksiyonu kullanılabilir. Bu fonksiyonun prototipi şöyledir:
+
+    #include <gpiod.h>
+
+    struct gpiod_chip *gpiod_chip_open_by_name(const char *name);
+
+    Fonksiyon GPIO chip aygıt sürücüsünün ismini (yol ifadesini değil) alır. Başarı durumunda gpiod_chip yapısı türünden 
+    bir nesnenin adresiyle geri döner. Bu nesne GPIO chip aygıt sürücüsü için bir handle niteliğindedir. Fonksiyon başarısızsa
+    NULL adrese geri dönmektedir. Hata durumunda errno değişkeni set edilmektedir. Dolayısıyla hatanın nedenini perror 
+    fonksiyonuyla yazdırabilirsiniz. Örneğin:
+
+    struct gpiod_chip *chip;
     
-    ret = ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, &req);
-    if (ret < 0) {
-        perror("GPIO hattı talep edilemedi");
-        close(chip_fd);
-        return -1;
-    }
-    
-    gpio_fd = req.fd;
-    close(chip_fd);  // Artık gereksiz
-    
-    // LED yanıp sönsün
-    values.mask = 1ULL;
-    for (int i = 0; i < 10; i++) {
-        // LED'i yak
-        values.bits = 1ULL;
-        ioctl(gpio_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &values);
-        usleep(500000); // 500ms bekle
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
         
-        // LED'i söndür
-        values.bits = 0ULL;
-        ioctl(gpio_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &values);
-        usleep(500000); // 500ms bekle
-    }
-    
-    close(gpio_fd);
-    return 0;
-}
+    İlgili chip aygıt sürücüsünü açmak için gpiod_chip_open_by_number fonksiyonu kullanılabilir. Bu fonksiyon yalnızca numara 
+    almaktadır. (Örneğin bu fonksiyona 0 girilirse by "gpiochip0" anlamına gelmektedir.) gpiod_chip_open fonksiyonu ise aygıt
+    sürücünün tam yol ifadesini almaktadır. Örneğin bu fonksiyona "/dev/gpiochipo" yol ifadesini girebiliriz. 
 
-/*---------------------------------------------------------------------------------------------------------------------------
+    Biz bu bölümde gpiod_chip nesnesine kısaca "chip nesnesi" de diyeceğiz. 
 
-#!/bin/bash
-set -e
+    Açılan bir chip aygıt sürücüsü gpiod_chip_close fonksiyonu ile kaynaklar serbest bırakılarak kapatılabilir. Fonksiyonun 
+    prototipi şöyşedir:
 
-# Gerekli paketleri yükle
-sudo apt-get update
-sudo apt-get install -y autoconf-archive autoconf automake libtool pkg-config build-essential autotools-dev build-essential
+    #include <gpiod.h>
 
-# Libgpiod indir
-wget https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/snapshot/libgpiod-1.6.3.tar.gz
-tar -xzf libgpiod-1.6.3.tar.gz
-cd libgpiod-1.6.3/
+    void gpiod_chip_close(struct gpiod_chip *chip);
 
-# PATH'e toolchain ekle
-export PATH=$HOME/mytoolchain/bin:$PATH
+    Fonksiyon gpiod_chip nesnesinn adresini almaktadır. Örneğin:
 
-# Configure et
-./autogen.sh --host=arm-linux-gnueabihf \
-             --enable-tools=no \
-             --enable-bindings-cxx=no \
-             --prefix=/usr
+    gpiod_chip_close(chip);
 
-# Derle
-make -j$(nproc)
+    Chip aygıt sürücüsünü açtıktan sonra üzerinde çalışacağımız pine ilişkin gpiod_line nesnesinin elde edilmesi gerekmektedir. 
+    Bu işlem gpiod_chip_get_line fonksiyonuyla yapılmaktadır. Fonksiyonun prototipi şöyledir:
 
-# Sysroot'a yükle
-SYSROOT=$HOME/mytoolchain/arm-linux-gnueabihf/sysroot
-make install DESTDIR=$SYSROOT
+    #include <gpiod.h>
 
-echo "Libgpiod başarıyla kuruldu: $SYSROOT"
----------------------------------------------------------------------------------------------------------------------------*/
+    struct gpiod_line *gpiod_chip_get_line(struct gpiod_chip *chip, unsigned int offset);
 
-/*---------------------------------------------------------------------------------------------------------------------------
+    Fonksiyonun birinci parametresi chip nesnesinin adresini, ikinci parametresi ise o chip'teki pinin numarasını belirtmektedir. 
+    Fonksiyon başarı durumunda gpiod_line isimli bir yapı türünden nesnenin adresine, başarısızlık durumunda ise NULL adrese 
+    geri dönmektedir. Örneğin:
 
-// gpio_read.c - GPIO pin durumunu okuma
-#include <gpiod.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-
-int main(int argc, char *argv[]) {
     struct gpiod_chip *chip;
     struct gpiod_line *line;
-    int gpio_pin = 67;  // Default pin (BeagleBone P8_8)
-    int value;
     
-    if (argc > 1) {
-        gpio_pin = atoi(argv[1]);
-    }
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
     
-    printf("GPIO %d durumunu okuma testi...\n", gpio_pin);
+    if ((line = gpiod_chip_get_line(chip, 28)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+
+    Biz bu bölümde gpiod_line nesnesine hat nesnesi diyeceğiz. Anımsanacağı gibi bu kütüphanenin terminolojisinde "pin" yerine "hat 
+    (line)" denilmektedir.)
+
+    Açılan pinin  kapatılması için de gpiod_line_release fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir.
+
+    #include <gpiod.h>
+
+    int gpiod_line_release(struct gpiod_line *line);
+
+    Fonksiyon hat nesnesinin adresini parametre olarak alır. Başarı durumudna 0 değerine başarısızlık durumunda -1 değerine 
+    geri döner. Örneğin:
+
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
     
-    chip = gpiod_chip_open_by_name("gpiochip0");
-    if (!chip) {
-        perror("GPIO chip açılamadı");
-        return 1;
-    }
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
     
-    line = gpiod_chip_get_line(chip, gpio_pin);
-    if (!line) {
-        fprintf(stderr, "GPIO %d hattı alınamadı\n", gpio_pin);
-        gpiod_chip_close(chip);
-        return 1;
-    }
-    
-    // GPIO'yu giriş olarak yapılandır
-    if (gpiod_line_request_input(line, "read-test") < 0) {
-        perror("GPIO giriş olarak yapılandırılamadı");
-        gpiod_chip_close(chip);
-        return 1;
-    }
-    
-    printf("GPIO %d giriş olarak yapılandırıldı\n", gpio_pin);
-    printf("Pin durumunu sürekli okuyorum (Ctrl+C ile çık)...\n");
-    
-    while (1) {
-        value = gpiod_line_get_value(line);
-        if (value < 0) {
-            perror("GPIO değeri okunamadı");
-            break;
-        }
-        
-        printf("GPIO %d = %d %s\r", gpio_pin, value, value ? "HIGH" : "LOW ");
-        fflush(stdout);
-        usleep(100000);  // 100ms bekle
-    }
-    
-    // Temizlik
+    if ((line = gpiod_chip_get_line(chip, 28)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+
+    printf("success...\n");
+
     gpiod_line_release(line);
     gpiod_chip_close(chip);
+
+    İlgili GPIO pinini elde ettikten sonra onu IN ya da OUT biçiminde konfigüre etmek gerekir. Belli bir pin'i OUT olarak 
+    konfigüre etmek için gpiod_line_request_output fonksiyonuyla yapılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <gpiod.h>
+
+    int gpiod_line_request_output(struct gpiod_line *line, const char *consumer, int default_val);
+
+    Fonksiyonun birinci parametresi hat nesnesinin adresini almaktadır. İkinci parametresi ise pin'i kullanan program 
+    tarafından belirlenen bir ismi belirtmektedir.  Üçüncü parametre pine gönderilecek ilk işareti belirtir. Bu parametre 
+    0 ya da 1 olabilir. Fonksiyon başarı durumunaa 0, başarısızlık durumunda -1 değeirne geri dönmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 28)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+
+     if (gpiod_line_request_output(line, "myapp", 1) == -1)
+        exit_sys("gpiod_line_request_output");
+
+    printf("Press ENTER to exit...\n");
+    getchar();
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    Burada  LED'i bağladığımız pin'e 3.3V gönderdik. Dolayısıyla program sonlanana kadar LED'imiz yanacaktır. Pekyi biz 
+    saniyede bir yanıp sönen LED uygulaması için döngü içerisinde jer defasında gpiod_line_request_output fonksiyonunu mu 
+    çağırmalıyız? Hayır, artık elimizde hat nesnesi varsa doğrudan ilgili pin'e lojik 0 ya da lojik 1 işaretini 
+    gpiod_line_set_value fonksiyonuyla gönderebiliriz. Fonksiyonun prototipi şöyledir:
+
+    #include <gpiod.h>
+
+    int gpiod_line_set_value(struct gpiod_line *line, int value);
+
+    Fonksiyonun birinci parametresi hat nesnesinin adresini, ikinci parametresi lojik işareti almaktadır. İkinci parametre 
+    için girilecek değer 1 ya da 0 olabilir. Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine
+    geri dönmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    int out;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 28)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+   
+    if (gpiod_line_request_output(line, "myapp", 0) == -1)
+        exit_sys("gpiod_line_request_output");
+
+    out = 1;
+    for (int i = 0; i < 30; ++i) {
+        if (gpiod_line_set_value(line, out) == -1)
+            exit_sys("gpiod_line_set_value");
+        out = !out;
+        sleep(1);
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpiod-sample.c */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <gpiod.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    int out;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 28)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+    
+    if (gpiod_line_request_output(line, "myapp", 0) == -1)
+        exit_sys("gpiod_line_request_output");
+
+    out = 1;
+    for (int i = 0; i < 30; ++i) {
+        if (gpiod_line_set_value(line, out) == -1)
+            exit_sys("gpiod_line_set_value");
+        out = !out;
+        sleep(1);
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        134. Ders 14/10/2025 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Belli bir hattı (yani pin'i) IN olarak konfigüre etmek için gpiod_line_request_input fonksiyonu kullanılmaktadır. Fonksiyonun
+    prototipi şöyledir:
+
+    #include <gpiod.h>
+
+    int gpiod_line_request_input(struct gpiod_line *line, const char *consumer);
+
+    Fonksiyonun birinci parametresi GPIO hattına ilişkin gpiod_line nesnesinin adresini almaktadır. İkinci parametre uygulamayı
+    betimleyen herhangi bir isim olarak girilebilmektedir. Fonksiyon başarı durumunda 0, başarısızlık durumunda -1 değerine 
+    geri dönmektedir. Belli bir hattı giriş olarak konfigüre ettikten sonra artık o hattan okuma yapılabilir. Bunun için 
+    gpiod_line_get_value fonksiyonu kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <gpiod.h>
+
+    int gpiod_line_get_value(struct gpiod_line *line);
+
+    Fonksiyon hat nesnesinin adresini parametre olarak alır ve hattaki giriş işaretini geri dönüş değeri olarak verir. Hata 
+    durumunda fonksiyon -1 değerine geri dönmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    int result;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 19)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+    
+    if (gpiod_line_request_input(line, "myapp") == -1)
+        exit_sys("gpiod_line_request_input");
+
+    for (int i = 0; i < 10; ++i) {
+        if ((result = gpiod_line_get_value(line)) == -1)
+            exit_sys("gpiod_line_get_value");
+        printf("%d\n", result);
+        sleep(1);
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    Aşağıda programın tamamaını veriyoruz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpiod-sample.c */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <gpiod.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    int result;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 19)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+    
+    if (gpiod_line_request_input(line, "myapp") == -1)
+        exit_sys("gpiod_line_request_input");
+
+    for (int i = 0; i < 10; ++i) {
+        if ((result = gpiod_line_get_value(line)) == -1)
+            exit_sys("gpiod_line_get_value");
+        printf("%d\n", result);
+        sleep(1);
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Tek hamlede birden fazla hattın değerini okumak ya da birden fazla hatta değişik değerleri tek hamlede yazmak isteyebiliriz. 
+    Bu işlemlere gipiod kütüphanesinde "bulk işlemler" denilmektedir. Birden fazla hatta ilişkin gpiod_line nesnelerinin adreslerini 
+    tutan gpiod_line_bulk isimli bir yapı vardır. Bu yapı şöyle bildirilmiştir:
+
+    struct gpiod_line_bulk {
+        unsigned int num_lines;
+        struct gpiod_line *lines[GPIOD_LINE_BULK_MAX_LINES];
+    };
+
+    Birden fazla hattı almak için gpiod_chip_get_lines fonksiyonu kullanılmaktadır. Bu fonksiyonun prototipi şöyledir.
+
+    #include <gpiod.h>
+
+    int gpiod_chip_get_lines(struct gpiod_chip *chip, unsigned int *offsets, unsigned int num_offsets, struct gpiod_line_bulk *bulk);
+
+    Fonksiyonun birinci parametresi gpiod_chip nesnesinin adresini, ikinci parametresi alınacak hatlara ilişkin numaraları, 
+    üçüncü parametre ise ikinci parametrede belirtilen dizinin uzunluğunu belirtmektedir. Fonksiyon başarı durumunda 0 değerine, 
+    başarısızlık durumunda -1 değerine geri dönmektedir. Burada elde edilen gpiod_line_bulk nesnesi gpiod_line_release_bulk 
+    fonksiyonu ile serbest bırakılmaktadır. Bu fonksiyonun prototipi de şöyledir:
+
+    void gpiod_line_release_bulk(struct gpiod_line_bulk *bulk);
+
+    Fonksiyon gpiod_line_bulk nesnesini parametre olarak alıp oluşturduğu alanı serbest bırakır. Örneğin:
+
+    struct gpiod_chip *chip;
+    unsigned int offsets[] = {4, 17, 27};
+    struct gpiod_line_bulk lb;
+
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+
+    if (gpiod_chip_get_lines(chip, offsets, 3, &lb) == -1)
+        exit_sys("gpiod_chip_get_lines");
+    
+    /* ... */
+
+    gpiod_line_release_bulk(&lb);
+
+    Birden fazla hattı OUT olarak konfigüre etmek için gpiod_line_request_bulk_output fonksiyonu IN olarak konfigüre etmek 
+    için gpiod_line_request_bulk_input fonksiyonu kullanılmaktadır. Bu fonksiyonların prototipileri şöyledir:
+
+    #include <gpiod.h>
+
+    int gpiod_line_request_bulk_output(struct gpiod_line_bulk *bulk, const char *consumer, const int *default_vals);
+    int gpiod_line_request_bulk_input(struct gpiod_line_bulk *bulk, const char *consumer);
+
+    birinci parametreleri gpiod_line_bulk nesnesinin adresini, ikinci parametreleri programcının vereceği uygulama ismini 
+    aşmaktadır. default_vals parametresi OUT olarak konfigüre ederken verilecek ilkdeğerleri belirtir. Fonksiyonlar başarı 
+    durumunda 0, başarısızlık durumunda -1 değerine regi dönmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    unsigned int offsets[] = {4, 17, 27};
+    unsigned int initial_values[] = {0, 0, 0};
+    struct gpiod_line_bulk *lb;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if (gpiod_chip_get_lines(chip, offsets, 3, &lb) == -1)
+        exit_sys("gpiod_chip_get_lines");
+
+    if (gpiod_line_request_bulk_output(&lb, "myapp", initial_values) == -1)
+        exit_sys("gpiod_line_request_bulk_output");
+
+    /* ... */
+
+    gpiod_line_release_bulk(&lb);
+    gpiod_chip_close(chip);
+    
+    Birden fazla hattı tek hamlede set etmek için gpiod_line_set_value_bulk fonksiyonu kullanılmaktadır. Fonksiyonun prototipi 
+    şöyledir:
+
+    int gpiod_line_set_value_bulk(struct gpiod_line_bulk *bulk, const int *values);
+
+    Fonksiyonun birinci parametresi gpiod_line_bulk nesnesinin adresini, iknci parametresi hatlara set edilecke değerleri 
+    almaktadır. Fonksiyın başarı durumunda 0 balarısızlık durumunda -1 değerine geri dönmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    unsigned int offsets[] = {4, 19, 28};
+    int initial_values[] = {0, 0, 0};
+    int values[3];
+    struct gpiod_line_bulk lb;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if (gpiod_chip_get_lines(chip, offsets, 3, &lb) == -1)
+        exit_sys("gpiod_chip_get_lines");
+
+    if (gpiod_line_request_bulk_output(&lb, "myapp", initial_values) == -1)
+        exit_sys("gpiod_line_request_bulk_output");
+
+    for (int i = 0; i < 10; ++i) {
+        values[0] = 1;
+        values[1] = 1;
+        values[2] = 1;
+
+        if (gpiod_line_set_value_bulk(&lb, values) == -1)
+            exit_sys("gpiod_line_set_value_bulk");
+
+        sleep(1);
+
+        values[0] = 0;
+        values[1] = 0;
+        values[2] = 0;
+
+        if (gpiod_line_set_value_bulk(&lb, values) == -1)
+            exit_sys("gpiod_line_set_value_bulk");
+
+        sleep(1);
+    }
+
+    gpiod_line_release_bulk(&lb);
+    gpiod_chip_close(chip);
+
+    Aşağıda örnek bir bütün olarak verilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpiod-sample.c */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <gpiod.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    struct gpiod_chip *chip;
+    unsigned int offsets[] = {4, 19, 28};
+    int initial_values[] = {0, 0, 0};
+    int values[3];
+    struct gpiod_line_bulk lb;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if (gpiod_chip_get_lines(chip, offsets, 3, &lb) == -1)
+        exit_sys("gpiod_chip_get_lines");
+
+    if (gpiod_line_request_bulk_output(&lb, "myapp", initial_values) == -1)
+        exit_sys("gpiod_line_request_bulk_output");
+
+    for (int i = 0; i < 10; ++i) {
+        values[0] = 1;
+        values[1] = 1;
+        values[2] = 1;
+
+        if (gpiod_line_set_value_bulk(&lb, values) == -1)
+            exit_sys("gpiod_line_set_value_bulk");
+
+        sleep(1);
+
+        values[0] = 0;
+        values[1] = 0;
+        values[2] = 0;
+
+        if (gpiod_line_set_value_bulk(&lb, values) == -1)
+            exit_sys("gpiod_line_set_value_bulk");
+
+        sleep(1);
+    }
+
+    gpiod_line_release_bulk(&lb);
+    gpiod_chip_close(chip);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aynı anda birden fazl hattın değerini okumak için de gpiod_line_get_value_bulk fonksiyonu kullanılmaktadır. Fonksiyonun
+    prototipi şöyledir:
+
+   int gpiod_line_get_value_bulk(struct gpiod_line_bulk *bulk, int *values);
+
+   Fonksiyonun birinci parametresi gpiod_line_bulk nesnesinin adresini, ikinci parametresi hatlardan okunan değerlerin 
+   yerleştirileceği int dizinin adresi belirtmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    unsigned int offsets[] = {4, 19, 28};
+    int values[3];
+    struct gpiod_line_bulk lb;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if (gpiod_chip_get_lines(chip, offsets, 3, &lb) == -1)
+        exit_sys("gpiod_chip_get_lines");
+
+    if (gpiod_line_request_bulk_input(&lb, "myapp") == -1)
+        exit_sys("gpiod_line_request_bulk_output");
+
+    for (int i = 0; i < 10; ++i) {
+        if (gpiod_line_get_value_bulk(&lb, values) == -1)
+            exit_sys("gpiod_line_set_value_bulk");
+        for (int k = 0; k < 3; ++k)
+            printf("line %d: %d\n", offsets[k], values[k]);
+        sleep(1);
+    }
+
+    gpiod_line_release_bulk(&lb);
+    gpiod_chip_close(chip);
+
+    Örnel bir bütün olarak aşağıda verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpiod-sample.c */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <gpiod.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    struct gpiod_chip *chip;
+    unsigned int offsets[] = {4, 19, 28};
+    int values[3];
+    struct gpiod_line_bulk lb;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if (gpiod_chip_get_lines(chip, offsets, 3, &lb) == -1)
+        exit_sys("gpiod_chip_get_lines");
+
+    if (gpiod_line_request_bulk_input(&lb, "myapp") == -1)
+        exit_sys("gpiod_line_request_bulk_output");
+
+    for (int i = 0; i < 10; ++i) {
+        if (gpiod_line_get_value_bulk(&lb, values) == -1)
+            exit_sys("gpiod_line_set_value_bulk");
+        for (int k = 0; k < 3; ++k)
+            printf("line %d: %d\n", offsets[k], values[k]);
+        sleep(1);
+    }
+
+    gpiod_line_release_bulk(&lb);
+    gpiod_chip_close(chip);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de gpiod kütüphanesinde kesme işlemlerinin naısl yapıdığı üzerinde duralım. Kesme işlemlerini yapabilmek için önce 
+    ilgili hattın "çıkan kenar tetiklemeli mi", "düşen kenar tetiklemeli mi" kesme oluşturacağı ayarlanmalıdır. Bunun için 
+    gpiod_line_request_rising_edge_events ve gpiod_line_request_falling_edge_events fonksiyonları kullanılmaktadır. Fonksiyonların 
+    prototipleri şöyledir:
+    
+    #include <gpiod.h>
+
+    int gpiod_line_request_rising_edge_events(struct gpiod_line *line, const char *consumer);
+    int gpiod_line_request_falling_edge_events(struct gpiod_line *line, const char *consumer);
+
+    Fonksiyonların birinci parametreleri gpiod_line nesnesinin adresini, ikinci parametreleri uygulamayı belirten bir yazıyı 
+    almaktadır. Fonksiyonlar başarı durumunda 0 değerine, başarıszlık durumunda -1 değerine geri dönmektedir. Bu fonksiyonlar 
+    zaten hattı IN olarak konfigüre de etmektedir. Örneğin:
+
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    int result;
+    
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 19)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+    
+    if (gpiod_line_request_falling_edge_events(line, "myapp") == -1)
+        exit_sys("gpiod_line_request_falling_edge_events");
+
+    /* ... */
+        
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    Bundan sonra artık gpiod_line_event_wait fonksiyonu ile kesme oluşana kadar blokede beklenir. Tabii bu fonksiyon 
+    aslında kendi içerisinde select ve poll fonksşyonlarını kullanmaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <gpiod.h>
+
+    int gpiod_line_event_wait(struct gpiod_line *line, const struct timespec *timeout);
+
+    Fonksiyonun birinci parametresi gpiod_line nesnesinin adresini, ikinci parametresi zaman aşımı değerini almaktadır. 
+    aman aşımı POSIX'in timespec yapısıyla belirtilmektedir:
+
+    #include <time.h>
+
+    struct timespec {
+        time_t      tv_sec;                 /* Seconds */
+        long        tv_nsec;                /* Nanoseconds [0, 999'999'999] */
+    };
+
+    Zaman aşımı parametresi NULL geçilirse zaman aşıı uygulanmaz. Fonksiyon zaman aşımı oluşursda 0 değerine, kesme olayı 
+    gerçekleşirse 1 değrine ve balşarısızlık durumunda -1 değerine geri dönmektedir. İlgili olay gerçekleştikten sonra 
+    olayın gerçekleştiği hattın gpiod_line_event_read fonksiyonuyla okunması gerekmektedir. Aksi takdirde fonksiyon sonraki 
+    seferde bekleme yapmayacaktır. gpiod_line_event_read fnksiyonunun prototipi şöyledir:
+
+    #include <gpiod.h> 
+
+    int gpiod_line_event_read(struct gpiod_line *line, struct gpiod_line_event *event);
+
+    Fonksiyonun birinci parametresi gpiod_line nesnesinin adresini, ikinci parametresi gpiod_line_event isimli bir yapı 
+    nesnesinin adresini almaktadır. Fonksiyon olayla ilgili bazı bilgileri bu nesneye yazmaktadır. Yapı şöyle bildirilmiştir:
+
+    struct gpiod_line_event {
+        struct timespec ts;   /* Timestamp (CLOCK_REALTIME) */
+        int event_type;       /* GPIOD_LINE_EVENT_RISING_EDGE veya GPIOD_LINE_EVENT_FALLING_EDGE */
+    };
+
+    Burada yapının ts elemanı olayın oluş zamanını, event_type elemanı olayın türünü belirtmektedir. Bu eleman şunlardan 
+    biri olabilir:
+
+    GPIOD_LINE_EVENT_RISING_EDGE
+    GPIOD_LINE_EVENT_FALLING_EDGE
+
+    Tabii biz bu yapı içerisindeki bilgileri hiç kullanmayabiliriz. Ancak bu ikinci parametre NULL geçilememektedir. 
+    Örneğin:
+
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    struct gpiod_line_event event;
+        
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 19)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+    
+    if (gpiod_line_request_falling_edge_events(line, "myapp") == -1)
+        exit_sys("gpiod_line_request_falling_edge_events");
+
+    for (int i = 0; i < 10; ++i) {
+        if (gpiod_line_event_wait(line, NULL) == -1)
+            exit_sys("gpiod_line_event_wait");
+
+        if (gpiod_line_event_read(line, &event) == -1)
+            exit_sys("gpiod_line_get_value");
+        
+        printf("interrupt occurred...\n");
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    Aşağıda örnek bir bütün olarak verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpiod-sample.c */
+
+#include <stdio.h>
+#include <unistd.h>
+#include <gpiod.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    struct gpiod_chip *chip;
+    struct gpiod_line *line;
+    struct gpiod_line_event event;
+        
+    if ((chip = gpiod_chip_open_by_name("gpiochip1")) == NULL)
+        exit_sys("gpiod_chip_open_by_name");
+    
+    if ((line = gpiod_chip_get_line(chip, 19)) == NULL)
+        exit_sys("gpiod_chip_get_line");
+    
+    if (gpiod_line_request_falling_edge_events(line, "myapp") == -1)
+        exit_sys("gpiod_line_request_falling_edge_events");
+
+    for (int i = 0; i < 10; ++i) {
+        if (gpiod_line_event_wait(line, NULL) == -1)
+            exit_sys("gpiod_line_event_wait");
+
+        if (gpiod_line_event_read(line, &event) == -1)
+            exit_sys("gpiod_line_get_value");
+        
+        printf("interrupt occurred...\n");
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    gpiod kütüphanesi burada açıkladığımız fonksiyonlardan daha fazla fonksiyona sahiptir. Bunun için kütüphanenin orijinal
+    dokümanlarına başvurabilirsiniz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    gpiod kütüphanesinin aslında "/dev/gpiochipN" (buradaki N bir chip numarasını belirten bir sayıdır) aygıt sürücülerine 
+    ioctl komutları göndererek yazıldığını belirtmiştik. Biz de aslında bu aygıt sürücüyü open donksiyonuyla açıp ona 
+    ioctl komutları göndererek de işlemlemlerimizi yapabiliriz. Tabii bunun için bu aygıt sürücünün dokümantasyonuna erişemiz
+    gerekir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        135. Ders 16/10/2025 - Perşembe
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi biz çok ayrıntısına girmeden "/dev/gpiochipN" aygıt sürücülerin nasıl kullanıldığını temel düzeyde açıklayalım. 
+    BBB'de toplam GPIO aygıt sürücüsüne ilişkin dört aygıt dosyası bulunmaktadır:
+
+    $ ls -l gpio*
+    crw-rw---- 1 root gpio 254, 0 Feb  4 22:05 gpiochip0
+    crw-rw---- 1 root gpio 254, 1 Feb  4 22:05 gpiochip1
+    crw-rw---- 1 root gpio 254, 2 Feb  4 22:05 gpiochip2
+    crw-rw---- 1 root gpio 254, 3 Feb  4 22:05 gpiochip3
+
+    Görüldüğü gibi aygıt dosyalarının majör numaralarının aynıdır. Her bir minör numara bir GPIO denetleyicisini temsil 
+    etmektedir. 
+
+    GPIO aygıt sürücülerinin iki versiyonu çıkmıştır. Aygıt sürücünün 1 numaralı versiyonlarıyla 2 numaralı versiyonları 
+    arasında uyumsuzluklar bulunmaktadır. Biz burada 1 numaralı versiyona ilişkin örnekler vereceğiz. 
+
+    GPIO aygıt sürücücünün kullandığı bütün yapıların bildirimleri, sembolik sabit tanımlamaları <linux/gpio.h> dosyası 
+    içerisindedir. Dolayısıyla bu dosya include etmelisiniz. 
+
+    Bizim ilk yapacağımız şey ilgilendiğimiz aygıt dosyasını open POSIX fonksiyonuyla açıp bir dosya betimleyicisi elde 
+    etmektedir:
+
+    int fd;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    GPIO chip'inin ismi ve hat sayısı aygıt sürücüye GPIO_GET_CHIPINFO_IOCTL ioctl komutu gönderilerek elde edilebilmektedir. 
+    Aygıt sürücü chip'e ilişkin bilgileri adresini aldığı gpiochip_info isimli bir yapı nesnesinin içine yerleştirmektedir. 
+    Bu yapı şöyle bildirilmiştir:
+
+    struct gpiochip_info {
+        char name[32];
+        char label[32];
+        __u32 lines;
+    };
+
+    Örneğin:
+
+    int fd;
+    struct gpiochip_info info;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &info) == -1)
+        exit_sys("ioctl");
+
+    printf("Name: %s, Number of lines: %u\n", info.name, info.lines);
+
+    Tıpkı gpiod kütüphanesinde olduğu gibi belli bir hat üzerinde işlem yapmadan önce o hattı elde etmek gerekir. OUT için 
+    hat talep etme işlemi GPIO_GET_LINEHANDLE_IOCTL ioctl komutuyla yapılmaktadır. Bunun için gpiohandle_request yapısı 
+    türünden bir nesne tanımlanır. Bu yapının içi memset fonksiyonuyla sıfırlanır. Sonra gpiohandle_request yapısının 
+    lineoffsets elemanına OUT olarak konfigüre edeceğimiz hatların numralarını yerleştiririz Yani örneğin bir 3 farklı hattı
+    OUT olarak konfigüre edeceksek bu har numaralarını lineoffsets[0], lineoffsets[1] ve lineoffsets[2] elemanlarına yerleştiririz. 
+    Dizinin kaç elemanına yerleştirme yapmışsak yapının lines elemanına o sayı girilmelidir. Ayrıca bu OUT konfigürasyonunda 
+    hattaki ilk değeri de yapının default_values dizisi yoluyla verebilmekteyiz. Ayrıca yapının consumer_label elemanına da 
+    uygulamaya ilişkin bir isim iliştirilebilir. Aslında buraya kadar yapılan işlemler hattı IN olarak konfigüre etmek için 
+    de kullanılmaktadır. Hatton OUT olarak konfigüre edilmesi için yapının flags elemanına GPIOHANDLE_REQUEST_OUTPUT değerinin 
+    yerleştirilmesi gerekmektedir. 
+    
+    Örneğin biz gpiochip1 denetleyicisinin 28 numaralı ucunu OUT olarak aşağıdaki gibi konfigüre edebiliriz:
+
+    int fd;
+    struct gpiochip_info info;
+    struct gpiohandle_request req;
+    
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &info) == -1)
+        exit_sys("ioctl");
+    printf("Name: %s, Number of lines: %u\n", info.name, info.lines);
+
+    memset(&req, 0, sizeof(req));
+    req.lineoffsets[0] = 28;
+    req.default_values[0] = 1;
+    req.lines = 1;
+    strcpy(req.consumer_label, "myapp");
+    req.flags = GPIOHANDLE_REQUEST_OUTPUT;
+
+    if (ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req) == -1)
+        exit_sys("ioctl");
+
+    OUT olarak konfigüre ettiğimiz hattı lojik 0 ve lojik 1 seviyesine çekmek için GPIOHANDLE_SET_LINE_VALUES_IOCTL ioctl komutu 
+    gönderilmelidir. Burada bizim OUT olarak konfigüre ettiğimiz hatların işaretlerini gpiohandle_data isimli bir yapının values 
+    dizisine kodlamamız gerekir. Ancak GPIOHANDLE_SET_LINE_VALUES_IOCTL komutunu artık yukarıdaki hat alma işlemi sonucunda 
+    bize verilen gpiohandle_request yapısının fd elemanına ilişkin betimleyiciyi kullanarak uygulamamız gerekir. Bu ioctl komutunun 
+    üçüncü parametresine gpiohandle_data yapı nesnesini adresi girilmelidir. Örneğin yukarıda oUT biçiminde konfigüre ettiğimiz hattı 
+    şöyle 0'a çekebiliriz:
+
+    int fd;
+    struct gpiochip_info info;
+    struct gpiohandle_request req;
+    struct gpiohandle_data data;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &info) == -1)
+        exit_sys("ioctl");
+    printf("Name: %s, Number of lines: %u\n", info.name, info.lines);
+
+    memset(&req, 0, sizeof(req));
+    req.lineoffsets[0] = 28;
+    req.default_values[0] = 1;
+    req.lines = 1;
+    strcpy(req.consumer_label, "myapp");
+    req.flags = GPIOHANDLE_REQUEST_OUTPUT;
+
+    if (ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req) == -1)
+        exit_sys("ioctl");
+
+    sleep(5);
+
+    data.values[0] = 0;
+    if (ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data) == -1)
+        exit_sys("ioctl");
+
+    Elde etmiş olduğumuz hatları geri bırakmak için tek yapılacak şey gpiohandle_request yapısının fd elemanı ile verilen 
+    betimleyiciyi close etmektir. Yani programımızın sonunda iki betimelyiciyi de aşağıdaki gibi close etmeliyiz:
+
+    close(req.fd);
+    clsoe(fd);
+
+    Aşağıdaki örnekte 10 kez LED yakılıp söndürülmüştür.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-driver-ioctl.c */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/gpio.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    struct gpiochip_info info;
+    struct gpiohandle_request req;
+    struct gpiohandle_data data;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &info) == -1)
+        exit_sys("ioctl");
+    printf("Name: %s, Number of lines: %u\n", info.name, info.lines);
+
+    memset(&req, 0, sizeof(req));
+    req.lineoffsets[0] = 28;
+    req.default_values[0] = 1;
+    req.lines = 1;
+    strcpy(req.consumer_label, "myapp");
+    req.flags = GPIOHANDLE_REQUEST_OUTPUT;
+
+    if (ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req) == -1)
+        exit_sys("ioctl");
+
+    for (int i = 0; i < 10; ++i) {
+        data.values[0] = 0;
+        if (ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data) == -1)
+            exit_sys("ioctl");
+        sleep(1);
+        data.values[0] = 1;
+        if (ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data) == -1)
+            exit_sys("ioctl");
+        sleep(1);
+    }
+
+    close(req.fd);
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Hattan okuma yapmak da benzer biçimdedir. Önce hat talep edilir. Ancak talep edilirken gpiohandle_request yapısının flags 
+    elemanı GPIOHANDLE_REQUEST_INPUT girilmelidir. Örneğin:
+
+    int fd;
+    struct gpiochip_info info;
+    struct gpiohandle_request req;
+    struct gpiohandle_data data;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &info) == -1)
+        exit_sys("ioctl");
+    printf("Name: %s, Number of lines: %u\n", info.name, info.lines);
+
+    memset(&req, 0, sizeof(req));
+    req.lineoffsets[0] = 19;
+    req.lines = 1;
+    strcpy(req.consumer_label, "myapp");
+    req.flags = GPIOHANDLE_REQUEST_INPUT;
+    if (ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req) == -1)
+        exit_sys("ioctl");
+
+    Bundan sonra GPIOHANDLE_GET_LINE_VALUES_IOCTL ioctl komutu ile hatlardaki değerler okunabilir. Yine bu ioctl komutunda 
+    da ioctl fonksiyonun üçüncü parametresine gpiohandle_data isimli yapı türünden bir nsnenin adresi girilmelidir. ioctl 
+    uygulandıktan sonra yne bu nesnenin values dizisinde ilgili değer alınmaktadır. Örneğin:
+
+    if (ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data) == -1)
+            exit_sys("ioctl");
+
+    Aşağıdaki örnekte düğmeye basılıp basılmadığı bilgisi bir saniye periyotlarla kontrol edilerek yazdırılmıştır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-driver-ioctl.c */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/gpio.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    struct gpiochip_info info;
+    struct gpiohandle_request req;
+    struct gpiohandle_data data;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, GPIO_GET_CHIPINFO_IOCTL, &info) == -1)
+        exit_sys("ioctl");
+    printf("Name: %s, Number of lines: %u\n", info.name, info.lines);
+
+    memset(&req, 0, sizeof(req));
+    req.lineoffsets[0] = 19;
+    req.lines = 1;
+    strcpy(req.consumer_label, "myapp");
+    req.flags = GPIOHANDLE_REQUEST_INPUT;
+    if (ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req) == -1)
+        exit_sys("ioctl");
+
+    for (int i = 0; i < 10; ++i) {
+        if (ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data) == -1)
+            exit_sys("ioctl");
+
+        printf("%d\n", data.values[0]);
+        sleep(1);
+    }   
+
+    close(req.fd);
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Kesme işlemi yapmak için önce gpioevent_request isimli bir yapı türünden nesne yaratıp içi sıfırlanır. Yapının lineoffset 
+    elemanına kesme için ilgilendiğimiz hattın numarası yerleştirilir. Sonra yapının aşağıdaki bayrak elemanına aşağıdaki 
+    değerler verilir:
+
+    event_req.handleflags = GPIOHANDLE_REQUEST_INPUT;
+    event_req.eventflags = GPIOEVENT_REQUEST_FALLING_EDGE; 
+
+    Sonra da GPIO_GET_LINEEVENT_IOCTL komutuyla hat kesme içn konfigüre edilir. Buradaki event_req ile temsil edilen yapı 
+    nesnesinin adresi ioctl fonksiyonunun üçüncü parametresine geçirilmeliir. Bu ioctl komutu herhangi bir bloke oluşturmaz. 
+    Kesmeyi beklemek için bu yapının fd elemanı ile verilen betimleyiciden read fonksiyonu ile okuma yapmak gerekir. Okuma 
+    işlemi kesme oluşana kadar thread'i bloke bekletecektir. Örneğin:
+
+    int fd;
+    struct gpioevent_request event_req;
+    struct gpioevent_data event;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    memset(&event_req, 0, sizeof(event_req));
+    event_req.lineoffset = 19;
+    event_req.handleflags = GPIOHANDLE_REQUEST_INPUT;
+    event_req.eventflags = GPIOEVENT_REQUEST_FALLING_EDGE; 
+
+    strcpy(event_req.consumer_label, "myapp");
+    if (ioctl(fd, GPIO_GET_LINEEVENT_IOCTL, &event_req) == -1)
+        exit_sys("ioctl");
+
+    for (int i = 0; i < 10; ++i) {
+        if (read(event_req.fd, &event, sizeof(event)) == -1)
+            exit_sys("read");
+        
+        printf("intterupt occured...\n");
+    }
+
+    close(event_req.fd);
+    close(fd);
+
+    Aşağıda örnek bütünsel biçimde verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-driver-ioctl.c */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/gpio.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    struct gpioevent_request event_req;
+    struct gpioevent_data event;
+
+    if ((fd = open("/dev/gpiochip1", O_RDWR)) == -1)
+        exit_sys("open");
+
+    memset(&event_req, 0, sizeof(event_req));
+    event_req.lineoffset = 19;
+    event_req.handleflags = GPIOHANDLE_REQUEST_INPUT;
+    event_req.eventflags = GPIOEVENT_REQUEST_FALLING_EDGE; 
+
+    strcpy(event_req.consumer_label, "myapp");
+    if (ioctl(fd, GPIO_GET_LINEEVENT_IOCTL, &event_req) == -1)
+        exit_sys("ioctl");
+
+    for (int i = 0; i < 10; ++i) {
+        if (read(event_req.fd, &event, sizeof(event)) == -1)
+            exit_sys("read");
+        
+        printf("intterupt occured...\n");
+    }
+
+    close(event_req.fd);
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                                136. Ders 21/10/2025 - Salı 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de BBB içerisindeki GPIO denetleyicisine bellek tabanlı (memory-mapped) IO tekniği ile erişip doğrudan bu denetleyiciyi 
+    programlayarak GPIO işlemlerini yapalım. Anımsanacağı gibi ARM mimarisinde zaten prt tabanlı (port-mapped) IO kullanılmıyordu. 
+    Tüm denetleyicilerle adres ve veri yolu kullanılarak bellek erişim komutlarıyla haberleşme sağlanıyordu. Bu da bizim doğrudan 
+    C'deki göstericilerle denetleyicinin yazmaçlarına erişebileceğimiz anlamına geliyordu. Bellek tabanlı IO işlemi yaparken 
+    şunlara dikkat edilmesi gerektiğini anımsayınız:
+    
+    - Bellek tabanlı IO işlemeri için hangi fiziksel bellek adresinin denetleyicinin hangi yazmacına karşılık geldiğinin bilinmesi 
+    gerekmektedir. Başka bir deyişle denetleyicinin hangi adresine hangi komut gönderildiğinde denetleyicinin ne yaptığının 
+    baştan bilinmesi gerekmektedir. 
+
+    - Denetleyicilereki bellek adresleri fiziksel adreslerdir. Programcının bu fiziksel adresler için sanal adresleri oluşturması
+    gerekmektedir. 
+
+    - Derleyiciler ve işlemciler birbirlerinden bağımsız komutların sırasını değiştirbiliyordu (instuction reordering). Bellek 
+    tabanlı IO işlemlerinde bu durumun dikkate alınması gerekir. Bunun bellek bariyerleri (memory barriers) denilen mekanizmanın 
+    kullanıldığını anımsayınız. 
+
+    - Aynı bellek bölgesine farklı çekirdekler tarafından aynı anda yazma yapılırken ya da aynı bellek bölgesine bir çkirdek
+    yazma yaparken aynı anda oradan başka bir çekirdek okuma yaparken bazı platformlarda bazı koşullarda bazulmalar olabileceğini 
+    belirtmiştik. Bu nedenle okuma ve yazma işlemlerinin bu durum gözetilerek atomikbir biçimde yapılması tavsiye edilmektedir. 
+    (Anımsanacağı gibi aygıt sürücüler konusunda görmüş olduğumuz ioreadxxx ve iowritexxx fonksiyonları bellek bariyerlerini 
+    ve atomikliği kendi içlerinde oluşturmaktadır. Bu nedenle aygıt sürücüler içerisinde bu fonksiyonların kullanılması tavsiye 
+    edilmektedir.)
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BBB'de toplam dört adet GPIO denetleyicisi bulunduğunu anımsayınız. Bunların taban fiziksel adresleri şöyledir:
+
+    #define GPIO_CHIP0_BASE  0x44E07000
+    #define GPIO_CHIP1_BASE  0x4804C000
+    #define GPIO_CHIP2_BASE  0x481AC000
+    #define GPIO_CHIP3_BASE  0x481AE000
+
+    Bu taban adreslerden itibaren her DWORD (4 byte) farklı bir anlama gelmektedir. Bunlara GPIO denetleyicisinin yazmaçları 
+    diyebiliriz. Bizi ilgilendiren önemli yazmaçlar ve bunlar offste numaraları şöyledir:
+
+    Yazmacın Sembolik İsimli                Offset Değeri
+
+    #define GPIO_OE                             0x134
+    #define GPIO_DATAIN                         0x138
+    #define GPIO_DATAOUT                        0x13C
+    #define GPIO_CLEARDATAOUT                   0x190
+    #define GPIO_SETDATAOUT                     0x194
+
+    BBB'deki diğer GPIO yazmaçları ve genel olarak GPIO denetleyicisi hakkında ayrıntılı açıklama için "AM335x and AMIC110 Sitara™ 
+    Processors Technical Reference Manual" dokümanlarına başvurabilirsiniz. Aşağıdaki örneklerde gpio_base göstericisinin denetleyiciye 
+    ilişkin taban sanal adresi gösterdiği varsayılacaktır. 
+
+   -  GPIO_OE pinlerini (aslında denetleyicinin uçlarını) IN ya da OUT biçimide konfigüre etmek için kullanılmaktadır. Bu offset'ten 
+   başlayan 4 byte'lık DWORD bilgi ger denetleyici ucunun konumunu bit bit temsil etmektedir. İlgili bit 0 yapıldığında o uç OUT 
+   durumuna 1 yapıldığında IN durumuna konfigüre edilmektedir. O halde "pin" denetleyicinin uç numarasını belirtmek üzere o ucu 
+   OUT olarak konfügüre etmek için şu işlem yapılmalıdır:
+
+    volatile uint32_t *gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    *gpio_reg &= ~(1 << pin);
+
+    IN olarak konfigüre etme işlemi de şöyle yapılabilir:
+
+    volatile uint32_t *gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    *gpio_reg |= 1 << pin;
+ 
+    - GPIO_DATAIN ile temsil edilen offset'teki 4 byte'lık DWORD değer denetleyicinin uçlarını tek hamlede okumak için kullanılmaktadır. 
+    Tabii eğer biz "pin" numaralı ucun durumunu elde etmek istiyorsak şöyle yapmalıyız:
+
+    volatile uint32_t *gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAIN);
+    result = *gpio_reg >> pin & 1;
+
+    - GPIO_DATAOUT ile temsil edilen offset'teki 4 byte'lık DWORD değer denetleyicinin uçlarını lojik 0 ya da 1 çekmek için kullanılmaktadır. 
+    Burada her bit bir ucu temsil etmektedir. Örneğin "pin" numaralı ucu diğer uçlardaki değerleri değiştirmeden şöyle 1 yapabiliriz:
+
+    volatile uint32_t *gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAOUT);
+    *gpio_reg |= 1 << pin;
+
+    Diğer uçlara dokunmadan ilgili uç şöyle 0'a çekilebilir:
+
+    volatile uint32_t *gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAOUT);
+    *gpio_reg &= ~(1 << pin);
+
+    - GPIO_CLEARDATAOUT ve GPIO_SETDATAOUT yazmaçları bit düzeyinde işlemleri elimine etmek için düşünülmüştür. Bu yazmaçlardaki 
+    0 olan bitleer dikkate alınmaz. Yalnıca 1 olan bitler üzerinde işlem yapılmaktadır. GPIO_CLEARDATAOUT yalnızca 1 olan bitleri
+    lojik 0 seviyesine, GPIO_SETDATAOUT ise yaşnızca 1 olan bitleri lojik 1 seviyesine çekmektedir. Örneğin biz "pin" numaralı 
+    ucu lojik 1 seviyesine şöyle de çekebiliriz:
+
+    volatile uint32_t *gpio_reg = (uint32_t *) (gpio_base + GPIO_SETDATAOUT);
+    *gpio_reg = 1 << pin;
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de bellek tabanlı IO tekniğini kullanıcı modunda mmap fonksiyonuyla uygulayalım. Tabii aslında bu işlemler için 
+    karakter aygıt sürücülerinin yazılması ve işlemlerin çekirdek modunda gerçekleştirilmesi tavsiye edilmektedir. 
+
+    Kullanıcı modunda bellek tabanlı IO işlemleri için "/dev/mem" aygıt sürücüsü ve mmap POSIX fonksiyonu kullanılmaktadır. 
+    mmap fonksiyonu "bellek tabanlı dosya (mempry-mapped file)" oluşturmak için kullanılabilmektedir. Bellek tabanlı dosyalar 
+    sayesinde sanki bir dosya bellekteymiş de bellekte oraya yazma yapıldığında yazma doğrudan doğrudan dosyaya yapılıyormuş 
+    gibi bir etki oluşturulmaktadır. "/dev/mem" aygıt sürücüsü fiziksel RAM'i sanki bir dosyaymış gibi göstermektedir. Örneğin
+    biz bu dosyayı open fonksiyonu ile açıp dosya göstericisini belli bir offset'e konumlandırıp oraya yazma yaparsak fiziksel 
+    RAM'e yazma yapımış oluruz. O halde "/dev/mem" dosyasını mmap ile belleğe çekerek bellekte yapacağımız yazma işlemi aslında 
+    "/dev/mem" dosyasına yapılacaktır. Dolayısıyla biz fiziksel RAM'i kendi prosesimizin sanal adresl alanında bir yere çekip 
+    onun üzerinde çalışabiliriz. mmap fonksiyonunun pek çok ayrıntısı vardır. Bu fonksiyonun çalışması "UNIX/Linux Sistem 
+    Programlama" kurslarında ele alınmaktadır. mmap ile belleğe çekilen dosya munmap fonksiyonuyla boşaltılmaktadır. 
+    Fonksiyonların prototipleri şöyledir:
+
+    #include <sys/mman.h>
+
+    void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+    int munmap(void *addr, size_t len);
+
+    mmap fonksiyonunun birinci parametresi programcınn arzu ettiği sanal bellek adresini belirtmektedir. Genellikle bu 
+    parametre NULL geçilmektedir. Bu durumda map işlemi için uygun sanal adres fonksiyon tarafından tespit edilir. Fonksiyonun 
+    ikinci parametresi mapping uzunluğunu belirtmektedir. Üçüncü parametre map edilen sayfaların koruma bilgilerini belirtiri. 
+    Bu parametre için PROT_READ|PROT_WRITE değerini argüman olarak geçebilirsiniz. Dördüncü parametre tipik olarak MAP_SHARED
+    biçiminde geçilmektedir. MAP_PRIVATE "copy-on-write" mekanizması için kullanılmaktadır. Fonksiyonun fd ile belirtilen 
+    beşinci parametresi map edilecek dosyaya ilişkin dosya betimleyicisini belirtmektedir. Son parametre ise dosyanın hangi 
+    offset'inden itibaren mapping yapılacağını belirtmektedir. Yani dosyanın belli bir offset'indne itibaren belli bir uzunluk 
+    map edilebilmektedir. munmap fonksiyonun ise birinci parametresi mmap fonksiyonundan elde edilen adresi, ikinci parametresi 
+    de unmap yapılacak uzunluğu belirtir. mmap fonksiyonu başarı durumunda map edilen dosyanın sanal bellek adresine, başarısızlık 
+    durumunda ise MAP_FAILED özel değerine geri dönmektedir. munmap fonksiyonu ise başarı durumunda 0 değerine, başarısızlık 
+    durumunda  -1 değerine geri dönmektedir. 
+
+    mmap ve maunmap fonksiyonları sayfa tabanlı çalışmaktadır. Dolayısıyla bu fonksiyonlardaki uzunluk değerleri tipik 
+    olarak 4096'nın katları olmalıdır. Bu fonksiyonlara uzun oolarak eğer sayfa katlarını vermezseniz, fonksiyonlar bunu 
+    sayfa katlarına çekmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BBB'nin GPIO denetleyicileri için mapping işlemi tipik olarak şöyle yapılmaktadır:
+
+    int fd;
+    volatile uint8_t *gpio_base;
+
+    if ((fd = open("/dev/mem", O_RDWR|O_SYNC)) == -1) 
+       exit_sys("open");
+        
+    if ((gpio_base = (volatile uint8_t *)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, GPIO_CHIP1_BASE)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    /* .... */
+
+    munmap((void *)gpio_base, 4096);
+    close(fd);
+
+    Bu işlemi yaptıktan sonra atık GPIO denetleyicisinin yazmaçlarına bir gösterici yoluyla erişebilir hale gelmiş oluruz. 
+    Bu durumda örneğin GPIO1_28 pinine bağladığımız LED'i 1 saniye arayla yakıp söndürme işlemi şöyle yapılabilir:
+
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    clear_bit(gpio_reg, 28);
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAOUT);
+
+    for (int i = 0; i < 10; ++i) {
+        set_bit(gpio_reg, 28);
+        sleep(1);
+        clear_bit(gpio_reg, 28)   ;
+        sleep(1);
+    }
+
+    Buradaki clear_bit ve set_bit fonksiyonları uint32_t türünden bir değerin belli bir bitini diğer bitlerine dokunmadan 0 
+    ve 1 yapmaktadır. Kodd önce ilgili pin OUT olarak konfigüe edilmiştir:
+
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    clear_bit(gpio_reg, 28);
+
+    Sonra ilgili pin 1'er saniye aralıklarla yakılıp södürülmüştür:
+
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAOUT);
+
+    for (int i = 0; i < 10; ++i) {
+        set_bit(gpio_reg, 28);
+        sleep(1);
+        clear_bit(gpio_reg, 28);
+        sleep(1);
+    }
+
+    Her okuma ve yazma işleminden sonra bellek bariyerlerini kullanmayı unutmayınız. Bu bariyerler hem derleyicinin hem de 
+    işlemcinin komutları yeniden sıralamasını engelleyecektir. Ancak aygıt sürücü konusunda gördüğümüz bariyer fonksiyonlarını
+    kullanıcı modunda doğrudan kullanamayız. Bu nedenle bu fonksiyonları gcc'nin eklentilerini kullanarak yenidne yazdık:
+
+    #ifdef __arm__
+        #define dmb()  __asm__ __volatile__ ("dmb" : : : "memory")
+        #define rmb()  __asm__ __volatile__ ("dmb" : : : "memory")          
+        #define wmb()  __asm__ __volatile__ ("dmb st" : : : "memory")  
+    #elif defined(__aarch64__)
+        #define dmb()  __asm__ __volatile__ ("dmb sy" : : : "memory")
+        #define rmb()  __asm__ __volatile__ ("dmb ld" : : : "memory")
+        #define wmb()  __asm__ __volatile__ ("dmb st" : : : "memory")
+    #else
+        #define dmb()  __sync_synchronize()
+        #define rmb()  __sync_synchronize()
+        #define wmb()  __sync_synchronize()
+    #endif
+
+    Program bir bütün olarak aşağıda verilmiştir.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-mmap.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>   
+
+#define GPIO_CHIP0_BASE  0x44E07000
+#define GPIO_CHIP1_BASE  0x4804C000
+#define GPIO_CHIP2_BASE  0x481AC000
+#define GPIO_CHIP3_BASE  0x481AE000
+
+#define GPIO_OE                             0x134
+#define GPIO_DATAIN                         0x138
+#define GPIO_DATAOUT                        0x13C
+#define GPIO_CLEARDATAOUT                   0x190
+#define GPIO_SETDATAOUT                     0x194
+
+#ifdef __arm__
+    #define dmb()  __asm__ __volatile__ ("dmb" : : : "memory")
+    #define rmb()  __asm__ __volatile__ ("dmb" : : : "memory")          
+    #define wmb()  __asm__ __volatile__ ("dmb st" : : : "memory")  
+#elif defined(__aarch64__)
+    #define dmb()  __asm__ __volatile__ ("dmb sy" : : : "memory")
+    #define rmb()  __asm__ __volatile__ ("dmb ld" : : : "memory")
+    #define wmb()  __asm__ __volatile__ ("dmb st" : : : "memory")
+#else
+    #define dmb()  __sync_synchronize()
+    #define rmb()  __sync_synchronize()
+    #define wmb()  __sync_synchronize()
+#endif
+
+void exit_sys(const char *msg);
+
+static inline void set_bit(volatile uint32_t *gpio_reg, int offset)
+{
+    *gpio_reg |= 1 << offset;  
+    wmb();
+}
+
+static inline void clear_bit(volatile uint32_t *gpio_reg, int offset)
+{
+    *gpio_reg &= ~(1 << offset);
+    wmb();
+}
+
+int main(void)
+{
+    int fd;
+    volatile uint8_t *gpio_base;
+    volatile uint32_t *gpio_reg;
+
+    if ((fd = open("/dev/mem", O_RDWR|O_SYNC)) == -1) 
+       exit_sys("open");
+        
+    if ((gpio_base = (volatile uint8_t *)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, GPIO_CHIP1_BASE)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    clear_bit(gpio_reg, 28);
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAOUT);
+
+        for (int i = 0; i < 10; ++i) {
+            set_bit(gpio_reg, 28);
+            sleep(1);
+            clear_bit(gpio_reg, 28)   ;
+            sleep(1);
+        }
+
+    munmap((void *)gpio_base, 4096);
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de GPIO denetleyicisinin GPIO_DATAIN yazmacını okuyarak belli bir pinin değerini elde edelim. Bunun için yine 
+    aşağıdaki hazırlık işlemleri yapılır:
+
+    if ((fd = open("/dev/mem", O_RDWR|O_SYNC)) == -1) 
+       exit_sys("open");
+        
+    if ((gpio_base = (volatile uint8_t *)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, GPIO_CHIP1_BASE)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    set_bit(gpio_reg, 19);
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAIN);
+
+    Pini okumak için read_bit isimli bir fonksiyon yazdık:
+
+    
+    static inline int read_bit(const volatile uint32_t *gpio_reg, int offset)
+    {
+        int first_val, second_val;
+
+        for (int i = 0; i < TRYNUM; ++i) {
+            first_val = *gpio_reg >> offset & 1;
+            rmb();
+
+            usleep(5000);
+
+            second_val = *gpio_reg >> offset & 1;
+            rmb();
+
+            if (first_val == second_val)
+                return second_val;
+        }
+
+        return second_val;
+    }
+
+    Burada "debouncing" sorununu çözmek için iki ardııl okumanın aynı değerde olup olmadığına baktık. Eğer az bir bekleme 
+    ile iki okuma aynı değeri veriyorsa bir "debounce" durumu oluşmamıştır. Tüm denemeler sonucunda hala "debounce" oluşmuşsa
+    artık yapılacak bir şey olmadığı için son değerle geri döndük.
+
+    Programın tüm kodları aşağıda verilmiştir:
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-mmap-read.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>   
+
+#define GPIO_CHIP0_BASE  0x44E07000
+#define GPIO_CHIP1_BASE  0x4804C000
+#define GPIO_CHIP2_BASE  0x481AC000
+#define GPIO_CHIP3_BASE  0x481AE000
+
+#define GPIO_OE                             0x134
+#define GPIO_DATAIN                         0x138
+#define GPIO_DATAOUT                        0x13C
+#define GPIO_CLEARDATAOUT                   0x190
+#define GPIO_SETDATAOUT                     0x194
+
+#define TRYNUM                              10
+
+#ifdef __arm__
+    #define dmb()  __asm__ __volatile__ ("dmb" : : : "memory")
+    #define rmb()  __asm__ __volatile__ ("dmb" : : : "memory")          
+    #define wmb()  __asm__ __volatile__ ("dmb st" : : : "memory")  
+#elif defined(__aarch64__)
+    #define dmb()  __asm__ __volatile__ ("dmb sy" : : : "memory")
+    #define rmb()  __asm__ __volatile__ ("dmb ld" : : : "memory")
+    #define wmb()  __asm__ __volatile__ ("dmb st" : : : "memory")
+#else
+    #define dmb()  __sync_synchronize()
+    #define rmb()  __sync_synchronize()
+    #define wmb()  __sync_synchronize()
+#endif
+
+void exit_sys(const char *msg);
+
+static inline void set_bit(volatile uint32_t *gpio_reg, int offset)
+{
+    *gpio_reg |= 1 << offset;  
+    wmb();
+}
+
+static inline void clear_bit(volatile uint32_t *gpio_reg, int offset)
+{
+    *gpio_reg &= ~(1 << offset);
+    wmb();
+}
+
+static inline int read_bit(const volatile uint32_t *gpio_reg, int offset)
+{
+    int first_val, second_val;
+
+    for (int i = 0; i < TRYNUM; ++i) {
+        first_val = *gpio_reg >> offset & 1;
+        rmb();
+
+        usleep(5000);
+
+        second_val = *gpio_reg >> offset & 1;
+        rmb();
+
+        if (first_val == second_val)
+            return second_val;
+    }
+
+    return second_val;
+}
+
+int main(void)
+{
+    int fd;
+    volatile uint8_t *gpio_base;
+    volatile uint32_t *gpio_reg;
+    int bitval;
+
+    if ((fd = open("/dev/mem", O_RDWR|O_SYNC)) == -1) 
+       exit_sys("open");
+        
+    if ((gpio_base = (volatile uint8_t *)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, GPIO_CHIP1_BASE)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_OE);
+    set_bit(gpio_reg, 19);
+    gpio_reg = (uint32_t *) (gpio_base + GPIO_DATAIN);
+
+    for (int i = 0; i < 10; ++i) {
+        bitval = read_bit(gpio_reg, 19);
+        printf("%d\n", bitval);
+        sleep(1);
+    }
+
+    munmap((void *)gpio_base, 4096);
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                    138. Ders 30/10/2025 - Perşembe
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de bellek tabanlı IO ile GPIO denetleyicisine erişerek okuma yazma yapan bir karakter aygıt sürücüsü yazalım. 
+    Aygıt sürücümüzün init fonksiyonunda GPIO denetleyicilerinin fiziksel adresleri sanal adreslere dönüştürülmüşütür:
+
+    for (i = 0; i < NGPIO_CHIPS; ++i) {
+        g_gpio_base_addrs[i] = ioremap(gpio_physical_addrs[i], 4096);
+        if (g_gpio_base_addrs[i] == NULL) {
+            for (k = 0; k < i; ++k)
+                iounmap(g_gpio_base_addrs[k]);
+            return -ENOMEM;
+        }
+    }
+
+    Buradaki gpio_physical_addrs denetleyicilerin taban adreslerini belirtmektedir. Bu taban adresler zaten üretici firma 
+    tarafından verilmektedir:
+
+    #define GPIO_CHIP0_BASE         0x44E07000
+    #define GPIO_CHIP1_BASE         0x4804C000
+    #define GPIO_CHIP2_BASE         0x481AC000
+    #define GPIO_CHIP3_BASE         0x481AE000
+
+    unsigned long gpio_physical_addrs[NGPIO_CHIPS] = {
+        GPIO_CHIP0_BASE, 
+        GPIO_CHIP1_BASE, 
+        GPIO_CHIP2_BASE, 
+        GPIO_CHIP3_BASE
+    };
+
+    Aygıt sürücümüzün read ve write fonksiyonlarında GPIO aygıt sürücü pin numaralarını chip numarakarına ve chip'teki 
+    pin numaralarına dönüştürdük:
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    Burada PINS_PER_CHIP sembolik sabiti 32 değerindedir. Okuma ve yazma işlemlerinde önce ilgili pin IN ya da OUT olarak 
+    konfigüre edilmiş sonra okuma ve yazma yapılmıştır:
+
+    static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        int chip, pin, bitval;
+        uint32_t *gpio_reg;
+
+        if (size != 1)
+            return -EINVAL;
+
+        chip = *off / PINS_PER_CHIP;
+        pin = *off % PINS_PER_CHIP;
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+        iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+        gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAIN);
+        bitval = read_bit(gpio_reg, pin);
+
+        if (copy_to_user(buf, &"01"[bitval] , size) != 0)
+            return -EFAULT;
+
+        /* put_user("01"[bitval], buf); */
+
+        return size;
+    }
+
+    static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+    {
+        int chip, pin;
+        uint32_t *gpio_reg;
+        char ch;
+
+        if (size != 1) 
+            return -EINVAL;
+
+        chip = *off / PINS_PER_CHIP;
+        pin = *off % PINS_PER_CHIP;
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+        gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAOUT);
+        if (copy_from_user(&ch, buf, size) != 0)
+            return -EFAULT;
+        if (ch == '0')
+            iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+        else if (ch == '1')
+            iowrite32(ioread32(gpio_reg) | (1 << pin), gpio_reg);
+        else 
+            return -EINVAL;
+
+        return size;
+    }
+
+    Okuma yazma işlemleri karakter düzeyinde yani '0' ve '1' biçiminde yapılmaktadır. Okuma yazma işlemlerinin dosya göstericisinin
+    gösterdiği offset'e ilişkin pin numarsından yapıldığına dikkat ediniz. Ancak okuma yazma sonrasında aygıt sürücümüzün 
+    read ve write fonksiyonları dosya göstericisinin konumunu değiştirmemektedir. Tabii bizim lseek işleminde offset'i de aygıt 
+    sürücümüz içerisinde konumlandırmamız gerekmektedir:
+
+    static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
+    {
+        loff_t newpos;
+
+        switch (whence) {
+            case 0:
+                newpos = off;
+                break;
+            case 1:
+                newpos = filp->f_pos + off;
+                break;
+            case 2:
+                newpos = (4 * PINS_PER_CHIP) + off;
+                break;
+            default:
+                return -EINVAL;
+        }
+        if (newpos < 0 || newpos >= 128)
+            return -EINVAL;
+
+        filp->f_pos = newpos;
+
+        return newpos;
+    }
+
+    Aygıt sürücümüzde herhangi bir ioctl komutunu bulundurmadık. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/delay.h>
+#include <asm/io.h>
+#include "gpio-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("gpio-driver");
+
+#define GPIO_CHIP0_BASE         0x44E07000
+#define GPIO_CHIP1_BASE         0x4804C000
+#define GPIO_CHIP2_BASE         0x481AC000
+#define GPIO_CHIP3_BASE         0x481AE000
+
+#define NGPIO_CHIPS             4
+#define PINS_PER_CHIP           32
+
+#define GPIO_OE                 0x134
+#define GPIO_DATAIN             0x138
+#define GPIO_DATAOUT            0x13C
+#define GPIO_CLEARDATAOUT       0x190
+#define GPIO_SETDATAOUT         0x194
+
+#define TRYNUM                  10
+
+static int gpio_open(struct inode *inodep, struct file *filp);
+static int gpio_release(struct inode *inodep, struct file *filp);
+static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static loff_t gpio_llseek(struct file *filp, loff_t off, int whence);
+static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static inline int read_bit(const uint32_t *gpio_reg, int offset);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = gpio_open,
+	.read = gpio_read,
+    .write = gpio_write,
+	.llseek = gpio_llseek,
+    .release = gpio_release,
+    .unlocked_ioctl = gpio_driver_ioctl
+};
+
+uint8_t *g_gpio_base_addrs[NGPIO_CHIPS];
+
+static int __init gpio_init(void)
+{
+	int result;
+    int i, k;
+    unsigned long gpio_physical_addrs[NGPIO_CHIPS] = {
+        GPIO_CHIP0_BASE, 
+        GPIO_CHIP1_BASE, 
+        GPIO_CHIP2_BASE, 
+        GPIO_CHIP3_BASE
+    };
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "gpio-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+    for (i = 0; i < NGPIO_CHIPS; ++i) {
+        g_gpio_base_addrs[i] = ioremap(gpio_physical_addrs[i], 4096);
+        if (g_gpio_base_addrs[i] == NULL) {
+            for (k = 0; k < i; ++k)
+                iounmap(g_gpio_base_addrs[k]);
+            return -ENOMEM;
+        }
+    }
+
+    printk(KERN_INFO "gpio-driver module initialization...\n");
+
+	return 0;
+}
+
+static void __exit gpio_exit(void)
+{
+    int i;
+
+    for (i = 0; i < NGPIO_CHIPS; ++i)
+        iounmap(g_gpio_base_addrs[i]);
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+    
+	printk(KERN_INFO "gpio-driver module exit...\n");
+}
+
+static int gpio_open(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "gpio-driver opened...\n");
+
+	return 0;
+}
+
+static int gpio_release(struct inode *inodep, struct file *filp)
+{
+	printk(KERN_INFO "gpio-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+    int chip, pin, bitval;
+    uint32_t *gpio_reg;
+
+    if (size != 1)
+        return -EINVAL;
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+    gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAIN);
+    bitval = read_bit(gpio_reg, pin);
+
+    if (copy_to_user(buf, &"01"[bitval] , size) != 0)
+        return -EFAULT;
+
+    /* put_user("01"[bitval], buf); */
+
+	return size;
+}
+
+static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+    int chip, pin;
+    uint32_t *gpio_reg;
+    char ch;
+
+    if (size != 1) 
+        return -EINVAL;
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAOUT);
+    if (copy_from_user(&ch, buf, size) != 0)
+        return -EFAULT;
+    if (ch == '0')
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    else if (ch == '1')
+        iowrite32(ioread32(gpio_reg) | (1 << pin), gpio_reg);
+    else 
+        return -EINVAL;
+
+	return size;
+}
+
+static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
+{
+    loff_t newpos;
+
+    switch (whence) {
+        case 0:
+            newpos = off;
+            break;
+        case 1:
+            newpos = filp->f_pos + off;
+            break;
+        case 2:
+            newpos = (4 * PINS_PER_CHIP) + off;
+            break;
+        default:
+            return -EINVAL;
+    }
+    if (newpos < 0 || newpos >= 128)
+        return -EINVAL;
+
+    filp->f_pos = newpos;
+
+    return newpos;
+}
+
+static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+ 
+    switch (cmd) {
+        case IOC_GPIO_TEST:
+            break;
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+static inline int read_bit(const uint32_t *gpio_reg, int offset)
+{
+    int i;
+    int first_val, second_val;
+
+    for (i = 0; i < TRYNUM; ++i) {
+        first_val = ioread32(gpio_reg) >> offset & 1;
+        msleep(5);
+        second_val = ioread32(gpio_reg) >> offset & 1;
+        if (first_val == second_val)
+            return second_val;
+    }
+
+    return second_val;
+}
+
+module_init(gpio_init);
+module_exit(gpio_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* gpio-driver-test-read.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char ch;
+
+    if ((fd = open("gpio-driver", O_RDWR)) == -1) 
+        exit_sys("open");
+    
+    lseek(fd, 51, 0);
+    for (int i = 0; i < 10; ++i) {
+        if (read(fd, &ch, 1) == -1)
+            exit_sys("read");
+        printf("%c\n", ch);
+        sleep(1);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/* gpio-driver-test-write.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char ch;
+
+    if ((fd = open("gpio-driver", O_RDWR)) == -1) 
+        exit_sys("open");
+    
+    lseek(fd, 60, 0);
+    for (int i = 0; i < 10; ++i) {
+        ch = '1';
+        if (write(fd, &ch, 1) == -1)
+            exit_sys("write");
+        sleep(1);
+
+        ch = '0';
+        if (write(fd, &ch, 1) == -1)
+            exit_sys("write");
+        sleep(1);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de yukarıdaki aygıt sürücümüze kesme özelliği ekleyelim. Anımsanacağı gibi aygıt sürücülerde kesme oluştuğunda 
+    belirlenen fonksiyonun çağrılması için request_irq isimli bir çekirdek fonksiyonu kullanılıyordu. İşlem bittiğinde de 
+    ele alınan kesme free_irq fonksiyonu ile geri bırkılıyordu. Peki BBB'nin GPIO denetleyicisi hangi IRQ numaralarını 
+    kullanmaktadır? İşte BBB'deki dört adet GPII denetleyicisinin kullandığı IRQ numaraları baştan bellidir. Bazı kartlardaki
+    IRQ hatları programlama yoluyla değiştirilebilmektedir. Dolayısıyla o kartlarda kartın kullandığı IRQ numaralarını 
+    "aygıt ağacı (device tree)" üzeirnden değiştirmek mümkün olabilmektedir. Ancak BBB'deki AM335x SoC'undaki denetleyiciler 
+    için bu mümkün değildir. BBB'deki GPIO denetyelyicilerinin IRQ numaraları şöyledir:
+
+    GPIO0: IRQ 96 ve IRQ 97
+    GPIO1: IRQ 98 ve IRQ 99
+    GPIO2: IRQ 32 ve IRQ 33
+    GPIO3: IRQ 62 ve IRQ 63
+
+    Aslında Linux çekirdeğinde aygıt sürücü fırmatında verilen GPIO numarasına ilişkin kesmeyi veren gpio_to_irq isimli 
+    bir fonksiyon da bulunmaktadır:
+
+    #include <linux/gpio.h>
+
+    static int gpio_to_irq(unsigned gpio);
+
+    Fonksiyonun geri dönüş değeri >= 0 ise fonksiyon IRQ numarasına, < 0 ise negatif errno değerine geri dönmektedir. 
+
+    Bu biçimdeki aygıt sürücülerde IRQ'nun set edilmesi bir ioctl koduna yaptırılmalıdır. Örneğin:
+
+    static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+    {
+        long result;
+    
+        switch (cmd) {
+            case IOC_GPIO_IRQ_SET:
+                result = set_gpio_irq(arg);
+                break;
+            default:
+                result = -ENOTTY;
+        }
+
+        return result;
+    }
+
+    Burada IOC_GPIO_IRQ_SET ioctl komutu oluştuğunda set_gpio_irq fonksiyonu çağrılacaktır. Tabii kullanıcı modundan IRQ'yu
+    set etmek isteyen kişi irq numarasını ve irq türünü belirtmelidir. Bu bilgileri bir yapı biçiminde ifade edebiliriz:
+
+    enum IRQ_TYPE {
+        IRQ_TYPE_EDGE_RISING,
+        IRQ_TYPE_EDGE_FALLING,
+        IRQ_TYPE_EDGE_BOTH,
+        IRQ_TYPE_LEVEL_HIGH,
+        IRQ_TYPE_LEVEL_LOW,
+    };
+
+    struct IRQ_INFO {
+        int gpio_pin;
+        enum IRQ_TYPE irq_type;       
+    };
+
+    İşte ioctl fonksiyonun üçüncü parametresine IRQ_INFO türünden bir yaı nesnesinin adresi geçirilmektedir. 
+
+    BBB'nin GPIO denetleyicilerinde IRQ'nun set edilmesi için aşağıdaki yazmaçlar kullanılmaktadır:
+
+    #define GPIO_IRQSTATUS_0        0x2C
+    #define GPIO_IRQSTATUS_1        0x30
+    #define GPIO_IRQSTATUS_SET_0    0x34
+    #define GPIO_IRQSTATUS_SET_1    0x38
+    #define GPIO_IRQSTATUS_CLR_0    0x3C
+    #define GPIO_IRQSTATUS_CLR_1    0x40
+
+    Burada _0 ve _1 sonekli sembolik sabitler görüyorsunuz. Yukarıda da belirttiğimiz gibi aslında her GPIO denetleyicisi 
+    iki IRQ hattı kullanabilmektedir. _0 sonekli hat ilk hat, _1 sonekli hat ise diğer hattır. Tabii sistem programcısı 
+    tipik olarak bunlardan birini hedef alır. Biz de uygulamamızda _0'lı olanları kullanacağız. GPIO_IRQSTATUS_SET_0 yazmacının
+    ilgili biti 1 yapılırsa o bite ilişkin pin kesmelere açılır. GPIO_IRQSTATUS_CLR_0 yazmacında ise 1 yapılan bite ilişkin 
+    pin kesmeye kapatılmaktadır. O halde ilgili pini kesmeye açmak için GPIO_IRQSTATUS_SET_0 yazmacının ilgili bitini 
+    diğer bitlere dokunmadan 1 yapmamız gerekir. Bu yazmaçlar aynı zamanda okunabilmektedir. Bu yazmaçlar okunduğunda pinlerin
+    kesmelere açık olup olmadığı bilgisi elde edilmektedir. Burada isminde SET ya da CLR olmayan GPIO_IRQSTATUS_0 ve 
+    GPIO_IRQSTATUS_1 biçiminde iki yazmaç daha görüyorsunuz. Bu yazmaçlar okunduğunda ilgili pinlerin kesmelere karşı 
+    kapatılıp kapatılmadığı bilgisi elde edilmektedir. Ancak bu yazmaçlar yazma amacıyla kullanıldığında "kesmeyi işlediğini 
+    denetleyiciye bildirme (acknowledge)" görevini yapmaktadır. Bir kesme oluşup bizim fonksiyonumuz çağrıldığında eğer biz
+    kesme kodundan bu işlemi yapmadan ayrılırsak kesmeden geri döndüğümüzde sürekli aynı kesme oluşacaktır. Bu duruma 
+    İngilizce "IRQ storm" da denilmektedir. 
+
+    İlgili pini kesme türüne göre konfigüre edebilmek için şu yazmaçlar kullanılmaktadır:
+
+    #define GPIO_LEVELDETECT0       0x140
+    #define GPIO_LEVELDETECT1       0x144
+    #define GPIO_RISINGDETECT       0x148
+    #define GPIO_FALLINGDETECT      0x14C
+
+    Bu yazmaçların ilgili bitler 1 yapıldığında pin ilgili türe konfigüre edilmiş olur. Örneğin bizim chpi1'in 19 numaralı 
+    ucunı (yani GPIO51 pinini) düşen kenar tetiklemeli olarak konfigüre etmemiz için GPIO_FALLINGDETECT yazmacının 19 numaralı 
+    bitini 1 yapmamız gerekir. Ancak set işlemlerinde güvenlik amacıyla bir yazmacın bir biti set edilirken diğer yazmaçların
+    diğer bitlerinin clear edilmesi uygun olur. Çünkü aynı bit birden fazla yazmaçta set edilmişse birden fazla olay yüzüenden 
+    kesme oluşur. Tabii bir ucu kesme olarak konfigüre etmedne önce onun aynı zamanda IN olarak konfigüre edilmesi de 
+    gerekmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    <BURADA KALDIK>
+---------------------------------------------------------------------------------------------------------------------------*/
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/* gpio-driver-with-irq.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/delay.h>
+#include <linux/interrupt.h>
+#include <linux/wait.h>
+#include <linux/sched.h>
+#include <asm/io.h>
+#include "gpio-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("gpio-driver with interrupt support");
+
+#define GPIO_CHIP0_BASE         0x44E07000
+#define GPIO_CHIP1_BASE         0x4804C000
+#define GPIO_CHIP2_BASE         0x481AC000
+#define GPIO_CHIP3_BASE         0x481AE000
+
+#define NGPIO_CHIPS             4
+#define PINS_PER_CHIP           32
+
+/* GPIO Registers */
+#define GPIO_OE                 0x134
+#define GPIO_DATAIN             0x138
+#define GPIO_DATAOUT            0x13C
+#define GPIO_CLEARDATAOUT       0x190
+#define GPIO_SETDATAOUT         0x194
+
+/* Interrupt Registers */
+#define GPIO_IRQSTATUS_0        0x2C
+#define GPIO_IRQSTATUS_1        0x30
+#define GPIO_IRQSTATUS_SET_0    0x34
+#define GPIO_IRQSTATUS_SET_1    0x38
+#define GPIO_IRQSTATUS_CLR_0    0x3C
+#define GPIO_IRQSTATUS_CLR_1    0x40
+#define GPIO_LEVELDETECT0       0x140
+#define GPIO_LEVELDETECT1       0x144
+#define GPIO_RISINGDETECT       0x148
+#define GPIO_FALLINGDETECT      0x14C
+
+#define TRYNUM                  10
+
+/* AM335x GPIO IRQ Numbers */
+#define GPIO0_IRQ               96
+#define GPIO1_IRQ               98
+#define GPIO2_IRQ               32
+#define GPIO3_IRQ               62
+
+/* Interrupt configuration structure */
+typedef struct {
+    int chip;               /* GPIO chip number (0-3) */
+    int pin;                /* Pin number (0-31) */
+    int irq_num;            /* Linux IRQ number */
+    int enabled;            /* Interrupt enabled flag */
+    unsigned long count;    /* Interrupt counter */
+    wait_queue_head_t wait; /* Wait queue for blocking read */
+    int data_ready;         /* Data ready flag */
+} gpio_irq_info_t;
+
+static gpio_irq_info_t g_gpio_irq_info = {
+    .chip = -1,
+    .pin = -1,
+    .irq_num = -1,
+    .enabled = 0,
+    .count = 0,
+    .data_ready = 0
+};
+
+static int gpio_open(struct inode *inodep, struct file *filp);
+static int gpio_release(struct inode *inodep, struct file *filp);
+static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static loff_t gpio_llseek(struct file *filp, loff_t off, int whence);
+static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static inline int read_bit(const uint32_t *gpio_reg, int offset);
+static irqreturn_t gpio_irq_handler(int irq, void *dev_id);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+    .owner = THIS_MODULE,
+    .open = gpio_open,
+    .read = gpio_read,
+    .write = gpio_write,
+    .llseek = gpio_llseek,
+    .release = gpio_release,
+    .unlocked_ioctl = gpio_driver_ioctl
+};
+
+uint8_t *g_gpio_base_addrs[NGPIO_CHIPS];
+
+/* GPIO interrupt handler */
+static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
+{
+    gpio_irq_info_t *info = (gpio_irq_info_t *)dev_id;
+    uint32_t *irq_status_reg;
+    uint32_t status;
+    
+    if (!info || info->chip < 0 || info->chip >= NGPIO_CHIPS) {
+        return IRQ_NONE;
+    }
+    
+    /* Read interrupt status */
+    irq_status_reg = (uint32_t *)(g_gpio_base_addrs[info->chip] + GPIO_IRQSTATUS_0);
+    status = ioread32(irq_status_reg);
+    
+    /* Check if our pin caused the interrupt */
+    if (!(status & (1 << info->pin))) {
+        return IRQ_NONE;  /* Not our interrupt */
+    }
+    
+    /* Clear interrupt status - IMPORTANT! */
+    iowrite32(1 << info->pin, irq_status_reg);
+    
+    /* Update statistics */
+    info->count++;
+    info->data_ready = 1;
+    
+    /* Wake up waiting processes */
+    wake_up_interruptible(&info->wait);
+    
+    printk(KERN_INFO "gpio-driver: Interrupt on chip %d, pin %d (count: %lu)\n",
+           info->chip, info->pin, info->count);
+    
+    return IRQ_HANDLED;
+}
+
+/* Configure GPIO pin for interrupt detection */
+static int gpio_setup_interrupt(int chip, int pin, int edge_type)
+{
+    uint32_t *reg;
+    int irq_numbers[NGPIO_CHIPS] = {GPIO0_IRQ, GPIO1_IRQ, GPIO2_IRQ, GPIO3_IRQ};
+    int result;
+    
+    if (chip < 0 || chip >= NGPIO_CHIPS || pin < 0 || pin >= PINS_PER_CHIP) {
+        printk(KERN_ERR "gpio-driver: Invalid chip (%d) or pin (%d)\n", chip, pin);
+        return -EINVAL;
+    }
+    
+    /* If interrupt already enabled, disable it first */
+    if (g_gpio_irq_info.enabled && g_gpio_irq_info.irq_num >= 0) {
+        /* Disable interrupt for this pin */
+        reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_IRQSTATUS_CLR_0);
+        iowrite32(1 << g_gpio_irq_info.pin, reg);
+        
+        /* Clear detection registers */
+        reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_FALLINGDETECT);
+        iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
+        reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_RISINGDETECT);
+        iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
+        
+        free_irq(g_gpio_irq_info.irq_num, &g_gpio_irq_info);
+        g_gpio_irq_info.enabled = 0;
+        printk(KERN_INFO "gpio-driver: Previous interrupt disabled\n");
+    }
+    
+    /* Setup new interrupt configuration */
+    g_gpio_irq_info.chip = chip;
+    g_gpio_irq_info.pin = pin;
+    g_gpio_irq_info.irq_num = irq_numbers[chip];
+    g_gpio_irq_info.count = 0;
+    g_gpio_irq_info.data_ready = 0;
+    
+    /* Configure pin as input */
+    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(reg) | (1 << pin), reg);
+    
+    /* Clear any pending interrupts */
+    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_IRQSTATUS_0);
+    iowrite32(1 << pin, reg);
+    
+    /* Disable level detection */
+    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT0);
+    iowrite32(ioread32(reg) & ~(1 << pin), reg);
+    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT1);
+    iowrite32(ioread32(reg) & ~(1 << pin), reg);
+    
+    /* Configure edge detection based on type */
+    if (edge_type == 0 || edge_type == 2) {  /* Falling edge or both */
+        reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_FALLINGDETECT);
+        iowrite32(ioread32(reg) | (1 << pin), reg);
+        printk(KERN_INFO "gpio-driver: Falling edge detection enabled\n");
+    }
+    
+    if (edge_type == 1 || edge_type == 2) {  /* Rising edge or both */
+        reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_RISINGDETECT);
+        iowrite32(ioread32(reg) | (1 << pin), reg);
+        printk(KERN_INFO "gpio-driver: Rising edge detection enabled\n");
+    }
+    
+    /* Request IRQ */
+    result = request_irq(g_gpio_irq_info.irq_num,
+                        gpio_irq_handler,
+                        IRQF_SHARED,
+                        "gpio-driver-irq",
+                        &g_gpio_irq_info);
+    
+    if (result) {
+        printk(KERN_ERR "gpio-driver: Cannot request IRQ %d (error %d)\n",
+               g_gpio_irq_info.irq_num, result);
+        g_gpio_irq_info.chip = -1;
+        g_gpio_irq_info.pin = -1;
+        g_gpio_irq_info.irq_num = -1;
+        return result;
+    }
+    
+    /* Enable interrupt for this pin */
+    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_IRQSTATUS_SET_0);
+    iowrite32(1 << pin, reg);
+    
+    g_gpio_irq_info.enabled = 1;
+    
+    printk(KERN_INFO "gpio-driver: Interrupt configured for chip %d, pin %d (IRQ %d)\n",
+           chip, pin, g_gpio_irq_info.irq_num);
     
     return 0;
 }
 
+/* Disable interrupt */
+static void gpio_disable_interrupt(void)
+{
+    uint32_t *reg;
+    
+    if (!g_gpio_irq_info.enabled || g_gpio_irq_info.chip < 0) {
+        return;
+    }
+    
+    /* Disable interrupt for this pin */
+    reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_IRQSTATUS_CLR_0);
+    iowrite32(1 << g_gpio_irq_info.pin, reg);
+    
+    /* Clear detection registers */
+    reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_FALLINGDETECT);
+    iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
+    reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_RISINGDETECT);
+    iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
+    
+    free_irq(g_gpio_irq_info.irq_num, &g_gpio_irq_info);
+    
+    g_gpio_irq_info.enabled = 0;
+    g_gpio_irq_info.chip = -1;
+    g_gpio_irq_info.pin = -1;
+    g_gpio_irq_info.irq_num = -1;
+    
+    printk(KERN_INFO "gpio-driver: Interrupt disabled\n");
+}
+
+static int __init gpio_init(void)
+{
+    int result;
+    int i, k;
+    unsigned long gpio_physical_addrs[NGPIO_CHIPS] = {
+        GPIO_CHIP0_BASE, 
+        GPIO_CHIP1_BASE, 
+        GPIO_CHIP2_BASE, 
+        GPIO_CHIP3_BASE
+    };
+
+    if ((result = alloc_chrdev_region(&g_dev, 0, 1, "gpio-driver")) < 0) {
+        printk(KERN_INFO "cannot alloc char driver!...\n");
+        return result;
+    }
+    cdev_init(&g_cdev, &g_fops);
+    if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+        unregister_chrdev_region(g_dev, 1);
+        printk(KERN_ERR "cannot add device!...\n");
+        return result;
+    }
+
+    for (i = 0; i < NGPIO_CHIPS; ++i) {
+        g_gpio_base_addrs[i] = ioremap(gpio_physical_addrs[i], 4096);
+        if (g_gpio_base_addrs[i] == NULL) {
+            for (k = 0; k < i; ++k)
+                iounmap(g_gpio_base_addrs[k]);
+            cdev_del(&g_cdev);
+            unregister_chrdev_region(g_dev, 1);
+            return -ENOMEM;
+        }
+    }
+    
+    /* Initialize wait queue */
+    init_waitqueue_head(&g_gpio_irq_info.wait);
+
+    printk(KERN_INFO "gpio-driver module initialization (with IRQ support)...\n");
+
+    return 0;
+}
+
+static void __exit gpio_exit(void)
+{
+    int i;
+    
+    /* Disable any active interrupt */
+    gpio_disable_interrupt();
+
+    for (i = 0; i < NGPIO_CHIPS; ++i)
+        iounmap(g_gpio_base_addrs[i]);
+    cdev_del(&g_cdev);
+    unregister_chrdev_region(g_dev, 1);
+    
+    printk(KERN_INFO "gpio-driver module exit...\n");
+}
+
+static int gpio_open(struct inode *inodep, struct file *filp)
+{
+    printk(KERN_INFO "gpio-driver opened...\n");
+    return 0;
+}
+
+static int gpio_release(struct inode *inodep, struct file *filp)
+{
+    printk(KERN_INFO "gpio-driver closed...\n");
+    return 0;
+}
+
+static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+    int chip, pin, bitval;
+    uint32_t *gpio_reg;
+    char data[32];
+    int len;
+
+    if (size < 1)
+        return -EINVAL;
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    /* Check if this is the interrupt-configured pin and user wants to wait for interrupt */
+    if (chip == g_gpio_irq_info.chip && pin == g_gpio_irq_info.pin && 
+        g_gpio_irq_info.enabled && size > 1) {
+        
+        /* Wait for interrupt */
+        if (wait_event_interruptible(g_gpio_irq_info.wait, g_gpio_irq_info.data_ready)) {
+            return -ERESTARTSYS;
+        }
+        
+        g_gpio_irq_info.data_ready = 0;
+        
+        /* Return interrupt count */
+        len = snprintf(data, sizeof(data), "%lu\n", g_gpio_irq_info.count);
+        if (len > size)
+            len = size;
+        
+        if (copy_to_user(buf, data, len) != 0)
+            return -EFAULT;
+        
+        return len;
+    }
+    
+    /* Normal read operation */
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+    gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAIN);
+    bitval = read_bit(gpio_reg, pin);
+
+    if (copy_to_user(buf, &"01"[bitval], 1) != 0)
+        return -EFAULT;
+
+    return 1;
+}
+
+static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+    int chip, pin;
+    uint32_t *gpio_reg;
+    char ch;
+
+    if (size != 1) 
+        return -EINVAL;
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAOUT);
+    if (copy_from_user(&ch, buf, size) != 0)
+        return -EFAULT;
+    if (ch == '0')
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    else if (ch == '1')
+        iowrite32(ioread32(gpio_reg) | (1 << pin), gpio_reg);
+    else 
+        return -EINVAL;
+
+    return size;
+}
+
+static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
+{
+    loff_t newpos;
+
+    switch (whence) {
+        case 0:
+            newpos = off;
+            break;
+        case 1:
+            newpos = filp->f_pos + off;
+            break;
+        case 2:
+            newpos = 128 + off;
+            break;
+        default:
+            return -EINVAL;
+    }
+    if (newpos < 0 || newpos >= 128)
+        return -EINVAL;
+
+    filp->f_pos = newpos;
+
+    return newpos;
+}
+
+static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result = 0;
+    gpio_irq_config_t config;
+ 
+    switch (cmd) {
+        case IOC_GPIO_IRQ_CONFIG:
+            /* Configure interrupt for a specific pin */
+            if (copy_from_user(&config, (void __user *)arg, sizeof(config)) != 0) {
+                return -EFAULT;
+            }
+            
+            printk(KERN_INFO "gpio-driver: Configuring IRQ - chip: %d, pin: %d, edge: %d\n",
+                   config.chip, config.pin, config.edge_type);
+            
+            result = gpio_setup_interrupt(config.chip, config.pin, config.edge_type);
+            break;
+            
+        case IOC_GPIO_IRQ_DISABLE:
+            /* Disable interrupt */
+            gpio_disable_interrupt();
+            break;
+            
+        case IOC_GPIO_IRQ_STATUS:
+            /* Get interrupt status */
+            if (copy_to_user((void __user *)arg, &g_gpio_irq_info.count, sizeof(unsigned long)) != 0) {
+                return -EFAULT;
+            }
+            break;
+            
+        case IOC_GPIO_TEST:
+            printk(KERN_INFO "gpio-driver: Test ioctl called\n");
+            break;
+            
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+static inline int read_bit(const uint32_t *gpio_reg, int offset)
+{
+    int i;
+    int first_val, second_val;
+
+    for (i = 0; i < TRYNUM; ++i) {
+        first_val = ioread32(gpio_reg) >> offset & 1;
+        msleep(5);
+        second_val = ioread32(gpio_reg) >> offset & 1;
+        if (first_val == second_val)
+            return second_val;
+    }
+
+    return second_val;
+}
+
+module_init(gpio_init);
+module_exit(gpio_exit);
+
+╔═════╦═══════════╦═══════════════╦════════════════════════════╗
+║  #  ║ BCM GPIO  ║ Fiziksel Pin  ║   Alternatif Fonksiyon     ║
+╠═════╬═══════════╬═══════════════╬════════════════════════════╣
+║  1  ║  GPIO0    ║    Pin 27     ║ ID_SD (I2C0 SDA - EEPROM)  ║
+║  2  ║  GPIO1    ║    Pin 28     ║ ID_SC (I2C0 SCL - EEPROM)  ║
+║  3  ║  GPIO2    ║    Pin 3      ║ I2C1 SDA                   ║
+║  4  ║  GPIO3    ║    Pin 5      ║ I2C1 SCL                   ║
+║  5  ║  GPIO4    ║    Pin 7      ║ GPCLK0                     ║
+║  6  ║  GPIO5    ║    Pin 29     ║ GPIO                       ║
+║  7  ║  GPIO6    ║    Pin 31     ║ GPIO                       ║
+║  8  ║  GPIO7    ║    Pin 26     ║ SPI0 CE1                   ║
+║  9  ║  GPIO8    ║    Pin 24     ║ SPI0 CE0                   ║
+║ 10  ║  GPIO9    ║    Pin 21     ║ SPI0 MISO                  ║
+║ 11  ║  GPIO10   ║    Pin 19     ║ SPI0 MOSI                  ║
+║ 12  ║  GPIO11   ║    Pin 23     ║ SPI0 SCLK                  ║
+║ 13  ║  GPIO12   ║    Pin 32     ║ PWM0                       ║
+║ 14  ║  GPIO13   ║    Pin 33     ║ PWM1                       ║
+║ 15  ║  GPIO14   ║    Pin 8      ║ UART0 TXD                  ║
+║ 16  ║  GPIO15   ║    Pin 10     ║ UART0 RXD                  ║
+║ 17  ║  GPIO16   ║    Pin 36     ║ GPIO                       ║
+║ 18  ║  GPIO17   ║    Pin 11     ║ GPIO                       ║
+║ 19  ║  GPIO18   ║    Pin 12     ║ PWM0 / PCM CLK             ║
+║ 20  ║  GPIO19   ║    Pin 35     ║ PWM1 / PCM FS              ║
+║ 21  ║  GPIO20   ║    Pin 38     ║ PCM DIN                    ║
+║ 22  ║  GPIO21   ║    Pin 40     ║ PCM DOUT                   ║
+║ 23  ║  GPIO22   ║    Pin 15     ║ GPIO                       ║
+║ 24  ║  GPIO23   ║    Pin 16     ║ GPIO                       ║
+║ 25  ║  GPIO24   ║    Pin 18     ║ GPIO                       ║
+║ 26  ║  GPIO25   ║    Pin 22     ║ GPIO                       ║
+║ 27  ║  GPIO26   ║    Pin 37     ║ GPIO                       ║
+║ 28  ║  GPIO27   ║    Pin 13     ║ GPIO                       ║
+╚═════╩═══════════╩═══════════════╩════════════════════════════╝
+```
+
+### 🔷 40-Pin Başlık Şeması (Fiziksel Görünüm)
+```
+╔═══════════════════════════════════════════════════════════════╗
+║           RASPBERRY PI 40-PIN GPIO HEADER                     ║
+║                                                               ║
+║  ◉ = 3.3V Power    ◎ = 5V Power    ⊞ = Ground (GND)         ║
+╚═══════════════════════════════════════════════════════════════╝
+
+    ┌────────────────────────────────────────────────┐
+    │                                                │
+ 1  │ ◉  3.3V Power              5V Power  ◎        │ 2
+ 3  │ •  GPIO2   (I2C1 SDA)      5V Power  ◎        │ 4
+ 5  │ •  GPIO3   (I2C1 SCL)      Ground    ⊞        │ 6
+ 7  │ •  GPIO4   (GPCLK0)        GPIO14    •  (TX)  │ 8
+ 9  │ ⊞  Ground                  GPIO15    •  (RX)  │ 10
+11  │ •  GPIO17                  GPIO18    •  (PWM) │ 12
+13  │ •  GPIO27                  Ground    ⊞        │ 14
+15  │ •  GPIO22                  GPIO23    •        │ 16
+17  │ ◉  3.3V Power              GPIO24    •        │ 18
+19  │ •  GPIO10  (MOSI)          Ground    ⊞        │ 20
+21  │ •  GPIO9   (MISO)          GPIO25    •        │ 22
+23  │ •  GPIO11  (SCLK)          GPIO8     •  (CE0) │ 24
+25  │ ⊞  Ground                  GPIO7     •  (CE1) │ 26
+27  │ •  GPIO0   (ID_SD)         GPIO1     •  (ID)  │ 28
+29  │ •  GPIO5                   Ground    ⊞        │ 30
+31  │ •  GPIO6                   GPIO12    •  (PWM) │ 32
+33  │ •  GPIO13  (PWM)           Ground    ⊞        │ 34
+35  │ •  GPIO19  (PWM)           GPIO16    •        │ 36
+37  │ •  GPIO26                  GPIO20    •  (PCM) │ 38
+39  │ ⊞  Ground                  GPIO21    •  (PCM) │ 40
+    │                                                │
+    └────────────────────────────────────────────────┘
+```
+
+### 🔸 Detaylı Pin Haritası (İki Sütun)
+```
+╔════════════════════════════════╦════════════════════════════════╗
+║         SOL SÜTUN (Tek)        ║        SAĞ SÜTUN (Çift)        ║
+╠════════════════════════════════╬════════════════════════════════╣
+║ Pin 1  │ ◉  3.3V               ║ Pin 2  │ ◎  5V                 ║
+║ Pin 3  │ •  GPIO2  (I2C SDA)   ║ Pin 4  │ ◎  5V                 ║
+║ Pin 5  │ •  GPIO3  (I2C SCL)   ║ Pin 6  │ ⊞  GND                ║
+║ Pin 7  │ •  GPIO4  (GPCLK0)    ║ Pin 8  │ •  GPIO14 (UART TX)   ║
+║ Pin 9  │ ⊞  GND                ║ Pin 10 │ •  GPIO15 (UART RX)   ║
+║ Pin 11 │ •  GPIO17             ║ Pin 12 │ •  GPIO18 (PWM0)      ║
+║ Pin 13 │ •  GPIO27             ║ Pin 14 │ ⊞  GND                ║
+║ Pin 15 │ •  GPIO22             ║ Pin 16 │ •  GPIO23             ║
+║ Pin 17 │ ◉  3.3V               ║ Pin 18 │ •  GPIO24             ║
+║ Pin 19 │ •  GPIO10 (SPI MOSI)  ║ Pin 20 │ ⊞  GND                ║
+║ Pin 21 │ •  GPIO9  (SPI MISO)  ║ Pin 22 │ •  GPIO25             ║
+║ Pin 23 │ •  GPIO11 (SPI SCLK)  ║ Pin 24 │ •  GPIO8  (SPI CE0)   ║
+║ Pin 25 │ ⊞  GND                ║ Pin 26 │ •  GPIO7  (SPI CE1)   ║
+║ Pin 27 │ •  GPIO0  (ID_SD)     ║ Pin 28 │ •  GPIO1  (ID_SC)     ║
+║ Pin 29 │ •  GPIO5              ║ Pin 30 │ ⊞  GND                ║
+║ Pin 31 │ •  GPIO6              ║ Pin 32 │ •  GPIO12 (PWM0)      ║
+║ Pin 33 │ •  GPIO13 (PWM1)      ║ Pin 34 │ ⊞  GND                ║
+║ Pin 35 │ •  GPIO19 (PWM1)      ║ Pin 36 │ •  GPIO16             ║
+║ Pin 37 │ •  GPIO26             ║ Pin 38 │ •  GPIO20 (PCM DIN)   ║
+║ Pin 39 │ ⊞  GND                ║ Pin 40 │ •  GPIO21 (PCM DOUT)  ║
+╚════════════════════════════════╩════════════════════════════════╝
+```
+
+### 📊 Pin Tiplerine Göre Özet
+```
+╔════════════════════╦═══════╦══════════════════════════════════╗
+║    Pin Tipi        ║ Adet  ║         Pin Numaraları           ║
+╠════════════════════╬═══════╬══════════════════════════════════╣
+║ ◉  3.3V Power      ║   2   ║ Pin 1, Pin 17                    ║
+║ ◎  5V Power        ║   2   ║ Pin 2, Pin 4                     ║
+║ ⊞  Ground (GND)    ║   8   ║ 6,9,14,20,25,30,34,39            ║
+║ •  GPIO Pinleri    ║  28   ║ GPIO0-GPIO27 (aşağıda detay)     ║
+╠════════════════════╬═══════╬══════════════════════════════════╣
+║ TOPLAM             ║  40   ║                                  ║
+╚════════════════════╩═══════╩══════════════════════════════════╝
+```
+
+### 🎯 Fonksiyonlara Göre GPIO Grupları
+```
+╔══════════════════════╦═══════╦════════════════════════════════╗
+║   Fonksiyon Grubu    ║ Adet  ║         BCM GPIO               ║
+╠══════════════════════╬═══════╬════════════════════════════════╣
+║ 📍 Genel GPIO        ║  10   ║ 4,5,6,16,17,22,23,24,25,26,27  ║
+║ 🔄 I2C               ║   4   ║ 0,1 (I2C0) + 2,3 (I2C1)        ║
+║ 🔌 SPI               ║   5   ║ 7,8,9,10,11                    ║
+║ 📡 UART              ║   2   ║ 14,15                          ║
+║ 〰️  PWM               ║   4   ║ 12,13,18,19                    ║
+║ 🎵 PCM Audio         ║   3   ║ 18,20,21                       ║
+║ ⚙️  Special (EEPROM) ║   2   ║ 0,1 (ID_SD/SC)                 ║
+╚══════════════════════╩═══════╩════════════════════════════════╝
+```
+
+### ⚠️ Önemli Notlar
+```
+┌────────────────────────────────────────────────────────────┐
+│  ⚠️  KRİTİK UYARILAR                                       │
+├────────────────────────────────────────────────────────────┤
+│  • GPIO pinleri 3.3V ile çalışır                          │
+│  • ASLA 5V uygulamayın! (kalıcı hasar)                    │
+│  • Max akım: 16mA/pin, 50mA toplam                        │
+│  • GPIO0/1: HAT EEPROM için rezerve                       │
+│  • Power pinlerine direnç/sigorta kullanın                │
+└────────────────────────────────────────────────────────────┘
+
 /*-----------------------------------------------------------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------------------------------------------------------*/
@@ -1217,9 +4074,6 @@ int main(int argc, char *argv[]) {
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
 
