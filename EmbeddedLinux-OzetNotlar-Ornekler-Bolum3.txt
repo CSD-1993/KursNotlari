@@ -3286,21 +3286,15 @@ void exit_sys(const char *msg)
     kullanmaktadır? İşte BBB'deki dört adet GPII denetleyicisinin kullandığı IRQ numaraları baştan bellidir. Bazı kartlardaki
     IRQ hatları programlama yoluyla değiştirilebilmektedir. Dolayısıyla o kartlarda kartın kullandığı IRQ numaralarını 
     "aygıt ağacı (device tree)" üzeirnden değiştirmek mümkün olabilmektedir. Ancak BBB'deki AM335x SoC'undaki denetleyiciler 
-    için bu mümkün değildir. BBB'deki GPIO denetyelyicilerinin IRQ numaraları şöyledir:
-
-    GPIO0: IRQ 96 ve IRQ 97
-    GPIO1: IRQ 98 ve IRQ 99
-    GPIO2: IRQ 32 ve IRQ 33
-    GPIO3: IRQ 62 ve IRQ 63
-
-    Aslında Linux çekirdeğinde aygıt sürücü fırmatında verilen GPIO numarasına ilişkin kesmeyi veren gpio_to_irq isimli 
-    bir fonksiyon da bulunmaktadır:
+    için bu mümkün değildir. GPIO denetleyicilerinin IRQ numaralarını elde etmek için çekirdek içerisinde gpio_to_irq 
+    isimli bir fonksiyon bulundurulmuştur:
 
     #include <linux/gpio.h>
 
     static int gpio_to_irq(unsigned gpio);
 
-    Fonksiyonun geri dönüş değeri >= 0 ise fonksiyon IRQ numarasına, < 0 ise negatif errno değerine geri dönmektedir. 
+    Fonksiyon parametre olarak aygıt sürücü formatındaki GPIO numarasını alır, geri dönüş değeri olarak GPIO pini için 
+    kullanılan IRQ numarasını verir. Fonksiyon başarısız olursa negatif errno değerine geri dönmektedir. 
 
     Bu biçimdeki aygıt sürücülerde IRQ'nun set edilmesi bir ioctl koduna yaptırılmalıdır. Örneğin:
 
@@ -3321,13 +3315,13 @@ void exit_sys(const char *msg)
 
     Burada IOC_GPIO_IRQ_SET ioctl komutu oluştuğunda set_gpio_irq fonksiyonu çağrılacaktır. Tabii kullanıcı modundan IRQ'yu
     set etmek isteyen kişi irq numarasını ve irq türünü belirtmelidir. Bu bilgileri bir yapı biçiminde ifade edebiliriz:
-
+    
     enum IRQ_TYPE {
-        IRQ_TYPE_EDGE_RISING,
-        IRQ_TYPE_EDGE_FALLING,
-        IRQ_TYPE_EDGE_BOTH,
-        IRQ_TYPE_LEVEL_HIGH,
-        IRQ_TYPE_LEVEL_LOW,
+        IRQ_EDGE_RISING,
+        IRQ_EDGE_FALLING,
+        IRQ_EDGE_BOTH,
+        IRQ_LEVEL_HIGH,
+        IRQ_LEVEL_LOW,
     };
 
     struct IRQ_INFO {
@@ -3348,16 +3342,19 @@ void exit_sys(const char *msg)
 
     Burada _0 ve _1 sonekli sembolik sabitler görüyorsunuz. Yukarıda da belirttiğimiz gibi aslında her GPIO denetleyicisi 
     iki IRQ hattı kullanabilmektedir. _0 sonekli hat ilk hat, _1 sonekli hat ise diğer hattır. Tabii sistem programcısı 
-    tipik olarak bunlardan birini hedef alır. Biz de uygulamamızda _0'lı olanları kullanacağız. GPIO_IRQSTATUS_SET_0 yazmacının
-    ilgili biti 1 yapılırsa o bite ilişkin pin kesmelere açılır. GPIO_IRQSTATUS_CLR_0 yazmacında ise 1 yapılan bite ilişkin 
-    pin kesmeye kapatılmaktadır. O halde ilgili pini kesmeye açmak için GPIO_IRQSTATUS_SET_0 yazmacının ilgili bitini 
-    diğer bitlere dokunmadan 1 yapmamız gerekir. Bu yazmaçlar aynı zamanda okunabilmektedir. Bu yazmaçlar okunduğunda pinlerin
-    kesmelere açık olup olmadığı bilgisi elde edilmektedir. Burada isminde SET ya da CLR olmayan GPIO_IRQSTATUS_0 ve 
-    GPIO_IRQSTATUS_1 biçiminde iki yazmaç daha görüyorsunuz. Bu yazmaçlar okunduğunda ilgili pinlerin kesmelere karşı 
-    kapatılıp kapatılmadığı bilgisi elde edilmektedir. Ancak bu yazmaçlar yazma amacıyla kullanıldığında "kesmeyi işlediğini 
-    denetleyiciye bildirme (acknowledge)" görevini yapmaktadır. Bir kesme oluşup bizim fonksiyonumuz çağrıldığında eğer biz
-    kesme kodundan bu işlemi yapmadan ayrılırsak kesmeden geri döndüğümüzde sürekli aynı kesme oluşacaktır. Bu duruma 
-    İngilizce "IRQ storm" da denilmektedir. 
+    tipik olarak bunlardan birini kullanır. Biz de uygulamamızda _0'lı olanları kullanacağız. GPIO_IRQSTATUS_SET_0 ve 
+    GPIO_IRQSTATUS_SET_1 yazmacının ilgili biti 1 yapılırsa o bite ilişkin kesme yazılımsal yolla oluşturulmaktadır. Bu 
+    yazmaçlar okunduğunda ise o anda kesme oluşan pin'lerden 1 elde edilmektedir. GPIO_IRQSTATUS_CLR_0 ve GPIO_IRQSTATUS_CLR_1 
+    yazmaçlarına yazma yapıldığında 1 olan bitlerdeki kesme olayı sonlandırılır. Okuma uyapıldığında ise 1 olan bitler 
+    kesme durumunda olmayan pin'leri belirtmektedir. Burada isminde SET ya da CLR olmayan GPIO_IRQSTATUS_0 ve GPIO_IRQSTATUS_1 
+    biçiminde iki yazmaç daha görüyorsunuz. Bu yazmaçlar okunduğunda ilgili pinlerde kesme oluşup oluşmadığı bilgisi elde edilir. 
+    Bu yazmaçlara yazma yapıldığında ise 1 olan bitler programlama yoluyla kesme oluşturmakta 0 olan bitler ise kesmeyi ortadan
+    kaldırmaktadır.
+    
+    Burada önemli bir noktayı belirtmek istiyoruz. Bir kesme donanımsal olarak gerçekleştiğinde ya da IRQSTATUS yazmaçları 
+    ile programlama yoluyla gerçekleştirildiğinde eğer kesme bu STATUS yazmaçlarında ilgili bit set ya da reset edilerek ortadan 
+    kaldırılmazsa sürekli kesme oluşturmaktadır. Bu duruma "IRQ fırtınası (IRQ storm)" da denilmektedir. Bu nedenle bir kesme
+    oluştuğunda kesme kodu içerisinde ilgili STATUS yazmaçları yoluyla bu eksme durumunun ortadan kaldırılması gerekir.
 
     İlgili pini kesme türüne göre konfigüre edebilmek için şu yazmaçlar kullanılmaktadır:
 
@@ -3375,7 +3372,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+                                            139. Ders 04/11/2025 - Salı
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -3393,6 +3390,33 @@ void exit_sys(const char *msg)
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/* gpio-driver.h */
+#ifndef GPIO_DRIVER_H_
+#define GPIO_DRIVER_H_
+
+#include <linux/ioctl.h>
+
+#define GPIO_DRIVER_MAGIC       'g'
+
+/* Edge detection types */
+#define GPIO_IRQ_FALLING_EDGE   0   /* Düşen kenar */
+#define GPIO_IRQ_RISING_EDGE    1   /* Yükselen kenar */
+#define GPIO_IRQ_BOTH_EDGES     2   /* Her iki kenar */
+
+/* GPIO interrupt configuration structure */
+typedef struct {
+    int chip;           /* GPIO chip number (0-3) */
+    int pin;            /* Pin number (0-31) */
+    int edge_type;      /* Edge type: 0=falling, 1=rising, 2=both */
+} gpio_irq_config_t;
+
+/* IOCTL commands */
+#define IOC_GPIO_TEST           _IOR(GPIO_DRIVER_MAGIC, 1, unsigned long long)
+#define IOC_GPIO_IRQ_CONFIG     _IOW(GPIO_DRIVER_MAGIC, 2, gpio_irq_config_t)
+#define IOC_GPIO_IRQ_DISABLE    _IO(GPIO_DRIVER_MAGIC, 3)
+#define IOC_GPIO_IRQ_STATUS     _IOR(GPIO_DRIVER_MAGIC, 4, unsigned long)
+
+#endif /* GPIO_DRIVER_H_ */
 
 /* gpio-driver-with-irq.c */
 
@@ -3404,6 +3428,7 @@ void exit_sys(const char *msg)
 #include <linux/interrupt.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
+#include <linux/poll.h>
 #include <asm/io.h>
 #include "gpio-driver.h"
 
@@ -3472,6 +3497,7 @@ static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
 static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 static loff_t gpio_llseek(struct file *filp, loff_t off, int whence);
 static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static __poll_t gpio_poll(struct file *filp, struct poll_table_struct *wait);
 
 static inline int read_bit(const uint32_t *gpio_reg, int offset);
 static irqreturn_t gpio_irq_handler(int irq, void *dev_id);
@@ -3485,7 +3511,8 @@ static struct file_operations g_fops = {
     .write = gpio_write,
     .llseek = gpio_llseek,
     .release = gpio_release,
-    .unlocked_ioctl = gpio_driver_ioctl
+    .unlocked_ioctl = gpio_driver_ioctl,
+    .poll = gpio_poll
 };
 
 uint8_t *g_gpio_base_addrs[NGPIO_CHIPS];
@@ -3852,6 +3879,36 @@ static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long
     }
 
     return result;
+}
+
+/* Poll/select support */
+static __poll_t gpio_poll(struct file *filp, struct poll_table_struct *wait)
+{
+    __poll_t mask = 0;
+    loff_t pos = filp->f_pos;
+    int chip = pos / PINS_PER_CHIP;
+    int pin = pos % PINS_PER_CHIP;
+    
+    /* Check if this is the interrupt-configured pin */
+    if (chip == g_gpio_irq_info.chip && pin == g_gpio_irq_info.pin && 
+        g_gpio_irq_info.enabled) {
+        
+        /* Add our wait queue to the poll table */
+        poll_wait(filp, &g_gpio_irq_info.wait, wait);
+        
+        /* Check if data is ready (interrupt occurred) */
+        if (g_gpio_irq_info.data_ready) {
+            mask |= POLLIN | POLLRDNORM;  /* Data available for reading */
+        }
+    } else {
+        /* For non-interrupt pins, always readable (normal GPIO read) */
+        mask |= POLLIN | POLLRDNORM;
+    }
+    
+    /* GPIO pins are always writable */
+    mask |= POLLOUT | POLLWRNORM;
+    
+    return mask;
 }
 
 static inline int read_bit(const uint32_t *gpio_reg, int offset)
