@@ -17,42 +17,407 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 05/11/2025 - Çarşamba
+                                            Son Güncelleme: 11/11/2025 - Salı
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bu bölümde Rust'ta generic'ler konusunu ele alacağız. Biz daha önce generic'ler konusunu üstün körü ele almıştık. Ancak 
-    bu bölümde sıfırdan başlayacak biçimde konuyu ayrıntılarıyla ele alacağız. 
+                                        63. Ders 10/11/2025 - Pazartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Farklı türler için benzer işlemlerin yapılması gerektiği pek çok durum vardır. Örneğin bir sıralama yapan bir fonksiyon 
-    yazmak isteyelim:
+    Bu bölümde Rust'ta generic'ler konusunu ele alacağız. Biz daha önce generic'ler konusunu üstünkörü ele almıştık. Ancak 
+    bu bölümde sıfırdan başlayarak konuyu ayrıntılarıyla ele alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Farklı türler için benzer işlemlerin yapılması gerektiği pek çok durum vardır. Örneğin sıralama yapan bir fonksiyon yazmak 
+    isteyelim:
 
     fn sort_i32(a: &mut [i32]) {
         //...
     }
 
-    Burada fonksiyonun yalnızca i32 türünden bir diziyi sıraya dizebilmektedir. Eğer biz farklı türlerden bir diziyi sıraya 
-    dizmek istiyorsak içi aynı olacak biçimde bu fonksiyondanm bir tane daha yazmamız gerekir. Örneğin i64 türünden bir 
-    diziyi sıraya dizmek için içi aynı olan yeni bir fonksiyon yazmamız gerkeir:
+    Burada fonksiyon yalnızca i32 türünden bir diziyi sıraya dizebilmektedir. Eğer biz farklı türdn bir diziyi sıraya dizmek 
+    istiyorsak içi aynı olacak biçimde bu fonksiyondan bir tane daha yazmamız gerekir. Örneğin i64 türünden bir diziyi sıraya 
+    dizmek için içi aynı olan yeni bir fonksiyon yazmamız gerekir:
 
     fn sort_i64(a: &mut [i64]) {
         //...
     }
 
-    Rust'ta farklı parametrik yapılara ilişkin aynı isimli fonksiyonlar oluşturulamamaktadır. (Yani Rust'ta "function 
-    overloading" ya da "method overloading" kavramları yoktur.) Bu nedenle fonksiyonların içi aynı olsa da bunlara farklı 
-    isimlerin derilmesi gerekmektedir. 
+    Rust'ta farklı parametrik yapılara ilişkin aynı isimli fonksiyonlar oluşturulamamaktadır. (Rust'ta "function overloading" 
+    ya da "method overloading" özelliğinin olmadığını anımsayınız. Bu nedenle fonksiyonların içi aynı olsa da bunlara farklı 
+    isimlerin verilmesi gerekmektedir.) Örneğin i32 türündn bir dizinin en büyük elemanı ile geri dönen aşağıdaki gibi bir 
+    yazmış olalım:
+
+    fn get_max_i32(a: &[i32]) -> i32 {
+        //...
+    }
+
+    Bu fonksiyonla biz ancak i32 türünden bir dizinin en büyük elemanını bulabiliriz. Biz örneğin i64 türünden bir dizinin 
+    en büyük elemanını bu fonksiyonla bulamayız. Bunun için bu fonksiyonu içi aynı olacak biçimde i64 türü için yeniden yazmamız 
+    gerekir:
+
+    fn get_max_i64(a: &[i64]) -> i64 {
+        //...
+    }
+
+    Aynı problemli durum yapılar için de söz konusu olabilmektedir. Bir yapı belli türlerden bilgileri kullanacak biçimde 
+    oluşturulmuş olabilir. Böyle yapıların başka türlr için yniden tanımlanmaları grekir. Örneğin sabit büyüklükteki i32 türünden
+    bir diziyi bir kuyruk sistemi biçiminde kullanan Queue isimli bir yapı oluşturacak olalım. Bu yapıda kuyruğa eklenecek elemanlar 
+    i32 türünden olacaktır:
+
+    struct QueueI32 {
+        queue: [i32; 1024],
+        head: usize,
+        tail: usize 
+    }
+
+    impl QueueI32 {
+        //...
+    }
+
+    Eğer biz örneğin i64 türünden elemanları tutacak bir kuyruk sistemi oluşturmak istersek bu yapıdan i64 türü için yeni bir 
+    tane daha tanımlamamız gerekir:
+
+    struct QueueI64 {
+        queue: [i64; 1024],
+        head: usize,
+        tail: usize 
+    }
+
+    impl QueueI64 {
+        //...
+    }
+
+    İşte generic'ler bir şablon tanımlaması eşliğinde aynı fonksiyonun ya da struct, enum, trait gibi türlerin otomatik 
+    olarak derleyici tarafından türe uygun biçimde oluşturulmasını sağlamaktadır. Yani generic'ler içi aynı olan ancak 
+    farklı türler için tekrar tekrar yazmak zorunda olduğumuz fonksiyonların ve türlerin derleyici tarafından yazılmasını 
+    sağlamaktadır. Bu da hem yük oluşturan bu sıkıcı işlemleri bizim üzerimizden alır hem kodumuzun daha az karmaşık görünmesini 
+    sağlar. Bu özellik C++'ta "template", Java ve C#'ta "generic" simiyle zaten bulunmaktadır. Diğer modern pek çok dil de 
+    artık bu mekanizmayı desteklemektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+    Rust'ta generic fonksiyonların ve türlerin kullanılması durumunda derleyicinin o türlere dayalı olarak o generic şablondan 
+    hareketle gerçek fonksiyonları ya da türleri oluşturması sürecine "monomorfizasyon (monomorphisation)" denilmektedir. 
+    (C++'ta bu sürece "template instantiation" denildiğini anımsayınız.) Monomorfizasyon derleme aşamasında derleyici tarafından 
+    yapılmaktadır. Rust'ta generic türler kütüphanelerde de bulundurulabilmektedir. (C++'ta böyle bir durumun mümkün olmadığını 
+    anımsayınız.) Derleyici kütüphanelere başvurarak bu generic tanımlamaları elde edip monomorfizasyon işlemini derleme 
+    aşamasında yapabilmektdir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta fonksiyonlar, metotlar, yapılar, enum türleri ve trait'ler generic biçimde tanımlanabilmektdir. Biz önce generic 
+    fonksiyonları daha sonra da generic türleri ele alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
 
+/*---------------------------------------------------------------------------------------------------------------------------
+    Generic fonksiyonlar ve metotlar tanımlanırken fonksiyon isminden sonra açısal parantezler içerisinde generic parametreler 
+    aralarına ',' atomu yerleştirilerek bildirilmektedir. Fonksiyonun ya da metodun generic olduğu bu açısal parantezlerden 
+    anlaşılmaktadır. Örneğin:
+
+    fn foo<T, K>(x: T, y: K) {
+        //...
+    }
+
+    Burada foo gnric bir fonksiyondur, T ve K da generic parametrelerdir. Generic parametreler bir tür belirtmektedir. Bu 
+    parametreler tür gereken her bağlamda kullanılabilmektedir. Generic parametreler genellikle T gibi K gibi V gibi tek 
+    karakterlik büyük harfler kullanılarak isimlendirilmektedir. Ancak isimlendirme herhangi bir biçimde yapılabilir.  
+
+    Generic bir fonksiyon çağrılmak istendiğinde derleyicinin generic parametrelerin gerçekte hangi türleri temsil ettiğini 
+    belirlemesi gerekir. Buna Rust dünyasında "tür çıkarımı (type inference)" denilmektedir. (C++'ta buna "template argument 
+    deduction" denildiğini anımsayınız.) Rust derleyicileri generic tür parametrelerinin gerçekte hangi türü temsil ettiğini 
+    iki biçimde belirlemektedir:
+
+    1) Eğer generic türler programcı tarafından açıkça belirtilmişse derleyici tür çıkarımınını yapmaz, programcının belirlediği 
+    türleri esas alır. 
+    2) Eğer generic türler programcı tarafından açıkça belirtilmediyse derleyici tür çıkarımını fonksiyonun kullanıldığı 
+    bağlamı göz önüne alarak yapar.
+
+    Eğer generic tür parametreleri açıkça belirtilmediyse ve derleyici de generic fonksiyonun kullanıldığı bağlamdan tür 
+    çıkarımını yapamazsa bu durum error oluşturmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Generic fonksiyon çağrılırken tür parametreleri programcı tarafından fonksiyon isminden sonra :: operatörü ve bunu izleyen 
+    açısal parantezlerle açıkça belirtilebilmektedir. Örneğin:
+
+    fn foo<T, K>(x: T, y: K) {
+        //...
+    }
+
+    Burada biz T türünün i32, K türünün i64 olmasını isteyelim. Bu durumda fonksiyonu şöyle çağırırız:
+
+    foo::<i32, i64>(10, 20);
+
+    Bu sentaksı C++'tan geçenler yadırgamaktadır. Çünkü C++'ta fonksiyon şablonlarında çağrım yapılırken tür belirlemesi 
+    hemen fonksiyon isminden sonra açısal parantezler kullanılarak yapılmaktadır. Örneğin:
+
+    foo<int, long>(10, 20);
+
+    Halbuki Rust'ta fonksiyon isminden sonra hemen açısal parantezlerden önce :: operatörü kullanılmalıdır. 
+
+    C++'ta ilk N tane şablon parametresi için açıkça tür belirtilip geri kalanlarının derleyici tarafından akıl yürütme 
+    yoluyla belirlenmesi sağlanabilmektedir. Örneğin C++'ta foo fonksiyonun iki şablon parametresi varsa aşağıdaki gibi 
+    bir çağrı yapabiliriz:
+
+    template <typename T, typename K>
+    void foo(T x, K y) 
+    {
+        //...
+    }
+    //...
+
+    foo<int>(10, 3.14);
+
+    Burada biz ilk şablon parametresini açıkça belirttik, ancak ikinci şablon parametresinin türünü derleyicinin belirlemesini 
+    istedik. Rust'ta bu işlem C++'taki gibi yapılmamaktadır. Rust'ta belli generic parametrelerin derleyici tarafından çıkarsanması
+    isteniyırsa o tür parametreleri için _ atomu kullanılmaktadır. Örneğin:
+
+    foo::<i32, _>(10, 3.14);
+
+    Burada biz birinci generic parametrenin türünü açıkça belirttik. Ancak ikinci generic parametrenin türünü derleyicinin 
+    tespit etmesini istedik. Tabii _ atomu birden fazla generc parametre için de kullanılabilir. Bu atomun pozisyonu önemli 
+    değildir. Örneğin:
+
+    foo::<_, f64>(10, 3.14);        // geçerli
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Eğer çağrım sırasında generic parametrenin türü programcı tarafından açıkça belirtilmemişse derleyici generic parametrenin 
+    türünü argümanların türlerinden ve geri dönüş değerinin türünden hareketle çıkarsamaya çalışmaktadır. Örneğin:
+
+    use std::any::type_name;
+
+    fn foo<T, K>(x: T, y: K) {
+        println!("T: {}", type_name::<T>());
+        println!("K: {}", type_name::<K>());
+    }
+
+    Bu örneğimizde type_name isimli generic fonksiyon generic parametrenin türünü yazı olarak elde etmek için kullanılmıştır. 
+    type_name fonksiyonu üzerinde ileride duracağız. Biz burada type_name fonksiyonunu parametre çıkarımını test etme amaçlı 
+    kullanacağız. Şimdi foo fonksiyonunu şöyle çağırmış olalım:
+
+    foo(10, 3.14);
+
+    Derleyici 10 sabiti i32 türünden, 3.14 sabiti de f64 türünden olduğu için T türünün i32, K türünün de f64 olduğunu 
+    çıkarsayacaktır. Dolayısıyla fonksiyondan şöyle bir çıktı elde edilecektir:
+
+    T: i32
+    K: f64
+
+    Eğer derleyici argümanlardan hareketle tür çıkarımı yapamazsa bu durumda çağırma ifadesinde error oluşacaktır. Örneğin:
+
+    fn foo<T>(x: T, y: T) {
+        println!("T: {}", type_name::<T>());
+    }
+
+    Burada x ve y parametre değişkenlerinin her ikisi de T türündendir. O halde çağırma sırasında iki argümanın da aynı 
+    türden olması gerekir. Örneğin:
+
+    foo(3.14, 6.28);        // geçerli
+
+    Burada her iki argüman da f64 türünden olduğu için çağrı geçerlidir, T türü f64 olarak çıkarsanacaktır. Ancak örneğin:
+
+    foo(10, 6.28);        // error!
+
+    Burada T türü derleyici tarafından çıkarsanamayacağı için error oluşacaktır. Ancak örneğin:
+
+    foo::<i64>(10, 20);     // geçerli
+
+    Burada da bir sorun ortaya çıkmayacaktır. Çünkü 10 ve 20 sabitleri i64 türü için geçerli sabitlerdir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Fonksiyonun geri dönüş değerinde de generic parametreler kullanılabilir. Örneğin:
+
+    fn foo<T>() -> T {
+        //...
+    }
+
+    Burada artık argümandan hareketle fonksiyonun geri dönüş değerinin türü tespit edilemeyecektir. Örneğin:
+
+    foo();
+
+    Bu tür durumlarda programcının açıkça tür belirlemesi yapması gerekmektedir. Örneğin:
+
+    foo::<i32>();
+
+    Ancak bazı durumlarda Rust derleyicisi geri dönüş değerinin atandığı değişkenden hareketle de tür çıkarımını yapabilmektedir.
+    Bu konuyu ileride ele alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta generic bir fonksiyon ya da metodun içerisindeki kodların generic parametrelerin türü ne olursa olsun geçerli 
+    olması gerekir. Örneğin:
+
+    fn max(a: T, b: T) -> T {           // error!
+        if a > b {
+            a
+        }
+        else {
+            b
+        }
+    }
+
+    Buradaki generic max fonksiyonu derlenemeyecektir. Çünkü fonksiyonun içerisindeki kod olası her T türü için geçerli 
+    değildir. Örneğin T türü i32 olsa ya da i64 olsa bu kod geçerli olurdu. Çünkü i32 ve i64 türleri > operatörüyle karşılaştırılabilmektedir. 
+    Ancak örneğin bizim oluşturduğumuz Point türü > operatörüyle karşılaştırılamamaktadır. İşte bu tür durumlarda programcı 
+    "tür sınırlaması (type bounding)" uygulayarak kodun her generic tür için geçerli olmasını sağlamalıdır. (Bu durum Rust'a 
+    özgü değildir. C# ve Java'da da benzerdir. C++'a da "Concepts" ismiyle C++20 ile eklenmiştir.) Biz yukarıdaki generic 
+    fonksiyonda eğer derleyiciye T türünün > operatörünü destekleyeceği sözünü verirsek kod artık geçerli olacaktır. Bu garanti 
+    PartialOrd isimli trait ile verilmektedir:
+
+    fn max<T: PartialOrd>(a: T, b: T) -> T {            // geçerli
+        if a > b {
+            a
+        }
+        else {
+            b
+        }
+    }
+
+    Burada açısal parantezler içerisinde T: PartialOrd sentaksı ile biz derleyiciye T türünün PartialOrd trait'ini destekleyeceği 
+    sözünü vermiş olduk. Artık derleyici generic fonksiyonu kabul edecektir. Örneğin:
+
+    let a = 10;
+    let b = 20;
+    let result: i32;
+
+    result = max(a, b);         // geçerli
+    println!("{}", result);
+    
+    Burada T türü i32 olarak çıkarsanacaktır. Derleyiciye verilen söz tutulmuştur. Çünkü i32 türü PartialOrd trait'ini 
+    desteklemektedir dolayısıyla iki i32 değeri > operatörüyle karşılaştırılabilmektedir. Peki böyle bir söz verildiği halde 
+    programcı bu sözde durulmazsa ne olur? Örneğin:
+
+    let pt1 = Point { x: 1, y: 2 };
+    let pt2 = Point { x: 3, y: 4 };
+    let result: Point;
+
+    result = max(pt1, pt2);         // error!
+
+    Burada Point türü PartialOrd trait'ini desteklemediği için max çağrısı error ile sonuçlanacaktır. Tabii biz Point yapısının
+    PartialOrd trait'ini desteklemesini sağlayabiliriz. Bu durumda max fonksiyonunu Point ile de kullanabiliriz:
+
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    impl Point {
+        fn new(x: i32, y: i32) -> Point {
+            Point { x: x, y: y }
+        }
+
+        fn disp(&self) {
+            println!("x: {}, y: {}", self.x, self.y);
+        }
+    }
+
+    impl PartialEq for Point {
+        fn eq(&self, other: &Point) -> bool {
+            self.x == other.x && self.y == other.y
+        }
+    }
+
+    use std::cmp::Ordering;
+
+    impl PartialOrd for Point {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            let pt1_len = self.x * self.x + self.y * self.y;
+            let pt2_len = other.x * other.x + other.y * self.y;
+
+            if pt1_len > pt2_len {
+                Some(Ordering::Greater)
+            }
+            else if pt1_len < pt2_len {
+                Some(Ordering::Less)
+            }
+            else {
+                Some(Ordering::Equal)
+            }
+        }
+    }
+
+    Biz henüz operatör metotlarını ve dolayısıyla da PartialOrd trait'ini görmedik. Ancak PartialOrd trait'i PartialEq 
+    trait'inden türetilmiştir. Dolayısıyla biz yalnızca PartialOrd trait'ini değil aynı zamanda PartialEq trait'ini de 
+    desteklemek zorundayız. Yukarıdaki desteğin nasıl yapıldığını bu aşamada bilmenize gerek yoktur. Burada önemli olan 
+    nokta artık bizim Point yapımızın > operatörünü destekliyor olmasıdır. O halde artık biz max fonksiyonunda T türü 
+    olarak Point türünü kullanırsak verdiğimiz sözde durmuş oluruz:
+
+    let pt1 = Point::new(1, 2);
+    let pt2 = Point::new(3, 4);
+    let result: Point;
+
+    result = max(pt1, pt2);         // geçerli
+    result.disp();
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    O halde Rust'ta bir generic fonksiyon ya da metot yazılırken eğer kod içerisinde yaptığımız birtakım işlemler her generic 
+    tür için geçerli olamıyorsa bizim tür sınırlamaları uygulayarak kodumuzu geçerli hale getirmemiz gerekir. Örneğin:
+
+    fn foo<T>() -> T {
+        T::default()            // error!
+    }
+
+    Bu kod derlenmeyecektir. Çünkü her T türünün default isminde bir ilişkili fonksiyonu olmak zorunda değildir. Ancak 
+    örneğin:
+
+    fn foo<T: Default>() -> T {
+        T::default()            // geçerli
+    }
+
+    Burada artık fonksiyon geçerli hale gelmiştir. Çünkü T türünün Default trait'ini destekleyeceği sözü verilmiştir. T türü 
+    Default trait'ini desteklediğine göre zaten default isimli bir ilişkili fonksiyonun bulunuyor olması gerekir. Biz burada 
+    foo fonksiyonunu Default trait'ini desteklemeyen bir türle kullanamayız. Örneğin Point yapısının Default trait'ini 
+    desteklemediğini varsayalım:
+
+    let result: Point;
+
+    result = foo::<Point>();        // error!
+
+    Derleyici foo fonksiyonunu Point için monomorfize edemeyecektir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de bir dizinin en büyük elemanı ile geri dönen get_max isimli generic fonksiyonu yazmaya çalışalım. Fonksiyonu 
+    aşağıdaki gibi yazarsak error oluşacaktır:
+
+    fn get_max<T>(a: &[T]) -> T {           // error!
+        let mut max = a[0];
+
+        for i in 1..a.len() {
+            if a[i] > max {
+                max = a[i];
+            }
+        }
+        max
+    }
+
+    Burada iki sorun vardır. Birincisi derleyiciye T türünün > operatörünü destekleyeceği biçiminde bir söz verilmemiştir. 
+    Buradaki ikinci sorun eğer fonksiyona aktardığımız dizi Copy türünden değilse fonksiyonun içerisindeki kod geçersiz hale 
+    gelir. Çünkü anımsayacağınız gibi Copy türünden olmayan bir dizinin elemanları taşınamaz. İşte burada T türü için derleyiciye 
+    iki sözün verilmesi gerekmektedir: T türünün > operatörünü destekliyor olması sözü ve T türünün Copy trait'ini destekliyor 
+    olması sözü:
+
+    fn get_max<T: PartialOrd + Copy>(a: &[T]) -> T {            // geçerli
+        let mut max = a[0];
+
+        for i in 1..a.len() {
+            if a[i] > max {
+                max = a[i];
+            }
+        }
+        max
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+<BURADA KALDIK>
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
