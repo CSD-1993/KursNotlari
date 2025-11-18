@@ -2147,7 +2147,7 @@ void exit_sys(const char *msg)
 
     Aşağıdaki örnekte 10 kez LED yakılıp söndürülmüştür.
 ---------------------------------------------------------------------------------------------------------------------------*/
-
+<BURADA KALDIM>
 /* gpio-driver-ioctl.c */
 
 #include <stdio.h>
@@ -3371,70 +3371,19 @@ void exit_sys(const char *msg)
     gerekmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/*---------------------------------------------------------------------------------------------------------------------------
-                                            139. Ders 04/11/2025 - Salı
----------------------------------------------------------------------------------------------------------------------------*/
-
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-    <BURADA KALDIK>
----------------------------------------------------------------------------------------------------------------------------*/
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/* gpio-driver.h */
-#ifndef GPIO_DRIVER_H_
-#define GPIO_DRIVER_H_
-
-#include <linux/ioctl.h>
-
-#define GPIO_DRIVER_MAGIC       'g'
-
-/* Edge detection types */
-#define GPIO_IRQ_FALLING_EDGE   0   /* Düşen kenar */
-#define GPIO_IRQ_RISING_EDGE    1   /* Yükselen kenar */
-#define GPIO_IRQ_BOTH_EDGES     2   /* Her iki kenar */
-
-/* GPIO interrupt configuration structure */
-typedef struct {
-    int chip;           /* GPIO chip number (0-3) */
-    int pin;            /* Pin number (0-31) */
-    int edge_type;      /* Edge type: 0=falling, 1=rising, 2=both */
-} gpio_irq_config_t;
-
-/* IOCTL commands */
-#define IOC_GPIO_TEST           _IOR(GPIO_DRIVER_MAGIC, 1, unsigned long long)
-#define IOC_GPIO_IRQ_CONFIG     _IOW(GPIO_DRIVER_MAGIC, 2, gpio_irq_config_t)
-#define IOC_GPIO_IRQ_DISABLE    _IO(GPIO_DRIVER_MAGIC, 3)
-#define IOC_GPIO_IRQ_STATUS     _IOR(GPIO_DRIVER_MAGIC, 4, unsigned long)
-
-#endif /* GPIO_DRIVER_H_ */
-
-/* gpio-driver-with-irq.c */
+/* gpio-driver.c */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/delay.h>
-#include <linux/interrupt.h>
-#include <linux/wait.h>
-#include <linux/sched.h>
-#include <linux/poll.h>
 #include <asm/io.h>
 #include "gpio-driver.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kaan Aslan");
-MODULE_DESCRIPTION("gpio-driver with interrupt support");
+MODULE_DESCRIPTION("gpio-driver");
 
 #define GPIO_CHIP0_BASE         0x44E07000
 #define GPIO_CHIP1_BASE         0x4804C000
@@ -3444,52 +3393,13 @@ MODULE_DESCRIPTION("gpio-driver with interrupt support");
 #define NGPIO_CHIPS             4
 #define PINS_PER_CHIP           32
 
-/* GPIO Registers */
 #define GPIO_OE                 0x134
 #define GPIO_DATAIN             0x138
 #define GPIO_DATAOUT            0x13C
 #define GPIO_CLEARDATAOUT       0x190
 #define GPIO_SETDATAOUT         0x194
 
-/* Interrupt Registers */
-#define GPIO_IRQSTATUS_0        0x2C
-#define GPIO_IRQSTATUS_1        0x30
-#define GPIO_IRQSTATUS_SET_0    0x34
-#define GPIO_IRQSTATUS_SET_1    0x38
-#define GPIO_IRQSTATUS_CLR_0    0x3C
-#define GPIO_IRQSTATUS_CLR_1    0x40
-#define GPIO_LEVELDETECT0       0x140
-#define GPIO_LEVELDETECT1       0x144
-#define GPIO_RISINGDETECT       0x148
-#define GPIO_FALLINGDETECT      0x14C
-
 #define TRYNUM                  10
-
-/* AM335x GPIO IRQ Numbers */
-#define GPIO0_IRQ               96
-#define GPIO1_IRQ               98
-#define GPIO2_IRQ               32
-#define GPIO3_IRQ               62
-
-/* Interrupt configuration structure */
-typedef struct {
-    int chip;               /* GPIO chip number (0-3) */
-    int pin;                /* Pin number (0-31) */
-    int irq_num;            /* Linux IRQ number */
-    int enabled;            /* Interrupt enabled flag */
-    unsigned long count;    /* Interrupt counter */
-    wait_queue_head_t wait; /* Wait queue for blocking read */
-    int data_ready;         /* Data ready flag */
-} gpio_irq_info_t;
-
-static gpio_irq_info_t g_gpio_irq_info = {
-    .chip = -1,
-    .pin = -1,
-    .irq_num = -1,
-    .enabled = 0,
-    .count = 0,
-    .data_ready = 0
-};
 
 static int gpio_open(struct inode *inodep, struct file *filp);
 static int gpio_release(struct inode *inodep, struct file *filp);
@@ -3497,185 +3407,26 @@ static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
 static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 static loff_t gpio_llseek(struct file *filp, loff_t off, int whence);
 static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
-static __poll_t gpio_poll(struct file *filp, struct poll_table_struct *wait);
 
 static inline int read_bit(const uint32_t *gpio_reg, int offset);
-static irqreturn_t gpio_irq_handler(int irq, void *dev_id);
 
 static dev_t g_dev;
 static struct cdev g_cdev;
 static struct file_operations g_fops = {
-    .owner = THIS_MODULE,
-    .open = gpio_open,
-    .read = gpio_read,
+	.owner = THIS_MODULE,
+	.open = gpio_open,
+	.read = gpio_read,
     .write = gpio_write,
-    .llseek = gpio_llseek,
+	.llseek = gpio_llseek,
     .release = gpio_release,
-    .unlocked_ioctl = gpio_driver_ioctl,
-    .poll = gpio_poll
+    .unlocked_ioctl = gpio_driver_ioctl
 };
 
 uint8_t *g_gpio_base_addrs[NGPIO_CHIPS];
 
-/* GPIO interrupt handler */
-static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
-{
-    gpio_irq_info_t *info = (gpio_irq_info_t *)dev_id;
-    uint32_t *irq_status_reg;
-    uint32_t status;
-    
-    if (!info || info->chip < 0 || info->chip >= NGPIO_CHIPS) {
-        return IRQ_NONE;
-    }
-    
-    /* Read interrupt status */
-    irq_status_reg = (uint32_t *)(g_gpio_base_addrs[info->chip] + GPIO_IRQSTATUS_0);
-    status = ioread32(irq_status_reg);
-    
-    /* Check if our pin caused the interrupt */
-    if (!(status & (1 << info->pin))) {
-        return IRQ_NONE;  /* Not our interrupt */
-    }
-    
-    /* Clear interrupt status - IMPORTANT! */
-    iowrite32(1 << info->pin, irq_status_reg);
-    
-    /* Update statistics */
-    info->count++;
-    info->data_ready = 1;
-    
-    /* Wake up waiting processes */
-    wake_up_interruptible(&info->wait);
-    
-    printk(KERN_INFO "gpio-driver: Interrupt on chip %d, pin %d (count: %lu)\n",
-           info->chip, info->pin, info->count);
-    
-    return IRQ_HANDLED;
-}
-
-/* Configure GPIO pin for interrupt detection */
-static int gpio_setup_interrupt(int chip, int pin, int edge_type)
-{
-    uint32_t *reg;
-    int irq_numbers[NGPIO_CHIPS] = {GPIO0_IRQ, GPIO1_IRQ, GPIO2_IRQ, GPIO3_IRQ};
-    int result;
-    
-    if (chip < 0 || chip >= NGPIO_CHIPS || pin < 0 || pin >= PINS_PER_CHIP) {
-        printk(KERN_ERR "gpio-driver: Invalid chip (%d) or pin (%d)\n", chip, pin);
-        return -EINVAL;
-    }
-    
-    /* If interrupt already enabled, disable it first */
-    if (g_gpio_irq_info.enabled && g_gpio_irq_info.irq_num >= 0) {
-        /* Disable interrupt for this pin */
-        reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_IRQSTATUS_CLR_0);
-        iowrite32(1 << g_gpio_irq_info.pin, reg);
-        
-        /* Clear detection registers */
-        reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_FALLINGDETECT);
-        iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
-        reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_RISINGDETECT);
-        iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
-        
-        free_irq(g_gpio_irq_info.irq_num, &g_gpio_irq_info);
-        g_gpio_irq_info.enabled = 0;
-        printk(KERN_INFO "gpio-driver: Previous interrupt disabled\n");
-    }
-    
-    /* Setup new interrupt configuration */
-    g_gpio_irq_info.chip = chip;
-    g_gpio_irq_info.pin = pin;
-    g_gpio_irq_info.irq_num = irq_numbers[chip];
-    g_gpio_irq_info.count = 0;
-    g_gpio_irq_info.data_ready = 0;
-    
-    /* Configure pin as input */
-    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
-    iowrite32(ioread32(reg) | (1 << pin), reg);
-    
-    /* Clear any pending interrupts */
-    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_IRQSTATUS_0);
-    iowrite32(1 << pin, reg);
-    
-    /* Disable level detection */
-    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT0);
-    iowrite32(ioread32(reg) & ~(1 << pin), reg);
-    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT1);
-    iowrite32(ioread32(reg) & ~(1 << pin), reg);
-    
-    /* Configure edge detection based on type */
-    if (edge_type == 0 || edge_type == 2) {  /* Falling edge or both */
-        reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_FALLINGDETECT);
-        iowrite32(ioread32(reg) | (1 << pin), reg);
-        printk(KERN_INFO "gpio-driver: Falling edge detection enabled\n");
-    }
-    
-    if (edge_type == 1 || edge_type == 2) {  /* Rising edge or both */
-        reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_RISINGDETECT);
-        iowrite32(ioread32(reg) | (1 << pin), reg);
-        printk(KERN_INFO "gpio-driver: Rising edge detection enabled\n");
-    }
-    
-    /* Request IRQ */
-    result = request_irq(g_gpio_irq_info.irq_num,
-                        gpio_irq_handler,
-                        IRQF_SHARED,
-                        "gpio-driver-irq",
-                        &g_gpio_irq_info);
-    
-    if (result) {
-        printk(KERN_ERR "gpio-driver: Cannot request IRQ %d (error %d)\n",
-               g_gpio_irq_info.irq_num, result);
-        g_gpio_irq_info.chip = -1;
-        g_gpio_irq_info.pin = -1;
-        g_gpio_irq_info.irq_num = -1;
-        return result;
-    }
-    
-    /* Enable interrupt for this pin */
-    reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_IRQSTATUS_SET_0);
-    iowrite32(1 << pin, reg);
-    
-    g_gpio_irq_info.enabled = 1;
-    
-    printk(KERN_INFO "gpio-driver: Interrupt configured for chip %d, pin %d (IRQ %d)\n",
-           chip, pin, g_gpio_irq_info.irq_num);
-    
-    return 0;
-}
-
-/* Disable interrupt */
-static void gpio_disable_interrupt(void)
-{
-    uint32_t *reg;
-    
-    if (!g_gpio_irq_info.enabled || g_gpio_irq_info.chip < 0) {
-        return;
-    }
-    
-    /* Disable interrupt for this pin */
-    reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_IRQSTATUS_CLR_0);
-    iowrite32(1 << g_gpio_irq_info.pin, reg);
-    
-    /* Clear detection registers */
-    reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_FALLINGDETECT);
-    iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
-    reg = (uint32_t *)(g_gpio_base_addrs[g_gpio_irq_info.chip] + GPIO_RISINGDETECT);
-    iowrite32(ioread32(reg) & ~(1 << g_gpio_irq_info.pin), reg);
-    
-    free_irq(g_gpio_irq_info.irq_num, &g_gpio_irq_info);
-    
-    g_gpio_irq_info.enabled = 0;
-    g_gpio_irq_info.chip = -1;
-    g_gpio_irq_info.pin = -1;
-    g_gpio_irq_info.irq_num = -1;
-    
-    printk(KERN_INFO "gpio-driver: Interrupt disabled\n");
-}
-
 static int __init gpio_init(void)
 {
-    int result;
+	int result;
     int i, k;
     unsigned long gpio_physical_addrs[NGPIO_CHIPS] = {
         GPIO_CHIP0_BASE, 
@@ -3684,108 +3435,79 @@ static int __init gpio_init(void)
         GPIO_CHIP3_BASE
     };
 
-    if ((result = alloc_chrdev_region(&g_dev, 0, 1, "gpio-driver")) < 0) {
-        printk(KERN_INFO "cannot alloc char driver!...\n");
-        return result;
-    }
-    cdev_init(&g_cdev, &g_fops);
-    if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
-        unregister_chrdev_region(g_dev, 1);
-        printk(KERN_ERR "cannot add device!...\n");
-        return result;
-    }
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "gpio-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
 
     for (i = 0; i < NGPIO_CHIPS; ++i) {
         g_gpio_base_addrs[i] = ioremap(gpio_physical_addrs[i], 4096);
         if (g_gpio_base_addrs[i] == NULL) {
             for (k = 0; k < i; ++k)
                 iounmap(g_gpio_base_addrs[k]);
-            cdev_del(&g_cdev);
-            unregister_chrdev_region(g_dev, 1);
             return -ENOMEM;
         }
     }
-    
-    /* Initialize wait queue */
-    init_waitqueue_head(&g_gpio_irq_info.wait);
 
-    printk(KERN_INFO "gpio-driver module initialization (with IRQ support)...\n");
+    printk(KERN_INFO "gpio-driver module initialization...\n");
 
-    return 0;
+	return 0;
 }
 
 static void __exit gpio_exit(void)
 {
     int i;
-    
-    /* Disable any active interrupt */
-    gpio_disable_interrupt();
 
     for (i = 0; i < NGPIO_CHIPS; ++i)
         iounmap(g_gpio_base_addrs[i]);
-    cdev_del(&g_cdev);
-    unregister_chrdev_region(g_dev, 1);
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
     
-    printk(KERN_INFO "gpio-driver module exit...\n");
+	printk(KERN_INFO "gpio-driver module exit...\n");
 }
 
 static int gpio_open(struct inode *inodep, struct file *filp)
 {
-    printk(KERN_INFO "gpio-driver opened...\n");
-    return 0;
+	printk(KERN_INFO "gpio-driver opened...\n");
+
+	return 0;
 }
 
 static int gpio_release(struct inode *inodep, struct file *filp)
 {
-    printk(KERN_INFO "gpio-driver closed...\n");
-    return 0;
+	printk(KERN_INFO "gpio-driver closed...\n");
+
+	return 0;
 }
 
 static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
 {
     int chip, pin, bitval;
     uint32_t *gpio_reg;
-    char data[32];
-    int len;
 
-    if (size < 1)
+    if (size != 1)
         return -EINVAL;
 
     chip = *off / PINS_PER_CHIP;
     pin = *off % PINS_PER_CHIP;
 
-    /* Check if this is the interrupt-configured pin and user wants to wait for interrupt */
-    if (chip == g_gpio_irq_info.chip && pin == g_gpio_irq_info.pin && 
-        g_gpio_irq_info.enabled && size > 1) {
-        
-        /* Wait for interrupt */
-        if (wait_event_interruptible(g_gpio_irq_info.wait, g_gpio_irq_info.data_ready)) {
-            return -ERESTARTSYS;
-        }
-        
-        g_gpio_irq_info.data_ready = 0;
-        
-        /* Return interrupt count */
-        len = snprintf(data, sizeof(data), "%lu\n", g_gpio_irq_info.count);
-        if (len > size)
-            len = size;
-        
-        if (copy_to_user(buf, data, len) != 0)
-            return -EFAULT;
-        
-        return len;
-    }
-    
-    /* Normal read operation */
     gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
     iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
     gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAIN);
     bitval = read_bit(gpio_reg, pin);
 
-    if (copy_to_user(buf, &"01"[bitval], 1) != 0)
+    if (copy_to_user(buf, &"01"[bitval] , size) != 0)
         return -EFAULT;
 
-    return 1;
+    /* put_user("01"[bitval], buf); */
+
+	return size;
 }
 
 static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off)
@@ -3812,7 +3534,7 @@ static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_
     else 
         return -EINVAL;
 
-    return size;
+	return size;
 }
 
 static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
@@ -3827,7 +3549,7 @@ static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
             newpos = filp->f_pos + off;
             break;
         case 2:
-            newpos = 128 + off;
+            newpos = (4 * PINS_PER_CHIP) + off;
             break;
         default:
             return -EINVAL;
@@ -3842,73 +3564,16 @@ static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
 
 static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    long result = 0;
-    gpio_irq_config_t config;
+    long result;
  
     switch (cmd) {
-        case IOC_GPIO_IRQ_CONFIG:
-            /* Configure interrupt for a specific pin */
-            if (copy_from_user(&config, (void __user *)arg, sizeof(config)) != 0) {
-                return -EFAULT;
-            }
-            
-            printk(KERN_INFO "gpio-driver: Configuring IRQ - chip: %d, pin: %d, edge: %d\n",
-                   config.chip, config.pin, config.edge_type);
-            
-            result = gpio_setup_interrupt(config.chip, config.pin, config.edge_type);
-            break;
-            
-        case IOC_GPIO_IRQ_DISABLE:
-            /* Disable interrupt */
-            gpio_disable_interrupt();
-            break;
-            
-        case IOC_GPIO_IRQ_STATUS:
-            /* Get interrupt status */
-            if (copy_to_user((void __user *)arg, &g_gpio_irq_info.count, sizeof(unsigned long)) != 0) {
-                return -EFAULT;
-            }
-            break;
-            
         case IOC_GPIO_TEST:
-            printk(KERN_INFO "gpio-driver: Test ioctl called\n");
             break;
-            
         default:
             result = -ENOTTY;
     }
 
     return result;
-}
-
-/* Poll/select support */
-static __poll_t gpio_poll(struct file *filp, struct poll_table_struct *wait)
-{
-    __poll_t mask = 0;
-    loff_t pos = filp->f_pos;
-    int chip = pos / PINS_PER_CHIP;
-    int pin = pos % PINS_PER_CHIP;
-    
-    /* Check if this is the interrupt-configured pin */
-    if (chip == g_gpio_irq_info.chip && pin == g_gpio_irq_info.pin && 
-        g_gpio_irq_info.enabled) {
-        
-        /* Add our wait queue to the poll table */
-        poll_wait(filp, &g_gpio_irq_info.wait, wait);
-        
-        /* Check if data is ready (interrupt occurred) */
-        if (g_gpio_irq_info.data_ready) {
-            mask |= POLLIN | POLLRDNORM;  /* Data available for reading */
-        }
-    } else {
-        /* For non-interrupt pins, always readable (normal GPIO read) */
-        mask |= POLLIN | POLLRDNORM;
-    }
-    
-    /* GPIO pins are always writable */
-    mask |= POLLOUT | POLLWRNORM;
-    
-    return mask;
 }
 
 static inline int read_bit(const uint32_t *gpio_reg, int offset)
@@ -3930,142 +3595,1398 @@ static inline int read_bit(const uint32_t *gpio_reg, int offset)
 module_init(gpio_init);
 module_exit(gpio_exit);
 
-╔═════╦═══════════╦═══════════════╦════════════════════════════╗
-║  #  ║ BCM GPIO  ║ Fiziksel Pin  ║   Alternatif Fonksiyon     ║
-╠═════╬═══════════╬═══════════════╬════════════════════════════╣
-║  1  ║  GPIO0    ║    Pin 27     ║ ID_SD (I2C0 SDA - EEPROM)  ║
-║  2  ║  GPIO1    ║    Pin 28     ║ ID_SC (I2C0 SCL - EEPROM)  ║
-║  3  ║  GPIO2    ║    Pin 3      ║ I2C1 SDA                   ║
-║  4  ║  GPIO3    ║    Pin 5      ║ I2C1 SCL                   ║
-║  5  ║  GPIO4    ║    Pin 7      ║ GPCLK0                     ║
-║  6  ║  GPIO5    ║    Pin 29     ║ GPIO                       ║
-║  7  ║  GPIO6    ║    Pin 31     ║ GPIO                       ║
-║  8  ║  GPIO7    ║    Pin 26     ║ SPI0 CE1                   ║
-║  9  ║  GPIO8    ║    Pin 24     ║ SPI0 CE0                   ║
-║ 10  ║  GPIO9    ║    Pin 21     ║ SPI0 MISO                  ║
-║ 11  ║  GPIO10   ║    Pin 19     ║ SPI0 MOSI                  ║
-║ 12  ║  GPIO11   ║    Pin 23     ║ SPI0 SCLK                  ║
-║ 13  ║  GPIO12   ║    Pin 32     ║ PWM0                       ║
-║ 14  ║  GPIO13   ║    Pin 33     ║ PWM1                       ║
-║ 15  ║  GPIO14   ║    Pin 8      ║ UART0 TXD                  ║
-║ 16  ║  GPIO15   ║    Pin 10     ║ UART0 RXD                  ║
-║ 17  ║  GPIO16   ║    Pin 36     ║ GPIO                       ║
-║ 18  ║  GPIO17   ║    Pin 11     ║ GPIO                       ║
-║ 19  ║  GPIO18   ║    Pin 12     ║ PWM0 / PCM CLK             ║
-║ 20  ║  GPIO19   ║    Pin 35     ║ PWM1 / PCM FS              ║
-║ 21  ║  GPIO20   ║    Pin 38     ║ PCM DIN                    ║
-║ 22  ║  GPIO21   ║    Pin 40     ║ PCM DOUT                   ║
-║ 23  ║  GPIO22   ║    Pin 15     ║ GPIO                       ║
-║ 24  ║  GPIO23   ║    Pin 16     ║ GPIO                       ║
-║ 25  ║  GPIO24   ║    Pin 18     ║ GPIO                       ║
-║ 26  ║  GPIO25   ║    Pin 22     ║ GPIO                       ║
-║ 27  ║  GPIO26   ║    Pin 37     ║ GPIO                       ║
-║ 28  ║  GPIO27   ║    Pin 13     ║ GPIO                       ║
-╚═════╩═══════════╩═══════════════╩════════════════════════════╝
-```
+# Makefile
 
-### 🔷 40-Pin Başlık Şeması (Fiziksel Görünüm)
-```
-╔═══════════════════════════════════════════════════════════════╗
-║           RASPBERRY PI 40-PIN GPIO HEADER                     ║
-║                                                               ║
-║  ◉ = 3.3V Power    ◎ = 5V Power    ⊞ = Ground (GND)         ║
-╚═══════════════════════════════════════════════════════════════╝
+ obj-m += ${file}.o
 
-    ┌────────────────────────────────────────────────┐
-    │                                                │
- 1  │ ◉  3.3V Power              5V Power  ◎        │ 2
- 3  │ •  GPIO2   (I2C1 SDA)      5V Power  ◎        │ 4
- 5  │ •  GPIO3   (I2C1 SCL)      Ground    ⊞        │ 6
- 7  │ •  GPIO4   (GPCLK0)        GPIO14    •  (TX)  │ 8
- 9  │ ⊞  Ground                  GPIO15    •  (RX)  │ 10
-11  │ •  GPIO17                  GPIO18    •  (PWM) │ 12
-13  │ •  GPIO27                  Ground    ⊞        │ 14
-15  │ •  GPIO22                  GPIO23    •        │ 16
-17  │ ◉  3.3V Power              GPIO24    •        │ 18
-19  │ •  GPIO10  (MOSI)          Ground    ⊞        │ 20
-21  │ •  GPIO9   (MISO)          GPIO25    •        │ 22
-23  │ •  GPIO11  (SCLK)          GPIO8     •  (CE0) │ 24
-25  │ ⊞  Ground                  GPIO7     •  (CE1) │ 26
-27  │ •  GPIO0   (ID_SD)         GPIO1     •  (ID)  │ 28
-29  │ •  GPIO5                   Ground    ⊞        │ 30
-31  │ •  GPIO6                   GPIO12    •  (PWM) │ 32
-33  │ •  GPIO13  (PWM)           Ground    ⊞        │ 34
-35  │ •  GPIO19  (PWM)           GPIO16    •        │ 36
-37  │ •  GPIO26                  GPIO20    •  (PCM) │ 38
-39  │ ⊞  Ground                  GPIO21    •  (PCM) │ 40
-    │                                                │
-    └────────────────────────────────────────────────┘
-```
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
-### 🔸 Detaylı Pin Haritası (İki Sütun)
-```
-╔════════════════════════════════╦════════════════════════════════╗
-║         SOL SÜTUN (Tek)        ║        SAĞ SÜTUN (Çift)        ║
-╠════════════════════════════════╬════════════════════════════════╣
-║ Pin 1  │ ◉  3.3V               ║ Pin 2  │ ◎  5V                 ║
-║ Pin 3  │ •  GPIO2  (I2C SDA)   ║ Pin 4  │ ◎  5V                 ║
-║ Pin 5  │ •  GPIO3  (I2C SCL)   ║ Pin 6  │ ⊞  GND                ║
-║ Pin 7  │ •  GPIO4  (GPCLK0)    ║ Pin 8  │ •  GPIO14 (UART TX)   ║
-║ Pin 9  │ ⊞  GND                ║ Pin 10 │ •  GPIO15 (UART RX)   ║
-║ Pin 11 │ •  GPIO17             ║ Pin 12 │ •  GPIO18 (PWM0)      ║
-║ Pin 13 │ •  GPIO27             ║ Pin 14 │ ⊞  GND                ║
-║ Pin 15 │ •  GPIO22             ║ Pin 16 │ •  GPIO23             ║
-║ Pin 17 │ ◉  3.3V               ║ Pin 18 │ •  GPIO24             ║
-║ Pin 19 │ •  GPIO10 (SPI MOSI)  ║ Pin 20 │ ⊞  GND                ║
-║ Pin 21 │ •  GPIO9  (SPI MISO)  ║ Pin 22 │ •  GPIO25             ║
-║ Pin 23 │ •  GPIO11 (SPI SCLK)  ║ Pin 24 │ •  GPIO8  (SPI CE0)   ║
-║ Pin 25 │ ⊞  GND                ║ Pin 26 │ •  GPIO7  (SPI CE1)   ║
-║ Pin 27 │ •  GPIO0  (ID_SD)     ║ Pin 28 │ •  GPIO1  (ID_SC)     ║
-║ Pin 29 │ •  GPIO5              ║ Pin 30 │ ⊞  GND                ║
-║ Pin 31 │ •  GPIO6              ║ Pin 32 │ •  GPIO12 (PWM0)      ║
-║ Pin 33 │ •  GPIO13 (PWM1)      ║ Pin 34 │ ⊞  GND                ║
-║ Pin 35 │ •  GPIO19 (PWM1)      ║ Pin 36 │ •  GPIO16             ║
-║ Pin 37 │ •  GPIO26             ║ Pin 38 │ •  GPIO20 (PCM DIN)   ║
-║ Pin 39 │ ⊞  GND                ║ Pin 40 │ •  GPIO21 (PCM DOUT)  ║
-╚════════════════════════════════╩════════════════════════════════╝
-```
+/* load (bu satırı dosyaya kopyalamayınız) */
 
-### 📊 Pin Tiplerine Göre Özet
-```
-╔════════════════════╦═══════╦══════════════════════════════════╗
-║    Pin Tipi        ║ Adet  ║         Pin Numaraları           ║
-╠════════════════════╬═══════╬══════════════════════════════════╣
-║ ◉  3.3V Power      ║   2   ║ Pin 1, Pin 17                    ║
-║ ◎  5V Power        ║   2   ║ Pin 2, Pin 4                     ║
-║ ⊞  Ground (GND)    ║   8   ║ 6,9,14,20,25,30,34,39            ║
-║ •  GPIO Pinleri    ║  28   ║ GPIO0-GPIO27 (aşağıda detay)     ║
-╠════════════════════╬═══════╬══════════════════════════════════╣
-║ TOPLAM             ║  40   ║                                  ║
-╚════════════════════╩═══════╩══════════════════════════════════╝
-```
+#!/bin/bash
 
-### 🎯 Fonksiyonlara Göre GPIO Grupları
-```
-╔══════════════════════╦═══════╦════════════════════════════════╗
-║   Fonksiyon Grubu    ║ Adet  ║         BCM GPIO               ║
-╠══════════════════════╬═══════╬════════════════════════════════╣
-║ 📍 Genel GPIO        ║  10   ║ 4,5,6,16,17,22,23,24,25,26,27  ║
-║ 🔄 I2C               ║   4   ║ 0,1 (I2C0) + 2,3 (I2C1)        ║
-║ 🔌 SPI               ║   5   ║ 7,8,9,10,11                    ║
-║ 📡 UART              ║   2   ║ 14,15                          ║
-║ 〰️  PWM               ║   4   ║ 12,13,18,19                    ║
-║ 🎵 PCM Audio         ║   3   ║ 18,20,21                       ║
-║ ⚙️  Special (EEPROM) ║   2   ║ 0,1 (ID_SD/SC)                 ║
-╚══════════════════════╩═══════╩════════════════════════════════╝
-```
+module=$1
+mode=666
 
-### ⚠️ Önemli Notlar
-```
-┌────────────────────────────────────────────────────────────┐
-│  ⚠️  KRİTİK UYARILAR                                       │
-├────────────────────────────────────────────────────────────┤
-│  • GPIO pinleri 3.3V ile çalışır                          │
-│  • ASLA 5V uygulamayın! (kalıcı hasar)                    │
-│  • Max akım: 16mA/pin, 50mA toplam                        │
-│  • GPIO0/1: HAT EEPROM için rezerve                       │
-│  • Power pinlerine direnç/sigorta kullanın                │
-└────────────────────────────────────────────────────────────┘
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* gpio-driver-test-read.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char ch;
+
+    if ((fd = open("gpio-driver", O_RDWR)) == -1) 
+        exit_sys("open");
+    
+    lseek(fd, 51, 0);
+    for (int i = 0; i < 10; ++i) {
+        if (read(fd, &ch, 1) == -1)
+            exit_sys("read");
+        printf("%c\n", ch);
+        sleep(1);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/* gpio-driver-test-write.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char ch;
+
+    if ((fd = open("gpio-driver", O_RDWR)) == -1) 
+        exit_sys("open");
+    
+    lseek(fd, 60, 0);
+    for (int i = 0; i < 10; ++i) {
+        ch = '1';
+        if (write(fd, &ch, 1) == -1)
+            exit_sys("write");
+        sleep(1);
+
+        ch = '0';
+        if (write(fd, &ch, 1) == -1)
+            exit_sys("write");
+        sleep(1);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            139. Ders 04/11/2025 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de kesme oluşana kadar blokede bekleten bir aygıt sürücü yazalım. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            140. Ders 06/11/2025 - Perşembe
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Kesme gelene kadar bekleme yapan aygıt sürücümüzün init fonksiyonunda GPIO denetleyicilerinin taban adresleri bellek tabaklı 
+    IO amacıyla bir göstericisi dizisinde saklanıp bunlar için sanal adresler oluşturulmuştur:
+
+    static int __init gpio_init(void)
+    {
+        int result;
+        int i, k;
+        unsigned long gpio_physical_addrs[NGPIO_CHIPS] = {
+            GPIO_CHIP0_BASE, 
+            GPIO_CHIP1_BASE, 
+            GPIO_CHIP2_BASE, 
+            GPIO_CHIP3_BASE
+        };
+
+        if ((result = alloc_chrdev_region(&g_dev, 0, 1, "gpio-driver")) < 0) {
+            printk(KERN_INFO "cannot alloc char driver!...\n");
+            return result;
+        }
+        cdev_init(&g_cdev, &g_fops);
+        if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+            unregister_chrdev_region(g_dev, 1);
+            printk(KERN_ERR "cannot add device!...\n");
+            return result;
+        }
+
+        for (i = 0; i < NGPIO_CHIPS; ++i) {
+            g_gpio_base_addrs[i] = ioremap(gpio_physical_addrs[i], 4096);
+            if (g_gpio_base_addrs[i] == NULL) {
+                for (k = 0; k < i; ++k)
+                    iounmap(g_gpio_base_addrs[k]);
+                return -ENOMEM;
+            }
+        }
+
+        printk(KERN_INFO "gpio-driver module initialization...\n");
+
+        return 0;
+    }
+
+    GPIO denetleyicilerinin taban sanal adresleri g_gpio_base_addrs dizisine yerleştirilmiştir. Aygıt sürücümüzde read işleminde
+    iki biçimde yapılabilmektedir: Blokeli ve blokesiz. Default mod blokeli moddur. Blokeli modda pin okunmak istediğinde 
+    read fonksiyonu bloke olur. İlgili pin değeri lojik 0'a düşürüldüğünde bloke çözülür. Bunun için bir bekleme kuyruğu 
+    oluşturulmuş ve GPIO IRQ'su işlenerek bu bekleme kuyruğunda bekleyen thread'ler çalışma kuyruğuna alınmıştır. read işleminde
+    her zaman ilgili pin IN olarak konfigüre edilip eğer daha önce kesme konfigürasyonu yapılmamışsa kesme konfigürasyonu da
+    düşüne kenar olarak yapılmıştır:
+
+    static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        int chip, pin, bitval;
+        uint32_t *gpio_reg;
+        unsigned long flags;
+        struct IRQ_DATA *irq_data;
+        int result;
+
+        if (size != 1)
+            return -EINVAL;
+
+        if (*off < 0 || *off >= TOTAL_PINS)
+            return -EINVAL;
+
+        chip = *off / PINS_PER_CHIP;
+        pin = *off % PINS_PER_CHIP;
+
+        irq_data = &g_irq_data[*off];
+
+        if (filp->f_flags & O_NONBLOCK) {
+            spin_lock_irqsave(&g_spinlock, flags);
+
+            gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+            iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+
+            gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAIN);
+            bitval = read_bit(gpio_reg, pin);
+
+            spin_unlock_irqrestore(&g_spinlock, flags);
+
+            if (copy_to_user(buf, &"01"[bitval] , size) != 0)
+                return -EFAULT;
+
+            return size;
+        }
+                
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+        iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+        
+        if (!g_irq_data[*off].irq_flag)
+            if ((result = set_gpio_irq(*off )) != 0)
+                return result;
+
+        if (wait_event_interruptible(irq_data->wq, atomic_read(&irq_data->wait_flag) != 0) != 0)
+            return -ERESTARTSYS;
+        atomic_set(&irq_data->wait_flag, 0);
+    
+
+        if (copy_to_user(buf, &"01"[bitval] , size) != 0)
+            return -EFAULT;
+
+        return size;
+    }
+
+    Eğer okuma işlemi dosya O_NONBLOCK ile açılığ yapılmışsa bu durumda hiç bloke oluşmamakta ve doğrudan pin'in değeri 
+    okunmaktadır. 
+
+    Kesme oluşturulduğunda çağrılacak kesme kodu da şöyle yazılmıştır:
+
+    static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
+    {
+        uint32_t *gpio_reg;
+        struct IRQ_DATA *irq_data;
+
+        irq_data = (struct IRQ_DATA *)dev_id;
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[1] + GPIO_IRQSTATUS_0);
+        iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+
+        atomic_set(&irq_data->wait_flag, 1);
+        wake_up_interruptible(&irq_data->wq);
+
+        return IRQ_HANDLED;
+    }
+
+    Aygıt sürücümüzde her pin için ayrı bir bekleme kuyruğu bulunmaktadır. Pin'lere ilişkin bilgiler global bir dizide 
+    tutulmaktadır:
+
+    struct IRQ_DATA {
+        int chip;
+        int pin;
+        int irq_flag;
+        atomic_t wait_flag;
+        wait_queue_head_t wq;
+    };
+
+    static struct IRQ_DATA g_irq_data[TOTAL_PINS];
+
+    IRQ set edilirken request_şrq fonksiyonunda IRQ!nun düşen kenara ilişkin olduğu belirtilmelidir:
+
+    static int set_gpio_irq(int gpio_pin)
+    {
+        int chip, pin;
+        uint32_t *gpio_reg;
+        int irqno;
+        int result;
+        unsigned long flags;
+
+        if (gpio_pin < 0 || gpio_pin >= TOTAL_PINS)
+            return -EINVAL;
+
+        chip = gpio_pin / PINS_PER_CHIP;
+        pin = gpio_pin % PINS_PER_CHIP;
+
+        spin_lock_irqsave(&g_spinlock, flags);
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT0);
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT1);
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_RISINGDETECT);
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+        
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_FALLINGDETECT);
+        iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+
+        spin_unlock_irqrestore(&g_spinlock, flags);
+
+        if (mutex_lock_interruptible(&g_mutex) != 0)
+            return -ERESTARTSYS;
+
+        g_irq_data[gpio_pin].chip = chip;
+        g_irq_data[gpio_pin].pin = pin;
+        g_irq_data[gpio_pin].irq_flag = 1;
+
+        init_waitqueue_head(&g_irq_data[gpio_pin].wq);
+
+        if ((irqno = gpio_to_irq(gpio_pin)) < 0) {
+            printk(KERN_INFO "Cannot get IRQ number...\n");
+            mutex_unlock(&g_mutex);
+            return irqno;
+        }
+
+        if ((result = request_irq(irqno, gpio_irq_handler, IRQF_TRIGGER_FALLING|IRQF_SHARED, 
+                    "irq-driver", &g_irq_data[gpio_pin])) != 0) {
+            printk(KERN_INFO "Cannot set IRQ...\n");
+            mutex_unlock(&g_mutex);
+            return result;
+        }
+
+        mutex_unlock(&g_mutex);
+
+        printk(KERN_INFO "IRQ successfully set...\n");
+
+        return 0;
+    }
+
+    Aygıt sürücümüzde ioctil işlemi bulunmamaktadır. Ancak biz yine daha sonra eklenebilir diye ioctl işlemlerine yönelik 
+    temel kodları da bulundurduk.
+
+    Örneğin kodları bütün olarak aşağıda verilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* gpio-deriver.h */
+
+#ifndef HPET_DRIVER_H_
+#define HPET_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define GPIO_DRIVER_MAGIC		    'g'
+
+#define IOC_GPIO_IRQ_TEST	       _IO(GPIO_DRIVER_MAGIC, 1)
+
+#endif
+
+/* gpio-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/delay.h>
+#include <linux/spinlock.h>
+#include <linux/wait.h>
+#include <asm/atomic.h>
+#include <asm/io.h>
+#include <linux/interrupt.h>
+#include <linux/gpio.h>
+#include "gpio-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("gpio-driver");
+
+#define GPIO_CHIP0_BASE         0x44E07000
+#define GPIO_CHIP1_BASE         0x4804C000
+#define GPIO_CHIP2_BASE         0x481AC000
+#define GPIO_CHIP3_BASE         0x481AE000
+
+#define NGPIO_CHIPS             4
+#define PINS_PER_CHIP           32
+#define TOTAL_PINS              (NGPIO_CHIPS * PINS_PER_CHIP)
+
+#define GPIO_OE                 0x134
+#define GPIO_DATAIN             0x138
+#define GPIO_DATAOUT            0x13C
+#define GPIO_CLEARDATAOUT       0x190
+#define GPIO_SETDATAOUT         0x194
+
+#define GPIO_IRQSTATUS_0        0x2C
+#define GPIO_IRQSTATUS_1        0x30
+#define GPIO_IRQSTATUS_SET_0    0x34
+#define GPIO_IRQSTATUS_SET_1    0x38
+#define GPIO_IRQSTATUS_CLR_0    0x3C
+#define GPIO_IRQSTATUS_CLR_1    0x40
+
+#define GPIO_LEVELDETECT0       0x140
+#define GPIO_LEVELDETECT1       0x144
+#define GPIO_RISINGDETECT       0x148
+#define GPIO_FALLINGDETECT      0x14C
+
+#define TRYNUM                  10
+
+static int gpio_open(struct inode *inodep, struct file *filp);
+static int gpio_release(struct inode *inodep, struct file *filp);
+static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static loff_t gpio_llseek(struct file *filp, loff_t off, int whence);
+static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static irqreturn_t gpio_irq_handler(int irq, void *dev_id);
+
+static int set_gpio_irq(int gpip_pin);
+static int reset_gpio_irq(int gpip_pin);
+static inline int read_bit(const uint32_t *gpio_reg, int offset);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = gpio_open,
+	.read = gpio_read,
+    .write = gpio_write,
+	.llseek = gpio_llseek,
+    .release = gpio_release,
+    .unlocked_ioctl = gpio_driver_ioctl
+};
+
+enum IRQ_TYPE {
+    IRQ_EDGE_RISING,
+    IRQ_EDGE_FALLING,
+    IRQ_EDGE_BOTH,
+    IRQ_LEVEL_HIGH,
+    IRQ_LEVEL_LOW,
+};
+
+struct IRQ_DATA {
+    int chip;
+    int pin;
+    int irq_flag;
+    atomic_t wait_flag;
+    wait_queue_head_t wq;
+};
+
+static uint8_t *g_gpio_base_addrs[NGPIO_CHIPS];
+static struct IRQ_DATA g_irq_data[TOTAL_PINS];
+
+static DEFINE_SPINLOCK(g_spinlock);
+static DEFINE_MUTEX(g_mutex);
+
+static int __init gpio_init(void)
+{
+	int result;
+    int i, k;
+    unsigned long gpio_physical_addrs[NGPIO_CHIPS] = {
+        GPIO_CHIP0_BASE, 
+        GPIO_CHIP1_BASE, 
+        GPIO_CHIP2_BASE, 
+        GPIO_CHIP3_BASE
+    };
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "gpio-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+    for (i = 0; i < NGPIO_CHIPS; ++i) {
+        g_gpio_base_addrs[i] = ioremap(gpio_physical_addrs[i], 4096);
+        if (g_gpio_base_addrs[i] == NULL) {
+            for (k = 0; k < i; ++k)
+                iounmap(g_gpio_base_addrs[k]);
+            return -ENOMEM;
+        }
+    }
+
+    printk(KERN_INFO "gpio-driver module initialization...\n");
+
+	return 0;
+}
+
+static void __exit gpio_exit(void)
+{
+    int i;
+
+    for (i = 0; i < NGPIO_CHIPS; ++i)
+        iounmap(g_gpio_base_addrs[i]);
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+    
+	printk(KERN_INFO "gpio-driver module exit...\n");
+}
+
+static int gpio_open(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static int gpio_release(struct inode *inodep, struct file *filp)
+{
+    int i;
+    unsigned long flags;
+
+   if (mutex_lock_interruptible(&g_mutex) != 0)
+        return -ERESTARTSYS;
+    for (i = 0; i < TOTAL_PINS; ++i) {
+        if (g_irq_data[i].irq_flag)
+            reset_gpio_irq(i);
+            atomic_set(&g_irq_data[i].wait_flag, 0);
+    }
+    mutex_unlock(&g_mutex);
+
+	printk(KERN_INFO "gpio-driver closed...\n");
+
+	return 0;
+}
+
+static ssize_t gpio_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+    int chip, pin, bitval;
+    uint32_t *gpio_reg;
+    unsigned long flags;
+    struct IRQ_DATA *irq_data;
+    int result;
+
+    if (size != 1)
+        return -EINVAL;
+
+    if (*off < 0 || *off >= TOTAL_PINS)
+        return -EINVAL;
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    irq_data = &g_irq_data[*off];
+
+    if (filp->f_flags & O_NONBLOCK) {
+        spin_lock_irqsave(&g_spinlock, flags);
+
+        gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+        iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+
+        gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAIN);
+        bitval = read_bit(gpio_reg, pin);
+
+        spin_unlock_irqrestore(&g_spinlock, flags);
+
+        if (copy_to_user(buf, &"01"[bitval] , size) != 0)
+            return -EFAULT;
+
+        return size;
+    }
+            
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+    
+    if (!g_irq_data[*off].irq_flag)
+        if ((result = set_gpio_irq(*off )) != 0)
+            return result;
+
+
+    if (wait_event_interruptible(irq_data->wq, atomic_read(&irq_data->wait_flag) != 0) != 0)
+        return -ERESTARTSYS;
+    atomic_set(&irq_data->wait_flag, 0);
+   
+    if (copy_to_user(buf, &"01"[bitval] , size) != 0)
+        return -EFAULT;
+
+    return size;
+}
+
+static ssize_t gpio_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+    int chip, pin;
+    uint32_t *gpio_reg;
+    char ch;
+    unsigned long flags;
+
+    if (size != 1) 
+        return -EINVAL;
+
+    chip = *off / PINS_PER_CHIP;
+    pin = *off % PINS_PER_CHIP;
+
+    spin_lock_irqsave(&g_spinlock, flags);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_OE);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    gpio_reg = (uint32_t *) (g_gpio_base_addrs[chip] + GPIO_DATAOUT);
+
+    spin_unlock_irqrestore(&g_spinlock, flags);
+
+    if (copy_from_user(&ch, buf, size) != 0)
+        return -EFAULT;
+    if (ch == '0')
+        iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    else if (ch == '1')
+        iowrite32(ioread32(gpio_reg) | (1 << pin), gpio_reg);
+    else {
+        return -EINVAL;
+    }
+
+	return size;
+}
+
+static loff_t gpio_llseek(struct file *filp, loff_t off, int whence)
+{
+    loff_t newpos;
+ 
+    switch (whence) {
+        case 0:
+            newpos = off;
+            break;
+        case 1:
+            newpos = filp->f_pos + off;
+            break;
+        case 2:
+            newpos = (4 * PINS_PER_CHIP) + off;
+            break;
+        default:
+            return -EINVAL;
+    }
+    if (newpos < 0 || newpos >= 128)
+        return -EINVAL;
+
+    filp->f_pos = newpos;
+
+    return newpos;
+}
+
+static long gpio_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+ 
+    switch (cmd) {
+        case IOC_GPIO_IRQ_TEST:
+            break;
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
+{
+    uint32_t *gpio_reg;
+    struct IRQ_DATA *irq_data;
+
+    irq_data = (struct IRQ_DATA *)dev_id;
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[1] + GPIO_IRQSTATUS_0);
+    iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+
+    atomic_set(&irq_data->wait_flag, 1);
+    wake_up_interruptible(&irq_data->wq);
+
+    return IRQ_HANDLED;
+}
+
+static int set_gpio_irq(int gpio_pin)
+{
+    int chip, pin;
+    uint32_t *gpio_reg;
+    int irqno;
+    int result;
+    unsigned long flags;
+
+    if (gpio_pin < 0 || gpio_pin >= TOTAL_PINS)
+        return -EINVAL;
+
+    chip = gpio_pin / PINS_PER_CHIP;
+    pin = gpio_pin % PINS_PER_CHIP;
+
+    spin_lock_irqsave(&g_spinlock, flags);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT0);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT1);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_RISINGDETECT);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_FALLINGDETECT);
+    iowrite32(ioread32(gpio_reg) | 1 << pin, gpio_reg);
+
+    spin_unlock_irqrestore(&g_spinlock, flags);
+
+    if (mutex_lock_interruptible(&g_mutex) != 0)
+        return -ERESTARTSYS;
+
+    g_irq_data[gpio_pin].chip = chip;
+    g_irq_data[gpio_pin].pin = pin;
+    g_irq_data[gpio_pin].irq_flag = 1;
+
+    init_waitqueue_head(&g_irq_data[gpio_pin].wq);
+
+    if ((irqno = gpio_to_irq(gpio_pin)) < 0) {
+        printk(KERN_INFO "Cannot get IRQ number...\n");
+        mutex_unlock(&g_mutex);
+        return irqno;
+    }
+
+    if ((result = request_irq(irqno, gpio_irq_handler, IRQF_TRIGGER_FALLING|IRQF_SHARED, 
+                "irq-driver", &g_irq_data[gpio_pin])) != 0) {
+        printk(KERN_INFO "Cannot set IRQ...\n");
+        mutex_unlock(&g_mutex);
+        return result;
+    }
+
+    mutex_unlock(&g_mutex);
+
+    printk(KERN_INFO "IRQ successfully set...\n");
+
+    return 0;
+}
+
+static int reset_gpio_irq(int gpio_pin)
+{
+    int chip, pin;
+    uint32_t *gpio_reg;
+    int irqno;
+    unsigned long flags;
+
+    chip = gpio_pin / PINS_PER_CHIP;
+    pin = gpio_pin % PINS_PER_CHIP;
+
+    spin_lock_irqsave(&g_spinlock, flags);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT0);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_LEVELDETECT1);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_RISINGDETECT);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_FALLINGDETECT);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+
+    gpio_reg = (uint32_t *)(g_gpio_base_addrs[chip] + GPIO_IRQSTATUS_SET_0);
+    iowrite32(ioread32(gpio_reg) & ~(1 << pin), gpio_reg);
+    
+    if ((irqno = gpio_to_irq(gpio_pin)) < 0) {
+        printk(KERN_INFO "Cannot get IRQ number...\n");
+        return irqno;
+    }
+    g_irq_data[gpio_pin].irq_flag = 0;
+
+    spin_unlock_irqrestore(&g_spinlock, flags);
+
+    free_irq(irqno, &g_irq_data[gpio_pin]);
+
+    return 0;
+}
+
+static inline int read_bit(const uint32_t *gpio_reg, int offset)
+{
+    int i;
+    int first_val, second_val;
+
+    for (i = 0; i < TRYNUM; ++i) {
+        first_val = ioread32(gpio_reg) >> offset & 1;
+        msleep(5);
+        second_val = ioread32(gpio_reg) >> offset & 1;
+        if (first_val == second_val)
+            return second_val;
+    }
+
+    return second_val;
+}
+
+module_init(gpio_init);
+module_exit(gpio_exit);
+
+# Makefile
+
+ obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* gpio-driver-irq-test.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include "gpio-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char ch;
+
+    if ((fd = open("gpio-driver", O_RDWR)) == -1) 
+        exit_sys("open");
+
+    lseek(fd, 51, 0);
+
+    ch = '1';
+    write(fd, &ch, 1);
+
+    for (int i = 0; i < 10; ++i) {
+        printf("waiting for pressing button...\n");
+        if (read(fd, &ch, 1) == -1)
+            exit_sys("read");
+        printf("%c\n", ch);
+    }
+       
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        141. Ders 11/11/2025 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Raspberry Pi'daki GPIO kullanımı üzerimde duralım. Anımsanacağı gibi Raspberry Pi'da iki sütun haline toplam 
+    40 tane IP pin'i vardır. Bu pinlerin bazıları çok işlevlidir. Bazıları ise belirli amaca yöneliktir. Pin numaralandırmaları
+    yine soldaki sütun tek numaralar sağdaki sütun çüft numaralar olacak biçimde yapılmıştır:
+
+    1   2
+    3   4
+    5   6
+    7   8
+    9   10
+    11  12
+    13  14
+    15  16
+    17  18
+    19  20
+    21  22
+    23  24
+    25  26
+    27  28
+    29  30
+    31  32
+    23  34
+    35  36
+    37  38
+    39  40
+
+    Aşağıda tabloda aygıt pin'lerin sürücü numralandırması ile işlevleri belirtilmektedir. 
+
+    ╔═════╦═══════════╦═══════════════╦════════════════════════════╗
+    ║  #  ║ BCM GPIO  ║ Fiziksel Pin  ║   Alternatif Fonksiyon     ║
+    ╠═════╬═══════════╬═══════════════╬════════════════════════════╣
+    ║  1  ║  GPIO0    ║    Pin 27     ║ ID_SD (I2C0 SDA - EEPROM)  ║
+    ║  2  ║  GPIO1    ║    Pin 28     ║ ID_SC (I2C0 SCL - EEPROM)  ║
+    ║  3  ║  GPIO2    ║    Pin 3      ║ I2C1 SDA                   ║
+    ║  4  ║  GPIO3    ║    Pin 5      ║ I2C1 SCL                   ║
+    ║  5  ║  GPIO4    ║    Pin 7      ║ GPCLK0                     ║
+    ║  6  ║  GPIO5    ║    Pin 29     ║ GPIO                       ║
+    ║  7  ║  GPIO6    ║    Pin 31     ║ GPIO                       ║
+    ║  8  ║  GPIO7    ║    Pin 26     ║ SPI0 CE1                   ║
+    ║  9  ║  GPIO8    ║    Pin 24     ║ SPI0 CE0                   ║
+    ║ 10  ║  GPIO9    ║    Pin 21     ║ SPI0 MISO                  ║
+    ║ 11  ║  GPIO10   ║    Pin 19     ║ SPI0 MOSI                  ║
+    ║ 12  ║  GPIO11   ║    Pin 23     ║ SPI0 SCLK                  ║
+    ║ 13  ║  GPIO12   ║    Pin 32     ║ PWM0                       ║
+    ║ 14  ║  GPIO13   ║    Pin 33     ║ PWM1                       ║
+    ║ 15  ║  GPIO14   ║    Pin 8      ║ UART0 TXD                  ║
+    ║ 16  ║  GPIO15   ║    Pin 10     ║ UART0 RXD                  ║
+    ║ 17  ║  GPIO16   ║    Pin 36     ║ GPIO                       ║
+    ║ 18  ║  GPIO17   ║    Pin 11     ║ GPIO                       ║
+    ║ 19  ║  GPIO18   ║    Pin 12     ║ PWM0 / PCM CLK             ║
+    ║ 20  ║  GPIO19   ║    Pin 35     ║ PWM1 / PCM FS              ║
+    ║ 21  ║  GPIO20   ║    Pin 38     ║ PCM DIN                    ║
+    ║ 22  ║  GPIO21   ║    Pin 40     ║ PCM DOUT                   ║
+    ║ 23  ║  GPIO22   ║    Pin 15     ║ GPIO                       ║
+    ║ 24  ║  GPIO23   ║    Pin 16     ║ GPIO                       ║
+    ║ 25  ║  GPIO24   ║    Pin 18     ║ GPIO                       ║
+    ║ 26  ║  GPIO25   ║    Pin 22     ║ GPIO                       ║
+    ║ 27  ║  GPIO26   ║    Pin 37     ║ GPIO                       ║
+    ║ 28  ║  GPIO27   ║    Pin 13     ║ GPIO                       ║
+    ╚═════╩═══════════╩═══════════════╩════════════════════════════╝
+
+    Aşağıdaki şekilde ise pin'lerin başlık üzerinde konumları ve işlevleri gösterilmektedir:
+
+       ┌─────────────────────────────────────────────────┐
+    1  │ •  3.3V Power              5V Power  •          │ 2
+    3  │ •  GPIO2   (I2C1 SDA)      5V Power  •          │ 4
+    5  │ •  GPIO3   (I2C1 SCL)      Ground               │ 6
+    7  │ •  GPIO4   (GPCLK0)        GPIO14    •  (TX)    │ 8
+    9  │    Ground                  GPIO15    •  (RX)    │ 10
+    11 │ •  GPIO17                  GPIO18    •  (PWM)   │ 12
+    13 │ •  GPIO27                  Ground               │ 14
+    15 │ •  GPIO22                  GPIO23    •          │ 16
+    17 │ •  3.3V Power              GPIO24    •          │ 18
+    19 │ •  GPIO10  (MOSI)          Ground               │ 20
+    21 │ •  GPIO9   (MISO)          GPIO25    •          │ 22
+    23 │ •  GPIO11  (SCLK)          GPIO8     •  (CE0)   │ 24
+    25 │    Ground                  GPIO7     •  (CE1)   │ 26
+    27 │ •  GPIO0   (ID_SD)         GPIO1     •  (ID)    │ 28
+    29 │ •  GPIO5                   Ground               │ 30
+    31 │ •  GPIO6                   GPIO12    •  (PWM)   │ 32
+    33 │ •  GPIO13  (PWM)           Ground               │ 34
+    35 │ •  GPIO19  (PWM)           GPIO16    •          │ 36
+    37 │ •  GPIO26                  GPIO20    •  (PCM)   │ 38
+    39 │    Ground                  GPIO21    •  (PCM)   │ 40
+       └─────────────────────────────────────────────────┘
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aslında Raspberry Pi ile BBB GPIO pin'lerinin kullanılması konusunda oldukça benzemektedir. Raspberry PI'da da GPIO 
+    denetleyicisi Broadcom'un SoC çipi içerisindedir ve GPIO denetleyicisine yine bellek tabanlı IO (memory-mapped IO) 
+    tekniğiyle erişilmektedir. Yine Raspberry Pi'da da GPIO uçları için sysfs arayüzü BBB'de olduğu gibi kullanılmaktadır. 
+    Yine "/sys/class/gpio" dizinine geçilerek ilgili pin'lere ilişkin export edilmiş dizin girişleri yoluyla IO işlemleri 
+    komut satırından yapılabilmektedir. Bu dizinin içeriği aşağıdakine benzer olacaktır:
+
+    export  gpiochip512  gpiochip529  gpiochip535  gpiochip567  gpiochip571  unexport
+
+    Burada gpiochipXXX dizinleri GPIO denetleyicilerini belirtmektedir. gpiochip512 denetleyicisi GPIO pinlerini kontrol eden 
+    denetleyicidir. Aslında BCM SoC çiplerinde toplamda bir tane GPIO denetleyicisi vardır. Ancak Linux çekirdeği bize sanki 
+    birden fazla GPIO denetleyicisi varmış gibi bir görünüm sunmaktadır. SoC içerisinde 54 GPIO ucunun yalnızca 26 tanesi 
+    pinlere verilmiş durumdadır. GPIO pin'leri üzerinde işlem yapabilmek için global GPIO numarasının elde edilmesi gerekir. 
+    Bu numarada bir taban numaraya GPIO aygıt sürücü numarasının eklenmesiyle elde edilmektedir. Linux çekirdeği GPIO pin'lerini
+    gpiochip512 çip diziniyle göstermektedir. Bu bu çip dizinin taban değeri 512'dir. Bu taban değer ilgili dizindeki "base" 
+    elde edilebilir:
+
+    $ cat /sys/class/gpio/gpiochip512/base
+    512
+
+    Biz hangi aygıt sürücü numarasına ilişkin GPIO pin'ini kullanacaksak o değeri bu numaraya ekleyerek global GPIO numarasını
+    elde ederiz. Örneğin GPIO6 pin'ini kullanmak isteyelim. Bu durumda global GPIO pin numarası 512 + 6 = 518 olacaktır. 
+    Default durumda herhangi bir pin export edilmemiştir. Export işlemi global pin numarasına göre yapılmaktadır. Export işlemi 
+    için BBB'de olduğu gibi  "/sys/class/gpio" dizinindeki "export" dosyası kullanılmaktadır. Örneğin:
+
+    $ echo 518 > /sys/class/gpio/export
+
+    Artık export ettiğimiz pin "/sys/class/gpio" dizininde gözükecektir:
+
+    $ ls /sys/class/gpio
+    export  gpio518  gpiochip512  gpiochip529  gpiochip535  gpiochip567  gpiochip571  unexport
+
+    Bu dizine geçildiğinde tıpkı BBB'de olduğu gibi ilgili pin'e erişmek için dosyalar görülecektir:
+
+    $ ls ls /sys/class/gpio/gpio518
+    active_low  device  direction  power  subsystem  uevent  value
+
+    Burada yine direction dosyasıyla BBB'de olduğu gibi pin IN ya da OUT olarka konfigüre edilir. value dosyası yoluyla da
+    pin'deki değer elde edilip pin'e yeni değer set edilebilmektedir. Dolayısıyla aslında pin export edildikten sonra 
+    yapılacak her şey BBB'de olduğu gibidir. 
+
+    Aslında BBB'de belirttiğimiz gibi GPIO pin'leri için sysfs dosya sisteminin kullanılması "deprecated" yapılmıştır. Tıpkı
+    BBB'de olduğu gibi Raspberry Pi'da "libgpiod" kütüphanesi benzer biçimde kullanılabilmektedir. Bu kütüphane kullanılırken 
+    gpiod_chip_open_by_name fonksiyonunda çip ismi "gpiochip512" biçiminde girilmelidir. Hat numarası da aygıt sürücü GPIO 
+    numarası olarak girilmelidir. Örneğin GPIO6 numaralı pin'deki LED şöyle yapılabilir:
+
+    #include <gpiod.h>
+    #include <stdio.h>
+    #include <unistd.h>
+
+    #define CHIP_NAME       "gpiochip512"
+    #define LINE_OFFSET     6
+    #define CONSUMER        "led_test"
+
+    int main(void)
+    {
+        struct gpiod_chip *chip;
+        struct gpiod_line *line;
+        int ret;
+
+        chip = gpiod_chip_open_by_name(CHIP_NAME);
+        if (!chip) {
+            perror("gpiod_chip_open_by_name");
+            return 1;
+        }
+
+        line = gpiod_chip_get_line(chip, LINE_OFFSET);
+        if (!line) {
+            perror("gpiod_chip_get_line");
+            gpiod_chip_close(chip);
+            return 1;
+        }
+
+        ret = gpiod_line_request_output(line, CONSUMER, 0);
+        if (ret < 0) {
+            perror("gpiod_line_request_output");
+            gpiod_chip_close(chip);
+            return 1;
+        }
+
+        printf("LED ON\n");
+        gpiod_line_set_value(line, 1);
+        sleep(1);
+        printf("LED OFF\n");
+        gpiod_line_set_value(line, 0);
+
+        gpiod_line_release(line);
+        gpiod_chip_close(chip);
+        return 0;
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Raspbeery PI'daki GPIO denetleyicisinin fiziksel taban adresleri şöyledir:
+
+    #define BCM2835_PERI_BASE   0x20000000  // Pi 1
+    #define BCM2836_PERI_BASE   0x3F000000  // Pi 2/3
+    #define BCM2711_PERI_BASE   0xFE000000  // Pi 4
+    #define BCM2712_PERI_BASE   0x1F00000000  // Pi 5 (64-bit!)
+
+    #define GPIO_OFFSET         0x00200000
+    #define GPIO_BASE          (PERI_BASE + GPIO_OFFSET)
+
+    Burada taban fiziksel adres GPIO_BASE sembolik sabiti ile temsil edilmiştir. Bu taban adresten itibaren toplam 41 tane
+    32 bitlik bellek tabanlı erişilen yazmaç vardır.
+
+    // Function Select (Her GPIO için 3-bit fonksiyon kodu)
+    #define GPFSEL0   0x00  // GPIO 0-9
+    #define GPFSEL1   0x04  // GPIO 10-19
+    #define GPFSEL2   0x08  // GPIO 20-29
+    #define GPFSEL3   0x0C  // GPIO 30-39
+    #define GPFSEL4   0x10  // GPIO 40-49
+    #define GPFSEL5   0x14  // GPIO 50-53
+
+    // Output Set (Write 1 to set)
+    #define GPSET0    0x1C  // GPIO 0-31
+    #define GPSET1    0x20  // GPIO 32-53
+
+    // Output Clear (Write 1 to clear)
+    #define GPCLR0    0x28  // GPIO 0-31
+    #define GPCLR1    0x2C  // GPIO 32-53
+
+    // Pin Level (Read only)
+    #define GPLEV0    0x34  // GPIO 0-31
+    #define GPLEV1    0x38  // GPIO 32-53
+
+    // Event Detect Status
+    #define GPEDS0    0x40
+    #define GPEDS1    0x44
+
+    // Rising/Falling Edge Detect
+    #define GPREN0    0x4C
+    #define GPFEN0    0x58
+
+    // Pull-up/Pull-down
+    #define GPPUD     0x94  // Control
+    #define GPPUDCLK0 0x98  // Clock 0-31
+    #define GPPUDCLK1 0x9C  // Clock 32-53
+
+    Buradaki GPFSELN yazmaçları belli bir pin'i IN, OUT ve diğer bazı biçimlerde konfigüre  etmek için kullanılmaktadır. 
+    Her yazmaç 32 bit olmasına karşın yalnızca 10 tane GPIO pin'ini konfigüre edebilmektedir. Bu yazmaçlardaki her 3 bit 
+    bir pin'in konfigürasyonunu belirtmektedir:
+
+    000 = Input
+    001 = Output  
+    010-111 = Alternate Functions (ALT0-ALT5)
+
+    Örneğin GPIO17 pin'ini OUT olarak şöyle konfigüre edebiliriz:
+
+    volatile uint32_t *gpio = (uint32_t*)GPIO_BASE;
+    volatile uint32_t *gpfsel1 = gpio + (GPFSEL1 / 4);
+
+    int pin = 17;
+    int reg_idx = pin / 10;       // = 1 (GPFSEL1)
+    int bit_offset = (pin % 10) * 3;  // = 21
+
+    *gpfsel1 = (*gpfsel1 & ~(7 << bit_offset)) | (1 << bit_offset);
+
+    Tabii bu işlemler aslında aygıt sürücü içerisinde daha güvenli bir biçimde yapılmalıdır. Yukarıda her pin için 3 bitlik 
+    bir konfigürasyon bilgisinin bulundurulduğunu belirtmiştik. Oradaki 010 ile 111 arasındaki bitler alternatif konfigürasyon
+    numarasını belirtmektedir. Bu alternatif konfigürasyonlar şöyledir:
+
+    BCM  Board  Fonksiyon           ALT0      ALT1    ALT2    ALT3    ALT4    ALT5
+    ───────────────────────────────────────────────────────────────────────────────
+    0    27     ID_SD (EEPROM)      I2C0_SDA   -       -       -       -       -
+    1    28     ID_SC (EEPROM)      I2C0_SCL   -       -       -       -       -
+    2    3      I2C1 SDA            I2C1_SDA   -       -       -       -       -
+    3    5      I2C1 SCL            I2C1_SCL   -       -       -       -       -
+    4    7      GPCLK0              GPCLK0     -       -       -       -       -
+    7    26     SPI0 CE1            SPI0_CE1_N -       -       -       -       -
+    8    24     SPI0 CE0            SPI0_CE0_N -       -       -       -       -
+    9    21     SPI0 MISO           SPI0_MISO  -       -       -       -       -
+    10   19     SPI0 MOSI           SPI0_MOSI  -       -       -       -       -
+    11   23     SPI0 SCLK           SPI0_SCLK  -       -       -       -       -
+    12   32     PWM0                PWM0       -       -       -       -       -
+    13   33     PWM1                PWM1       -       -       -       -       -
+    14   8      UART0 TXD           UART0_TXD  -       -       -       UART1_TX -
+    15   10     UART0 RXD           UART0_RXD  -       -       -       UART1_RX -
+    17   11     GPIO                -          -       -       -       -       -
+    18   12     PWM0/PCM_CLK        PCM_CLK    -       PWM0    -       -       -
+    22   15     GPIO                -          -       -       -       -       -
+    23   16     GPIO                -          -       -       -       -       -
+    24   18     GPIO                -          -       -       -       -       -
+    25   22     GPIO                -          -       -       -       -       -
+    27   13     GPIO                -          -       -       -       -       -
+
+    İlgili pin'i alternatif konfigürasyon moduna sokma işlemi şöyle yapılabilir:
+
+    typedef enum {
+        GPIO_FUNC_INPUT  = 0b000,
+        GPIO_FUNC_OUTPUT = 0b001,
+        GPIO_FUNC_ALT0   = 0b100,
+        GPIO_FUNC_ALT1   = 0b101,
+        GPIO_FUNC_ALT2   = 0b110,
+        GPIO_FUNC_ALT3   = 0b111,
+        GPIO_FUNC_ALT4   = 0b011,
+        GPIO_FUNC_ALT5   = 0b010
+    } GPIO_ALT_MODES;
+
+    void gpio_set_function(int pin, GPIO_ALT_MODES alt) 
+    {
+        int reg = pin / 10;
+        int shift = (pin % 10) * 3;
+         volatile uint32_t *fsel = gpio_map + reg;
+        uint32_t value = *fsel;
+
+        value &= ~(7 << shift);
+        value |= (alt << shift);
+        *fsel = value;
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    "libgpiod" kütüphanesine alternatif olarak Raspberry Pi için "pigpio" isimli ayrı kütüphane de bulundurulmuştur. Kütüphane 
+    indirilebilir:
+
+    $ sudo apt-get install pigpio 
+
+    Aslında zaten Raspberri OS içerisinde bu kütüphane yüklü durumdadır. Kütüphanedeki fonksiyon prototipleri ve diğer 
+    birtakım bildrimler <pigpio.h> başlık dosyasında bulunmaktadır. Kütüphane genel değil Raspberry Pi için yazıldığından 
+    dolayı kullanımı da oldukça kolaydır. Önce gpioInitialise fonksiyonu çağrılır. Sonra ilgili pin gpioSetMode fonksiyonuyla 
+    IN ya da OUT biçiminde konfigüre edilir. Pin'e değer yazmak için gpioWrite fonls,yonu pin'den değer okumak için gpioRead 
+    fonksiyonu kullanılmaktadır. İşlemler bittiğinde gpioTerminate fonksiyonu çağrılır. Derleme işlemini yaparken -lpigpio" 
+    seçeneği ile bağlama aşamasında kütüphanenin kullanılmasının sağlanması gerekir. Örneğin:
+
+    $ gcc -o sample sample.c -lpigpio 
+
+    Aşağıda GPIO6 numaralı pin'e bağlı LED'i yakıp söndüren bir örnek verilmiştir:
+
+    #include <pigpio.h>
+
+    int main(void) {
+        if(gpioInitialise() < 0) return 1;
+        
+        gpioSetMode(17, PI_OUTPUT);
+        
+        for(int i = 0; i < 10; i++) {
+            gpioWrite(17, 1);
+            gpioDelay(500000);
+            gpioWrite(17, 0);
+            gpioDelay(500000);
+        }
+        
+        gpioTerminate();
+        return 0;
+    }
+
+    Kütüphanenin daha pek çok özelliği vardır. Ancak yukarıda da belirttiğimiz gibi kullanımı oldukça kolaydır. Kütüphanenin
+    dokğmantasytonuna aşağıdaki bağlantıdan erişebilirsiniz:
+
+    https://abyz.me.uk/rpi/pigpio/download.html
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        142. Ders 13/11/2025 - Perşembe
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bu bölümde UNIX/Linux sistemlerinde seri port haberleşme üzerinde duracağız. Bu haberleşmeyi BBB ve Raspberry Pi üzerinde 
+    uygulayacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Seri port haberleşmesi oldukça eskilere dayanmaktadır. Ancak hala bu haberleşme yöntemi geçerliliğini korumaktadır. 
+    Seri port haberleşmesi 80 yılların başlarında PC'lere bilgisayar-modem ve bilgisayar-yazıcı haberleşmesi için standart 
+    bir biçimde eklenmiştir. Ancak zamanla USB haberleşmesi yaygınlaşınca seri portlar masaüstü bilgisayarlardan ve notebook'lardan
+    kaldırılmıştır. Bu kursta da gördüğümüz gibi özel çeviricilerle seri port haberleşmesi USB yoluyla da sağlanmaktadır. 
+    Eskiden PC'lerde seri port'lar 9 pin'li erkek konnektörler biçiminde (bunlara DB-9 portu da denilmektedir) bulunduruluyordu. 
+    Bu 9 pin'in anlamları şöyledi:
+
+    ╭─────────────╮
+    │ ○ ○ ○ ○ ○   │  (pinler dışarı çıkıntılı)
+    │  ○ ○ ○ ○    │
+    ╰─────────────╯
+
+    Pin 1: DCD (Data Carrier Detect)
+    Pin 2: RxD (Receive Data)
+    Pin 3: TxD (Transmit Data)
+    Pin 4: DTR (Data Terminal Ready)
+    Pin 5: GND (Ground/Toprak)
+    Pin 6: DSR (Data Set Ready)
+    Pin 7: RTS (Request to Send)
+    Pin 8: CTS (Clear to Send)
+    Pin 9: RI (Ring Indicator)
+
+    Buradaki isimler "bilgisayar-modem haberleşmesi" dikkate alınarak verilmiştir. Haberleşme için minimum kullanılacak
+    uçlar şunlardır:
+
+    RxD: Receive Data
+    TxD: Transmit Data
+    GND: Toprak
+
+    Minimal bağlantıda iki tarafın RxD uçları karşı tarafın TxD uçlarına bağlanmaktadır. Toprak uçları da katşılıklı 
+    bağlanmaktadır:
+
+      PC 1 (DTE)                    PC 2 (DTE)
+        Erkek                         Erkek
+    ╭───────────╮                 ╭───────────╮
+    │ ○ ○ ○ ○ ○ │                 │ ○ ○ ○ ○ ○ │
+    │  ○ ○ ○ ○  │                 │  ○ ○ ○ ○  │
+    ╰───────────╯                 ╰───────────╯
+      1 2 3 4 5                     1 2 3 4 5
+      6 7 8 9                        6 7 8 9
+
+    Pin 2 (RxD) ─────────────────────────── Pin 3 (TxD)
+                    çapraz
+    Pin 3 (TxD) ─────────────────────────── Pin 2 (RxD)
+
+    Pin 5 (GND)─────────────────────────── Pin 5 (GND)
+
+    PC'lerdeki seri port'lar RS-232 denilen voltaj standartlarına uygun biçimde üretilmektedir. RS-232 standardında lojik 1 
+    lojik 0 için şu gerilim seviyeleri kullanılmaktadır:
+
+    Lojik 0: +3V ile +15V arası, tipik olarak +5V ile +12V
+    Lojik 1: -3V ile -15V arası, tipik olarak -5V ile -12V
+
+    Bu yüksek gerilim seviyeleri iki bilgisayar arasında uzun kablolarla (örneğin 20 metre) bağlantı yapılabilmesini 
+    sağlamaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Seri haberlşme aslında "UART (Universial Asynchronous Receiver and Transmitter)" denilen denetleyicilerle yapılmaktadır.
+    Eski PC'lerde UART denetleyicisi olarak "Intel 8250" kullanılıyordu. Sonra "NS 16550" denetleyicileri kullanılmaya başlandı. 
+    Artık UART denetleyicileri SoC'ların ya da chipset'lerin içerisinde bulunmaktadır. Klasik UART denetleyicilerinin 
+    uçları eskiden RS-232 voltaj seviyelerine yükseltilerek seri port'un pin'lerine veriliyordu. UART denetleyicileri TTL 
+    düzeyinde çık veriyordu. TTL çıkışları mikro elektronik uygulamalarında kullanılmaktadır. TTL voltaj seviyeleri tipik 
+    olarak şöyledir:
+
+    Lojik 0: 0V - 0.8V 
+    Lojik 1: 2V - 5V
+
+    RS-232 çıkışlarını doğrudan TTL düzeyinde çalışan UART denetleyicilerinin uçlarına bağlamayınız. Bunun için RS-232'den 
+    TTL'e dönüştürme yapan dönüştürücüler bulunmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Seri port haberleşmesi oldukça yalındır. Haberleşme için iki tarafın UART denetleyicisi eşit hızlarda ve aynı biçimde 
+    konfigüre edilir. Sistem programcısı UART denetleyicisine bilgileri byte düzeyinde verir. UART denetleyicisi bu bilgiyi 
+    bitlerine ayırır ve TxD ucundan belirlenen hızda kodlar. Gönderici tarafın TxD uzu alıcı tarafında RxD ucuba bağlı olduğu 
+    için gönderilen bitler alıcı taraftaki UART tarafından alınmaktadır. Alıcı taraftaki UART bu bitleri birleştirir, byte
+    biçimine getirir. Sistem programcısı onu byte olarak alır. Bu haberleşmeye "asenkron (asynchronous)" denmesinin nedeni
+    byte'lar arasındaki sürenin değişebilmesindendir. Ancak byte'ların bitleri aynı hızda kodlanıp alınmaktadır. 
+
+    Peki UART haberleşmesinde alıcı taraftaki UART bilginin gönderilmeye başlandığını nasıl anlamaktadır? İşte bilgi 
+    gönderilmiyorken TxD hattı lojik 1 seviyesinde tutulur. Bit'ler gönderilme başlanmadan önce hat bir periyot lojik 0'a 
+    çekilir. Buna "start bit" denilmektedir. Böylece karşı taraftaki UART bilginin gönderilmeye başlandığını anlar. Sonra 
+    iki taraf aynı frekansta bit'leri gönderip alırlar. Ancak hattın yeniden lojik 1 seviyesine çekilerek bırakılması 
+    gerekmektedir. İşte en sonunda hattın yeniden lojik 1 seviyesine çekilmesine "stop bit" denilmektedir. Hat lojik 1 
+    seviyesine bir periyot değil iki periyot da çekilebilir. Buna da stop bit sayısı denilmektedir. Genellikle 1 stop bit 
+    kullanılmaktadır. Ancak alıcının yavaş olduğu durumlarda artık çok seyrek de olsa 2 stop bit kullanılabilmektedir. UART 
+    haberleşmesinde gönderen tarafın gönderdiği bitleri alan tarafın düzgün alıp almadığını belirlemek için "parity" hata 
+    kontrol biti de data bitlerinden sonra isteğe bağlı gönderilip alınabilmektedir. Parity kullanılmayabilir. Bu durumda 
+    data bitlerinden sonra hemen stop bit gönderilir. Parity kullanılacaksa "tek parity (odd parity)" ya da "çift parity 
+    (even parity)" biçiminde iki seçenek söz konusudur. Tek parity "data bitlerindeki 1'lerin sayısını tek yapmak için geçerken
+    biti", çift parity ise "data bitlerindeki 1'lerin sayısını çift yapmak için gereken biti" belirtmektedir. Örneğin:
+
+    0100 0011 
+
+    Buradaki 8 bitin tek parity'si 0, çift parity'si ise 1'dir. Artık parity kullanımı hemen hemen ortadan kalkmıştır. 
+
+    UART haberleşmesi "full duplex" bir haberleşmedir. Yani UART haberleşmesinde iki taraf da birbirlerine aynı anda bilgi 
+    gönderip bilgi alabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Haberleşmenin türü ne olursa olsun hepsinde "akış kontolü (flow control)" denilen bir olgu vardır. Akış kontrolü "alan 
+    tarafın gönderen tarafı geçici olarak durdurmasını ve sonra yeniden göndermeye devam ettirmesini sağlayan" bir mekanizmadır. 
+    Gönderen tarafın gönderdiği bilgiler alan taraf tarafından hemen işlenemeyebilir. Bazen alan taraf bunları işlemekte 
+    yavaş kalabilir. Bu tür durumlarda gönderen tarafın gönderdiği bilgiler bir tamponda bekletilir. Alan taraf bilgileri 
+    bu tapon alarak işler. Ancak alan taraf gecikirse bu tampon da taşabilmektedir. O halde alan tarafın gönderen tarafı geçici 
+    olarak durdurması gerekmektedir. Tabii alıcı taraf önceden belirlenen hızda bilgiyi alıp işleyebiliyorsa bir sorun oluşmaz. 
+    Ancak iletimin güvenli hale getirilmesi için akış kontrolü önerilmektedir. 
+
+    UART haberleşmesinde iki tür akış kontrolü uygulanabilmektedir:
+
+    1) Donanımsal akış kontrolü
+    2) Yazılımsal akış kontrolü
+
+    Donanımsal akış kontrolü tipik olarak UART'ın iki ucundan sağlanmaktadır. Bunun için tipik olarak olarak RTS (request to 
+    Send) ve CTS (Clear to Send) uçları kullanılmaktadır. Bir RTS ucu diğer tarafın CTS ucuna bağlanmaktadır. Böylece bir 
+    taraf RTS ucuna bir işaret gönderdiğinde diğeri bunu CTS ucundan okuyabilmektedir. Yukarıda da belirttiğimiz gibi 
+    pin'lere RTS ve CTS isimleri geleneksel bilgisayar-modem haberlemesi dikkate alınarak verilmiştir. Tipik akış kontrolü 
+    kontolü şöyle yapılmaktadır: Alan taraf tipik olarak RTS ucunu lojik 1 seviyesinde tutar. Gönderen taraf da CTS ucuyla 
+    bu değeri okur. Bu değer lojik 1 olduğu sürece gönderen taraf göndermeye devam eder. Eğer alıcı taraf CTS ucunu lojik 0 
+    değerine çekerse gönderen taraf artık bu uç lojik 1 seviyesine  çekilene kadar bekler. Tabii diğer taraf da karşı tarafa 
+    aynı biçimde akış kontrolü uygulamaktadır. RTS/CTS akış kontrolü farklı biçimlerde de uygulanabilmektedir. Eski UART 
+    denetleyicileri bu RTS/CTS akış kontrolünü donanımsal düzeyde yapmıyordu. Ancak daha sonra pek çok UART devresi bunu 
+    donanımsal biçimde de yapar hale gelmiştir. 
+
+    Yazılımsal akış kontrolünde yukarıdaki senaryo elektriksel olarak değil alan tarafın gönderen tarafa özel karakterler
+    göndermesiyle sağlanmaktadır. Bunun için kullanılan tipik yazılımsal protokole XON/XOFF protokolü denilmektedir. Alıcı 
+    taraf gönderici tarafı durdurmak için XOFF özel karakterini gönderir. Gönderen taraf bu karakteri aldığında göndermeyi 
+    durdurur. Alıcı taraf gönderici tarafın devam etmesini sağlamak için XON özel karakterini göndermektedir. XON ve XOFF
+    karakteri olarak aşağıdaki karakterler kullanılmaktadır:
+
+    Dec  Hex  Oct  Ctrl   Açıklama
+    ───────────────────────────────────────
+    17  0x11 021  ^Q     XON  (Devam)
+    19  0x13 023  ^S     XOFF (Dur)
+
+    XON/XOFF protokolü tamamen programlama yoluyla oluşturulmaktadır. 
+
+    Peki akış kontrolünde karşı taraf ne zaman durdurulup ne zaman devam ettirilmelidir? Tipik olarak sistem programcıları 
+    tahsis ettikleri tampon %70 ile %90 arasında bir doluluk seviyesine geldiğinde karşı tarafı durdurmakta tampon %10 ile 
+    %30 civarında bir doluluk seviyesine düştüğünde ise karşı tarafı devam ettirmektedir. 
+
+    Peki sistem programcısı UART'ta çok hızlı veri gönderirse ne olur? İşte UART denetleyicilerinin içerisinde de donanımsal 
+    biçimde organize edilmiş bir FIFO tampon vardır. Tabii tampon da dolarsa gönderen taraf UART'a bilgiyi gönderdiği halde 
+    UART bunu tamponunda saklayamaz ve bilgi kaçırılabilir. Ancak gönderen taraf zaten UART'ın bunu aldığını anlayabilmektedir. 
+    Eski Intel 8250 UART denetleyicilerinde böyle bir donanımsal tampon yoktu. Daha sonra NS 16550 modellerine 16 byte'lık 
+    gönderme ve alma tamponları eklendi. Bugünkü SoC içerisindeki UART denetleyicilerinde genel olarak 64'lük ya da 32'lik 
+    donanımsal tamponlar bulunmaktadur. USB seri dönüştürücülerde bu tamponların uzunlukları 256 gibi yüksek değerlerdedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda programcının UART denetleyicisine byte verdiğini ondan byte aldığını belirttik. Byte'ın bitlere dönüştürülerek 
+    gönderilip alınmasını AURT denetleyicisi yapıyordu. İşte UART terminolojisinde gönderilecek bit öbeğine "data bitleri" 
+    denilmektedir. UART denetleyicileri 5, 6, 7, 8 data bitlerini desteklemektedir. Örneğin biz UART denetleyicisini 5 data 
+    bit olarak konfigüre edersek ancak ona 0 ile 31 arasında bir değer gönderebiliriz. Peki neden gönderilecek bilgi standart 
+    8 bit değil de duruma göre ayarlanabilen bir değerdedir? İşte bunun amacı özel durumlarda hız kanacı sağlamaktır. Örneğin 
+    kişi düz metin göndermek isteyebilir. Bu durumda 5 bit yetebilir. Daha az bit gönderildiği için daha hızlı bir iletişim 
+    sağlanır. Ancak tabii günümüzde UART data bitlerinin sayısı 8 olacak biçimde konfigüre edilmektedir. 
+    Bu durumda temel UART ayarları şunlardan olulmaktadır:
+
+    - Data bitlerinin sayısı
+    - Stop bitlerinin sayısı (1 ya da 2)
+    - Parity kullanılacak mı? Kullanılacaksa tek parity mi çift parity mi?
+    - Gönderim alma hızı (saniyedeki bit sayısı)
+
+    UART'ın gönderim alma hızı "baud" terimiyle ifade edilmektedir. Tabii bunun içerisine start bit ve stop bit varsa parity 
+    biti de dahildir. Yani örneğin data bitlerinin sayısı 8 ise aslında byte'lar arasında boşluk olmasa bile 10 bit ya da 11
+    ya da 12 bit iletim yapılmaktadır. Haberleşmede iletimi hedeflenen bilginin kendisine İngilizce "payload" da denilmektedir. 
+    Örneğin data bitlerinin sayısı 8 ise payload 8 bittir. Ancak aslında daha fazla bit karşı tarafa gönderilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    UNIX/Linux sistemlerinde seri port programlaması üç biçimde yapılabilmektedir:
+
+    1) Standart POSIX termios kütüphanesini kullanmak 
+    2) Özel kütüphaneleri kullanmak
+    3) Aygıt sürücü yazmak yoluyla ya da mevcut aygıt sürücüleri doğrudan kullanmak yoluyla
+
+    Tabii en taşınabilir yöntem standart "termios" arayüzünü kullanmaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BBB'lerde toplam 6 tane UART denetleyicisi ve uç takımı vardır. Bunlardan biri (sistem boot edilmeden önce terminal 
+    olarak kullanılan çıkış) 6 pinli GPIO P9 başlığımım yanında bulunmaktadır. Geri kalan 5 tanesi GPIO pin'lerinin içerisinde 
+    multiplexed edilmiştir. Yani bu 5 UART uçları GPIO olarak da UART olarak da konfigüre edilebilmektedir. Dolayısıyla 
+    GPIO soketlerindeki UART uçlarını kullanmadan önce bu uçların GPIO olarak değil de UART olarak konfigüre edilmesi 
+    gerekir. 
+    
+    Biz kursumuzda temek denemeleri UART2 ile UART4 uçlarını karşılıklı bağlayarak yapacağız. Dolayısıyla örneğin UART2'den
+    bilgi gönderdiğimizde onu UART4'ten, UART4'ten bilgi gönderidğimizde ise onu UART2'den okuyabileceğiz.  
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
 
 /*-----------------------------------------------------------------------------------------------------------------------------
 
