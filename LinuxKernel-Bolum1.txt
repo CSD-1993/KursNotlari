@@ -16,7 +16,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 18/11/2025 - Salı
+                                    Son Güncelleme: 28/11/2025 - Perşembe
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -12565,8 +12565,8 @@ clean:
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Güncel Linux çekirdeklerinde file_system_type yapısının dosya sistemini yazanlar tarafından doldurması gerek elemanları 
-    şunlardır:
+    Güncel Linux çekirdeklerinde file_system_type yapısının eğer yüksek seviyeli çekirdek fonksiyonlarından faydalanılacaksa 
+    dosya sistemini yazanlar tarafından doldurması gereken elemanları şunlardır:
 
     static struct file_system_type myfs_type = {
         .owner = THIS_MODULE,
@@ -12575,15 +12575,795 @@ clean:
         .kill_sb = myfs_kill_super,
     };
 
-    Yapının owner elemanına THIS_MODULE değeri atanmalıdır. Her dosya sisteminin bir simi vardır. Yapının name elemanı 
-    bu ismi belirtmektedir. Dosya sistemi mount edilmek istedndiğinde çekirdek file_systems bağlı listesinde arama 
+    Yapının owner elemanına THIS_MODULE değeri atanmalıdır. Her dosya sisteminin bir ismi vardır. Yapının name elemanı 
+    bu ismi belirtmektedir. Dosya sistemi mount edilmek istendiğinde çekirdek file_systems bağlı listesinde arama 
     yaparak bizim yerleştirdiğimiz yapı nesnesini bulur ve onun mount elemanında belirtilen fonksiyonu çağırır. Yani 
-    bu yapının mount elemanına "dosya sistemimiz mount edildiğinde çağrılacak fonlsiyonu" yerleştirmeliyiz. Dosya 
+    bu yapının mount elemanına "dosya sistemimiz mount edildiğinde çağrılacak fonksiyonu" yerleştirmeliyiz. Dosya 
     sistemi unmount edilirken eğer super_block nesnesinin referans sayacı 0'a düşerse kill_sb elemanında belirtilen  
-    fonksiyon çağrılmaktadır. O halde dosya sistemi yazmak isteyen sistem programcısı yapının mount elemanına ve kill_sb 
-    elemanına uygun parametrik yapıya sahip fonksiyonların adreslerini yerleştirmesi gerekir. Örneğimizde yapının bu 
-    elemanlarına myfs_mount ve myfs_kill_super fonksiyonlarının adresleri yerleştirilmiştir. Peki bu fonksiyonların 
-    içinde sistem programcısı ne yapmalıdır?
+    fonksiyon çağrılmaktadır. O halde dosya sistemini gerçekleştiren sistem programcısı yapının mount elemanına ve 
+    kill_sb elemanına uygun parametrik yapılara sahip fonksiyonların adreslerini yerleştirmesi gerekir. Örneğimizde 
+    yapının bu elemanlarına myfs_mount ve myfs_kill_super fonksiyonlarının adresleri yerleştirilmiştir. Yeni çekirdeklerde 
+    bir süredir yapının mıunt elemanına alternatif olarak init_fs_context isimli bir eleman daha bulundurulmaktadır. 
+    init_fs_context elemanı da bir fonksiyon göstericisidir ve mount işlemi sırasında çağrılmaktadır. init_fs_context 
+    elemanı mount elemanına daha modern bir alternatiftir. Sistem programcısı yapınn ya mount elemanını ya da init_fs_context
+    elemanını kullanır. Eğer yapının bu iki elemanı da set edilmişse çekirdek yalnızca mount işlemi sırasında init_fs_context  
+    elemanında belirtilen fonksiyonu çağırmaktadır. Her ne kadar init_fs_context elemanı ile yeni bir alternatif oluşturulmuşsa 
+    da mount elemanı "deprecated" yapılmamıştır. Yani eski mount elemanının kullanımı devam etmektedir ve bu eleman 
+    init_fs_context elemanından daha kolay bir kullanım sunmaktadır.
+        
+    Peki bu fonksiyonların içinde sistem programcısı ne yapmalıdır?
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        35. Ders 22/11/2025 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    file_system_type yapısının mount elemanına adresi yerleştirilecek fonksiyonun parametrik yapısı şöyle olmalıdır:
+
+    static struct dentry *myfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+    {
+        /* ... */
+    }
+
+    Fonksiyonun birinci parametresi register ettirilmiş olan file_system_type nesnesinin adresini belirtmektedir. sys_mount 
+    sistem fonksiyonu file_systems bağlı listesinde belirtilen isimdeki file_system_type nesnesini bularak onun adresini bu 
+    fonksiyonun birinci parametresine geçirmektedir. Fonksiyonun diğer parametreleri sys_mount sistem fonksiyonundan gelen 
+    parametrelerdir. Bir dosya sistemi mount edilirken dosya sisteminin içinde bulunduğu blok aygıtına ilişkin blok dosyasın 
+    belirtildiğini anımsaynız. İşte bu blok aygıt dosyası fonksiyonun üçüncü parametresine, mount bayrakları ikinci parametresine
+    ve mount edilecek sisteme ilişkin özel bilgiler de dördüncü parametresine geçirilmektedir. 
+    
+    file_system_type yapısının mount elemanına girilen fonksiyon aşağıdaki işlemleri yapmalıdır:
+
+    1) Bir super_block nesnesi oluşturup bunun içini doldurmalıdır.
+    2) Mount edilecek dosya sisteminin kök dizinine ilişkin inode ve dentry nesnelerini yaratıp bunları inode ve dentry 
+    önbelleklerine yerleştirmelidir.
+    3) Fonksiyon kök dizine ilişkin dentry nesnesinin adresiyle geri dönmelidir. 
+        
+    AslındaLinux çekirdeğinde mount edilecek dosya sistemi için super_block nesnesini oluşturan daha yüksek seviyeli fonksiyonlar 
+    da bulunmaktadır. Bu amaçla kullanılan iki önemli çekirdek fonksiyonu mount_nodev ve mount_bdev isimli fonksiyonlarıdır. 
+    Bu fonksiyonlar export edilmiştir. mount_nodev ve mount_bdev fonksiyonlarının prototipleri "include/linux/fs.h" dosyası 
+    içerisinde şöyle bildirilmiştir:
+
+    struct dentry *mount_nodev(struct file_system_type *fs_type, int flags, void *data,
+            int (*fill_super)(struct super_block *, void *, int))
+    
+    struct dentry *mount_bdev(struct file_system_type *fs_type, int flags, const char *dev_name, void *data,
+            int (*fill_super)(struct super_block *, void *, int))
+
+    Bu fonksiyonların tanımlamaları "fs/super.c" dosyası içerisinde yapılmıştır. 
+
+    mount_nodev fonksiyonu ramdisk gibi disk tabanlı olmayan dosya sistemlerinin gerçekleştirilmesinde, mount_bdev fonksiyonu
+    ise disk tabanlı dosya sistemlerinin gerçekleştirilmesinde kullanılmaktadır.
+
+    Çekirdek süper blok nesnelerini file_system_type yapısının fs_super elemanındaki bağlı listede tutmaktadır. Yani 
+    her  dosya sistemi türü için o dosya sistemi türünden disk bölümlerinin mount edilmesi sonucunda elde edilen süper 
+    blok nesneleri o dosya sistemi türüne ilişkin file_system_type yapısının içeisinde tutulmkatdır:
+    
+    struct file_system_type {
+        /* ... */
+        
+        struct hlist_head       fs_supers;
+        
+        /* ... */
+    };
+
+    Bu bağlı listenin düğümlerini super_block yapısının s_list elemanı oluşturmaktadır. 
+
+    struct super_block {
+        /* ... */
+        
+        struct list_head       s_list;        
+
+        /* ... */
+    };
+
+    Ayrıca Linux çekirdeği tüm süper blok nesnelerini de "fs/super.c" dosyası içerisindeki super_blocks isimli bağlı 
+    listede tutmaktadır:
+
+    static LIST_HEAD(super_blocks);
+
+    Böylece çekirdek gerektiğinde hem belli bir dosya sistemine ilişkin süper blok nesnelerine hem de sistemdeki tüm 
+    süper blok nesnelerine bu bağlı listeler yoluyla erişebilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    O halde disk tabanlı bir dosya sistemini çekirdeğin yüksek seviyeli mount_bdev fonksiyonunu kullanarak yazacak olan 
+    sistem programcıları mount fonksiyonunun içerisinde doğrudan bu fonksiyonu çağırırlar. Örneğin:
+
+    static struct dentry *myfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+    {
+         return mount_bdev(fs_type, flags, dev_name, data, myfs_fill_super);
+    }
+
+    Burada mount fonksiyonunun parametrelerinin mount_bdev fonksiyonuna doğrudan aktarıldığını görüyorsunuz. Ancak 
+    mount_bdev fonksiyonunun son parametresi dosya sistemini gerçekleştiren programcı tarafından oluşturulup fonksiyona 
+    verilmektedir. Bu son parametre bir callback fonksiyondur ve süper block nesnesinin içinin sistem programcısı tarafından 
+    doldurulmasına olanak sağlamaktadır. mount_bdev fonksiyonu kabaca bizim için şunları yapmaktadır:
+
+    1) dev_name parametresindeki aygıt dosyasını kullanarak blok aygıt sürücüsüne erişir.
+
+    2) Daha önce bu disk bölümü için bir süper blok nesnesi oluşturulmuş mu diye kontrol eder ve oluşturulmamışsa süper 
+    blok nesnesini oluşturur. 
+
+    3) Oluşturduğu super_block nesnesinin s_bdev ve s_dev elemanlarına değerlerini atar. 
+
+    4) Sistem programcısının son parametreye geçirdiği fill_super fonksiyonunu çağırarak oluşturduğu süper blok nesnesinin 
+    içinin sistem programcısı tarafından doldurulmasını sağlar. 
+
+    mount_nodev fonksiyonu da benzer işlemleri yapmaktadır. Ancak bir blok aygıtı söz konusu olmadığı için bazı aşamalar
+    farklı bir biçimde gerçekleştirilmektedir. 
+
+    Sistem programcısının mount fonksiyonun mount_bdev ya da mount_nodev fonksiyonlarının geri dönüş değeriyle geri 
+    döndürüldüğüne dikkat ediniz:
+
+    static struct dentry *myfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+    {
+         return mount_bdev(fs_type, flags, dev_name, data, myfs_fill_super);
+    }
+
+    Peki o halde mount edilecek dosya sisteminin kök dizinine ilişkin inode ve dentry nesneleri nerede yaratılmaktadır?
+    İşte aslında bu nesneleri sistem programcısı fill_super fonksiyonunun içerisinde yaratmaktadır. fill_super fonksiyonu 
+    içerisinde minimal olarak sistem programcısı super_block yapısının aşağıdaki elemanlarını doldurmalıdır :
+
+    - Yapının unsigned long türünden s_magic elemanı dosya sistemini belirten sihirli bir sayı ile doldurulmalıdır.
+
+    - Yapının super_operations türüden s_ops elemanı süper blok işlemlerinde çağrılacak fonksiyonları içerecek biçimde 
+    doldurulmalıdır. super_operations fonksiyon göstericilerinden oluşan büyük bir yapıdır. Ancak sistem programcısı bu 
+    yapının hepsini değil yalnızca bazı elemanlarını doldurabilir. super_operations yapısı şöyle bildirilmiştir:
+
+    struct super_operations {
+        struct inode *(*alloc_inode)(struct super_block *sb);
+        void (*destroy_inode)(struct inode *);
+
+        void (*dirty_inode) (struct inode *);
+        int (*write_inode) (struct inode *, int);
+        void (*drop_inode) (struct inode *);
+        void (*delete_inode) (struct inode *);
+        void (*put_super) (struct super_block *);
+        void (*write_super) (struct super_block *);
+        int (*sync_fs)(struct super_block *sb, int wait);
+        int (*freeze_fs) (struct super_block *);
+        int (*unfreeze_fs) (struct super_block *);
+        int (*statfs) (struct dentry *, struct kstatfs *);
+        int (*remount_fs) (struct super_block *, int *, char *);
+        void (*clear_inode) (struct inode *);
+        void (*umount_begin) (struct super_block *);
+
+        int (*show_options)(struct seq_file *, struct vfsmount *);
+        int (*show_stats)(struct seq_file *, struct vfsmount *);
+    #ifdef CONFIG_QUOTA
+        ssize_t (*quota_read)(struct super_block *, int, char *, size_t, loff_t);
+        ssize_t (*quota_write)(struct super_block *, int, const char *, size_t, loff_t);
+    #endif
+        int (*bdev_try_to_free_page)(struct super_block*, struct page*, gfp_t);
+    };
+
+    - Yapının s_blocksize ve s_blocksize_bits elemanları sırasıyla dosya sistemindeki bir bloğun büyüklüğünü ve bu büyüklüğün 
+    2 tabanına göre logaritma değerini tutacak biçimnde doldurulmalıdır. Aslında bu elemanların doldurulması için zaten 
+    çekirdeğin içerisinde sb_set_blocksize isimli bir fonksiyon bulunmaktadır:
+
+    int sb_set_blocksize(struct super_block *sb, int size); 
+
+    - Yapının s_fs_info elemanı dosya sistemine özgü süper blok bilgilerini tutan yapı nesnesini gösterecek biçimde set 
+    edilmelidir. Her dosya sisteminin o dosya sistemine özgü süper blok bilgileri de bulunmaktadır. Bu konuyu izleyen 
+    paragraflarda açıklayacağız. 
+
+    - Sistem programcının fill_super fonksiyonu içerisinde kök dizine ilişkin inode ve dentry nesnelerini yaratması 
+    ve bu yaratımları yaptıktan sonra da super_block yaoısının s_root elemanına kök dizine ilişkin dentry nesnesinin 
+    adresini yerleştirmesi gerekir. Güncel çekirdeklerin içerisinde bir inode nesnesi yaratılmışsa onu gösterecek bir 
+    dentry nesnesinin yaratılmasını sağlayan d_make_root isimli export edilmiş bir çekirdek fonksiyonu da bulunmaktadır:
+
+    struct dentry *d_make_root(struct inode *root_inode); 
+
+    İşte aslında mount_bdev ve mount_nodev fonksiyonları fill_super fonksiyonu tarafından super_block yapısının s_root 
+    elemanına yerleştirilen dentry nesnesinin adresiyle geri dönmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki süreçler size biraz karşık gibi gözükebilir. Burada işlemlerin hangi adımlardan geçilerek gerçekleştirildiğine 
+    ilişkin özet bir açıklama yapmak istiyoruz:
+
+    sys_mount sistem fonksiyonu ---> file_system_type içeisindeki mount fonksiyonu çağrılır ---> mount_bdev çekirdek 
+    fonksiyonu çağrılır ---> mount_bdev süper blok nesnesini yaratarak verilen fill_super fonksiyonunu çağırır ---> 
+    fill_super fonksiyonu içerisinde kök dizine ilişkin inode ve dentry nesneleri yaratılır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz yukarıdaki aşamalarda yalnızca bir dosya sisteminin mount edilebilmesi için gerekli olan minimal işlemleri 
+    açıkladık. Peki ya mount işleminden sonra mount edilen kök dizine geçilip burada dosya yaratılmak istense ya da 
+    dizin yaratılmak istense yeni gerçekleştirilen dosya sistemi bu işlemleri nasıl yapabilecektir? İşte bu tür işlemler 
+    hep çekirdeğin sistem programcısı tarafından yazılmış olan fonksiyonları çağrılarak yapılmaktadır. İzleyen paragraflarda 
+    bu mekanizma üzerinde temel açıklamaları yapacapız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux'un dosya sistemine "sanal dosya sistemi (virtual file system)" denilmektedir. Bu isim dosya sğistemine nesne
+    yönelimli prgramlama tekniğindeki soyutlamayı ve sanal fonksiyonları çağrıştırdığı için verilmiştir. Bilindiği gibi 
+    nesne yönelimli programlama tekniğinde kodda değişebilecek olan öğeler belirlenir. Bu değişebilecek öğelere doğrudan 
+    değil arayüz oluşturan sanal fonksiyonlar yoluyla erişilir. İşte Linux'un sanal dosya sisteminde de dosya sistemi 
+    ile ilgili genel işlemler yapan kodlar çekirdek içerisinde bulunmaktadır. Çekirdek dosya sistemine göre değişebilecek 
+    işlemler söz konusu olduğunda bu işlemleri kendisi yapmaz dosya sistemini gerçekleştirenler tarafından yazılmış olan f
+    onksiyonları çağırarak onlara yaptırır. Tabii C Programlama Dili nesne yönelimli bir dil değildir. Bu nedenle C'de 
+    sanal fonksiyon çağırma mekanizmasının fonksiyon göstericileri ile manuel bir biçimde oluşturulması gerekmektedir. 
+    Bu durumda rogramcı kendi dosya sistemini yazarken kendi dosya sistemine ilişkin işlemleri yapan fonksiyonların 
+    adreslerini çekirdeğin belirlediği birtakım yapı nesnelerinin içerisine yerleştirir. Çekirdek de dosya sistemine bağlı 
+    işlemler sırasında bu fonksiyonları çağırır. 
+
+    Şimdi siz "mademki Linux'un dosya sistemi nesne yönelimli teknikle örtüşüyor o halde neden dosya sistemini C yerine 
+    C++ gibi nesne yönelimli bir dille yazmamışlar" diye merak edebilirsiniz. C++ C'den daha yüksek seviyeli bir dildir. 
+    Dolayısıyla C++ derleyicisi tarafından üretilen kodlar C derleyicisi tarafından üretilen kodlar kadar etkin değildir. 
+    İşte her ne kadar Linux'un dosya sistemi nesne yönelimli programlama tekniğini oldukça çağrıştırıyor olsa da hiçbir 
+    zaman gerçekleştiriminin C++'ta yapılması düşünülmemiştir. C++ drleyicilerinin fonksiyon isimlerini değiştirmesi 
+    (name mangling), C++'ta farklı parametrik yapılara ilişkin aynı isimli fonksiyonların bulunabilmesi, exception 
+    mekanizması gibi pek çok özellik çekirdek kodlaması için bir handikap oluşturmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux'un sanal dosya sistemindeki sanal fonksiyon sistemi çekirdeğin daha önce sözünü ettiğimiz dört yapısına da 
+    yansıtılmıştır. Çekirdeğin bu dört yapısında da xxx_operations türünden yapı elemanları bulunmaktadır. xxx_operations 
+    yapıları fonksiyon göstericilerinden oluşmaktadır. Bu fonksiyon göstericilerine adresleri yerleştirilen fonksiyonlar 
+    çekirdek tarafından belirli noktalarda çağrılmaktadır. Aşağıda xxx_operations elemanlarının bu yapılar içerisindei 
+    görünümleri veriyoruz:
+
+    struct super_block {
+        /* ... */
+
+        const struct super_operations	*s_op;
+
+        /* ... */
+    };
+
+    struct inode {
+        /* ... */
+
+        const struct inode_operations	*i_op;
+
+        /* ... */
+    };
+
+    struct dentry {
+        /* ... */
+
+        const struct dentry_operations *d_op;
+
+        /* ... */
+    };
+
+    struct file {
+        /* ... */
+
+        const struct file_operations	*f_op;
+
+        /* ... */
+    };
+
+    Görüldüğü gübi süper blok nesneleri için super_operations, dentry nesneleri için dentry_operations, inode nesneleri
+    için inode_operations ve dosya nesneleri için de file_operations yapıları bulnmaktadır. Buradaki xxx_operations yapıları 
+    yukarıda da belirttiğimiz gibi aslında fonksiyon göstericilerinden oluşmaktadır. Güncel çekirdeklerde super_operations 
+    yapısı şöyle bildirilmiştir:
+
+    struct super_operations {
+        struct inode *(*alloc_inode)(struct super_block *sb);
+        void (*destroy_inode)(struct inode *);
+        void (*free_inode)(struct inode *);
+
+        void (*dirty_inode) (struct inode *, int flags);
+        int (*write_inode) (struct inode *, struct writeback_control *wbc);
+        int (*drop_inode) (struct inode *);
+        void (*evict_inode) (struct inode *);
+        void (*put_super) (struct super_block *);
+        int (*sync_fs)(struct super_block *sb, int wait);
+        int (*freeze_super) (struct super_block *, enum freeze_holder who, const void *owner);
+        int (*freeze_fs) (struct super_block *);
+        int (*thaw_super) (struct super_block *, enum freeze_holder who, const void *owner);
+        int (*unfreeze_fs) (struct super_block *);
+        int (*statfs) (struct dentry *, struct kstatfs *);
+        int (*remount_fs) (struct super_block *, int *, char *);
+        void (*umount_begin) (struct super_block *);
+
+        int (*show_options)(struct seq_file *, struct dentry *);
+        int (*show_devname)(struct seq_file *, struct dentry *);
+        int (*show_path)(struct seq_file *, struct dentry *);
+        int (*show_stats)(struct seq_file *, struct dentry *);
+    #ifdef CONFIG_QUOTA
+        ssize_t (*quota_read)(struct super_block *, int, char *, size_t, loff_t);
+        ssize_t (*quota_write)(struct super_block *, int, const char *, size_t, loff_t);
+        struct dquot __rcu **(*get_dquots)(struct inode *);
+    #endif
+        long (*nr_cached_objects)(struct super_block *,
+                    struct shrink_control *);
+        long (*free_cached_objects)(struct super_block *,
+                        struct shrink_control *);
+        void (*shutdown)(struct super_block *sb);
+    };
+
+    inode_operations yapısı şöyle bildirilmiştir:
+
+    struct inode_operations {
+        struct dentry * (*lookup) (struct inode *,struct dentry *, unsigned int);
+        const char * (*get_link) (struct dentry *, struct inode *, struct delayed_call *);
+        int (*permission) (struct mnt_idmap *, struct inode *, int);
+        struct posix_acl * (*get_inode_acl)(struct inode *, int, bool);
+
+        int (*readlink) (struct dentry *, char __user *,int);
+
+        int (*create) (struct mnt_idmap *, struct inode *,struct dentry *,
+                umode_t, bool);
+        int (*link) (struct dentry *,struct inode *,struct dentry *);
+        int (*unlink) (struct inode *,struct dentry *);
+        int (*symlink) (struct mnt_idmap *, struct inode *,struct dentry *,
+                const char *);
+        struct dentry *(*mkdir) (struct mnt_idmap *, struct inode *,
+                    struct dentry *, umode_t);
+        int (*rmdir) (struct inode *,struct dentry *);
+        int (*mknod) (struct mnt_idmap *, struct inode *,struct dentry *,
+                umode_t,dev_t);
+        int (*rename) (struct mnt_idmap *, struct inode *, struct dentry *,
+                struct inode *, struct dentry *, unsigned int);
+        int (*setattr) (struct mnt_idmap *, struct dentry *, struct iattr *);
+        int (*getattr) (struct mnt_idmap *, const struct path *,
+                struct kstat *, u32, unsigned int);
+        ssize_t (*listxattr) (struct dentry *, char *, size_t);
+        int (*fiemap)(struct inode *, struct fiemap_extent_info *, u64 start,
+                u64 len);
+        int (*update_time)(struct inode *, int);
+        int (*atomic_open)(struct inode *, struct dentry *,
+                struct file *, unsigned open_flag,
+                umode_t create_mode);
+        int (*tmpfile) (struct mnt_idmap *, struct inode *,
+                struct file *, umode_t);
+        struct posix_acl *(*get_acl)(struct mnt_idmap *, struct dentry *,
+                        int);
+        int (*set_acl)(struct mnt_idmap *, struct dentry *,
+                struct posix_acl *, int);
+        int (*fileattr_set)(struct mnt_idmap *idmap,
+                    struct dentry *dentry, struct fileattr *fa);
+        int (*fileattr_get)(struct dentry *dentry, struct fileattr *fa);
+        struct offset_ctx *(*get_offset_ctx)(struct inode *inode);
+    } ____cacheline_aligned;
+
+    dentry_operaions yapısı şöyle bildirilmiştir:
+
+    struct dentry_operations {
+        int (*d_revalidate)(struct inode *, const struct qstr *,
+                    struct dentry *, unsigned int);
+        int (*d_weak_revalidate)(struct dentry *, unsigned int);
+        int (*d_hash)(const struct dentry *, struct qstr *);
+        int (*d_compare)(const struct dentry *,
+                unsigned int, const char *, const struct qstr *);
+        int (*d_delete)(const struct dentry *);
+        int (*d_init)(struct dentry *);
+        void (*d_release)(struct dentry *);
+        void (*d_prune)(struct dentry *);
+        void (*d_iput)(struct dentry *, struct inode *);
+        char *(*d_dname)(struct dentry *, char *, int);
+        struct vfsmount *(*d_automount)(struct path *);
+        int (*d_manage)(const struct path *, bool);
+        struct dentry *(*d_real)(struct dentry *, enum d_real_type type);
+        bool (*d_unalias_trylock)(const struct dentry *);
+        void (*d_unalias_unlock)(const struct dentry *);
+    } ____cacheline_aligned;
+    
+    file_operations yapısı ise şöyle bildirilmiştir:
+
+    struct file_operations {
+        struct module *owner;
+        fop_flags_t fop_flags;
+        loff_t (*llseek) (struct file *, loff_t, int);
+        ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
+        ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
+        ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
+        ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
+        int (*iopoll)(struct kiocb *kiocb, struct io_comp_batch *,
+                unsigned int flags);
+        int (*iterate_shared) (struct file *, struct dir_context *);
+        __poll_t (*poll) (struct file *, struct poll_table_struct *);
+        long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
+        long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
+        int (*mmap) (struct file *, struct vm_area_struct *);
+        int (*open) (struct inode *, struct file *);
+        int (*flush) (struct file *, fl_owner_t id);
+        int (*release) (struct inode *, struct file *);
+        int (*fsync) (struct file *, loff_t, loff_t, int datasync);
+        int (*fasync) (int, struct file *, int);
+        int (*lock) (struct file *, int, struct file_lock *);
+        unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+        int (*check_flags)(int);
+        int (*flock) (struct file *, int, struct file_lock *);
+        ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
+        ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
+        void (*splice_eof)(struct file *file);
+        int (*setlease)(struct file *, int, struct file_lease **, void **);
+        long (*fallocate)(struct file *file, int mode, loff_t offset,
+                loff_t len);
+        void (*show_fdinfo)(struct seq_file *m, struct file *f);
+    #ifndef CONFIG_MMU
+        unsigned (*mmap_capabilities)(struct file *);
+    #endif
+        ssize_t (*copy_file_range)(struct file *, loff_t, struct file *,
+                loff_t, size_t, unsigned int);
+        loff_t (*remap_file_range)(struct file *file_in, loff_t pos_in,
+                    struct file *file_out, loff_t pos_out,
+                    loff_t len, unsigned int remap_flags);
+        int (*fadvise)(struct file *, loff_t, loff_t, int);
+        int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
+        int (*uring_cmd_iopoll)(struct io_uring_cmd *, struct io_comp_batch *,
+                    unsigned int poll_flags);
+        int (*mmap_prepare)(struct vm_area_desc *);
+    } __randomize_layout;
+
+    Şimdi aklınıza "ben bir dosya sistemini gerçekleştireceksem bütün bu sanal fonksiyonları yazmak zorunda mıyım?" 
+    sorusu gelebilir. İşte aslında dosya sistemlerini gerçekleştirenler bu fonksiyonların hepsini yazmak zorunda 
+    değillerdir. Bazı fonksiyonlar için zaten çekirdekte bulunan hazır fonksiyonları kullanabilirler. Bazıarını 
+    boş bırakabilirler. Ancak çekirdek boş bırakılan fonksğyonları kullanacak bir işlem yapmaya çalıştığında ilgili 
+    sistem fonksiyonları başarısızlıkla geri dönmektedir.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        36. Ders 23/11/2025 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    super_block yapısı içerisindeki super_operations yapısı içerisinde bulunan fonksiyonlar dosya sistemi ile ilgili 
+    işlemler yapılırken çağrılmaktadır. Örneğin ne zaman bir inode nesnsi tahsis edilecek olsa çekirdek bu işlem için 
+    dosya sistemine ilişkin super_block nesnesinin super_operations yapısı içerisindeki alloc_inode fonksiyonu çağırmaktadır.
+    Örneğin Linux çekirdeğindeki "fs/inode.c" içerisinde bulunan çekirdeğin inode tahsisatını yaptığı alloc_inode fonksiyonu 
+    şöyle yazılmıştır:
+
+    struct inode *alloc_inode(struct super_block *sb)
+    {
+        const struct super_operations *ops = sb->s_op;
+        struct inode *inode;
+
+        if (ops->alloc_inode)
+            inode = ops->alloc_inode(sb);
+        else
+            inode = alloc_inode_sb(sb, inode_cachep, GFP_KERNEL);
+
+        if (!inode)
+            return NULL;
+
+        if (unlikely(inode_init_always(sb, inode))) {
+            if (ops->destroy_inode) {
+                ops->destroy_inode(inode);
+                if (!ops->free_inode)
+                    return NULL;
+            }
+            inode->free_inode = ops->free_inode;
+            i_callback(&inode->i_rcu);
+            return NULL;
+        }
+
+        return inode;
+    }
+
+    Fonksiyondaki aşağıdaki kısma dikkat ediniz:
+
+    if (ops->alloc_inode)
+        inode = ops->alloc_inode(sb);
+    else
+        inode = alloc_inode_sb(sb, inode_cachep, GFP_KERNEL);
+
+    Burada görüldüğü gibi önce super_operations içerisindeki alloc_inode fonksiyon göstericisinin NULL olup olmadığına
+    bakılmış, eğer bu gösterici NULL değilse bu göstericinin gösterdiği fonksiyon çağrılmıştır. Bu gösterici NULL ise
+    alloc_inode_sb isimli default bir fonksiyon çağrıldığını görüyorsunuz.
+
+    Buradaki tasarmın nesne yönelimli programlama tekniğindeki çokbiçimliliğe (polymoprhism) çok benzediğine dikkat 
+    ediniz.  Örneğin çokbiçimli davranış için C++'ta tipik olarak taban sınıfta bir sanal fonksiyon bulundurulur. Bu 
+    fonksiyon türemiş sınıflarda override edilir. Eğer türemiş sınıflarda bu fonksiyon override edilmediyse taban 
+    sınıftaki fonksiyon çağrılır. İşte Linux çekirdeğinde de adeta böyle yapılmıştır.
+
+    Eğer Linux'un dosya sistemi C++'ta nesne yönelimli bir biçimde gerçekleştirilecek olsaydı super_block, inode, 
+    dentry ve file yapıları birer sınıf haline getirilip bunlara ilişkin xxx_operations fonksiyonları da bu sınıfların 
+    sanal fonksiyonları yapılırdı. Ancak daha önceden de belirttiğimiz gibi çekirdek kodlaması için C++ uygun bir dil
+    olarak görülmemektedir.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi sıfırdan bir dosya sistemi oluştururken sistem programcısının adım adım ne yapması gerektiğini ve çekirdeğin 
+    bu dosya sistemini nasıl işlettiğini açıklayalım:
+
+    1) Sistem programcısı kendi dosya sistemi için file_system_type türünden bir yapı nesnesi oluşturur ve register_file_system 
+    fonksiyonuyla bu yapı nesnesinin file_systems isimli global bağlı listeye eklenmesini sağlar. Sistem programcısı 
+    kendi oluşturduğu bu file_system_type nesnesinin mount ve sb_kill elemanlarına kendi fonksiyonlarının adreslerini 
+    yerleştirmektedir.
+
+    2) Dosya sistemi mount edildiğinde sys_mount sistem fonksiyonu dosya sistemine ilişkin file_system_type nesnesini 
+    file_systems bağlı listesinden bularak o nesnenin içerisindeki mount fonksiyonunu çağırmaktadır. Artık sistem 
+    programcısının mount fonksiyonu çalıştırılacaktır. 
+
+    3) Sistem programcısının yazdığı mount fonksiyonu tipik olarak çekirdeğin içerisindeki yüksek seviyeli mount_bdev
+    fonksiyonunu çağırır. Bu çekirdek fonksiyonu super_block nesnesini yaratır, bunu ilgili bağlı listelere ekler,  
+    ancak içini -birkaç eleman dışında- doldurmaz. super_block nesnesinin içinin doldurulması mount_bdev fonksiyonuna 
+    geçirilen fill_super fonksiyonu tarafından yapılmaktadır. 
+
+    4) Sistem rogramcısının yazdığı fill_super fonksiyonu kendi dosya sisteminden hareketle çeşitli bilgileri elde 
+    ederek süper blok nesnesinin içini doldurur. Tabii sistem programcısının super_block nesnesinin içini doldurabilmesi 
+    için diskteki kendi dosya sistemine ilişkin metadata bilgilerini okuması gerekir. Aslında sistem programcısı
+    kendi dosya sistemine ilişkin metadata bilgilerine başka işlemlerde de gereksinim duymaktadır. Bu nedenle sistem 
+    programcısı tipik olarak önce kendi dosya sisteminin metadata bilgilerini kendine özgü bir yapı nesnesine yerleştir. 
+    Sonra da bu yapı nesnesini de süper blok nesnesine liştirir. Bu iliştirme işlemi için super_block yapısının s_fs_info 
+    elemanı kullanılmaktadır:
+
+    struct super_block {
+        /* ... */
+
+        void	*s_fs_info;	        /* Filesystem private info */
+
+        /* ... */
+    };
+
+    Böylece super_block yapısı hem her dosya sisteminde söz konusu olabilecek genel bilgileri hem de sistem programcısının 
+    oluşturduğu dosya sistemine ilişkin özel bilgileri tutar hale gelmektedir. 
+
+    5) Sistem programcısı fill_super fonksiyonu içerisinde super_block nesnesinin içini doldururken aynı zamanda kendi
+    dosya sisteminin kök dizinine ilişkin inode nesnesini ve dentry nesnesini de oluşturmak zorundadır. Sistem programcısının 
+    kendi dosya sistemine ilişkin dentry nesnesinin adresini super_block yapısının s_root elemanına yerleştirmesi gerekmektedir. 
+    Artık bu noktada çekirdek mount edilen dosya sisteminin kök dizinine ilişkin inode nesnesine ve denty nesnesine erişebilir 
+    duruma gelmiştir. inode ve dentry yapılarının içerisinde inode_operations ve dentry_operations elemanlarının bulunduğunu 
+    ve burada belirtilen fonksiyonların inode ve dentry işlemlerini yaptığını anımsayınız. 
+
+    6) Şimdi örneğin kullanıcının sistem programcısının oluşturduğu mount edilen dizine geçip orada bir dizin yaratmak 
+    istedğini düşünelim. Bu işlem aslında sys_mkdir sistem fonksiyonuyla yapılmaktadır. İşte bu sistem fonksiyonu çağrıldığında 
+    güncel çeekirdeklerde bir dizi çağırma sonucunda çekirdekteki vfs_mkdir fonksiyonu çağrılmaktadır. Bu fonksiyonun 
+    kodları aşağıdaki gibidir:
+
+    struct dentry *vfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+			 struct dentry *dentry, umode_t mode)
+    {
+        int error;
+        unsigned max_links = dir->i_sb->s_max_links;
+        struct dentry *de;
+
+        error = may_create(idmap, dir, dentry);
+        if (error)
+            goto err;
+
+        error = -EPERM;
+        if (!dir->i_op->mkdir)
+            goto err;
+
+        mode = vfs_prepare_mode(idmap, dir, mode, S_IRWXUGO | S_ISVTX, 0);
+        error = security_inode_mkdir(dir, dentry, mode);
+        if (error)
+            goto err;
+
+        error = -EMLINK;
+        if (max_links && dir->i_nlink >= max_links)
+            goto err;
+
+        de = dir->i_op->mkdir(idmap, dir, dentry, mode);
+        error = PTR_ERR(de);
+        if (IS_ERR(de))
+            goto err;
+        if (de) {
+            dput(dentry);
+            dentry = de;
+        }
+        fsnotify_mkdir(dir, dentry);
+        return dentry;
+
+    err:
+        dput(dentry);
+        return ERR_PTR(error);
+    }
+    EXPORT_SYMBOL(vfs_mkdir);
+
+    Burada dizinin içinde yaratılacağı dizine ilişkin (yani üst dizine ilişkin) inode nesnesinin inode_operations
+    elemanındaki mkdir fonksiyonunun çağrıldığını görüyorsunuz:
+
+    error = -EPERM;
+    if (!dir->i_op->mkdir)
+        goto err;
+
+    /* ... */
+
+    de = dir->i_op->mkdir(idmap, dir, dentry, mode);
+
+    /* ... */
+
+    err:
+        dput(dentry);
+        return ERR_PTR(error);
+
+    Yani aslında dizinin yaratılma işlemi dosya sistemini gerçekleştiren sistem programcısı tarafından yazılan inode_operations 
+    yapısındaki mkdir fonksiyonu tarafından gerçekleştirilmektedir. Burada inode_operations içerisindeki mkdir elemanında 
+    NULL adres varsa (yani bu fonksiyon girilmemişse) fonksiyonun -EPERM errno değeri ile geri döndürüldüğüne dikkat ediniz. 
+    Burada inode_operations içerisindeki mkdir fonksiyonunun geri dönüş değerine dikkat ediniz. Bu fonksiyon dizini yaratıp 
+    dizinin inode ve dentry nesnelerini oluşturup yaratılan dizinin dentry nesnesiyle geri dönmelidir. 
+    
+    O halde dosya sistemini oluşturan sistem programcısı inode_operations nesnesini de oluşturup bu kök inode nesnesinin 
+    i_op elemanına yerleştirmelidir. Tabii aslında her inode nesnesi için ayrı bir inode_operations nesnesinin oluşturulmasına
+    gerek yoktur. Dosya sistemini gerçekleştiren sistem programcısı bundan bir tane oluşturur. Tüm inode nesnelerinin i_op 
+    elemanı aslında aynı inode_operations nesnesini gösterir durumda olur. 
+
+    Peki sistem programcısı tarafından gerçekleştirilen ve mount edilen dosya sisteminin kök dizininde bir dosya yaratılmak 
+    istense ve bu dosya üzerinde işlemler yapılmak istense arka planda neler olacaktır? Biz bir dosya açıldığında çekirdeğin 
+    neler yaptığını açıklamştık. Çekirdek önce bir dosya betimleyicisi tahsis edip sonra bir dosya nesnesi yaratıp onun 
+    içerisini dolduruyordu. Peki dosya nesnesinin (yani struct file yapısının) f_op elemanındaki file_operations fonksiyonları 
+    ne zaman devreye girmektedir? İşte çekirdek dosya işlemleri yapılırken bu file_operations yapısının içerisine yerleştirilen 
+    fonksiyonlarını uygun yerlerde çağırmaktadır. (Tabii yukarıda da belirttiğimiz gibi aslında bu yapının da tüm elemanları 
+    mutlak anlamda doldurulmak zorunda değildir.) Örneğin Linux'ta karakter aygıt sürücüleri file yapısının f_op elemanını 
+    değiştirip dosya işlemleri sırasında kendi fonksiyonlarının çağrılmasını sağlamaktadır. Ancak dosya sistemleri 
+    gerçekleştirilirken file_operations nesnesi sistem programcısı tarafından i_fop elemanına yerleştirilmekte ve 
+    çekirdek tarafından buradan alınarak file yapısının f_op elemanına yerleştirilmektedir. Yani file_operations 
+    yapısı içerisindeki fonksiyonları da yine dosya sistemini gerçekleştiren sistem programcısı tanımlamaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi biz bazı konuları görmemiş olsak da yukarıda verdiğimiz bilgilerin teorik düzeyde kalmaması için basit bir 
+    dosya sistemi tasarlayıp onu gerçekleştirmeye çalışalım. Böyle bir örnek Linux'un sanal dosya sisteminin nasıl 
+    çalıştığının büyük resim olarak anlaşılmasını sağlayacaktır. Ancak bir dosya sistemini gerçekleştirirken bizim bir 
+    diske gereksinimiz olacaktır. Neyse ki Linux'ta bir dosyayının bir disk gibi kullanılmasını sağlayan ismine "loop" 
+    denilen aygıt sürücüler bulunmaktadır. Bu "loop" aygıtları sayesinde bir dosyayı disk gibi kullanarak denemelerimizi 
+    kolay bir biçimde yapabileceğiz. O halde önce bu "loop" aygıt sürücüsünün nasıl kullanıldığını açıklayalım. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    "loop" aygıt sürücülerine ilişkin aygıt dosyaları Linux'ta "/dev" dizinin altında bulunmaktadır:
+
+    $ ls /dev/loop* -l
+    brw-rw---- 1 root disk  7,   0 Kas 23 12:22 /dev/loop0
+    brw-rw---- 1 root disk  7,   1 Kas 23 12:22 /dev/loop1
+    brw-rw---- 1 root disk  7,   2 Kas 23 12:22 /dev/loop2
+    brw-rw---- 1 root disk  7,   3 Kas 23 12:22 /dev/loop3
+    brw-rw---- 1 root disk  7,   4 Kas 23 12:22 /dev/loop4
+    brw-rw---- 1 root disk  7,   5 Kas 23 12:22 /dev/loop5
+    brw-rw---- 1 root disk  7,   6 Kas 23 12:22 /dev/loop6
+    brw-rw---- 1 root disk  7,   7 Kas 23 12:22 /dev/loop7
+    crw-rw---- 1 root disk 10, 237 Kas 23 12:22 /dev/loop-control
+
+    Görüldüğü buradaki sistemde majör numaraları aynı olan minör numaraları farklı olan 7 loop aygıtı bulunmaktadır. 
+    Bir loop aygıtını kullanıma hazır hale getirmek için önce onun kullanacağı bir dosyanın oluşturulması gerekir. Linux'ta
+    komut satırında içi 0'larla dolu olan bir dosya "dd (disk dump)" komutuyla oluşturulabilir. "dd" komutu aslında iki 
+    dosyayı blok blok kopyalamaktadır. Komutta "if (input file)" komut satırı argümanı kaynak dosyayı, "of (output file)" 
+    komut satırı argümanı ise hedef dosyayı belirtmektedir. Blok uzunluğu "bs (block size)" komut satırı argümanıyla 
+    kopyalanacak blok sayısı ise "count" argümanıyla belirtilmektedir. "bs" argümanı kullanılmayabilir. Bu durumda default 
+    blok büyüklüğü 512 alınmaktadır. Eğer "count" argümanı kullanılmazsa bu durumda tüm kaynak dosya kopyalanana kadar 
+    işlemlere devam edilmektedir. Linux'ta "/dev/zero" aygıt sürücüsü "okunduğunda hep 0 byte'ını veren bir aygıt sürücüdür. 
+    Bu bilgiler eşliğinde içi 0'larla dolu 10MB civarında bir dosya şöyle oluşturulabilir:
+
+    $ dd if=/dev/zero of=mydisk.dat bs=512 count=20480
+
+    Bu komutla elimizde içi sıfırlarla dolu 10MB'lık bir dosya elde etmiş olacağız.
+
+    Dosyayı oluşturduktan sonra onun loop aygıtı tarafından disk gibi kullanılmasını sağlamalıyız. Bu işlem "losetup" 
+    programıyla yapılmaktadır. losetup programı şöyle kullanılmaktadır:
+
+    losetup <loop_aygıt_dosyası> <disk_olarak_kullanılacak_dosya>
+
+    Örneğin:
+
+    $ sudo losetup /dev/loop0 mydisk.dat
+
+    "/dev/loop" aygıtına erişebilmek için programın sudo ile çalıştırılması gerekmektedir. 
+    
+    Artık elimizde "mydisk.dat" dosyasını kullanan "loop0" isimli bir blok aygıtı bulunmaktadır. Sistemdeki blok aygıtlarını 
+    "lsblk" komutu ile görüntülediğimizde bu dosyayı da görmeliyiz:
+
+    $ lsblk
+    NAME   MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+    loop0    7:0    0    10M  0 loop 
+    sda      8:0    0   120G  0 disk 
+    ├─sda1   8:1    0     1M  0 part 
+    ├─sda2   8:2    0   513M  0 part /boot/efi
+    └─sda3   8:3    0 119,5G  0 part /
+    sr0     11:0    1   2,8G  0 rom  /media/kaan/Linux Mint 22.1 Cinnamon 64-bit
+
+    Artık "/dev/loop0" dosyasını bir disk gibi kullanabiliriz. Bu diske yazma yaptığımızda bu işlemden yalnızca bu 
+    dosya etilenecektir. Örneğin biz bu diskimizi ext2 dosya sistemiyle formatlayalım:
+
+    $ sudo mkfs.ext2 /dev/loop0
+    mke2fs 1.47.0 (5-Feb-2023)
+    Discarding device blocks: bitti                            
+    Creating filesystem with 2560 4k blocks and 2560 inodes
+
+    Allocating group tables: bitti                            
+    Düğüm tabloları yazılıyor: bitti                            
+    Süperblokların ve dosya sisteminin hesap bilgileri yazılıyor: bitti
+
+    Şimdi de bu dosya sistemini mount edelim. Tabii bunun için önce mount noktası olarsak kullanılacak içi boş bir dizin 
+    oluşturmamız gerekir. (Aslında mount noktası içi dolu bir dizin de olabilir. Bu durumda mount işleminden sonra artık
+    o dizinin içeriğine unmount yapılana kadar erişilemez.):
+    
+    $ mkdir ext2-test
+    
+    mount işlemi şöyle yapılabilir:
+
+    $ sudo mount /dev/loop0 ext2-test
+
+    Artık biz "ext2-test" dizinine geçtiğimizde yeni bir kök dizine geçmiş oluruz. Burada mount sonrasında mount noktasına
+    ilişkin dizinin (örneğimizdeki "ext2-test") sahibi ve grubu "root" olacaktır. Tabii isterseniz "chown" komutuyla 
+    bunu değiştirebilirsiniz:
+
+    $ sudo chown kaan:study ext2-test
+
+    Eğer dizininin sahibini "root" olarak bırakırsanız bu dizinde giriş yaratmak için hep "sudo" komutunu kullanmak 
+    zorunda kalırsınız.
+
+    Peki bu işlemlerin hepsi nasıl geri alınacaktır? İşte geri alımları sırasıyla tertsen yapmak gerekir. Önce unmount 
+    işlemi yapılmalıdır:
+
+    $ sudo umount ext2-test
+
+    Bundan sonra "loop" aygıtının dosyayla ilişkisinin kesilerek onun blok aygıtı durumundan çıkartılması gerekir. Bunun 
+    için "losetup -d" komutu kullanılmaktadır:
+
+    $ sudo losetup -d /dev/loop0
+
+    Artık "lsblk" komutunda loop0 aygıtını görmememiz gerekir:
+
+    $ lsblk
+    NAME   MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+    sda      8:0    0   120G  0 disk 
+    ├─sda1   8:1    0     1M  0 part 
+    ├─sda2   8:2    0   513M  0 part /boot/efi
+    └─sda3   8:3    0 119,5G  0 part /
+    sr0     11:0    1   2,8G  0 rom  /media/kaan/Linux Mint 22.1 Cinnamon 64-bit
+
+    Tabii burada oluşturduğumuz "mydisk.dat" dosyası kalmaya devam etmektedir. Biz o dosyayı yine "losetup" ile blok 
+    aygıtı gibi kullanabiliriz. İşlemlerimize kaldığımız yerden devam edebiliriz:
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Sıfırdan bir dosya sistemi tasarlanacaksa öncelikle dosya sisteminin disk organizasyonu üzerinde belirlemelerin 
+    yapılamsı gerekmektedir. Her dosya sisteminin bir metadata alanı bir de data alanı vardır. Metadata alınında dosya 
+    sistemine ilişkin parametrik bilgiler ve önemli bölümlerin bilgileri bulunur. Data alanı dosyaların içindeki bilgilerin 
+    depolandığı alandır. Bugün kullandığımız dosya sistemleri evrim süreci içerisinde sürekli iyileştirilmiş ve bugünkü 
+    durumlarına getirilmiştir. Dolayısıyla örneğin ext4 gibi bir dosya sisteminin ya da FAT32 gibi bir dosya sisteminin 
+    gerçekleştirimini yapmak için gerçekleştirime belli bir zaman ayrımak gerekir. Biz burada oldukça basit bir dosya 
+    sistemini gerçekleştirmeye çalışacağız. Burada örneğini vereceğimiz dosya sistemi tamamen bu kurs için örnek oluşturmak 
+    amacıyla tasarlanmış bir sistemdir. Yani dünyada böyle bir dosya sistemi  mevcut değildir. Biz bu dısya sistemine 
+    "simplefs" ismini vereceğiz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    simplefs dosya sisteminin disk organizasyonu şöyledir:
+
+      ┌─────────────────┐
+   0  │   Süper Blok    │ 1 Blok = 4096 byte
+      ├─────────────────┤
+   1  │   Inode Blok    │ Default 4 Blok = 16384 byte ancak değişebilir
+      ├─────────────────┤
+   5  │ Root Dir Blok   │ 1 Blok = 4096 byte değişemez
+      ├─────────────────┤
+   6  │   Data Blok     │ 
+      │                 │ Geri kalan alan alan 
+      │                 │
+      └─────────────────┘
+
+    Dosya sistemimizde her dosya ve dizin en fazla bir blok yani default olarak 8192 bytevuzunluğunda olabilmektedir. 
+    Bu kısıtı koyduğumuz zaman artık bizim dosyanın bloklarının yerlerini tutmamıza gerek kalmaz. Yalnızca tek bir blok 
+    numarasını tutmamız yeterli olacaktır. Dosyaların içeriği olan bloklar diskimizin Data bölümünde bulunacaktır. Dosya 
+    sistemimizde kök dizinin yeri ve uzunluğu bellidir. Kök dizin her zaman 5 numaralı bloktadır ve 1 blok yer kaplamaktadır. 
+    Diskimizdeki bir bloğun default durumda 4096 byte uzunluğunda olduğuna dikkat ediniz. Ancak dosya sistemimizde aslında 
+    bu blok uzunluğu da formatlama sırasında değiştirilebilmektedir. 
+
+    Diskimizin süper blok bilgileri aşağıdaki gibidir:
+
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║ BLOK 0: SUPER BLOCK (4096 bytes)                                 ║
+    ╠══════════════════════════════════════════════════════════════════╣
+    ║ magic:              0x53494D50  ("SIMP")                         ║
+    ║ block_size:         4096                                         ║
+    ║ inode_count:        örneğin 1024 gibi                            ║
+    ║ data_block_count:   örneğin 2557 gibi                            ║
+    ║ free_inodes:        örneğin 1023 gibi                            ║ 
+    ║ free_blocks:        örneğin gibi 2556                            ║
+    ╚══════════════════════════════════════════════════════════════════╝
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
