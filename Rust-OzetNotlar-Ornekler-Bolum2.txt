@@ -791,7 +791,7 @@
         y: T
     }
 
-   impl<T> Point<T> {
+    impl<T> Point<T> {
         fn new(x: T, y: T) -> Self {
             Point { x, y }
         }
@@ -4240,7 +4240,7 @@ impl IndexMut<usize> for Date {
     x bir yapı ya da enum türünden mut olmayan bir değişken ya da değer belirtiyor olsun. *x ifadesinin eşdeğeri *x.deref() 
     biçimindedir. Eğer x mut bir değişken ise ve *x ifadesine atama yapılıyorsa *x ifadesinin eşdeğeri *x.deref_mut() biçiminde 
     olur. Burada bir noktaya dikkat ediniz. deref ve deref_mut metotları referans geri döndürmektedir. Bu referansa * operatörü 
-    uygulanmaktadır. Rust'ta C++'ta olduğu gibi doğrudan * operatör metodu yazılamamakltadır. Biz yapı ya da enum türünden 
+    uygulanmaktadır. Rust'ta C++'ta olduğu gibi doğrudan * operatör metodu yazılamamaktadır. Biz yapı ya da enum türünden 
     değişken ya da değere * operatörü uyguladığımızda önce bu yapı ya da enum türünden değişken ya da değer üzerinde deref 
     ya da deref_mut metodu çağrılmakta ve onun geri döndürdüğü referansın gösterdiği yere erişilmektedir. "The Rust Reference" 
     dokümanlarında "The dereference operator" başlığında * operatörünün bu bağlamdaki davranışı şöyle açıklanmaktadır:
@@ -4272,10 +4272,10 @@ impl IndexMut<usize> for Date {
         }
     }
 
-    Burada Deref trait'inin gerçekleştiriminde Target ilişkili türünün i32 olduğuna dikkat ediniz. Bu durumda deref 
-    metodu da &i32 türünden geri dönüş değerine sahip olmak zorundadır. Metodun Number yapısının number alanın adresiyle 
-    geri döndürüldüğüne dikkat ediniz. (Anımsanacağı gibi fonksiyonların ve metotların geri dönüş değerleri referans ise 
-    "lifetime elision" denilen özel iki durumda ömür bilgisinin iliştirilmesi elimine edilebilmektedir.)
+    Burada Deref trait'inin gerçekleştiriminde Target ilişkili türünün i32 olduğuna dikkat ediniz. Bu durumda deref metodu 
+    da &i32 türünden geri dönüş değerine sahip olmak zorundadır. Metodun Number yapısının number alanın adresiyle geri 
+    döndürüldüğüne dikkat ediniz. (Anımsanacağı gibi fonksiyonların ve metotların geri dönüş değerleri referans ise "lifetime 
+    elision" denilen özel iki durumda ömür bilgisinin iliştirilmesi elimine edilebilmektedir.)
 
     Yukarıdaki Number yapısı türünden bir değişken ya da değerle artık * operatörünü kullanılabiliriz. Örneğin:
 
@@ -4354,6 +4354,89 @@ impl IndexMut<usize> for Date {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Standart kütüphanede Deref ve DerefMut trait'lerine benzer std::convert modülünde AsRef isimli ve AsMut isimli trait'ler 
+    de vardır. AsRef trait'i şöyle tanımlanmıştır:
+
+    pub trait AsRef<T> 
+    where
+        T: ?Sized,{
+        // Required method
+        fn as_ref(&self) -> &T;
+    }
+
+    AsMut trait'i de şöyle tanımlanmıştır:
+
+   pub trait AsMut<T>where
+        T: ?Sized,{
+        // Required method
+        fn as_mut(&mut self) -> &mut T;
+    }
+
+    Görüldüğü gibi iki trait arasındaki tek fark referansların mut'luk durumudur. AsRef<T> ve AsMut<T> bu trait'leri bunları 
+    destekleyen türden T türüne dönüştürme yapmak için kullanılmaktadır. Ancak bu trait'ler otomatik dönüştürmede devreye 
+    girmemekte ve otomatik dereferense işlemini yapmamakltadır. Dolayısıyla bu trait'ler * operatörüne ilişkin operatör 
+    metotlarının yazılmasında kullanılamazlar. Ancak açıkça (explicit) dönüştürme vurgulanmak isteniyorsa bu trait'ler 
+    tercih edilebilmektedir. Örneğin:
+
+    struct Number {
+        number: i32
+    }
+
+    impl Number {
+        fn new(number: i32) -> Number {
+            Number { number }
+        }
+
+        fn disp(&self) {
+            println!("{}", self.number)
+        }
+    }
+
+    impl AsRef<i32> for Number {
+        fn as_ref(&self) -> &i32 {
+            &self.number
+        }
+    }
+
+    impl AsMut<i32> for Number {
+        fn as_mut(&mut self) -> &mut i32 {
+            &mut self.number
+        }
+    }
+
+    Burada Deref yerine AsRef, DerefMut yerine AsMut trait'leri desteklenmiştir. Ancak artık biz Nuköber türünden bir 
+    değişkenden içerisindeki number alanının adresini açıkça as_ref ve as_mut metotlarını çağırarak elde edebiliri. Örneğin:
+
+    let mut n = Number::new(10);
+    let r: &i32;
+    let k: &mut i32;
+
+    r = n.as_ref();
+    println!("{}", *r);
+
+    k = n.as_mut();
+    *k = 20;
+    n.disp();
+
+    Burada bir kez daha Deref ve DefetMut ile AsRef ve AsMut trait'lerinin arasındaki farkları vurgulamak istiyoruz:
+
+    1) Deref ve DerefMut trait'lerini desteklenirse * operatörü ilgili tür için kullanılabilir. Ancal AsRef ve AsMut 
+    trait'lerinin böyle bir etkisi yoktur. 
+
+    2) Deref ve DerefMut trait'leri bunları derstekleyen tür türünden değişkenlerin adresleri alındığında ilgili türe 
+    otomatik dönüşüm (deref coercion) sağlamaktadır. Ancak AsRef ve AsMut trait'lerinin böyle bir bir özelliği yoktur. 
+
+    Yani biz yalnızca AsRef ve AsMut trait'lerini desteklersek aşağdaki işlemleri yapamayız:
+
+    let n = Number::new(10);
+    let r: &i32;
+    let x: i32;
+
+    r = &n;     // error! bu işlem ancak Deref trait'i ile mümkündür
+    x = *x;     // errror! bu işlem ancak Deref trait'i ile mümkündür
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
     Biz yukarıdaki örneklerde operatör metotlarını generic olmayan yapılarda kullandık. Eğer yapı (ya da enum) generic ise 
     sentaks biraz kafa karıştırıcı olabilmektedir. Bu nedenle generic yapı ya da enum türlerine ilişkin operatör metotlarının 
     yazımı üzerinde de ayrıca durmak istiyoruz. 
@@ -4409,18 +4492,45 @@ impl IndexMut<usize> for Date {
     use num::{Integer, Signed, Zero, One};
     use std::fmt::Display;
 
-
-    struct Rational<T: Integer + Signed = i64> {
+   struct Rational<T = i64>
+    where T: Integer + Signed + Copy 
+    {
         a: T,
         b: T
     }
 
-    impl<T: Integer + Signed + Display> Rational<T> {
-        fn new(a: T, b: T) -> Rational<T> {
-            Rational { a, b }
+   impl<T> Rational<T>
+    where T: Integer + Signed + Copy {
+        fn new(a: T, b: T) -> Result<Rational<T>, &'static str> {
+            if b == T::zero() {
+                return Err("invalid rational number");
+            }
+            let mut result = Rational { a, b };
+            result.simplify();
+            Ok(result)
+
         }
 
-        fn disp(&self) {
+        fn gcd(mut a: T, mut b: T) -> T {
+            if a == Zero::zero() { return b; }
+            if b == Zero::zero() { return a; }
+            while b != Zero::zero() {
+                let r = a % b;
+                a = b;
+                b = r;
+            }
+            a
+        }
+
+        fn simplify(&mut self) {
+            let gcd = Self::gcd(self.a.abs(), self.b.abs());
+
+            self.a = self.a / gcd;
+            self.b = self.b / gcd;
+        }
+
+        fn disp(&self)
+        where T: Display {
             if self.a == Zero::zero() {
                 println!("0");
             }
@@ -4430,37 +4540,459 @@ impl IndexMut<usize> for Date {
             else {
                 println!("{}/{}", self.a, self.b);
             }
-        }       
+        }
     }
 
     Burada disp metodunun nasıl yazıldığına dikkat ediniz. T generic parametresi zaten Integer ve Signed trait'lerini 
     destekliyor olduğu için biz de Display trait'ini desteklediğimizde artık self.a ve self.b değerlerini println! 
-    makrosuyla yazdırabilir hale gelmekteyiz. disp metodunda 0 ve 1 sabitleri yerine num crate'indeki Zero::zero ve
-    One::one ilişkili fonksiyonlarının kullanıldığına dikkat ediniz. Biz bu metot içeriside doğurdan 0 ve 1 sabitlerini 
-    kullanamayız. Her ne kadar T ütürü işaretli tamsatı türlerinden biri olacak biçimde sınırlandırılmışsa da karşılaştırma
-    operatörlerinin her iki operand'ının da aynı türdne olması zorunluluğu vardır. 
+    makrosuyla yazdırabilir hale gelmekteyiz. Metotlarda 0 ve 1 sabitleri yerine num crate'indeki Zero::zero ve
+    One::one ilişkili fonksiyonlarının kullanıldığına dikkat ediniz. Biz bu metot içeriside doğrudan 0 ve 1 sabitlerini 
+    kullanamayız. Her ne kadar T türü işaretli tamsayı türlerinden biri olacak biçimde sınırlandırılmışsa da karşılaştırma
+    operatörlerinin her iki operand'ının da aynı türden olma zorunluluğu nedeniyle bu işlemi yapamamaktayız.
 
     Şimdi + ve - operatörlerine ilişkin operatör netotlarını yazalım:
+
+    impl<T> Add<Rational<T>> for Rational<T>
+    where T: Integer + Signed + Copy {
+        type Output = Rational<T>;
+
+        fn add(self, other: Rational<T>) -> Rational<T> {
+            let a = self.a * other.b + self.b * other.a;
+            let b = self.b * other.b;
+
+            let mut result = Rational { a, b };
+            result.simplify();
+            result
+        }
+    }
+
+    impl<T> Sub<Rational<T>> for Rational<T>
+    where T: Integer + Signed + Copy {
+        type Output = Rational<T>;
+
+        fn sub(self, other: Rational<T>) -> Rational<T> {
+            let a = self.a * other.b - self.b * other.a;
+            let b = self.b * other.b;
+
+            let mut result = Rational { a, b };
+            result.simplify();
+            result
+        }
+    }
+
+    Diper operatör metotları da benzer biçimde yazılabilir. Bu örneğin bütünsel halini aşağıda veriyoruz.
 -----------------------------------------------------------------------------------------------------------------------*/
 
-/*---------------------------------------------------------------------------------------------------------------------------
+use num::{Integer, Signed, Zero, One};
+use std::fmt::Display;
+use std::ops::{Add, Sub};
 
+fn main() {
+    let x = Rational::new(1, 2).unwrap();
+    let y = Rational::new(1, 2).unwrap();
+    let z: Rational<i32>;
+
+    z = x - y;
+    z.disp();
+}
+
+struct Rational<T = i64>
+where T: Integer + Signed + Copy
+{
+    a: T,
+    b: T
+}
+
+impl<T> Rational<T>
+where T: Integer + Signed + Copy {
+    fn new(a: T, b: T) -> Result<Rational<T>, &'static str> {
+        if b == T::zero() {
+            return Err("invalid rational number");
+        }
+        let mut result = Rational { a, b };
+        result.simplify();
+        Ok(result)
+
+    }
+
+    fn gcd(mut a: T, mut b: T) -> T {
+        if a == Zero::zero() { return b; }
+        if b == Zero::zero() { return a; }
+        while b != Zero::zero() {
+            let r = a % b;
+            a = b;
+            b = r;
+        }
+        a
+    }
+
+    fn simplify(&mut self) {
+        let gcd = Self::gcd(self.a.abs(), self.b.abs());
+
+        self.a = self.a / gcd;
+        self.b = self.b / gcd;
+    }
+
+    fn disp(&self)
+    where T: Display {
+        if self.a == Zero::zero() {
+            println!("0");
+        }
+        else if self.b == One::one() {
+            println!("{}", self.a);
+        }
+        else {
+            println!("{}/{}", self.a, self.b);
+        }
+    }
+}
+
+impl<T> Add<Rational<T>> for Rational<T>
+where T: Integer + Signed + Copy {
+    type Output = Rational<T>;
+
+    fn add(self, other: Rational<T>) -> Rational<T> {
+        let a = self.a * other.b + self.b * other.a;
+        let b = self.b * other.b;
+
+        let mut result = Rational { a, b };
+        result.simplify();
+        result
+    }
+}
+
+impl<T> Sub<Rational<T>> for Rational<T>
+where T: Integer + Signed + Copy {
+    type Output = Rational<T>;
+
+    fn sub(self, other: Rational<T>) -> Rational<T> {
+        let a = self.a * other.b - self.b * other.a;
+        let b = self.b * other.b;
+
+        let mut result = Rational { a, b };
+        result.simplify();
+        result
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            73. Ders 17/12/2025 - Çarşamba
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta C++'taki gibi "tür dönüştürme operatör fonksiyonu" yoktur. Yukarıda görmüş olduğumuz Deref ve DerefMut trait'leri 
+    sahipliği bırakmadan değişken içerisindeki alanın adresiyle geri dönmek için kullanılmaktadır. Deref ve DerefMut trait'lerinin 
+    bir çeşit ödünç alma mekanizmasını uyguladığına dikkat ediniz. Rust'ta bu trait'lerin desteklenmesi ile C++'taki tür 
+    dönüştürme operatör fonksiyonu etkisi tam olmasa da adres yoluyla kısmen karşılamaktadır. 
+    
+    Rust'ta Deref ve DerefMut trait'lerinin yanı sıra değişkenin sahipliğini devrederek dönüştürme yapmak için std::convert 
+    modülünde bulunan From ve Into trait'leri de bulundurulmuştur. Bu trait'ler için standart prelude içerisinde use işlemi 
+    yapıldığından dolayı trait isimleri doğrudan kullanılabilmektedir. Biz aslında From trait'iyle daha önce karşılaşmıştık:
 
+    let s = String::from("ankara");
+
+    İşte aslında String yapısındaki from ilişkili fonksiyonu From trait'inden gelmektedir. 
+
+    From trait'i şöyle tanımlanmıştır:
+
+    pub trait From<T>: Sized {
+        // Required method
+        fn from(value: T) -> Self;
+    }
+
+    Burada from fonksiyonun bir metot olmadığına ilişkli fonksiyon olduğuna dikkat ediniz. Fonksiyon T türünden bir parametreye 
+    sahiptir. Parametre bir referans olmadığı için sahiplik devri söz konusu olmaktadır. Fonksiyonun geri dönüş değeri From 
+    trait'ini destekleyen tür türünden olmak zorundadır. Biz X türünden bir yapı ya da enum türünün From<T> trait'ini 
+    desteklediğini görmüş olalım. Bu durumda şunu anlkamalıyız: "X yapı ya da enum türünün from isimli bir ilişkili fonksiyonu
+    vardır. Bu from fonksiyonu T türünden bir değeri alıp X türünden bir değer vermektedir". Aşağıdaki kullanıma dikkat 
+    ediniz:
+
+    let s = String::from("ankara");
+
+    Burada biz String yapısında From<&str> trait'inin desteklendiğini anlıyoruz. Bu from fonksiyonu parametre olarak &str 
+    alıp bize String vermektedir. Şimdi de aşağıdaki örneğe bakınız:
+
+    struct Number {
+        number: i32
+    }
+
+    impl Number {
+        fn new(number: i32) -> Number {
+            Number { number }
+        }
+
+        fn disp(&self) {
+            println!("{}", self.number)
+        }
+    }
+
+    impl From<i32> for Number {
+        fn from(value: i32) -> Number {
+            Number {number: value}
+        }
+    }
+
+    impl From<&str> for Number {                // dikkat! aslında kötü bir fikir
+        fn from(s: &str) -> Number {
+            Number {number: s.parse().unwrap()}
+        }
+    }
+
+    Burada i32 alıp Number veren ve &str alıp Number veren iki from fonksiyonu oluşturulmuştur. From trait'indeki from 
+    fonksiyonunun her zaman başarılı olması gerektiğine dikkat ediniz. Aslında bu nedenle &str alıp Number veren from 
+    fonksiyonunu oluşturmak iyi bir teknik değildir. Çünkü bu durumda eğer string içerisindeki yazı i32 ile temsil edilen 
+    bir sayı belirtmiyorsa panic oluşacaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let n = Number::from(10);
+    n.disp();
+
+    let k = Number::from("20");
+    k.disp();
+}
+
+struct Number {
+    number: i32
+}
+
+impl Number {
+    fn new(number: i32) -> Number {
+        Number { number }
+    }
+
+    fn disp(&self) {
+        println!("{}", self.number)
+    }
+}
+
+impl From<i32> for Number {
+    fn from(value: i32) -> Number {
+        Number {number: value}
+    }
+}
+
+impl From<&str> for Number {                // dikkat! aslında kötü bir fikir
+    fn from(s: &str) -> Number {
+        Number {number: s.parse().unwrap()}
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    From trait'indeki from fonksiyonunun referans almadığına doğrudan değerin kendisini aldığına dikkat ediniz. O halde 
+    eğer kaynak tür Copy türünden değilse bir sahiplik devri de söz konusu olacaktır. Örneğin:
+
+    struct Number<T> {
+        number: T
+    }
+
+    struct Rational {
+        a: i64,
+        b: i64
+    }
+
+    impl From<Rational> for Number<f64> {
+        fn from(r: Rational) -> Number<f64> {
+            Number {number: r.a as f64 / r.b as f64 }
+        }
+    }
+
+    Burada Number generic bir yapıdır. From trait'i Number<f64> destklenmiştir. Burada from fonksiyonu Rational alıp Number<f64> 
+    vermektedir. Ancak Rational yapısı Copy türünden olmadığı için sahiplik devri söz konusu olacaktır. Dolayısıyla biz from 
+    çağrısından sonra artık argüman olarak verdiğimiz değişkeni kullanamayız:
+
+    let r = Rational {a: 1, b: 2};
+    let n = Number::from(r);
+
+    println!("{}", n.number);
+
+    println!("{}/{}", r.a, r.b);        // error! sahiplik devredildi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let r = Rational {a: 1, b: 2};
+    let n = Number::from(r);
+
+    println!("{}", n.number);
+
+    // println!("{}/{}", r.a, r.b);        ===> error! sahiplik devredildi
+}
+
+struct Number<T> {
+    number: T
+}
+
+struct Rational {
+    a: i64,
+    b: i64
+}
+
+impl From<Rational> for Number<f64> {
+    fn from(r: Rational) -> Number<f64> {
+        Number {number: r.a as f64 / r.b as f64 }
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Into trait'i From trait'inin metotsal ters biçimi gibidir. Şöyle tanımlanmıştır:
+
+    pub trait Into<T>: Sized {
+        // Required method
+        fn into(self) -> T;
+    }
+
+    Buradaki into artık bir metottur. Bu metot trait'i destekleyen türden bir değeri alıp generic parametreyle belirtilen 
+    türe dönüştürmektedir. into metodunun parametresinin &self değil self biçiminde olduğuna dikkat ediniz. Yani metot 
+    çağrıldıktan sonra yine sahiplik devri yapılacaktır. Örneğin:
+
+    struct Number {
+        number: i32
+    }
+
+    impl Number {
+        fn new(number: i32) -> Number {
+            Number { number }
+        }
+
+        fn disp(&self) {
+            println!("{}", self.number)
+        }
+    }
+
+    impl From<i32> for Number {
+        fn from(value: i32) -> Number {
+            Number {number: value}
+        }
+    }
+
+    impl Into<i32> for Number {
+        fn into(self) -> i32 {
+            self.number
+        }
+    }
+
+    Burada from fonksiyonu i32'den Number türüne into fonksiyonu ise Number türünden i32 türüne dönüştürme yapmaktadır. 
+    Bu metotları aşağıdaki gibi kullanmış olalım:
+
+    let n = Number::from(10);
+    n.disp();
+
+    let val: i32 = n.into();
+    println!("{}", val);
+
+    Burada into metodunun kullanımına dikkat ediniz:
+
+    let val: i32 = n.into();       
+
+    into metodunun hangi türe dönüştürme yapmak için kullanıldığını derleyiciye söylemek için hedef türün açıkça belirtilmesi 
+    gerekmektedir. Aşağıdaki kullanım geçerli değildir:
+
+    let val = n.into();                     // error! 
+
+    Burada derleyici hangi türe dönüştürme yapan into metodunun kullanılacağını alyamamamaktadır. (Örneğimizde yalnızca i32
+    türüne dönüştürme yapan into metodu vardır. Ancak derleyici "nasıl olsa yalnızca bir tane into var o halde hedef tür 
+    i32 olmalıdır" biçiminde bir akıl yürütme yapmamaktadır.) Peki biz into metodunda hedef türü nasıl açıkça belirtebiliriz?
+    Aşağıdaki bir sentaks geçerli değildir:
+
+    let val = n.into::<i32>();              // error! 
+
+    Çünkü burada into metodu generic değildir, Into trait'i generic'tir. O halde mecburen bu işlem için UFCS sentaksını 
+    kullanmamız gerekir:
+
+    let val = Into::<i32>::into(n);         // geçerli
+
+    into metodunda self üzerinden sahiplik devrinin yapıldığına dikkat ediniz:
+
+    let n = Number::from(10);
+    let val: i32;
+
+    val = n.into();
+    println!("{}", val);
+
+    println!("{}", n.number);       // error!
+
+    Bu örnekte n değişkenin sahipliği devredilerek tüketilmiştir. Dolayısıyla into çağrısından sonra artık biz n değişkenini 
+    kullanamayız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ın standart kütüphanesinde From<T> türünü destekleyen her tür için Into<T> desteği de "kaplayıcı destekleme 
+    (blanket implementation)" yoluyla verilmiştir. From tarit'i üzerinden Into kaplayıcı desteklemesi şöyle oluşturulmuştur:
+    
+    impl<T, U> Into<U> for T
+    where
+        U: From<T> 
+    {
+        fn into(self) -> U {
+            U::from(self)
+        }
+    }
 
+    Burada ana noktaya dikkat ediniz: Aslında from kullanılarak into yazılabilmektedir. Yukarıdaki kapsayıcı destekleme 
+    şu anlama gelmektedir: Eğer bir U türünden T türüne dönüştürme yapan bir from fonksiyonu varsa U türünün içerisinde de 
+    T türünde dönüştürme yapan bir into metodu da otomatik olarak oluşturulmaktadır. Yani örneğin biz i32 türünden Number türüne 
+    dönüştürme yapan bir from fonksiyonu oluşturmuşsak, i32 türünün içerisinde de Number türüne türüne dnüştürme yapan bir into 
+    metodu da otomatik olarak oluşturulmaktadır. Bunun için bizim ayrıca i32 türü için Number türüne dönüştürme yapan into 
+    metodunu yazmamıza gerek yoktur. Örneğin:
+
+    struct Number {
+        number: i32
+    }
+
+    impl Number {
+        fn new(number: i32) -> Number {
+            Number { number }
+        }
+
+        fn disp(&self) {
+            println!("{}", self.number)
+        }
+    }
+
+    impl From<i32> for Number {
+        fn from(value: i32) -> Number {
+            Number {number: value}
+        }
+    }
+
+    Burada i32 türünden Number türüne dönüştürme yapan from ilişkili fonksiyonunu biz yazdık. Artık i32 türünün içerisinde de 
+    Number türüne dönüştürme yapan into metodu kapsayıcı destekleme sayesinde otomatik olarak oluşturulacaktır. Burada sıklıkla 
+    yapılan bir yanlış anlaşılmaya dikkatinizi çekmek istiyoru: i32 türünden Number türüne from ile yapılan dönüştürmenin 
+    kapsayıcı karşılığı Number türünden i32 türüne yapılan dönüştürme değildir, yine i32 türünden Number türüne yapılan ancak
+    i32 içerisindeki metotla yapılan dönüşürmedir. Zaten kapsayıcı destekleme "bir fonksiyon ya da metot varsa onu kullanarak 
+    diğerininin otomatik yazılması" anlamına gelmektedir. Örneğin elimizde i32 türünden Number türüne dönüştürme yapan bir 
+    from fonksiyonu varsa biz i32 türünden Number türüne dönüştürme yapan into metodunu bu fonksiyonu kullanarak aşağdıaki 
+    gibi yazabiliriz:
+
+    impl Into<Number> for i32 {
+        fn into(self) -> Number {
+            Number::from(self)
+        }
+    }
+
+    Buradaki self artık i32 anlamına gelmektedir. Tabii biz bu biçimde bir desteği kodumuza eklersek aynı zamanda kapsayıcı 
+    destekleme de bulunduğu için error oluşacaktır. Ancak burada bizim göstermek istediğimiz şey U türünden T türüne dönüştürme 
+    yapan bir from fonksiyonu varsa U türü için T türüne dönüştürme yapan into metodu da from metodu kullanılarak yazılabilmektedir. 
+    Örneğin Rational türünden Number türüne dönüştürme yapan bir from fonksiyonu varsa Rational türünden de Number türüne 
+    dönüştürme yapan bir into metodu otomatik olarak bulunuyor olacaktır. Örneğin:
+
+    let s = String::from("ankara");
+
+    Burada &str türünden String türüne dönüştürme yapan bir from fonksiyonun olduğunu görüyorsunuz. O halde &str türünün 
+    içerisinde de String türüne dönüştürme yapan bir into metodu bulunmak zorundadır:
+
+    let k: String;
+
+    k = "ankara".into();
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
+    Yukarıda da belirttiğimiz gibi biz i32 türünden Number türüne dönüştürme yapan from fonksiyonunu yazmış olalım. Bu durum 
+    bizim Number türünden i32 türüne dönştürme yapabileceğimiz anlamına gelmemektedir. i32 içerisinde Number türüne dönüştürme 
+    yapan bir metodun da otomatik bulundurulduğu anlamına gelmektedir. Peki biz Number türünden de i32 türüne dönüştürme 
+    yapmak isteyelim. Bu durumda Number için i32 dönüştürmesi yapan into metodunu mu yazmalıyız, yoksa i32 için Number 
+    dönüştürmesini yapan from metodunu mu yazmalıyız? İşte bu tür durumlarda "her zaman from metodunun yazılması" tercih 
+    edilmektedir. Nasıl olsa into metodu da kapsayıcı destekleme sayesinde otomatik olarak oluşturulacaktır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
