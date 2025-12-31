@@ -16,7 +16,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 31/12/2025 - Çarşamba
+                                    Son Güncelleme: 01/01/2026 - Perşembe
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -14477,7 +14477,7 @@ void exit_sys(const char *msg)
             return -ENOMEM;
         }
         sb->s_fs_info = sfs_sb;
-        spin_lock_init(&sfs_sb->slock);
+        spin_lock_init(&sfs_sb->lock);
 
         if ((sfs_sb->sb_bh = sb_bread(sb, 0)) == NULL) {
             printk(KERN_INFO "cannot read  simplefs disk super block!..\n");
@@ -14782,13 +14782,13 @@ void exit_sys(const char *msg)
     struct simplefs_inode *inode_simpls;
     /*  ... */
     
-    inode_simplefs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL);
+    inode_sfs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL);
 
     Fonksiyon başarısızlık durumunda NULL adrese geri dönmektedir. 
 
     kmem_cache_alloc fonksiyonuyla tahsis edilen alan kmeme_cache_free fonksiyonuyla serbest bırakılmaktadır:
 
-    kmem_cache_free(simplefs_inode_cachep, inode_simplefs);
+    kmem_cache_free(simplefs_inode_cachep, inode_sfs);
 
     kmem_cache_create fonksiyonu ile yaratılmış olan dilimli tahsisat nesnesi kmem_cache_destroy fonksiyonuyla yok 
     edilmektedir:
@@ -14809,13 +14809,13 @@ void exit_sys(const char *msg)
 
     static struct inode *simplefs_alloc_inode(struct super_block *sb)
     {
-        struct simplefs_inode *inode_simplefs;
+        struct simplefs_inode *inode_sfs;
 
-        if ((inode_simplefs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL)) == NULL) 
+        if ((inode_sfs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL)) == NULL) 
             return NULL;
-        inode_init_once(&inode_simplefs->vfs_inode);
+        inode_init_once(&inode_sfs->vfs_inode);
 
-        return &inode_simplefs->vfs_inode;
+        return &inode_sfs->vfs_inode;
     }
 
     inode nesnesi tahsis edildikten sonra onun içerisindeki elemanlara inode_init_once fonksiyonu ile ilkdeğerlerin 
@@ -14825,9 +14825,9 @@ void exit_sys(const char *msg)
 
     static void simplefs_free_inode(struct inode *inode) 
     {
-        struct simplefs_inode *inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
+        struct simplefs_inode *inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
         
-        kmem_cache_free(simplefs_inode_cachep, inode_simplefs);
+        kmem_cache_free(simplefs_inode_cachep, inode_sfs);
     }
 
     simplefs_inode yaımızın block_no elemanına henüz bir değer atamadık. Bu eleman inode elemanın bulunduğu disk bloğunun 
@@ -14915,18 +14915,18 @@ void exit_sys(const char *msg)
     Artık diskten inode elemanını okumuş durumdayız. Şimdi bu bilgilerden hareketle simplefs_iget fonksiyonunda 
     inode nesnesinin içini doldurmamız gerekir. Aşağıda simplefs_iget fonksiyonunun yeni durumunu veriyoruz:
 
-    #define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)((sb->s_fs_info)))
-    #define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB((sb))->sbd)
+    #define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)(((sb)->s_fs_info)))
+    #define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB(sb)->sbd)
 
     static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
     {
         struct inode *inode;
         struct simplefs_disk_inode *disk_inode;
         struct buffer_head *bh;
-        struct simplefs_disk_super_block *simplefs_sbd;
+        struct simplefs_disk_super_block *sfs_sbd;
 
-        simplefs_sbd = SIMPLEFS_DISK_SB(sb);
-        if (ino >= simplefs_sbd->inode_count) 
+        sfs_sbd = SIMPLEFS_DISK_SB(sb);
+        if (ino >= sfs_sbd->inode_count) 
             return ERR_PTR(-EINVAL);
 
         if ((inode = iget_locked(sb, ino)) == NULL) 
@@ -14951,8 +14951,8 @@ void exit_sys(const char *msg)
     yapının içerisindeki inode_count elemanında bulunuyordu. Böylece simplefs_iget fonksiyonu içerisinde yanlışlıkla 
     olmayan bir inode elemanı okunmak istenirse fonksiyon hemen başarısızlıkla geri dönmektedir:
 
-    simplefs_sbd = SIMPLEFS_DISK_SB(sb);
-    if (ino >= simplefs_sbd->inode_count) 
+    sfs_sbd = SIMPLEFS_DISK_SB(sb);
+    if (ino >= sfs_sbd->inode_count) 
         return ERR_PTR(-EINVAL);
 
     Anımsayacağınız gibi iget_locked fonksiyonu eğer inode nesnesi diskte inode önbelleğinde varsa onu alıyor, yoksa 
@@ -15011,11 +15011,11 @@ void exit_sys(const char *msg)
     isteyeceğiz. Bu bilgi zaten diskteki inode elemanında bulunuyordu. O halde bu bilginin inode nesnesine yerleştirilmesi 
     şöyle yapılabilir:
 
-    struct simplefs_inode *inode_simplefs;
+    struct simplefs_inode *inode_sfs;
     /* ... */
 
-    inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
-	inode_simplefs->block_no = disk_inode->block_no;
+    inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
+	inode_sfs->block_no = disk_inode->block_no;
 
     inode nesne adresinin bizim simplefs_inode yapımızın içerisindeki vfs_inode isimli elemanın adresi olduğunu anımsayınız.
     Biz container_of makrosuyla yukarı çıkarak asıl nesnemizin adresini elde etmekteyiz. 
@@ -15038,11 +15038,11 @@ void exit_sys(const char *msg)
         struct inode *inode;
         struct simplefs_disk_inode *disk_inode;
         struct buffer_head *bh;
-        struct simplefs_disk_super_block *simplefs_sbd;
-        struct simplefs_inode *inode_simplefs;
+        struct simplefs_disk_super_block *sfs_sbd;
+        struct simplefs_inode *inode_sfs;
         
-        simplefs_sbd = SIMPLEFS_DISK_SB(sb);
-        if (ino >= simplefs_sbd->inode_count) 
+        sfs_sbd = SIMPLEFS_DISK_SB(sb);
+        if (ino >= sfs_sbd->inode_count) 
             return ERR_PTR(-EINVAL);
 
         if ((inode = iget_locked(sb, ino)) == NULL) 
@@ -15067,8 +15067,8 @@ void exit_sys(const char *msg)
         inode_set_mtime(inode, le32_to_cpu(disk_inode->mtime), 0);
         inode_set_ctime(inode, le32_to_cpu(disk_inode->ctime), 0);
 
-        inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
-        inode_simplefs->block_no = disk_inode->block_no;
+        inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
+        inode_sfs->block_no = disk_inode->block_no;
 
         /* ... */
 
@@ -15230,7 +15230,7 @@ void exit_sys(const char *msg)
     static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
     {
         struct super_block *sb = dir->i_sb;
-        struct simplefs_inode *inode_simplefs = container_of(dir, struct simplefs_inode, vfs_inode);
+        struct simplefs_inode *inode_sfs = container_of(dir, struct simplefs_inode, vfs_inode);
         struct buffer_head *bh;
         struct simplefs_disk_dentry *de;
         struct inode *inode = NULL;
@@ -15239,11 +15239,11 @@ void exit_sys(const char *msg)
         if (dentry->d_name.len > SIMPLEFS_FILENAME_MAXLEN - 1)
             return ERR_PTR(-ENAMETOOLONG);
         
-        if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
+        if ((bh = sb_bread(sb, inode_sfs->block_no)) == NULL)
             return ERR_PTR(-EIO);
         
         de = (struct simplefs_disk_dentry *)bh->b_data;
-        for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
+        for (i = 0; i < SIMPLEFS_MAX_DENTRIES; ++i) {
             if (de[i].inode == 0)			/* deleted entry */
                 continue;
             if (strcmp(de[i].name, dentry->d_name.name) == 0) {
@@ -15266,14 +15266,14 @@ void exit_sys(const char *msg)
 
     lookup fonksiyonumuzda daha sonra dizine ilişkin blok okunmuştur:
 
-    if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
+    if ((bh = sb_bread(sb, inode_sfs->block_no)) == NULL)
         return ERR_PTR(-EIO);
 
     Tabii bu blok zaten sayfa önbelleiğinde varsa gerçek bir okuma yapılmayacaktır. Fonksiyonumuzda sonra doprusal 
     arama yapılmıştır:
 
     de = (struct simplefs_disk_dentry *)bh->b_data;
-    for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
+    for (i = 0; i < SIMPLEFS_MAX_DENTRIES; ++i) {
         if (de[i].inode == 0)			/* deleted entry */
             continue;
         if (strcmp(de[i].name, dentry->d_name.name) == 0) {
@@ -15397,7 +15397,7 @@ void exit_sys(const char *msg)
             return -ENOMEM;
         }
         sb->s_fs_info = sfs_sb;
-        spin_lock_init(&sfs_sb->slock);
+        spin_lock_init(&sfs_sb->lock);
 
         if ((sfs_sb->sb_bh = sb_bread(sb, 0)) == NULL) {
             printk(KERN_INFO "cannot read  simplefs disk super block!..\n");
@@ -15700,10 +15700,10 @@ struct simplefs_disk_dentry {
 };
 
 #define SIMPLEFS_DISK_DENTRY_SIZE			sizeof(struct simplefs_disk_dentry)
-#define SIMPLEFS_MAX_DIR_ENTRIES			(SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
+#define SIMPLEFS_MAX_DENTRIES			(SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
 
-#define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)((sb->s_fs_info)))
-#define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB((sb))->sbd)
+#define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)(((sb)->s_fs_info)))
+#define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB(sb)->sbd)
 
 #define SIMPLEFS_DISK_INODE_SIZE			sizeof(struct simplefs_disk_inode)
 #define SIMPLEFS_DISK_INODE_PER_BLOCK     	(SIMPLEFS_BLOCKSIZE / SIMPLEFS_DISK_INODE_SIZE)
@@ -15801,7 +15801,7 @@ static int simplefs_fill_super(struct super_block *sb, void *data, int silent)
 		return -ENOMEM;
 	}
 	sb->s_fs_info = sfs_sb;
-	spin_lock_init(&sfs_sb->slock);
+	spin_lock_init(&sfs_sb->lock);
 
 	if ((sfs_sb->sb_bh = sb_bread(sb, 0)) == NULL) {
 		printk(KERN_INFO "cannot read  simplefs disk super block!..\n");
@@ -15889,20 +15889,20 @@ static void simplefs_kill_sb(struct super_block *sb)
 
 static struct inode *simplefs_alloc_inode(struct super_block *sb)
 {
-	struct simplefs_inode *inode_simplefs;
+	struct simplefs_inode *inode_sfs;
 
-	if ((inode_simplefs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL)) == NULL) 
+	if ((inode_sfs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL)) == NULL) 
 		return NULL;
-    inode_init_once(&inode_simplefs->vfs_inode);
+    inode_init_once(&inode_sfs->vfs_inode);
 
-	return &inode_simplefs->vfs_inode;
+	return &inode_sfs->vfs_inode;
 }
 
 static void simplefs_free_inode(struct inode *inode) 
 {
-	struct simplefs_inode *inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
+	struct simplefs_inode *inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
     
-    kmem_cache_free(simplefs_inode_cachep, inode_simplefs);
+    kmem_cache_free(simplefs_inode_cachep, inode_sfs);
 }
 
 static int simplefs_write_inode(struct inode *inode, struct writeback_control *wbc)
@@ -15920,11 +15920,11 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	struct inode *inode;
 	struct simplefs_disk_inode *disk_inode;
 	struct buffer_head *bh;
-	struct simplefs_disk_super_block *simplefs_sbd;
-	struct simplefs_inode *inode_simplefs;
+	struct simplefs_disk_super_block *sfs_sbd;
+	struct simplefs_inode *inode_sfs;
 
-	simplefs_sbd = SIMPLEFS_DISK_SB(sb);
-	if (ino >= simplefs_sbd->inode_count) 
+	sfs_sbd = SIMPLEFS_DISK_SB(sb);
+	if (ino >= sfs_sbd->inode_count) 
 		return ERR_PTR(-EINVAL);
 
 	if ((inode = iget_locked(sb, ino)) == NULL) 
@@ -15949,8 +15949,8 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	inode_set_mtime(inode, le32_to_cpu(disk_inode->mtime), 0);
     inode_set_ctime(inode, le32_to_cpu(disk_inode->ctime), 0);
 
-	inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
-	inode_simplefs->block_no = disk_inode->block_no;
+	inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
+	inode_sfs->block_no = disk_inode->block_no;
 
 	if (S_ISDIR(inode->i_mode)) {
         inode->i_op = &simplefs_dir_inode_ops;
@@ -15988,7 +15988,7 @@ static struct simplefs_disk_inode *simplefs_get_inode_disk(struct super_block *s
 static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 {
     struct super_block *sb = dir->i_sb;
-    struct simplefs_inode *inode_simplefs = container_of(dir, struct simplefs_inode, vfs_inode);
+    struct simplefs_inode *inode_sfs = container_of(dir, struct simplefs_inode, vfs_inode);
     struct buffer_head *bh;
     struct simplefs_disk_dentry *de;
     struct inode *inode = NULL;
@@ -15997,11 +15997,11 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
     if (dentry->d_name.len > SIMPLEFS_FILENAME_MAXLEN)
         return ERR_PTR(-ENAMETOOLONG);
     
-    if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
+    if ((bh = sb_bread(sb, inode_sfs->block_no)) == NULL)
         return ERR_PTR(-EIO);
     
     de = (struct simplefs_disk_dentry *)bh->b_data;
-    for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
+    for (i = 0; i < SIMPLEFS_MAX_DENTRIES; ++i) {
         if (de[i].inode == 0)			/* deleted entry */
             continue;
         if (strcmp(de[i].name, dentry->d_name.name) == 0) {
@@ -16129,17 +16129,17 @@ clean:
     edebilirsiniz:
 
     struct inode *inode;
-	struct simplefs_inode *inode_simplefs;
+	struct simplefs_inode *inode_sfs;
 
     inode = file_inode(file);
-	inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
+	inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
 
     Fonksiyonda güvenlik amacıyla bazı kontrolleri de yapabiliriz. Örneğin:
 
-    if (ctx->pos >= SIMPLEFS_MAX_DIR_ENTRIES) 
+    if (ctx->pos >= SIMPLEFS_MAX_DENTRIES) 
         return 0;
 
-    if (inode_simplefs->block_no == 0) {
+    if (inode_sfs->block_no == 0) {
         printk(KERN_INFO "unallocated disk block for directory!..\n");
         return 0;
     }
@@ -16205,7 +16205,7 @@ struct simplefs_super_block {
 	struct buffer_head *data_bitmap_bh;
 	unsigned long *inode_bitmap;
 	unsigned long *data_bitmap;
-	spinlock_t slock;
+	spinlock_t lock;
 };
 
 struct simplefs_inode {
@@ -16233,10 +16233,10 @@ struct simplefs_disk_dentry {
 };
 
 #define SIMPLEFS_DISK_DENTRY_SIZE			sizeof(struct simplefs_disk_dentry)
-#define SIMPLEFS_MAX_DIR_ENTRIES			(SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
+#define SIMPLEFS_MAX_DENTRIES			    (SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
 
-#define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)((sb->s_fs_info)))
-#define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB((sb))->sbd)
+#define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)(((sb)->s_fs_info)))
+#define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB(sb)->sbd)
 
 #define SIMPLEFS_DISK_INODE_SIZE			sizeof(struct simplefs_disk_inode)
 #define SIMPLEFS_DISK_INODE_PER_BLOCK     	(SIMPLEFS_BLOCKSIZE / SIMPLEFS_DISK_INODE_SIZE)
@@ -16339,7 +16339,7 @@ static int simplefs_fill_super(struct super_block *sb, void *data, int silent)
 		return -ENOMEM;
 	}
 	sb->s_fs_info = sfs_sb;
-	spin_lock_init(&sfs_sb->slock);
+	spin_lock_init(&sfs_sb->lock);
 
 	if ((sfs_sb->sb_bh = sb_bread(sb, 0)) == NULL) {
 		printk(KERN_INFO "cannot read  simplefs disk super block!..\n");
@@ -16427,20 +16427,20 @@ static void simplefs_kill_sb(struct super_block *sb)
 
 static struct inode *simplefs_alloc_inode(struct super_block *sb)
 {
-	struct simplefs_inode *inode_simplefs;
+	struct simplefs_inode *inode_sfs;
 
-	if ((inode_simplefs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL)) == NULL) 
+	if ((inode_sfs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL)) == NULL) 
 		return NULL;
-	inode_init_once(&inode_simplefs->vfs_inode);
+	inode_init_once(&inode_sfs->vfs_inode);
 
-	return &inode_simplefs->vfs_inode;
+	return &inode_sfs->vfs_inode;
 }
 
 static void simplefs_free_inode(struct inode *inode) 
 {
-	struct simplefs_inode *inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
+	struct simplefs_inode *inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
     
-    kmem_cache_free(simplefs_inode_cachep, inode_simplefs);
+    kmem_cache_free(simplefs_inode_cachep, inode_sfs);
 }
 
 static int simplefs_write_inode(struct inode *inode, struct writeback_control *wbc)
@@ -16459,11 +16459,11 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	struct inode *inode;
 	struct simplefs_disk_inode *disk_inode;
 	struct buffer_head *bh;
-	struct simplefs_disk_super_block *simplefs_sbd;
-	struct simplefs_inode *inode_simplefs;
+	struct simplefs_disk_super_block *sfs_sbd;
+	struct simplefs_inode *inode_sfs;
 
-	simplefs_sbd = SIMPLEFS_DISK_SB(sb);
-	if (ino >= simplefs_sbd->inode_count) 
+	sfs_sbd = SIMPLEFS_DISK_SB(sb);
+	if (ino >= sfs_sbd->inode_count) 
 		return ERR_PTR(-EINVAL);
 
 	if ((inode = iget_locked(sb, ino)) == NULL) 
@@ -16488,8 +16488,8 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	inode_set_mtime(inode, le32_to_cpu(disk_inode->mtime), 0);
     inode_set_ctime(inode, le32_to_cpu(disk_inode->ctime), 0);
 
-	inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
-	inode_simplefs->block_no = disk_inode->block_no;
+	inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
+	inode_sfs->block_no = disk_inode->block_no;
 
 	if (S_ISDIR(inode->i_mode)) {
         inode->i_op = &simplefs_dir_inode_ops;
@@ -16528,7 +16528,7 @@ static struct simplefs_disk_inode *simplefs_get_inode_disk(struct super_block *s
 static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 {
     struct super_block *sb = dir->i_sb;
-    struct simplefs_inode *inode_simplefs = container_of(dir, struct simplefs_inode, vfs_inode);
+    struct simplefs_inode *inode_sfs = container_of(dir, struct simplefs_inode, vfs_inode);
     struct buffer_head *bh;
     struct simplefs_disk_dentry *de;
     struct inode *inode = NULL;
@@ -16537,11 +16537,11 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
     if (dentry->d_name.len > SIMPLEFS_FILENAME_MAXLEN)
         return ERR_PTR(-ENAMETOOLONG);
     
-    if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
+    if ((bh = sb_bread(sb, inode_sfs->block_no)) == NULL)
         return ERR_PTR(-EIO);
     
     de = (struct simplefs_disk_dentry *)bh->b_data;
-    for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
+    for (i = 0; i < SIMPLEFS_MAX_DENTRIES; ++i) {
         if (de[i].inode == 0)			/* deleted entry */
             continue;
         if (strcmp(de[i].name, dentry->d_name.name) == 0) {
@@ -16562,30 +16562,30 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
 static int simplefs_iterate_shared(struct file *file, struct dir_context *ctx)
 {
 	struct inode *inode;
-	struct simplefs_inode *inode_simplefs;
+	struct simplefs_inode *inode_sfs;
 	struct buffer_head *bh;
 	struct simplefs_disk_dentry *de;
 	unsigned long ino;
 	int i;
 
 	inode = file_inode(file);
-	inode_simplefs = container_of(inode, struct simplefs_inode, vfs_inode);
+	inode_sfs = container_of(inode, struct simplefs_inode, vfs_inode);
 
-	if (ctx->pos >= SIMPLEFS_MAX_DIR_ENTRIES) 
+	if (ctx->pos >= SIMPLEFS_MAX_DENTRIES) 
         return 0;
 
-    if (inode_simplefs->block_no == 0) {
+    if (inode_sfs->block_no == 0) {
         printk(KERN_INFO "unallocated disk block for directory!..\n");
         return 0;
     }
 
-	if ((bh = sb_bread(inode->i_sb, inode_simplefs->block_no)) == NULL) {
+	if ((bh = sb_bread(inode->i_sb, inode_sfs->block_no)) == NULL) {
 		printk(KERN_INFO "cannot read directory block from disk!..\n")  ;
         return -EIO;
     }
     de = (struct simplefs_disk_dentry *)bh->b_data;
 
-	for (i = ctx->pos; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
+	for (i = ctx->pos; i < SIMPLEFS_MAX_DENTRIES; ++i) {
         if (de[i].inode == 0) {
             /* Move position forward even for empty entries */
             ctx->pos = i + 1;
