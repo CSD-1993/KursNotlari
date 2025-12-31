@@ -13644,7 +13644,7 @@ clean:
 
     #define SIMPLEFS_FILENAME_MAXLEN        32
 
-    struct simplefs_disk_dir_entry {
+    struct simplefs_disk_dentry {
         __le32 inode;                           /* İnode number */
         char name[SIMPLEFS_FILENAME_MAXLEN];    /* File name */
     };
@@ -13805,13 +13805,17 @@ clean:
         return 0;
     }
 
-    Artık son olarak kök dizinin girişlerinin oluşturulmaıs gerekir. Kök dizinin ilk girişinin "." ve ".." dizinlerinden
+    Kök dizine ilişkin inode elemanının size elemanına SIMPLEFS_BLOCK_SIZE değerini yerleştirdiğimize dikkat ediniz. 
+    Pek çok dosya sisteminde dizin dosyalarının uzunluğu onlar için ayrılan blokların toplam uzunluğu ile ifade edilmektedir. 
+    Biz de simplefs dosya sistemimizde tüm dizinlerin uzunluklarını SIMPLEFS_BLOCK_SIZE yani 4096 niçiminde set edeceğiz.
+
+    Artık son olarak kök dizinin girişlerinin oluşturulması gerekir. Kök dizinin ilk girişinin "." ve ".." dizinlerinden
     oluşması zorunludur. Bu dizin girişlerini kök dizine ilişkin bloğun ilk iki girişine yazmak için formatlama 
     programımızda için write_dentries fonksiyonu kullanılmıştır:
 
     int write_dentries(int fd, struct simplefs_disk_super_block *sbd)
     {
-        struct simplefs_disk_dir_entry de = {0};
+        struct simplefs_disk_dentry de = {0};
 
         lseek(fd, sbd->data_block_start * SIMPLEFS_BLOCK_SIZE, SEEK_SET);
         de.inode = 2;
@@ -13878,7 +13882,7 @@ struct simplefs_disk_inode {
     __u8   padding[24];     /* Padding to 64 bytes */
 };
 
-struct simplefs_disk_dir_entry {
+struct simplefs_disk_dentry {
     __le32 inode;                           /* İnode number */
     char name[SIMPLEFS_FILENAME_MAXLEN];    /* File name */
 };
@@ -14014,7 +14018,7 @@ int write_inode_table(int fd, struct simplefs_disk_super_block *sbd)
 
 int write_dentries(int fd, struct simplefs_disk_super_block *sbd)
 {
-    struct simplefs_disk_dir_entry de = {0};
+    struct simplefs_disk_dentry de = {0};
 
     lseek(fd, sbd->data_block_start * SIMPLEFS_BLOCK_SIZE, SEEK_SET);
     de.inode = 2;
@@ -14975,7 +14979,6 @@ void exit_sys(const char *msg)
     inode->i_mode = le32_to_cpu(disk_inode->mode);
     i_uid_write(inode, le32_to_cpu(disk_inode->uid));
     i_gid_write(inode, le32_to_cpu(disk_inode->gid));
-    inode->i_size = le32_to_cpu(disk_inode->size);
     set_nlink(inode, le32_to_cpu(disk_inode->nlink));
     inode->i_blocks = le32_to_cpu(disk_inode->blocks);
     inode->i_size = le32_to_cpu(disk_inode->size);
@@ -14992,15 +14995,16 @@ void exit_sys(const char *msg)
     bu id'leri ayırmaktadır. Bu fonksiyonlar isim alanlarındaki id'leri çekirdeğin kullandığı id'lere dönüştürmektedir. 
     Aslında default isim alanında bulunuluyorsa bu çekirdekler aynı id'değerlerini inode nesnesinin içerisine yerleştirmektedir. 
     Örneğimizde dosyanın hard link sayscı da set_nlink fonksiyonuyla set edilmiştir. Çünkü hard link sayacının 
-    atomik bir biçimde birkaç durum gözetilerek yerleştirilmesi gerekmektedir. Linux çekirdeklerinde dosyanın tarih 
-    zaman bilgilerinin tutulma biçimi versiyonlarla üç kez değiştirilmiştir. Eskiden yalnızca 01/01/1970'ten geçen 
-    saniye sayısı tutuluyordu. Sonra timespec yapısı kullanılmaya başlandı. Bu yapıyu kullanıcı modu uygulamalarıdan
-    da anımsayacksınız. Bu timespec yapısı hem 01/01/1970'ten geçen saniye sayısını hem de bu saniyedne sonraki nano 
-    saniye sayısını tutuyordu. Nihayet yeni çekirdeklerde artık tarih ve zaman bilgisi inode nesnesinde iki ayrı yapı 
-    elemanıyla tuutlmaktadır. Çekirdekteki bu değişmlerden etkilenmek istenmiyorsa tarih zama bilgisi doğrudan değil 
-    çekirdeğin içerisindeki inode_set_atime, inode_set_mtime, inode_set_ctime fonksiyonlarıyla set edilmelidir. 
-    Bu fonksiyonlar uzunca bir süredir çekirdeklerde bulunmaktadır ve set işlmeini çekirdeğin o versiyonundaki formata 
-    göre yapmaktadır. 
+    atomik bir biçimde birkaç durum gözetilerek yerleştirilmesi gerekmektedir. 
+    
+    Linux çekirdeklerinde dosyanın tarih zaman bilgilerinin tutulma biçimi versiyonlarla üç kez değiştirilmiştir. 
+    Eskiden yalnızca 01/01/1970'ten geçen saniye sayısı tutuluyordu. Sonra timespec yapısı kullanılmaya başlandı. 
+    Bu yapıyı kullanıcı modu uygulamalarıdan da anımsayacksınız. Bu timespec yapısı hem 01/01/1970'ten geçen saniye 
+    sayısını hem de bu saniyedne sonraki nano saniye sayısını tutuyordu. Nihayet yeni çekirdeklerde artık tarih ve 
+    zaman bilgisi inode nesnesinde iki ayrı yapı elemanıyla tuutlmaktadır. Çekirdekteki bu değişmlerden etkilenmek 
+    istenmiyorsa tarih zama bilgisi doğrudan değil çekirdeğin içerisindeki inode_set_atime, inode_set_mtime, inode_set_ctime 
+    fonksiyonlarıyla set edilmelidir. Bu fonksiyonlar uzunca bir süredir çekirdeklerde bulunmaktadır ve set işlmeini 
+    çekirdeğin o versiyonundaki formata göre yapmaktadır. 
 
     inode nesnesinin doldurulurken inode nesnesinin belirttiği dosyanın bilgilerinin hangi data block içerisinde 
     olduğu da saklanmalıdır. Çünkü biz ileride inode nesnesinden hareketle dosyaya ilişkin bilgilere ulaşmak 
@@ -15056,7 +15060,6 @@ void exit_sys(const char *msg)
         inode->i_mode = le32_to_cpu(disk_inode->mode);
         i_uid_write(inode, le32_to_cpu(disk_inode->uid));
         i_gid_write(inode, le32_to_cpu(disk_inode->gid));
-        inode->i_size = le32_to_cpu(disk_inode->size);
         set_nlink(inode, le32_to_cpu(disk_inode->nlink));
         inode->i_blocks = le32_to_cpu(disk_inode->blocks);
         inode->i_size = le32_to_cpu(disk_inode->size);
@@ -15214,7 +15217,7 @@ void exit_sys(const char *msg)
 
     #define SIMPLEFS_FILENAME_MAXLEN    		32
 
-    struct simplefs_disk_dir_entry {
+    struct simplefs_disk_dentry {
         __le32 inode;                           /* inode number */
         char name[SIMPLEFS_FILENAME_MAXLEN];    /* File name */
     };
@@ -15229,7 +15232,7 @@ void exit_sys(const char *msg)
         struct super_block *sb = dir->i_sb;
         struct simplefs_inode *inode_simplefs = container_of(dir, struct simplefs_inode, vfs_inode);
         struct buffer_head *bh;
-        struct simplefs_disk_dir_entry *de;
+        struct simplefs_disk_dentry *de;
         struct inode *inode = NULL;
         int i;
         
@@ -15239,7 +15242,7 @@ void exit_sys(const char *msg)
         if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
             return ERR_PTR(-EIO);
         
-        de = (struct simplefs_disk_dir_entry *)bh->b_data;
+        de = (struct simplefs_disk_dentry *)bh->b_data;
         for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
             if (de[i].inode == 0)			/* deleted entry */
                 continue;
@@ -15269,7 +15272,7 @@ void exit_sys(const char *msg)
     Tabii bu blok zaten sayfa önbelleiğinde varsa gerçek bir okuma yapılmayacaktır. Fonksiyonumuzda sonra doprusal 
     arama yapılmıştır:
 
-    de = (struct simplefs_disk_dir_entry *)bh->b_data;
+    de = (struct simplefs_disk_dentry *)bh->b_data;
     for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
         if (de[i].inode == 0)			/* deleted entry */
             continue;
@@ -15288,7 +15291,7 @@ void exit_sys(const char *msg)
     uzunluğundadır. Yukarıdaki döngüde biz dizin bloğunun sonuna kadar her dizin girişini gözden geçirmekteyiz. Tabii 
     bu işlem bir zaman kaybına yol açacaktır. ext2 gibi ext4 gibi dosya sistemlerinde dizin girişlerinin sonu da 
     bir biçimde bilinmektedir. Böylece o dosya sistemlerinde tüm blok ya da bloklar sonuna kadar gözden geçirilmemektedir.  
-    Burada biz bloğun sonuna kadar gözden geçirme zorunluluğunu ortadan kaldırmak için simplefs_disk_dir_entry yapısının
+    Burada biz bloğun sonuna kadar gözden geçirme zorunluluğunu ortadan kaldırmak için simplefs_disk_dentry yapısının
     içerisine bir "son giriş mi" bayrağı tutabiliriz.
 
     Yukarıda kodda eğer dizin girişi bulunmuşsa ona ilişkin inode nesnesi daha önce yazmış olduğumuz simplefs_iget 
@@ -15691,12 +15694,13 @@ struct simplefs_disk_inode {
     __u8   padding[24];     /* Padding to 64 bytes */
 };
 
-struct simplefs_disk_dir_entry {
-    __le32 inode;                           /* İnode number */
+struct simplefs_disk_dentry {
+    __le32 inode;                           /* Inode number */
     char name[SIMPLEFS_FILENAME_MAXLEN];    /* File name */
 };
 
-#define SIMPLEFS_MAX_DIR_ENTRIES			(SIMPLEFS_BLOCK_SIZE / sizeof(struct simplefs_disk_dir_entry))
+#define SIMPLEFS_DISK_DENTRY_SIZE			sizeof(struct simplefs_disk_dentry)
+#define SIMPLEFS_MAX_DIR_ENTRIES			(SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
 
 #define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)((sb->s_fs_info)))
 #define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB((sb))->sbd)
@@ -15938,7 +15942,6 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	inode->i_mode = le32_to_cpu(disk_inode->mode);
     i_uid_write(inode, le32_to_cpu(disk_inode->uid));
     i_gid_write(inode, le32_to_cpu(disk_inode->gid));
-    inode->i_size = le32_to_cpu(disk_inode->size);
     set_nlink(inode, le32_to_cpu(disk_inode->nlink));
     inode->i_blocks = le32_to_cpu(disk_inode->blocks);
     inode->i_size = le32_to_cpu(disk_inode->size);
@@ -15987,7 +15990,7 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
     struct super_block *sb = dir->i_sb;
     struct simplefs_inode *inode_simplefs = container_of(dir, struct simplefs_inode, vfs_inode);
     struct buffer_head *bh;
-    struct simplefs_disk_dir_entry *de;
+    struct simplefs_disk_dentry *de;
     struct inode *inode = NULL;
     int i;
     
@@ -15997,7 +16000,7 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
     if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
         return ERR_PTR(-EIO);
     
-    de = (struct simplefs_disk_dir_entry *)bh->b_data;
+    de = (struct simplefs_disk_dentry *)bh->b_data;
     for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
         if (de[i].inode == 0)			/* deleted entry */
             continue;
@@ -16224,12 +16227,13 @@ struct simplefs_disk_inode {
     __u8   padding[24];     /* Padding to 64 bytes */
 };
 
-struct simplefs_disk_dir_entry {
+struct simplefs_disk_dentry {
     __le32 inode;                           /* İnode number */
     char name[SIMPLEFS_FILENAME_MAXLEN];    /* File name */
 };
 
-#define SIMPLEFS_MAX_DIR_ENTRIES			(SIMPLEFS_BLOCK_SIZE / sizeof(struct simplefs_disk_dir_entry))
+#define SIMPLEFS_DISK_DENTRY_SIZE			sizeof(struct simplefs_disk_dentry)
+#define SIMPLEFS_MAX_DIR_ENTRIES			(SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
 
 #define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)((sb->s_fs_info)))
 #define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB((sb))->sbd)
@@ -16477,7 +16481,6 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 	inode->i_mode = le32_to_cpu(disk_inode->mode);
     i_uid_write(inode, le32_to_cpu(disk_inode->uid));
     i_gid_write(inode, le32_to_cpu(disk_inode->gid));
-    inode->i_size = le32_to_cpu(disk_inode->size);
     set_nlink(inode, le32_to_cpu(disk_inode->nlink));
     inode->i_blocks = le32_to_cpu(disk_inode->blocks);
     inode->i_size = le32_to_cpu(disk_inode->size);
@@ -16527,7 +16530,7 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
     struct super_block *sb = dir->i_sb;
     struct simplefs_inode *inode_simplefs = container_of(dir, struct simplefs_inode, vfs_inode);
     struct buffer_head *bh;
-    struct simplefs_disk_dir_entry *de;
+    struct simplefs_disk_dentry *de;
     struct inode *inode = NULL;
     int i;
     
@@ -16537,7 +16540,7 @@ static struct dentry *simplefs_lookup(struct inode *dir, struct dentry *dentry, 
     if ((bh = sb_bread(sb, inode_simplefs->block_no)) == NULL)
         return ERR_PTR(-EIO);
     
-    de = (struct simplefs_disk_dir_entry *)bh->b_data;
+    de = (struct simplefs_disk_dentry *)bh->b_data;
     for (i = 0; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
         if (de[i].inode == 0)			/* deleted entry */
             continue;
@@ -16561,7 +16564,7 @@ static int simplefs_iterate_shared(struct file *file, struct dir_context *ctx)
 	struct inode *inode;
 	struct simplefs_inode *inode_simplefs;
 	struct buffer_head *bh;
-	struct simplefs_disk_dir_entry *de;
+	struct simplefs_disk_dentry *de;
 	unsigned long ino;
 	int i;
 
@@ -16580,7 +16583,7 @@ static int simplefs_iterate_shared(struct file *file, struct dir_context *ctx)
 		printk(KERN_INFO "cannot read directory block from disk!..\n")  ;
         return -EIO;
     }
-    de = (struct simplefs_disk_dir_entry *)bh->b_data;
+    de = (struct simplefs_disk_dentry *)bh->b_data;
 
 	for (i = ctx->pos; i < SIMPLEFS_MAX_DIR_ENTRIES; ++i) {
         if (de[i].inode == 0) {
