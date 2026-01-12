@@ -5000,7 +5000,7 @@ impl From<Rational> for Number<f64> {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                        74. Ders 29/12/2025 - Pazartesi
+                                            74. Ders 29/12/2025 - Pazartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -5324,20 +5324,648 @@ impl From<Rational> for Number<f64> {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+                                            75. Ders 05/01/2026 - Pazartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz panic! makrosunu daha önce kullandık. Bu makro "telafi edilemeyecek (unrecoverable)" hata durumlarında programı 
+    sonlandırmak için kullanılmaktadır. panic! makrosu argüman olarak hataya ilişkin bir bilgi alabilmektedir. panic! 
+    makrosunda tıpkı print! makrosunda olduğu gibi "{}" biçiminde yer tutucular kullanılabilmektedir. Örneğin:
+
+    if a < 0 {
+        panic!("Invalid value: {}", a);
+    }
+
+    Burada panic oluştuğunda a değişkenin değeri de yazdırılmıştır. panic! makrosu hata mesajını stderr dosyasına yazdırmaktadır. 
+    print! ve prinln! makrolarının mesajları stdout dosyasına eprint! ve eprintln! makrolarının ise stderr dosyasına 
+    yazdırdığını anımsayınız.
+
+    panic! makrosu aynı zamanda default durumda o zamana kadar yaratılmış ancak yok edilmemiş olan tüm yerel değişkenleri 
+    drop etmektedir. Yani eğer ilgili tür Copy türü değilse ve Drop trait'ini destekliyorsa onların drop metotları da ters sırada 
+    çağrılacaktır. Örneğin:
+
+    fn main() {
+        let x = Sample::new(10);
+
+        foo(-10);
+    }
+
+    fn foo(a: i32) {
+        let y = Sample::new(20);
+
+        bar(a);
+    }
+
+    fn bar(a: i32) {
+        let z = Sample::new(30);
+
+        if a < 0 {
+            panic!("invalid parameter!");
+        }
+    }
+
+    struct Sample {
+        val: i32,
+    }
+
+    impl Sample {
+        fn new(val: i32) -> Self {
+            Self { val }
+        }
+    }
+
+    impl Drop for Sample {
+        fn drop(&mut self) {
+            println!("Drop: {}", self.val);
+        }
+    }
+
+    Burada main fonksiyonu foo fonksiyonunu foo fonksiyonu da bar fonksiyonunu çağırmıştır. bar fonksiyonu içerisinde panic!
+    makrosu çağrılmıştır. İşte default durumda programın başından beri yaratılan tüm yerel değişkenler için "ters sırada" 
+    drop metotları çağrılacaktır. Yukarıdaki programın çıktısı panic haricinde şöyle olacaktır:
+
+    Drop: 30
+    Drop: 20
+    Drop: 10
+
+    Stack unwinding süreci için derleyici bizim görmediğimiz biçimde bazı kayıtlar da tutmaktadır. Sistem programlama 
+    uygulamalarında bu tür ekstra kayıtlar genellikle istenmez. İşte Rust'ta panic sırasındaki "stack unwinding" durumu 
+    "Cargo.toml" dosyası yoluyla elimine edilebilmektedir. Programcı isterse bu dosyaya aşağıdaki ekleyerek default olan 
+    "unwind" durumunu "abort" haline getirebilmektedir:
+
+    [profile.dev]
+    panic = "abort"
+
+    [profile.release]
+    panic = "abort"
+
+    Burada "dev" projenin debug versiyonunu, "release" ise release versiyonunu belirtmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    panic! makrosunun dışında Rust'ta benzer amaçlarla kullanılan todo! ve unimplemented! makroları da vardır. Bu makrolar da 
+    panic oluşturmaktadır. Dolayısıyla panic! makrosu için söylediklerimiz bu makrolar için de geçerlidir. İki makro arasında
+    niyet bakımından belki bir farklılık düşünülebilir. todo! makrosu daha çok "şimdi yazılmadı ama ileride yazılacak" anlamına 
+    gelmektedir. unimplemented! makrosu ise daha çok "kasti olarak yazılmadı" gibi bir anlama gelmektedir. Örneğin:
+
+    fn foo() {
+        todo!("foo");
+    }
+
+    Burada foo fonksiyonun içi henüz yazılmamıştır. İleride buraya dönülüp için yazılması gibi bir niyet vardır. 
+
+    todo! ve unimplemented! makrolarının dışında unreachable! isimli bir makro da vardır. Bu makro "bir noktaya kodun
+    gelmemesi gerektiği halde geldiği durumlarda panik oluşturmak için kullanılmaktadır. Örneğin.
+
+    match foo() {
+        0 => bar(),
+        1 => tar(), 
+        2 => zar(),
+        _ => unreachable!("unexpected match!..")
+    }
+
+    Burada foo fonksiyonun geri dönüş değerinin i32 türünden olduğunu ve fonksiyonun normal olarak 0, 1 ya da 2 değeri 
+    geri döndürdüğünü kabul edelim. match deyiminin exhaustive olması gerektiği için mecburen sonuna _ kalıbı yerleştirilmiştir. 
+    Ancak aslında akış buraya hiç gelmemelidir. İşte bu tür durumlarda okunabilir bir biçimde panik oluşturmak için 
+    unreachable! makrosu kullanılabilmektedir. (Tabii aslında yukarıdaki gibi bir örnekte foo fonksiyonun enum geri döndürmesi 
+    daha iyi bir tekniktir. Çünkü bu durumda zaten tüm enum varyantları match kollarına dizildiğinde match ifadesi exhaustive
+    hale gelmektedir. Ancak bu tür durumlarla da bazen mecburen karşılabilmektedir.)
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta da C'de ve C++'ta olduğu gibi assert makroları vardır. Programlama dillerinde assert mekanizması programın 
+    "release" versiyonunda bulunmayacak olan ancak "debug" versiyonunda böcek yakalamak için eklenen kontrol kodlarının 
+    oluşturulmasını sağlamaktadır. assert makrolarında aslında görünüşte gereksiz olan kontroller koda eklenmektedir. Çünkü
+    bu kontrollerin amacı programın geliştirilmesi sırasında olası hataların programcı tarafından tespit edilmesini sağlamaktır. 
+    Assert mekanizmalarında "release" derlemesi yapılırken otomatik olarak tüm assert makroları koddan kaldırılır. Yani sanki
+    onun oluşturduğu kontroller bir derleyici ayarıyla koddan atılmaktadır. Böylece geliştiricinin geliştirme aşamasında bolca
+    assert kullanmasının bir sakıncası yoktur. Nasıl olsa onlar nihai üründe koddan çıkartılacaktır. 
+
+    Rust'ta assert makrolarının listesi şöyledir:
+
+    ┌──────────────────────┬────────────────────────────────────────────────────────────┬─────────────────┐
+    │     Makro            │                    Parametreler                            │      Mod        │
+    ├──────────────────────┼────────────────────────────────────────────────────────────┼─────────────────┤
+    │ assert!              │ assert!(condition)                                         │ Debug + Release │
+    │                      │ assert!(condition, format_string, args...)                 │                 │
+    ├──────────────────────┼────────────────────────────────────────────────────────────┼─────────────────┤
+    │ assert_eq!           │ assert_eq!(left, right)                                    │ Debug + Release │
+    │                      │ assert_eq!(left, right, format_string, args...)            │                 │
+    ├──────────────────────┼────────────────────────────────────────────────────────────┼─────────────────┤
+    │ assert_ne!           │ assert_ne!(left, right)                                    │ Debug + Release │
+    │                      │ assert_ne!(left, right, format_string, args...)            │                 │
+    ├──────────────────────┼────────────────────────────────────────────────────────────┼─────────────────┤
+    │ debug_assert!        │ debug_assert!(condition)                                   │ Sadece Debug    │
+    │                      │ debug_assert!(condition, format_string, args...)           │                 │
+    ├──────────────────────┼────────────────────────────────────────────────────────────┼─────────────────┤
+    │ debug_assert_eq!     │ debug_assert_eq!(left, right)                              │ Sadece Debug    │
+    │                      │ debug_assert_eq!(left, right, format_string, args...)      │                 │
+    ├──────────────────────┼────────────────────────────────────────────────────────────┼─────────────────┤
+    │ debug_assert_ne!     │ debug_assert_ne!(left, right)                              │ Sadece Debug    │
+    │                      │ debug_assert_ne!(left, right, format_string, args...)      │                 │
+    └──────────────────────┴────────────────────────────────────────────────────────────┴─────────────────┘
+   
+    Buradadaki başı debug ile başlamayan makrolar programın "release" versiyonunda da kodda kalmaktadır. Başı "debug" 
+    ile başlayan makrolar programın "debug" versiyonunda koda eklenmekte, "release" versiyonunda koddan çıkartılmaktadır.
+    Buradaki assert makroları aynı zamanda asıl argümanlardan sonra yer tutucu içeren mesaj yazısıda alabilmektedir. 
+    Örneğin:
+
+    fn draw_rect(row1: u32, col1: u32, row2: u32, col2: u32) {
+        debug_assert!(row1 < row2 && col1 < col2, "invalid rectangle");
+
+        println!("drawing rectangle...");
+    }
+
+    Burada ekranda dikdörtgensel bir çizim yapan fonksiyon yazılmıştır. Normal olarak bu fonksiyonda hiçbir zaman 
+    row1 >= row2 ya da col1 >= col2 durumu oluşmamalıdır. İşte böyle bir kontrolü projeyi geliştirirken olası böcekleri 
+    yakalamak amacıyla koda ekleyebiliriz. Nasıl olsa programın "release" aşamasında bunlar basit bir biçimde koddan 
+    otomatik biçimde kaldırılabilecektir. 
+
+    Pek çok IDE'de programın "debug" versiyonu ile "release" verisyonu bir combobox'tan ayarlanabilmektedir. Eğer derlemeyi 
+    komut satırından yapıyorsanız default versiyon "debug" versiyonudur. "Release" versiyonunda derleme yapmak için rustc 
+    derleyicisinde cargo aracında "--release" komut satırı argümanı kullanılmalıdır. Örneğin:
+
+    rustc --release main.rs
+    cargo build --release
+    cargo run --release
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta diğer bazı dillerde de bulunan ? ile temsil edilen önemli bir operatör vardır. Bu operatöre Rust dünyasında "soru 
+    işareti operatörü (question mark operator)" ya da "try operatörü (try operator)" denilmektedir. "The Rust Reference" 
+    dokümanlarında bu operatör 8.2.4. Bölümünde "The try propagation expression" başlığı altında ele alınmıştır. 
+
+    ? operatörü tek "operand'lı sonek (unary postfix)" bir operatördür. Bu operatörün solundaki operand'ın Try isimli trait'i 
+    destekleyen bir tür türünden olması gerekmektedir. Yani ifade? gibi bir kullanımda ifade'nin Try trait'ini destekleyen 
+    bir tür türünden olması zorunludur. Her ne kadar ? operatörü daha genel biçimde trait ile ilişkilendirilmiş olsa da 
+    tipik olarak Option ve Result türleri için düşünülmüştür. Zaten ilk zamanlar Try trait'i yoktu. Dolayısıyla ? operatörü 
+    built-in bir biçimde Option ve Result türleriyle kullanılabiliyordu. 
+
+    ? operatörünün nasıl bir işlev gördüğü ilk karşılaşan kişilerde kavramsal zorluk oluşturabilmektedir. Biz de önce bu 
+    operatöre neden gereksinim duyulduğuna yönelik bir örnekle konuya girelim. foo ve bar fonksiyonlarının Option<i32>
+    türüyle geri döndüğünü varsayalım. tar fonksiyonu da Option<i32> türüyle geri dönüyor olsun. tar fonksyionun foo ve bar 
+    fonksiyonlarını çağırarak onların çarpım değerleriyle geri döndüğünü kabul edelim:
+
+    fn foo(a: i32) -> Option<i32> {
+        if a < 10 {
+            Some(a * 2)}
+        else {
+            None
+        }
+    }
+
+    fn bar(a: i32) -> Option<i32> {
+        if a < 5 {
+            Some(a * 4)}
+        else {
+            None
+        }
+    }
+
+    fn tar(a: i32) -> Option<i32> {
+        let val1: i32;
+        let val2: i32;
+
+        val1 = match foo(a) {
+            Some(val) => val,
+            None => return None
+        };
+
+        val2 = match bar(a) {
+            Some(val) => val,
+            None => return None
+        };
+
+        Some(val1 * val2)
+    }
+
+    Burada görüldüğü gibi tar fonksiyonu foo fonksiyonunu çağırdığında onun geri dönüş değerini kontrol etmektedir. Eğer foo
+    None ile geri dönmüşse tar da None ile geri dönmektedir. Benzer biçimde bar fonksiyonun da geri dönüş değeri kontrol 
+    edilmiştir. İşte ? operatörü bu sıkıcı işlemi yapan bir operatördür. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        76. Ders 07/01/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    tar fonksiyonun yazımına bir kez daha dikkat ediniz:
+
+    fn tar(a: i32) -> Option<i32> {
+        let val1: i32;
+        let val2: i32;
+
+        val1 = match foo(a) {
+            Some(val) => val,
+            None => return None
+        };
+
+        val2 = match bar(a) {
+            Some(val) => val,
+            None => return None
+        };
+
+        Some(val1 * val2)
+    }
+
+    Burada eğer foo fonksiyonu Option<i32>::None varyantı ile geri dönüyorsa biz de tar fonksiyonunu hedef türün None varyantıyla 
+    geri döndürmüş durumdayız. Aynı işlemi bar çağrısı için de yaptık. İşte buradaki işlemler ? operatörü ile çok daha kısa bir biçimde 
+    yapılabilmektedir:
+
+    fn tar(a: i32) -> Option<i32> {
+        let val1: i32;
+        let val2: i32;
+
+        val1 = foo(a)?;
+        val2 = bar(a)?;
+
+        Some(val1 * val2)
+    }
+
+    O halde ? operatörü ne anlama gelmektedir? 
+    
+    1) Eğer ? operatörünün solundaki ifade Option<T> türündense ve Option<T>::None varyantı içeriyorsa bu operatör kullanıldığı 
+    fonksiyonu hedef Option türünün None varyantıyla ile geri döndürmekte, eğer solundaki ifade Option<T> türündense ve 
+    Option<T>::Some(val) varyantı içeriyorsa val değerini üretmektedir.
+
+    2) Eğer ? operatörünün solundaki ifade Result<T, E> türündense ve Result<T, E>::Err(e) varyantını içeriyorsa bu operatör
+    kullanıldığı fonksiyonu hedef türün Err(e.into()) değeri ile geri döndürmekte, eğer solundaki ifade Result<T, E> ve 
+    Result<T, E>::Ok(val) varyantı içeriyorsaval değerini üretmektedir. 
+
+    Şimdi de bu operatörün yaklaşık eşdeğerlerini oluşturalım. Örneğin exp ifadesi Option<T> türündne olsun ve ? operatörü 
+    şöyle kullanılmış olsun:
+
+    a = exp?;
+
+    Bu işlemin eşdeğeri şöyledir:
+
+    a = match exp {
+        Some(val) => val, 
+        None => return None
+    };
+
+    Şimdi de exp ifadesinin Result<T, E> türündne olduğunu kabul edelim ve ? operatörü aşağıdaki gibi kullanılmış olsun:
+
+    a = exp?;
+
+    Bunun match eşdeğeri de şöyledir:
+
+    val = match exp {
+        Ok(val) => val,
+        Err(e) => return Err(e.into()),
+    };
+
+    Burada Result<T, E> türü söz konusu olduğunda ve match ifadesi Err(e) varyantını içerdiğinde fonksiyonun Err(e.into())
+    varyantı ile geri döndürüldüğüne dikkat ediniz. From trait'inden gelen from ilişkili fonksiyonunun kaplayıcı destekleme
+    sayesinde into metodu olarak da kullanılabildiğini anımsayınız. O halde yukarıdaki eşdeğerlik şöyle oluşturulabilir:
+
+    val = match exp {
+        Ok(val) => val,
+        Err(e) => return Err(From::from(e)),
+    };
+
+    Buradaki son dönüştürmenin neden yapıldığını izleyen paragraflarda ele alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let result: i32;
+
+    result = tar(3).unwrap();
+    println!("{}", result);
+}
+
+fn foo(a: i32) -> Option<i32> {
+    if a < 10 {
+        Some(a * 2)}
+    else {
+        None
+    }
+}
+
+fn bar(a: i32) -> Option<i32> {
+    if a < 5 {
+        Some(a * 4)}
+    else {
+        None
+    }
+}
+
+fn tar(a: i32) -> Option<i32> {
+    let val1: i32;
+    let val2: i32;
+
+    val1 = foo(a)?;
+    val2 = bar(a)?;
+
+    Some(val1 * val2)
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de ? operatörünün Result<T, E> ile kullanıma basit bir örnek verelim. foo, bar ve tar fonksiyonları 
+    Result<i32, &'static str> türü ile geri geri dönüyor olsun:
+
+    fn foo(a: i32) -> Result<i32, &'static str> {
+        if a < 10 {
+            Ok(a * 2)
+        }
+        else {
+            Err("invalid argument!..")
+        }
+    }
+
+    fn bar(a: i32) -> Result<i32, &'static str> {
+        if a < 5 {
+            Ok(a * 4)}
+        else {
+            Err("invalid argument!..")
+        }
+    }
+
+    fn tar(a: i32) -> Result<i32, &'static str> {
+        let val1: i32;
+        let val2: i32;
+
+        val1 = foo(a)?;
+        val2 = bar(a)?;
+
+        Ok(val1 * val2)
+    }
+
+    Burada tar fonksiyonunda foo ve bar çağrılarına dikkat ediniz:
+
+    val1 = foo(a)?;
+    val2 = bar(a)?;
+
+    Burada eğer foo ve bar fonksiyonları Err(e) varyantıyla geri dönerse tar fonksiyonu da bununla geri döndürülmüştür. 
+    Eğer bu fonksiyonlar Ok(val) varyantıyla geri dönerlerse çağrılardan val değerleri elde edilmiştir. Fonksiyonlar aşağıdaki
+    gibi bir kodla test edilebilir:
+
+    fn main() {
+        let result: i32;
+
+        result = tar(3).unwrap();
+        println!("{}", result);
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() {
+    let result: i32;
+
+    result = tar(3).unwrap();
+    println!("{}", result);
+}
+
+fn foo(a: i32) -> Result<i32, &'static str> {
+    if a < 10 {
+        Ok(a * 2)
+    }
+    else {
+        Err("invalid argument!..")
+    }
+}
+
+fn bar(a: i32) -> Result<i32, &'static str> {
+    if a < 5 {
+        Ok(a * 4)}
+    else {
+        Err("invalid argument!..")
+    }
+}
+
+fn tar(a: i32) -> Result<i32, &'static str> {
+    let val1: i32;
+    let val2: i32;
+
+    val1 = foo(a)?;
+    val2 = bar(a)?;
+
+    Ok(val1 * val2)
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    exp? ifadesindeki ? operatörü eğer exp ifadesi Option<T> türünün None varyantını içeriyorsa fakat fonksiyonun geri dönüş 
+    değeri Option<K> türündense gerekli dönüştürmeyi kendisi yapmaktadır. Aşağıdaki örneğe dikkat ediniz:
+
+    fn foo(a: i32) -> Option<i32> {
+        if a < 10 {
+            Some(a * 2)}
+        else {
+            None
+        }
+    }
+
+    Burada foo ve bar fonksiyonlarının Option<i32> geri dönüş değerine sahip olduğunu görüyorsunuz. Şimdi tar fonksiyonunun 
+    aşağıdaki gibi yazılmış olduğunu düşünelim:
+
+    fn tar(a: i32) -> Option<i64> {
+        let result: i32;
+
+        result = foo(a)?;
+
+        Some(result as i64 * 2)
+    }
+
+    Burada foo fonksiyonun Option<i32>::None değeri ile geri döndüğünü düşünelim. Normalde fonksiyonun geri dönüş değeri 
+    Option<i64> olduğu için burada bir sorun çıkacağını düşünebilirsiniz. Ancak yukarıda verdiğimiz eşdeğerlik dikkate 
+    alındığında burada bir soun çıkmayacağı anlaşılacaktır:
+
+    result = match foo() {
+        Some(val) => val, 
+        None => return None
+    };
+
+    Bu tür dönüştürmeye Rust'ta resmi olmayan bir biçimde "kovaryans dönüştürmesi" de denilmektedir. Aynı durum Result 
+    türü için de geçerlidir. Örneğin:
+
+    fn foo(a: i32) -> Result<i32, String> {
+        if a < 10 {
+            Ok(a * 2)
+        }
+        else {
+            Err(String::from("invalid value!.."))
+        }
+    }
+
+    fn tar(a: i32) -> Result<i64, String> {
+        let result: i32;
+
+        result = foo(a)?;
+
+        Ok(result as i64 * 2)
+    }
+
+    Burada foo fonksiyonu Result<i32, String> türünden bir değer geri döndürmektedir. result = foo()? ifadesinin eşdeğerinin 
+    aşağıdaki gibi olduğunu anımsayınız:
+
+    result = match foo(a) {
+        Ok(val) => val,
+        Err(e) => return Err(e.into()),
+    }
+
+    Burada tar fonksiyonun geri dönüş değeribib Result<i64, String> türündne olması bir sorun oluşturmayacaktır. Çünkü 
+    aslında derleyicinin geri döndürdüğü değer Result<i32, String> türünden Err(e.into()) değil Result<i64, String> türünden 
+    Err(e.into()) değeridir. 
+
+    Yukarıdaki anlatımlardan şu sonuçları çıkartabiliriz:
+
+    1) exp? ifadesinde exp ifadesi Option<T> türündense ancak ifadenin kullanıdığı fonksiyon Option<K> türündense bir 
+    sorun ortaya çıkmayacaktır. 
+
+    2) exp? ifadesinde exp ifadesi Result<T, E> türündense ve ifadenin kullanıldığı fonksiyonun geri dönüş değeri Result<K, E>
+    ise bir sorun ortaya çıkmayacaktır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da anlatımlardan da anlaşılacağı gibi eğer exp? ifadesinde exp ifadesi Result<T, E> türündense fakat bu ifadenin 
+    kullanıldığı fonksiyonun geri dönüş değeri Result<T, K> türündense exp? ifadesinin kullanımı error oluşturacktır. Örneğin:
+
+    struct Sample;
+    
+    fn foo(a: i32) -> Result<i32, String> {
+        if a < 10 {
+            Ok(a * 2)
+        }
+        else {
+            Err(String::from("invalid value!.."))
+        }
+    }
+
+    fn tar(a: i32) -> Result<i32, Sample> {
+        let result: i32;
+
+        result = foo(a)?;           // error
+
+        Ok(result * 2)
+    }
+
+    Burada result = foo()? ifadesinin eşdeğeri şöyledir:
+
+    result = match foo(a) {
+        Ok(val) => val, 
+        Err(e) => Err(e.into()),        // error!
+    };
+
+    Burada artık adeta Err(e.into()) ifadesi sanki Result<i32, Sampel> türüne atanmış olmaktadır. Bu atama da geçersizdir. 
+    
+    İşte into metodu ya da from fonksiyonu bu tür durumlarda otomatik dönüştürme yapmakta kullanılmaktadır. Eğer exp? 
+    türü Result<T, E> ise ancak ifadenin kullanıldığı fonksiyonun geri dönüş değerindeki E türü farlı ise (tabii T 
+    türü de farklı olabilir) into metodu ya da from fonksiyonu bu dönüştürmeyi yapabiliyorsa sorun ortadan kaldırılmaktadır. 
+    Örneğin:
+
+    fn foo(a: i32) -> Result<i32, String> {
+        if a < 10 {
+            Ok(a * 2)
+        }
+        else {
+            Err(String::from("invalid value!.."))
+        }
+    }
+
+    fn tar(a: i32) -> Result<i32, Sample> {
+        let result: i32;
+
+        result = foo(a)?;       // geçerli
+
+        Ok(result * 2)
+    }
+
+    struct Sample;
+
+    impl From<String> for Sample {
+        fn from(s: String) -> Self {
+            Sample
+        }
+    }
+
+    Burada artık tar içerisindeki result = foo(a)? çağrısı geçerlidir. Çünkü artık eşdeğerlikte Err(e.into()) varyantı 
+    Result<i32, Sample> ile uyum hale gelmektedir. Burada bir noktaya dikkat ediniz. Yukarıdaki örnekte tar fonksiyonun 
+    geri dönüş değeriin T generic parametresi i32 türünden olmak zorunda da değildir. Tabii tar fonksiyonunun içinde ona
+    uygun düzenlemenin yapılması gerekmektedir. Örneğin:
+
+    fn tar(a: i32) -> Result<i64, Sample> {
+        let result: i32;
+
+        result = foo(a)?;
+
+        Ok(result as i64 * 2)
+    }
+
+    into çağrısının (ya da from çağrısının) Result türü için söz konusu olduğuna Option için söz konusu olmadığına dikkat 
+    ediniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Konuya girişte ? operatörünün aslında yalnızca Option ve Result türü ile değil de genel olarak Try trait'ini destekleyen 
+    türlerle kullanılabildiğini söylemiştik. Eskiden bu operatör gerçekteb Option ve Result türü ile çalışıyordu. Ancak 
+    maalesef güncel Rust derleyicilerinin stabil versiyonlarında henüz programcı kendi yapıları ya da enum türleri için bu 
+    trait'i destekleyememektedir. Bu özellik şimdilik ancak Rust'ın "nightly" tabir edilen deneme sürümlerinde kullanılabilmektedir. 
+    Biz kursumuzda henüz konu tam oturmadığı için Try trait'inden bahsetmeyeceğiz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi ? operatörünün kullanımına standart kütüphane bağlamında birkaç örnek verelim. Anımsanacağı gibi str (yani string
+    dilimi) yapısının parse metodu eğer parse işlemi tamsayı türlerine doğru yapılıyorsa Result<T, ParseIntError> değeri
+    ile geri dönmektedir. (Burada T tamsayı türlerini temsil ediyor.) Yani bu metot eğer parse işlemi başarılıysa bize Ok(T)
+    türünden değer, başarısızsa Err(ParseIntError) türündne değer geri döndürmektedir. Şimdi aşağıdaki gibi bir fonksiyon 
+    yazacak olalım:
+
+    use std::num::ParseIntError;
+
+    fn tsquare(s: &str) -> Result<i32, ParseIntError> {
+        let result: i32;
+
+        result = s.parse()?;
+        Ok(result * result)
+    }
+
+    Burada tsquare fonksiyonu bir string dilim referansını parametre olarak alıp Result<i32, ParseIntError> türüne geri 
+    dönmektedir. parse işleminin naısl yapıldığına dikkat ediniz:
+
+    result = s.parse()?;
+
+    Burada parse işlemi başarısızsa fonksiyon hemen geri önecektir. Başarılıysa da parse eidlen değer result değişkenine 
+    atanacaktır. Fonskiyonu şöyle test edebiliriz:
+
+    fn main() {
+        let s = "10";
+        let result: i32;
+
+        result = tsquare(s).unwrap();
+        println!("{}", result);
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::num::ParseIntError;
+
+fn main() {
+    let s = "10";
+    let result: i32;
+
+    result = tsquare(s).unwrap();
+    println!("{}", result);
+}
+
+fn tsquare(s: &str) -> Result<i32, ParseIntError> {
+    let result: i32;
+
+    result = s.parse()?;
+    Ok(result * result)
+}
 
 /*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
 
 /*---------------------------------------------------------------------------------------------------------------------------
 
