@@ -17,7 +17,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 17/12/2025 - Çarşamba   
+                                            Son Güncelleme: 14/01/2026 - Çarşamba   
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -3877,15 +3877,14 @@ impl DivAssign<i64> for Rational {
 
     x bir yapı ya da enum türünden bir değişken ya da değeri belirtiyor olsun. y = x[i] işleminin eşdeğeri şöyledir:
 
-    y = *x.index(i);
+    y = *std::ops::Index::index(&x, i);
 
     Benzer biçimde x[i] = y ifadesinin eşdeğeri de şöyledir:
 
-    *x.index_mut(i) = y;
+    *std::ops::IndexMut::index_mut(&x, i) = y;
 
     Bu eşdeğerlik "The Rust Reference" dokümanlarında "8.2.6 Array and slice indexing expressions" başlığı altında şöyle
     açıklanmıştır:
-
 
     For other types an index expression a[b] is equivalent to *std::ops::Index::index(&a, b), or *std::ops::IndexMut::index_mut(&mut a, b) 
     in a mutable place expression context. Just as with methods, Rust will also insert dereference operations on a repeatedly 
@@ -4353,6 +4352,82 @@ impl IndexMut<usize> for Date {
     olması gerekmektedir:
 
     r = &mut n;
+
+    Tersten gidersek eğer T türü Deref<Target=i32> trait'in destekliyorsa biz T türünden bir değişkenin ya da değerin 
+    adresini Target türünden bir referansa atayabiliriz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi x.foo() gibi metot çağırmasında x'e alıcı (receiver) denilmektedir. Bu alıcı ile fonksiyonun birinci 
+    parametresi olan self parametresi tür bakımından eşleştirilmektedir. "The Rust Reference" dokümanları bu çağırma 
+    mekanizmasını şöyle açıklamıştır:
+
+    *****
+    "The first step is to build a list of candidate receiver types. Obtain these by repeatedly dereferencing the receiver 
+    expression’s type, adding each type encountered to the list, then finally attempting an unsized coercion at the end, 
+    and adding the result type if that is successful.
+
+    Then, for each candidate T, add &T and &mut T to the list immediately after T.
+
+    For instance, if the receiver has type Box<[i32;2]>, then the candidate types will be Box<[i32;2]>, &Box<[i32;2]>, 
+    &mut Box<[i32;2]>, [i32; 2] (by dereferencing), &[i32; 2], &mut [i32; 2], [i32] (by unsized coercion), &[i32], 
+    and finally &mut [i32].
+
+    Then, for each candidate type T, search for a visible method with a receiver of that type in the following places:
+
+    1) T’s inherent methods (methods implemented directly on T).
+    2) Any of the methods provided by a visible trait implemented by T. If T is a type parameter, methods provided by 
+    trait bounds on T are looked up first. Then all remaining methods in scope are looked up.
+
+    If this results in multiple possible candidates, then it is an error, and the receiver must be converted to an 
+    appropriate receiver type to make the method call."
+    *****
+
+    Bu açıklamalardan çıkan sonuş şöyledir: x.foo() gibi bir çağırma yapıldığında alıcı (receiver) üzerinde sürekli dreference 
+    işlemleri yapılarak (yani * operatörü uygulanarak) türler elde edilmekte ve her elde edilen tür T olmak üzere T, &T ve
+    &mut T oluşturulan bir listeye eklenmektedir. En nihayetinde listeye "diziden dilime dönüştürme söz konusuysa bu dizi 
+    dilim türü de eklenmektedir. İşte bu listedeki tüm elemanlara ilişkin türlerde foo metodu aranır. Eğer böyle tek bir 
+    fonksiyon bulunursa ve o fonksiyonun birinci parametresi olan self parametresi bu alıcıyla uyumluysa o metot çağrılır. 
+    Eğer bu biçimde listedeki türlerde birden fazla metot bulunursa ya da hiç metot bulunmazsa error oluşur. Örneğin:
+
+    x.foo();
+
+    çağrısı yapılmış olsun. Buradaki x henüz görmemiş olsak da Box<[i32; 5]> türünden olsun. İşte aday alıcı listesi 
+    şöyle oluşturulmaktadır:
+
+    Box<[i32; 2]> 
+    &Box<[i32; 2]> 
+    &mut Box<[i32; 2]> 
+    [i32; 2]
+    &[i32; 2]
+    &mut [i32; 2]
+    [i32]
+    &[i32]
+    &mut [i32]
+
+    Biz henüz bu noktada Box türünü görmedik. Ancak burada Box türü dereferens edildiğinde (yani Box türüne * operatörü 
+    uygulandığnda) [i32; 2] türü elde edilmektedir. İşte nihayetinde elde edilen bu alıcı listesindeki her türde çağrılan 
+    metot aranacaktır. Eğer böyle bir metot bulunursa o çağrılacak, birden fazl ametot bulunursa ya da hiç metot bulunamazsa
+    bu durum error ile sonuçlanacaktır. 
+
+    Daha önce de belirtitğimiğz gibi "The Rust Reference" dokümanlarında "8.2.11 (Field Access Expressions)" başlığında 
+    x.a gibi bir alan erişimi için şunlar söylenmiştir:
+
+    *****
+    "If the type of the container operand implements Deref or DerefMut depending on whether the operand is mutable, it is 
+    automatically dereferenced as many times as necessary to make the field access possible. This process is also called 
+    autoderef for short."
+    *****
+
+    Burada anlatılmak istenen şey şudur: x.a gibi bir erişimde nokta operatörünün solunda operand'ın türünde (örneğimizde x) 
+    bir x alanı yoksa bu operand'a sürekli olarak * operatörü uygulanır. Ta ki ifade geçerli olana kadar. İfadenin ilk 
+    geçerli olduğu durumdaki erişim gerçekleştirilir. Tabii ifade hala geçersiz olursa error oluşacaktır. Örneğin:
+
+    let s = Sample {val: 10};
+    let rs = &s;
+
+    Burada biz s.val erişimini yapmış olalım. &Sample türünde val isimli bir alan yoktur. Bu durumda *rs ifadenin türünde
+    val alanı aranır. *rs Sample türündne olduğu için ve Sample türünde val alanı olduğu için erişim geçerlidir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -4614,7 +4689,6 @@ where T: Integer + Signed + Copy {
         let mut result = Rational { a, b };
         result.simplify();
         Ok(result)
-
     }
 
     fn gcd(mut a: T, mut b: T) -> T {
@@ -5903,7 +5977,7 @@ fn tar(a: i32) -> Result<i32, &'static str> {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Şimdi ? operatörünün kullanımına standart kütüphane bağlamında birkaç örnek verelim. Anımsanacağı gibi str (yani string
+    Şimdi ? operatörünün kullanımına standart kütüphane bağlamında bir örnek verelim. Anımsanacağı gibi str (yani string
     dilimi) yapısının parse metodu eğer parse işlemi tamsayı türlerine doğru yapılıyorsa Result<T, ParseIntError> değeri
     ile geri dönmektedir. (Burada T tamsayı türlerini temsil ediyor.) Yani bu metot eğer parse işlemi başarılıysa bize Ok(T)
     türünden değer, başarısızsa Err(ParseIntError) türündne değer geri döndürmektedir. Şimdi aşağıdaki gibi bir fonksiyon 
@@ -5953,19 +6027,634 @@ fn tsquare(s: &str) -> Result<i32, ParseIntError> {
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+                                                77. Ders 12/01/2026 - Pazartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
-
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi eğer geri fonksiyonun geri dönüş değerindeki Result türündeki Err türü ? operatörünün 
+    solundaki türle uyuşmuyorsa fonksiyonun geri dönüş değerindeki Result türünün Err türü için From trait'inin desteklenmesi 
+    gerekmektedir. Yukarıdaki örnekte tsquare fonksiyonunun geri dönüş değerinin MyErrot türünden olduğunu düşünelim:
 
+    #[derive(Debug)]
+    enum MyError {
+        Err(&'static str),
+    }
+
+    fn tsquare(s: &str) -> Result<i32, MyError> {
+        let result: i32;
+
+        result = s.parse()?;
+        Ok(result * result)
+    }
+
+    Burada parse metodu Result<i32, ParseIntError> ile geri dönemktedir. Halbuki fonksiyonumuz Result<i32, MyError> geri 
+    dönüyor. İşte bu duurmda bizim ParseIntError türünün Myerror türüne dönüştürülmesini sağlayan From trait'ini desteklememiz
+    gerekir. Örneğin:
+
+    impl From<ParseIntError> for MyError {
+        fn from(val: ParseIntError) -> Self {
+            MyError::Err("Error!")
+        }
+    }
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+use std::num::ParseIntError;
+
+fn main() {
+    let s = "10";
+    let result: i32;
+
+    result = tsquare(s).unwrap();
+    println!("{}", result);
+}
+
+#[derive(Debug)]
+enum MyError {
+    Err(&'static str),
+}
+
+fn tsquare(s: &str) -> Result<i32, MyError> {
+    let result: i32;
+
+    result = s.parse()?;
+    Ok(result * result)
+}
+
+impl From<ParseIntError> for MyError {
+    fn from(val: ParseIntError) -> Self {
+        MyError::Err("Error!")
+    }
+}
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Aslında henüz görmemiş olsak da bu tür durumlarda çokbiçimliliği kullanarak daha genel bir destek de oluşturulabilmektedir. 
+    Rust'ın standart kütüphanesindeki ve standart olmayan pek çok kütüphanedeki Result enum türünün Err türü genel olarak 
+    std::error::Error isimli bir trait'i desteklemektedir. İşte biz çokbiçimli davranışı da devreye sokarak bu Err türünü 
+    Box<dyn std::error::Error> türünden alarak onun her türlü XXXError türü için geçerli olmasını sağlayabiliriz. Böylece 
+    ? operatörünün solundaki Result türünden değerin Err türü ne olursa olsun (tabii bu türün std::error::Error türünü 
+    desteklemesi gerekmektedir) tüm hataları elde edebiliriz. Örneğin:
+
+    fn tsquare(s: &str) -> Result<i32, Box<dyn std::error::Error>> {
+        let result: i32;
+
+        result = s.parse()?;
+        Ok(result * result)
+    }
+
+    Yukarıdakş kod sorunsuz derlenecektir. tsquare metodunun içerisindeki ? solunda bulunan ifade Result<i32, std::num::ParseIntError>
+    olsa bile bir sorun çıkmayacaktır. Bu durumda hatanın ele alınması şöyle yapılabilecektir:
+
+    fn main() {
+        let s = "10";
+        let result: i32;
+
+        match tsquare("ankara") {
+            Ok(val) => println!("{}", val),
+            Err(e) => println!("{}", e),
+        }
+    }
+    
+    Burada elde edilecek mesaj aslında ParseIntError yapısının veridği mesajdır. Burada henüz görmediğimiz Box konusu olduğu 
+    için biz açıklamaları burada keseceğiz. Ancak buradaki mekanizma diğer pek çok nesne yönelimli programlama dillerindeki 
+    exception sınıflarının taban bir exception sınıfından türetilmiş olmasına benzemektedir. O dillerdeki taban exception 
+    sınıfı ise hata mesajını çokbiçimli olarak veren metotlara sahiptir. Rust'taki std::error::Error trait'i Display ve 
+    Debug trait'lerinden türetilmiştir:
+
+    pub trait Error: Debug + Display {
+        // ...
+    }
+
+    Elimizde bu trait türünden dyn bir referans varsa biz bu trait'lerin sağladığı metotlar yoluyla orijinal hata mesajını 
+    elde edebilmekteyiz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+ fn main() {
+        let s = "10";
+        let result: i32;
+
+        match tsquare("ankara") {
+            Ok(val) => println!("{}", val),
+            Err(e) => println!("{}", e),
+        }
+    }
+
+ fn tsquare(s: &str) -> Result<i32, Box<dyn std::error::Error>> {
+    let result: i32;
+
+    result = s.parse()?;
+    Ok(result * result)
+}
+
+fn main() {
+    let s = "10";
+    let result: i32;
+
+    match tsquare("ankara") {
+        Ok(val) => println!("{}", val),
+        Err(e) => println!("{}", e),
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aşağıdaki fonksiyona dikkat ediniz:
+
+    fn get_square() -> Result<i32, Box<dyn std::error::Error>> {
+        let val: i32;
+        let mut s: String = String::new();
+        let result: i32;
+
+        std::io::stdin().read_line(&mut s)?;
+        val = s.trim().parse()?;
+
+        Ok(val * val)
+    }
+
+    Burada get_square fonksiyonu klavyeden (stdin dosyasından) bir değer okuyup o değerin karesiyle geri dönmektedir. 
+    Burada önce std::io::stdin fonksiyonun geri döndürdüğü Stdin yapısı türünden değer ile read_line metodu çağrılmıştır. 
+    buradaki read_line metodu aslında Result<i32, std::io::Error> türü ile geri dönmektedir. (Buradaki Error türünü 
+    std::error::Error trait'i ile karıştırmayınız). Buradan elde edilen yazı ile de önce String yapısının trim metodu 
+    çağrılmıştır. Bu trim metodu &str türünden bir string dilim referansı vermektedir. string dilim referansı ile de 
+    str türünün parse metodu çağrılmıştır. Bu parse metodunun örneğimizde Result<i32, std::num::ParseIntError> türüyle 
+    geri döndüğünğ anımsayınız. İşte burada aslında ? operatörünün solundaki ifadedeki Result türünün Err türleri farklıdır. 
+    Fonksiyonda iki farklı tür için ? operatörünün kullanılması ancak fonksiyonun geri dönüş değerinin 
+    Result<i32, Box<dyn std::error::Error>> olması ile sağlanabilmektedir. Bu örnekte get_square fonksiyonun geri dönüş 
+    değeri aynı biçimde kullanılacaktır:
+
+    fn main() {
+        match get_square() {
+            Ok(val) => println!("{}", val),
+            Err(e) => println!("{}", e),
+        }
+    }
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+fn main() {
+    match get_square() {
+        Ok(val) => println!("{}", val),
+        Err(e) => println!("{}", e),
+    }
+}
+
+fn get_square() -> Result<i32, Box<dyn std::error::Error>> {
+    let val: i32;
+    let mut s: String = String::new();
+    let result: i32;
+
+    std::io::stdin().read_line(&mut s)?;
+    val = s.trim().parse()?;
+
+    Ok(val * val)
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Kurusumuzun bu bölümünde Rust'ta heap tahsisatları için kullanılan std::boxed modülünde bulunan Box yapısını ele alacağız. 
+    Box Rust'ta built-in bir yapıdır. Dolayısıyla Box türünü kullanırken herhangi bir use işlemi yapmaya gerek yoktur. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bilindiği gibi programlama dillerinde heap alanı iki gerekçeyle kullanılmaktadır:
+
+    1) Derleme zamanında uzunluğu bilinmeyen ancak çalışma zamanında bilinen nesneleri tahsis etmek için.
+    2) Nesnelerin ömürlerini kontrol etmek için.
+
+    Programlama dillerindeki global değişkenlerin statik ömürlü olduğunu, yerel değişkenelrin ise içerisinde tanımlandıkları 
+    bloğun yaşamı kadar olduğunu anımsaynız. Biz nesnelerin istediğimiz bir noktada yaratılmasını ve yok edilmesini istiyorsak
+    onları heapt'te yaratıyorduk. 
+
+    C++'ta bir kaynağın ömrünün bir nsnenin ömrüye ilişkilendirilmesine "RAII (Resource Acquisition is Initialization)"
+    denilmektedir. C++'taki bu teknik sayesinde bir kaynak nesnenin ömrü bittiğinde otomatik boşaltılmaktadır. C++'ta 
+    dinamik nesne tahsisatları için RAII prensibini kullanan "akıllı gösterici (smart pointer)" sınıfları bulundurulmuştur. 
+    Ruts zaten RAII prensibini doğuştan desteklemektedir. İşte Rust'taki Box yapısı adeta C++'ta unique_ptr sınıfı gibi 
+    bir işlev görmektedir. Box yapısı ile heap'te yapılan tahsisatlar Box değişkenn ömrü bittiğinde otomatik olarak heap'ten 
+    silinmektedir. Tabii bu silinme işlemi Box yapısının Drop trait'ini desteklemesi ile sağlanmaktadır. Örneğin:
+
+    {
+        let b = Box::new(100);
+        //...
+    }
+
+    Burada heap'te bir i32 uzunluğunda yer tahsis edilmiştir. Ancak tahsis edilen yer bir yapı değişkeni ile kullanıma 
+    sunulmaktadır. Örneğimizdeki b yapı değişkeninin ömrü bittiğinde Box yapısının drop metodu çağrılacak ve heap'te 
+    yapılan tahsisat serbest bırakılacaktır. Böylece Rust programcısı C'deki free gibi bir fonksiyonu C++'taki delete gibi 
+    bir operatörü kullanmak zorunda kalmamaktadır. Rust'ta bu sayede bellek sızınısı olasılığı ortadan kaldırılmış olmaktadır. 
+    Rust'ta Copy türündne olmayan her nesnenin bir sahibinin olduğunu ve bu sahipliğin atama işlemleriyle devredildiğini 
+    anımsayınız. Örneğin:
+
+    fn main() {
+        let a: Box<i32>;
+            
+        a = foo();
+        bar(a);
+        //...
+    }
+
+    fn foo() -> Box<i32> {
+        Box::new(100)
+    }
+
+    fn bar(b: Box<i32>) {
+        //...
+    }
+
+    Burada foo fonksiyonun içerisinde Box::new(100) çağrısı ile heap'te i32 türünden bir nesne tahsis edilmiştir. Sonra bu 
+    nesnenin sahipliği geri dönüş değerine ilişkin geçici değişkene devredilmiştir. Oradan da sahiplik a değişkenine 
+    devredilmiştir. Sonra a değişkenin sahipliği bar fonksiyonun parametre değişkeni olan b'ye devredilmiştir. Nihateinde 
+    heap'teki i32 türünden nesne bar fonksiyonu bittiğinde drop metodu yoluyla free hale getirilecektir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box yapısı yukarıdaki örnekten de gördüğünüz gibi generic bir yapıdır. Şöyle tanımlanmıştır:
+
+    pub struct Box<T, A = Global>(/* private fields */)
+    where
+        A: Allocator,
+        T: ?Sized;
+
+    Bu tanımlamadan Box türünün iki generic parametresinin olduğu görülmektedir. T ile temsil edilen birinci generic parametre 
+    heap'te tahsis edilecek nesnenin türünü belirtmektedir. İkinci generic parametre ise tahsisat işleminde kullanılacak 
+    tahsisat nesnesinin türünü belirtmektedir. Bu generic parametrenin default olarak Global türünü belirttiğine dikkat ediniz. 
+    Global isimli tahsisat yapısı zaten Rust'ta kullanılan default tahsisat yapısıdır. Yani tahsisatlar default durumda
+    Rust'ın bu yapısının içerisindeki ilişkili fonksiyonlar tarafından yapılmaktadır. Programcılar bu default tahsisat yapısını 
+    çok uç durumlarda değiştirmek zorunda kalmaktadır. (Örneğin programcı başka bir heap tahsisat algoritması kullanmak 
+    isteyebilir. Box tahsisatlarının da bu algoritma tarafından yapılmasını sağlayabilir.) Tanımlamadaki generic tür 
+    sınırlamalarına da dikkat ediniz. Tahsisatı yapacak yapının Allocator isimli bir trait'i desteklemesi gerekmektedir. 
+    Ancak tahsis edilecek nesnenin türünün de derleme zamanında biliniyor olması gerekmemektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box türünden bir değer Box yapısının new ilişkili fonkisyonuyla yaratılmaktadır. Örneğin:
+
+    let b = Box::new(100);
+
+    Bu bağlama aşağıdakiyle eşdeğerdir:
+
+    let b: Box<i32> = Box::new(100);
+
+    Burada 100 sabiti i32 türünden kabul edilmiştir. Tabii istenirse tahsisat türü açıkça da belirtilebilir. Örneğin:
+
+    let b = Box::<i64>::new(100);
+
+    Burada artık heap'te i64 türünden bir nesne yaratılmaktadır. b'nin türü de Box<i64> olacaktır. 
+
+    Box<T> türünden bir değer yalnızca bir göstericinin uzunluğu kadar yer kaplamaktadır. Yani Box<T> türünü kullanmanın 
+    doğrudan referans ya da gösterici kullanmaktan yer bakımından bir farkı yoktur. Örneğin:
+
+    let b = Box::<i32>::new(100);
+
+    println!("{:?}", std::mem::size_of_val(&b));        // 8
+
+    64 bit sistemlerde adres bilgisinin 8 byte olduğunu anımsayınız.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box<T> türü Deref trait'ini desteklediği için doğrudan * operatörüyle kullanılabilmektedir. (Anımsanacağı gibi Deref 
+    trait'ini destekleyen bir yapı ya da enum değerine * operatörü uygulandığında önce ilgili türün deref metodu çağrılıyordu. 
+    Bu metot da bir referansa geri dönüyordu. * operatörü geri döndürülen referansa uygulanıyordu.) Bu durumda biz Box<T> 
+    türünden bir değişkeni bir referans gibi kullanabiliriz. Örneğin:
+
+    let b = Box::<i64>::new(100);
+    let val: i64;
+
+    val = *b;                   // b adeta bir &i64 türünden bir referans gibi davranıyor
+    println!("{}", val);
+
+    Buradaki *b ifadesinin *b.deref() ile eşdeğer olduğunu anımsayınız. İşte Box yapısının deref metodu adresini tuttuğu 
+    heap'teki nesnenin referansına geri dönmektedir. Böylece biz Box türünden bir değişkenin & operatörü ile adresini 
+    aldığımızda aslında heap'te tahsis edilmiş olan nesnenin referansını elde etmiş oluruz. 
+
+    Eğer yapılan tahsisat bir yapı ya da enum türündense Box içerisindeki adresi tutulan nesneynin alanlarına doğrudan nokta 
+    ile erişebilmektedir. Örneğin:
+
+    let pt: Box<Point>;
+
+    pt = Box::new(Point {x: 10, y: 20});
+    println!("{}, {}", pt.x, pt.y);
+
+    Tıpkı referanslarda olduğu gibi bizim (*pt).x ve (*pt).y gibi açıkça dereference işlemini yapmamıza gerek yoktur. 
+    Bu tür erişimlerde otomatik Deref işleminin yapıldığını anımsayınız. The Rust Reference 8.2.11'de "Field Access Expressions" 
+    başlığı altında bu durum şöyle açıklanmıştı:
+
+    *****
+    "if the type of the container operand implements Deref or DerefMut depending on whether the operand is mutable, 
+    it is automatically dereferenced as many times as necessary to make the field access possible. This process is also 
+    called autoderef for short."
+    *****
+
+    "The Rust Reference" dokümanlarındaki bu açıklamaya göre yukarıdaki pt.x ifadesi için derleyici önce Box türünde x 
+    isimli bir alan var mı diye bakacak, eğer bulamazsa bu kez *pt işlemini yaparak Point türünde x'i arayacaktır. Dolayısıyla 
+    burada Point türünün x alanına erişilecektir. 
+    
+    Sonuç olarak Box türünden bir değişken tamamen bir referans gibi davranmaktadır.
+
+    Her ne kadar biz "Box türünden değişkenler üzerinde * gibi operatörler uygulandığında deref metodu çağrılıyor diyorsak 
+    da" Box aslında built-in bir yapıdır. Dolayısıyla gerçekte bu deref çağrıları hiç yapılmamaktadır. Yani aslında Box 
+    türünden bir değişkeni kullanmakla bir referansı kullanmak arasında yer ve zaman bakımından bir maliyet farkı yoktur. 
+
+    Box<T> türünde T bit yapı ya da enum türündense nokta operatörü ile doğrudan T türünün metotları çağrılabilmektedir. 
+    Örneğin:
+
+    struct Point {
+        x: i32,
+        y: i32
+    }
+
+    impl Point {
+        fn disp(&self) {
+            println!("{}, {}", self.x, self.y);
+        }
+    }
+    //...
+
+    let b: Box<Point> = Box::new(Point {x: 10, y: 20});
+
+    b.disp();       // burada (*b).disp() işlemine gerek ypk
+
+    Burada b üzerinde otomatik olarak Deref dönüştürmesi yapılıp deref metodu çağrılacak ve elde edilen Point değeri ile
+    disp metodu çağrılacaktır. Anımsacağı gibi "The Rust Reference" dokümanlarında "8.2.10 Method Call Expression" 
+    başlığında bu metot çağrısındaki dönüştürme için şunlar söylenmişti:
+
+    *****
+    "The first step is to build a list of candidate receiver types. Obtain these by repeatedly dereferencing the receiver 
+    expression’s type, adding each type encountered to the list, then finally attempting an unsized coercion at the end, 
+    and adding the result type if that is successful.
+    
+    The first step is to build a list of candidate receiver types. Obtain these by repeatedly dereferencing the receiver 
+    expression’s type, adding each type encountered to the list, then finally attempting an unsized coercion at the end, 
+    and adding the result type if that is successful.
+    
+    Then, for each candidate T, add &T and &mut T to the list immediately after T.
+    For instance, if the receiver has type Box<[i32;2]>, then the candidate types will be Box<[i32;2]>, &Box<[i32;2]>, 
+    &mut Box<[i32;2]>, [i32; 2] (by dereferencing), &[i32; 2], &mut [i32; 2], [i32] (by unsized coercion), &[i32], 
+    and finally &mut [i32]."
+    *****
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box türünü kullanarak heap'te bir dizi de tahsis edebiliriz. Örneğin:
+
+    let b: Box<[i32; 5]>;
+
+    Burada b değişkeni Box<[i32; 5]> türündendir. Biz şimde Box::new ilişkili fonksiyonuna bir dizi verirsek heap'te dizi 
+    tahsis edilecek ve verdiğimiz dizi heap'te tahsis edilen diziye atanacaktır. Örneğin:
+
+    b = Box::new([10, 20, 30, 40, 50]);
+
+    Anımsanacağı gibi Rust'ta x[i] ifadesi tamamen *std::ops::Index::index(&x, i) ya da *std::ops::Index::index_mut(&x, i) 
+    ifadesiyle eşdeğerdir. Bu durumda yukarıdaki Box değişkenini biz b[i] gibi bir ifadede kullanırsak bu ifade 
+    *std::ops::Index::index(&b, i) ile eşdeğer olacaktır. &b ifadesinde de Deref dönüştürmesi uygulanacağından b[i] ifadesi 
+    de b değişkeninde adresi tutulan dizinin i'inci elemanına erişme anlamına gelecektir. Özetle biz böylesi bir durumda Box 
+    değişkenini tamamen bir dizi gibi kullanabiliriz:
+
+    let b: Box<[i32; 5]>;
+
+    b = Box::new([10, 20, 30, 40, 50]);
+
+    for i in 0..b.len() {
+        print!("{} ", b[i]);
+    }
+    println!();
+
+    Tabii dizi türleri için heap'te tahsisat yapılırken dizi uzunluğunun sabit ifadesi biçiminde belirtilmesi zorunludur. 
+    Bu durumu C'deki malloc fonksiyonun işlevi ile ya da C++'ta new operatörünün işlevi ile karıştırmayınız. Örneğin:
+
+    let size = 5;
+    let b: Box<[i32; size]>;        // error! 
+
+    Burada dizi uzunluğu sabit ifadesiyle belirtilmemiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        78. Ders 14/01/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box türü ile bir trait türünden tahsisatlar da yapılabilmektedir. Ancak söz konusu trait'in dyn uyumlu olması ve trait 
+    isminde önce dyn anahtar sözcüğünün kullanılması zorunludur. Böylece heap tabanlı çpkbiçimli davranışlar oluşturulabilmektedir. 
+    Örneğin aşağıdaki gibi bir trait ve onu destekleyen yapılar bulunuyor olsun:
+
+    trait Go {
+        fn go(&self);
+    }
+
+    struct Car {
+        //...
+    }
+
+    struct Truck {
+        //...
+    }
+
+    struct Motorcycle {
+        //...
+    }
+
+    impl Go for Car {
+        fn go(&self) {
+            println!("Car is going...");
+        }
+    }
+
+    impl Go for Truck {
+        fn go(&self) {
+            println!("Truck is going...");
+        }
+    }
+
+    impl Go for Motorcycle {
+        fn go(&self) {
+            println!("Motorcycle is going...");
+        }
+    }
+
+    Biz Box<dyn Go> türünden bir değişken bildirebiliriz:
+
+    let mut g: Box<dyn Go>;
+
+    Burada g değişkeni aslında Go trait'ini destekleyen heap'te tahsis edilmiş olan nesnelerin adreslerini tutabilmektedir. 
+    Biz bu g değişkeni ile trait metodunu çağırırsak dinamik türe ilişkin yani ilgili trait referansının gösterdiği türe 
+    ilişkin yapnın ilgili metodu çağrılacaktır. Örneğin:
+
+    g = Box::new(Car {});
+    g.go();         // Car yapısının go metodu çağrılır
+
+    g = Box::new(Truck {});
+    g.go();         // Truck yapısının go metodu çağrılır
+
+    g = Box::new(Motorcycle {});
+    g.go();         // Motorcycle yapısının go metodu çağrılır
+
+    Görüldüğü gibi çokbiçimli etki heap'te tahsis edilmiş olan neselerle de oluşturabilmektedir.    
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box türünden bir değişkenin faaliyet alan bittiğinde dropğ edildiğini dolayısıyla heap'teki nesnenin de free hale getirildiğini 
+    belirtmiştik. İşte Box<T> türünden eğer T drop trait'ini destekliyorsa Box değişkeni dropğ edilirken heap'te tutulan 
+    T türündne nesne için de drop metodu çağrılacaktır. Örneğin:
+
+    struct Sample {
+        val: i32
+    }
+
+    impl Drop for Sample {
+        fn drop(&mut self) {
+            println!("Sample is dropping...");
+        }
+    }
+
+    fn main() {
+        println!("one");
+        {
+            let b = Box::new(Sample { val: 10 });
+
+            println!("two");
+        }
+        println!("two");
+    }
+
+    Buarada Box değişkeni iç blok bittiğinde drop edilecektir. Bu değişkenin adresini tuttuğu heap'teki Sample nesnesi 
+    üzerinde de drop metodu çağrılacaktır. Programı çalıştırdığımızda ekranda şunları göreceğiz:
+
+    one
+    two
+    Sample is dropping...
+    two
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Peki elimizde bir değişkeni varsa biz o değişken faaliyet alanını bitirmeden heap'teki alanı nasıl free hale getirebiliriz. 
+    Örneğin:
+
+    fn main() {
+        let b = Box::new(Sample { val: 10 });
+
+        // Bu noktada heap'ten temizlemek isteyebiliriz
+
+        println!("program continues...");
+    }
+
+    Biz burada heap'te yaratılmış olan Sample türünden nesneyi belli bir noktada yok etmek isteyebiliriz. Bunun için Box 
+    yapısında bir metot yoktur. Ancak Rust Standart Kütüphanesinde bu işlemin yapılmasına yol açan aşağıdaki gibi tanımlanmış
+    std::mem modülünde drop isimli bir fonksiyon bulunmaktadır. Bu fonksiyon şöyle yazılmıştır:
+
+    fn drop<T>(_: T) {    
+    }
+
+    Görüldüğü gibi drop fonksiyonu hiçbir şey yapmamaktadır. Box nesnesinin sahipliği fonksiyonun parametre değişkenine 
+    aktarılacağına göre fonksiyon bittiğinde de zaten drop işlemi yapılacaktır. drop fonksiyonu standart prelude içerisinde 
+    use edildiği için doğrudan kullanılabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box<T> türünden bir değişkene ya da değer & operatörü uygulayıp bu ifadeyi T türünden bir referansa atamak istediğimizde 
+    Box<T> türü Deref<Target = T> trait'ini desteklediği için yapının deref metodu çağrılacaktır. Bu deref metodu da heap'te 
+    tutulan nesnenin adresini bize vermektedir. Dolayısıyla biz istediğimiz zaman heap'teki nesnenin adresini bir referans 
+    olarak elde edebiliriz. Örneğin:
+
+    let b = Box::new(Sample {val: 10});
+    let r: &Sample;
+
+    r = &b;
+    println!("{}", r.val);
+
+    Burada biz &b ifadesi ile Box değişkeninin adresini elde etmek istediğimizde aslında heap'teki Sample nesneninin adresini 
+    elde etmiş olduk. Eğer referansın mut olmasını istiyorsak Box değişkenin de mut olması ve adresin &mut operatörüyle 
+    elde edilmesi gerekmektedir. Örneğin:
+
+    let mut b = Box::new(Sample {val: 10});
+    let r: &mut Sample;
+
+    r = &mut b;
+    println!("{}", r.val);      // 10
+    r.val = 20;
+    println!("{}", b.val);      // 20
+
+    Burada görüldüğü gibi &mut b ifadesi ile Box değişkenin adresi alınarak mut bir referansa yerleştirilmiştir. Sonra da 
+    bu referans yoluyla heap'tek Sample nesnesinin val alanı değiştirilmiştir. Biz mut referans atamaları konsuunu ele 
+    almıştık. Anımsanacağı gibi bir referans onun son kullanıldığı noktada bu bağlamda faaliyet alanını bitiriyordu. Dolaısıyla
+    yukarıdaki kod parçasında bir sorun oluşmayacaktır. Ancak anımsanacağı gibi bu kod parçası aşağıdaki gibi olsaydı 
+    sorun ortaya çıkardı:
+
+    let mut b = Box::new(Sample {val: 10});
+    let r: &mut Sample;
+
+    r = &mut b;
+    println!("{}", r.val);
+    r.val = 20;
+    println!("{}", b.val);      
+    r.val = 30;                 // error!
+
+    mut bir referansın faaliyet alanı boyunca o referansın gösterdiği yere ancak bu referanls erişilebilir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Box<T> türünden bir değişkenin adresi T türünden bir göstericiye de atanabilir. Bunun için önce * operatörü ile heap'teki 
+    nesneye erişilip sonra onun adresi alınmalıdır. Örneğin:
+
+    let b = Box::new(Sample {val: 10});
+    let ps: * const Sample;
+    ps = &*b;
+
+    Burada ps = &*b; ifadesine dikkat ediniz. Burada önce *b işlemi yapılıp heap'teki Sample nesnesine erişilmiş ve ondan 
+    sonra onun adresi alınarak göstericiye yerleştirilmiştir. Burada bir noktaya dikkat ediniz. Bu işlemi biz ps = &b;
+    biçiminde yapamayız. Çünkü burada Deref dönüştürmesinin devreye girmesi atanacak hedef türün referans olması gerekir. 
+    Halbuki atanacak hedef tür referans değil bir göstericidir. Bu nedenle bu işlemi yapabilmek için önce *b ifadesiyle 
+    Sample nesnesine erişim sonra onun adresini elde ettik. Box değişkenin gösterdiği heap'teki nesnenin mut olarak da
+    adresi alınabilir. Örneğin:
+
+    let mut b = Box::new(Sample {val: 10});
+    let ps: * const Sample;
+    let r: &mut Sample;
+
+    r = &mut *b;
+
+    Heap'teki nesnenin adresi elde edildikten sonra nesne yine faaliyet alanı bittiğinde drop edilecektir. Bu tür durumlarda
+    tanımsız davranışlar oluşabilmektedir. Örneğin:
+
+    fn main() {
+        let ps: * const Sample;
+        {
+            let b = Box::new(Sample { val: 10 });
+
+            ps = &*b;
+            unsafe {
+                println!("{}", (*ps).val);
+            }
+        }
+        unsafe {
+            println!("{}", (*ps).val);      // dikkat tanımsız davranış!
+        }
+    }
+
+    Burada iç blok bittiğinde heap'teki nesne free hale getirilecektir. Dolayısıyla artık nesneye blok dışından erişmek 
+    tanımsız davranışa yol açacaktır. 
+
+    İşte hem heap'teki nesnenin sahipliğini devredip hem de onu göstericiye atamak istiyorsak bunun için Box yapısının 
+    into_raw isimli ilişki fonksiyonu kullanılmaktadır. Bu fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn into_raw(b: Box<T>) -> *mut T
+
+    Örneğin:
+
+    fn main() {
+        let ps: * const Sample;
+        {
+            let b = Box::new(Sample { val: 10 });
+
+            ps = Box::into_raw(b);
+            unsafe {
+                println!("{}", (*ps).val);
+            }
+        }
+        unsafe {
+            println!("{}", (*ps).val);      // artık tanımsız davranış değil
+        }
+    }
+
+    Burada Box değişkenin içerisindeki nesne adresi Box::into_raw fonksiyonuyla elde edilmiştir. Bu fonksiyon sahipliği 
+    devralmakla birlikte drop işlemini yapmamaktadır. Dolayısıyla iç bloktan çıkıldığında hala heap'teki nesne yaşıyor
+    durumda olacaktır.
+---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
 
