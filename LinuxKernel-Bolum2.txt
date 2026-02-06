@@ -1,0 +1,1622 @@
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        C ve Sistem Programcıları Derneği
+
+     "Linux Kernel - İşletim Sistemlerinin Tasarımı ve Gerçekleştirilmesi" Kursunda Yapılan Örnekler ve Özet Notlar
+                                                   2. Bölüm
+
+                                             Eğitmen: Kaan ASLAN
+
+        Bu notlar Kaan ASLAN tarafından oluşturulmuştur. Kaynak belirtmek koşulu ile her türlü alıntı yapılabilir.
+        Kaynak belirtmek için aşağıdaki referansı kullanabilirsiniz:
+
+    Aslan, K. (2025), "Linux Kernel - İşletim Sistemlerinin Tasarımı ve Gerçekleştirilmesi Kursu, Sınıfta Yapılan 
+        Örnekler ve Özet Notlar", C ve Sistem Programcıları Derneği, İstanbul.
+
+                    (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
+                        (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
+
+                                    Son Güncelleme: 06/02/2026 - Cuma
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Kursumuzun bu bölümünde Linux çekirdeğindeki senkronizasyon mekanizmaları üzerinde duracağız. Çekirdek içerisindeki
+    kodlar iç içe geçebilecek biçimde (re-entrant) çalışabilmektedir. Eğer makinenizde birden fazla işlemci ya da çekirdek 
+    varsa çekirdek kodları bunlar tarafından eş zamanlı biçimde işletilebilmektedir. Tek işlemcili ya da çekirdekli 
+    sistemlerde bile "thread'ler arası geçiş ve kesme mekanizmalarından dolayı" iç içe geçme söz konusu olabilmektedir. 
+    Linux çekirdekleri 2.6 ile birlikte "preemptive" hale getirilmiştir. Eskidne 2.6 öncesinde bir thread akışı çekirdek 
+    moduna geçtiğinde oradan çıkana kadar threadler arası geçiş (preemtion) oluşmuyordu. Ancak 2.6 çekirdekleriyle birlikte 
+    bir thread akışı örneğin bir sistem fonksiyonunda ilerlerken quanta süresi dolduğundan dolayı çekirdek içerisinde 
+    de kesilebilmektedir. 
+
+    Linux çekirdeğinde oldukça ayrıntılı ve çeşitli senkronizasyon nesneleri bulunmaktadır. Bu bölümde biz bu nesneleri
+    ele alıp onların nasıl kullanıldığını açıklayacağız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek kodlarında senkronizasyon uygulamaya ne gerek vardır? İşte tıpkı kullanıcı modundaki çok thread'li uygulamalarda 
+    olduğu gibi bir akış çekirdek içerisinde paylaşılan bir veri yapısı üzerinde işlem yaparken bir biçimde thread'ler 
+    arası geçiş ya da kesme olayı söz konusu olduğunda başka bir akış da bu paylaşılan veri yapısını kullanmak isterse 
+    bu veri yapısı bozulabilmektedir. Tabii çok çekirdekli sistemlerde farklı çekirdeklerdeki thread'ler de çekirdek 
+    içerisindeki ortak veri yapıları üzerinde eş zamanlı işlemler yapabilmektedir. Örneğin çekirdek kodunun bir bağlı 
+    listeye bir eleman eklediğini varsayalım. Tam bu işlemin ortalarında bir yerde thread'ler arası geçiş oluşursa 
+    ya da başka bir çekirdekteki thread de aynı bağlı liste üzerinde işlem yapmaya çalışırsa tüm veri yapısı 
+    bozulabilecektir. 
+
+    Çekirdek senkronizasyonunda en önemli kavram "kritik kod (ciritical section)" denilen kavramdır. Başından sonuna 
+    kadar tek bir akış tarafından işletilmesi gereken kodlara "kritik kod" denilmektedir. Kritik kod kavramını atomiklik
+    ile karıştırmayınız. Atomiklik "bir işlem yapılırken thread'ler arası geçiş ya da kesme mekanizaması yoluyla" 
+    işlemin kesintiye uğramaması anlamına gelmektedir. Bir akış çekirdekteki bir kritik koda girdiğinde akış "preemption"
+    dan dolayı kesintiye uğrayabilir. Ancak bu durumda bile başka bir akış kesintiye uğramış olan akış işini bitirene 
+    kadar kritik koda girmemelidir. Yani kritik koda girmiş olan bir akışın kesintiye uğraması biçiminde bir koşul 
+    yoktur. 
+
+    Çekirdek kodları kullanıcı modunda kodlar gibi değildir. Çekirdek kodları aynı zaman diliminde pek çok akış 
+    tarafından iç içe geçecek biçimde çalıştırılabilmektedir. Bu nedenle çekirdek tasarımında ve aygıt sürücü yazımında 
+    senkronizasyon her zaman göz önüne alınmalıdır. Maalesef senkronizasyon sorunlarının tespit edilmesi oldukça zor 
+    olabilmektedir. Çünkü senkronizasyon problemlerinin oluşturduğu böceklerin yeniden oluişturulması ("reproduce" 
+    edilmesi) oldukça zordur. 
+
+    Çekirdek içerisindeki kritik kod bloklarının önemli bir bölümü birden fazla akışın paylaşılan bir veri yapısına 
+    erilmesi nedeniyle oluşturulmaktadır. Örneğin aynı hash tablosuna birden fazla prosesin çağırdığı sistem fonksiyonları 
+    eleman ekleyebilir. Bu durumda bu hash tablosunun böyle erişimlerde seri hale getirilmesi ("serialize" edilmesi)
+    gerekir. Ancak senkronizasyon sorunu yalnızca ortak veri yapılarına ve nesnelere erişirken ortaya çıkmaz. Bu bölümde
+    ele alacağımız senkronizasyonu gerektiren başka durumlar da vardır. 
+
+    Genel olarak (ancak her zaman değil) bir nesne (nesne demekle burada çekirdek alanı içerisinde tahsis edilmiş bir 
+    alanı kastediyoruz) eğer birden fazla akış tarafından kullanılıyorsa bu nesnenin senkronize edilmesi için ayrı 
+    bir senkronizasyon nesnesi bulundurulmaktadır. Linux'un çekirdek kodlarında yapıların içerisinde senkronizasyon
+    nesnelerini görürseniz şaşırmayınız. Bir senkronizasyon nesnesi nesnesi ile birden fazla nesneyi korumak genel olarak
+    iyi bir fikir değildir. Çünkü bu nesnelerden birine erişirken kilit alındığı için aslında alakasız olan diğerine
+    erişim de engellenmiş olacaktır. Her nesnenin ayrı bir senkronizasyon nesnesi ile korunması en normal olan durumdur. 
+    Linux çekirdek nesnelerini incelediğinizde onları belirten yapıların elemanlarında senkronizasyon nesneleri 
+    göreceksiniz. 
+
+    Kritik kodlar ancak özel makine komutları kullanılarak oluşturulabilmektedir. Aşağdaki gibi basit bir mantıkla 
+    kritik kod oluşturulamaz:
+
+    int g_flag = 0;
+
+    while (g_flag)
+        ;
+    g_flag = 1;
+    .....
+    .....       <KRİTİK KOD>
+    .....
+    g_flag = 0;
+
+    Bu biçimdeki manuel kritik kod oluşturmaya çalışmanın iki sorunu vardır:
+
+    1) Bekleme bloke edilerek değil meşgul bir döngüde (busy loop) yapılmaktadır. Yani bir thread kritik kod içerisindeyse
+    diğeri CPU zamanı harcayarak meşgul bir döngüde sürekli bekler. 
+    
+    2) Yukarıdaki kodun diğer bir sorunu da kodda açık bir  pencerenin bulunmasıdır:
+
+    while (g_flag)
+        ;
+    -------------> DİKKAT burada thread'ler arası geçiş oluşabilir
+    g_flag = 1;
+    .....
+    .....       KRİTİK KOD
+    .....
+    g_flag = 0;
+    
+    Burada ok belirtilen noktada thread'ler arası geçiş oluşursa birden fazla thread kritik koda girebilir. İşte 
+    bu sakıncıyı ortadan kaldırmak için özel makine komutlarından faydalanılmaktadır. Bugün bilgisayar sistemlerinde 
+    birden fazla çekirdek bulunabildiği için kritik kod oluşturan sistem programcılarının bunlara dikkat etmesi 
+    gerekir. Linux'un çekirdek kodlarında zaten çeşitli senaryolar için kullanılabilecek senkronizasyon nesneleri 
+    hazır biçimde bulunmaktadır. Bu bölümde biz bu senkronizasyon nesnelerini ele alacağız. Bölümün sonlarına doğru da 
+    bu senkronizasyon nesnelerinin oluşturulabilmesi için gereken makine komutları hakkında bilgiler vereceğiz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	İşletim sistemindeki senkronizasyon nesnelerini temelde iki gruba ayırabiliriz:
+
+    1) Blokeye yol açan senkronizasyon nesneleri 
+    2) Blokeye yol açmayan senkronizasyon nesneleri
+
+    Blokeye yol açan senkronizasyon nesneleri çalışmakta olan kodun çalışmasına ara vererek ileride ala alacağımız 
+    "bekleme kuyruklarında (wait queue)" bekletildiği yani göreli olarak uzun süre beklemeye yol açan senkronizasyon 
+    nesneleridir. Blokeye yol açmayan senkronizasyon nesneleri ise akışın bekletilmediği senkronizasyon nesneleridir. 
+    Bunları da kendi aralarında iki kısma ayırabiliriz. Bunların bir bölümü döngü içerisinde spin yaparak beklemyi 
+    sağlamaktadır. Diğer bölümü ise modern "lock-free" veri yapılarından oluşmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bu bölümde açıklayacağımız çekirdek senkronizasyon nesnelerini kullanıcı modundaki thread senkronizasyonunda 
+    kullanılan senkronizasyon nesneleri ile karıştırmayınız. Kullanıcı modundaki senkronizasyon nesneleri kulalnıcı 
+    modundaki thread'leri senkronize etmek için bulundurulmuştur. Oysa bu bölümde göreceğimiz senkronizasyon nesneleri 
+    isimleri benzer olsa da çekirdek kodlarının senkronizasyonunda kullanılmaktadır. Tabii kullanıcı modundaki senktronizasyon 
+    nesnelerinin bir bölümü aslında burada  açıklayacağımız çekirdekteki senkronizasyon nesneleri kullanılarak yazılmıştır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+					                    51. Ders 24/01/2026 - Cumartesi				
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Kritik kod oluşturmak için en çok kullanılan senkronizasyon nesnelerinden biri "mutex (mutual exclusion)" denilen 
+    nesnelerdir. (UNIX/Linux sistemlerinde kullanıcı modundan kullanılabilecek mutex nesneleri de vardır. Yukarıda belirttiğimiz 
+    gibi biz burada çekirdeğin içerisinde bulunan mutex nesneleri üzerinde duracağız.) Mutex nesneleri Linux çekirdeğine 
+    2.6 versiyonlarıyla eklenmiştir. Bundan önce mutex işlemleri binary semaphore'larla yapılıyordu. Çekirdeğin mutex 
+    mekanizması kullanım bakımından kullanıcı modundaki mutex mekanizmasına çok benzemektedir. Çekirdek mutex nesnelerinin 
+    yine thread temelinde sahipliği vardır. Çekirdek mutex nesneleri thread'i bloke edip onu bekleme kuyruklarında 
+    bekletebilmektedir.
+
+    Mutex mekanizması şöyle işletilmektedir: Önce global düzeyde ya da çekirdeğin heap sisteminde bir mutex nesnesi 
+    yaratılır. Kritik koda girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin ele 
+    geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer  mutex'in sahipliği ele geçirilirse (yani 
+    mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik koda giremez. 
+    Mutex'in sahipliğini almaya çalışan thread mutex kilitli ise bloke olarak mutex kilidi açılana kadar bekler. Mutex'in 
+    sahipliğini almış olan thread kritik koddan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). 
+    Böylece blokede bekleyen thread'lerden biri mutex'in sahipliğini alarak kritik koda girer. Kritik kod tipik olarak 
+    şöyle oluşturulmaktadır:
+
+    mutex_lock(...);
+    ...
+    ...    <KRİTİK KOD>
+    ...
+    mutex_unlock(...);
+
+    Akışlardan biri mutex_lock fonksiyonuna geldiğinde eğer mutex kilitlenmemişse mutex'i kilitler ve kritik koda giriş 
+    yapar. Eğer mutex zaten kilitlenmişse mutex_lock fonksiyonunda thread bloke edilir ve bekleme kuyruğuna alınır. 
+    Kritik koda girmiş olan akış mutex_unlock fonksiyonu ile mutex nesnesinin kilidini bırakır. Böylece nesneyi bekleyen 
+    thread'lerden biri nesnenin sahipliğini alarak mutex'i kilitler. Birden fazla akışın mutex_lock fonksiyonunda 
+    bloke edilmesi durumunda mutex'in kilidi açıldığında bunlardan hangisinin mutex kilidini alarak kritik koda gireceği 
+    konusunda bir garanti verilmemektedir. (İlk bloke olan akışın mutex kilidini alarak kritik koda gireceğini 
+    düşünebilirsiniz, ancak bunun bir garantisi yoktur.)
+
+    Çekirdekteki mutex mekanizmasının tipik gerçekleştirimi şöyledir:
+
+    1) mutex_lock işlemi sırasında işlemcinin maliyetsiz compare/set (compare/exchange) komutlarıyla mutex'in kilitli 
+    olup olmadığına bakılır.
+
+    2) Diğer bir işlemcideki ya da çekirdekteki thread mutex'i kilitlemişse boşuna bloke olmamak için yine compare/set 
+    komutlarıyla biraz spin işlemi yapılır. Buradaki spin süresi çeşitli faktörlere bağlı olarak değişebilmektedir. 
+    Ancak ortalama 1 ile 10 ms arasında sürebilmektedir. Spin işleminin be olduğu izleyen paragraflarda açıklanacaktır.
+    
+    3) Spin işleminden sonuç elde edilemezse bloke oluşturulur. 
+
+    4) Mutex nesnesinin kilidini alan thread mutex'in kilidini bırakınca çekirdek bu mutex'i bekleyen therad'leri 
+    uykudan uyandırır ve bunlardan biri mutex'in kilidini ele geçirir, diğerleri yine uykuya dalar.
+
+    Çekirdeğin mutex nesneleri tipik olarak şöyle kullanılmaktadır:
+
+    1) Mutex nesnesi mutex isimli bir yapıyla temsil edilmektedir. Sistem programcısı bu yapı türünden global olarak 
+    ya da çekirdeğin heap sisteminde dinanik biçimde bir nesne yaratır ve ona ilk değerini verir. DEFINE_MUTEX(name) 
+    makrosu hem struct mutex türünden nesneyi tanımlamakta hem de ona ilk değerini vermektedir. Örneğin:
+
+    #include <linux/mutex.h>
+
+    static DEFINE_MUTEX(g_mutex);
+
+    Bu makro güncel çekirdeklerde şöyle bildirilmiştir:
+
+    #define DEFINE_MUTEX(mutexname) \
+	    struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
+
+    Buradaki __MUTEX_INITIALIZER makrosu da şöyle bildirilmiştir:
+
+    #define __MUTEX_INITIALIZER(lockname) \
+		{ .owner = ATOMIC_LONG_INIT(0) \
+		, .wait_lock = __RAW_SPIN_LOCK_UNLOCKED(lockname.wait_lock) \
+		, .wait_list = LIST_HEAD_INIT(lockname.wait_list) \
+		__DEBUG_MUTEX_INITIALIZER(lockname) \
+		__DEP_MAP_MUTEX_INITIALIZER(lockname) }
+
+    DEFINE_MUTEX makrosu yerine önce mutex nesnesi tanımlanıp nesneye ilkdeğeri mutex_init fonksiyuyla da verebiliriz. 
+    Bu fonksiyon güncel çekirdeklerde makro biçiminde yazılmıştır:
+
+    #define mutex_init(mutex)						\
+    do {									\
+        static struct lock_class_key __key;				\
+                                        \
+        __mutex_init((mutex), #mutex, &__key);				\
+    } while (0)
+
+    Fonksiyon mutex nesnesinin adresini almaktadır. Örneğin:
+
+    static struct mutex g_mutex;
+    /* ... */
+
+    mutex_init(&g_mutex);
+
+    2) Mutex nesnesini kilitlemek için mutex_lock fonksiyonu kullanılır:
+
+    #include <linux/mutex.h>
+
+    void mutex_lock(struct mutex *lock);
+
+    Fonksiyon paranetresiyle mutex nesnesinin adresini almaktadır. Bloke olmadan mutex'i kilitlemek için mutex_trylock 
+    fonksiyonu da bulundurulmuştur:
+
+    #include <linux/mutex.h>
+
+    int mutex_trylock(struct mutex *lock);
+
+    Eğer mutex kilitliyse bu fonksiyon bloke olmadan 0 değeriyle geri döner. Eğer mutex kilitli değilse mutex'i kilitler 
+    ve fonksiyon 1 değeri ile geri döner.
+    
+    Mutex nesnesi mutex_lock ile kilitlenmek istendiğinde bloke oluşursa bu blokeden sinyal yoluyla çıkılamamaktadır. 
+    Örneğin mutex_lock ile çekirdek modunda biz mutex kilidini alamadığımızdan dolayı bloke oluştuğunu düşünelim. Bu 
+    durumda ilgili prosese bir sinyal gelirse ve eğer o sinyal için sinyal fonksiyonu set edilmişse thread uyandırılıp 
+    sinyal fonksiyonu çalıştırılmamaktadır. Ayrıca bu durumda biz ilgili prosese SIGINT gibi, SIGKILL gibi sinyaller 
+    göndererek de prosesi sonlandıramayız. İşte eğer mutex'in kilitli olması nedeniyle bloke oluştuğunda sinyal yoluyla 
+    thread'in uyandırılıp sinyal fonksiyonunun çalıştırması ya da sinyal fonksiyonu set edilmemişse prosesin sonlandırılması 
+    isteniyorsa mutex nesnesi mutex_lock ile değil, mutex_lock_interrupible fonksiyonu ile kilitlenmeye çalışılmalıdır. 
+    mutex_lock_interruptible fonksiyonunun prototipi şöyledir:
+
+    #include <linux/mutex.h>
+
+    int mutex_lock_interruptible(struct mutex *lock);   
+
+    Fonksiyon eğer mutex kilidini alarak sonlanırsa 0 değerine, bloke olup sinyal dolayısıyla sonlanırsa -EINTR değerine 
+    geri dönmektedir. Programcı bu fonksiyonun 0 ile geri dönmediğini ya da -EINTR ile geri döndüğünü tespit ettiğinde 
+    ilgili sistem fonksiyonunun yeniden çalıştırılabilirliğini sağlamak için -ERESTARTSYS ile geri dönebilir. Örneğin:
+
+    if (mutex_lock_interruptible(&g_mutex) != 0)
+        return -ERESTARTSYS;
+
+    Sistem programcıları çoğu kez mutex_lock yerine mutex_lock_interruptible fonksiyonunu tercih etmektedir. 
+
+    3) Mutex nesnesinin kilidini bırakmak için (nesneyi unlock etmek için) mutex_unlock fonksiyonu kullanılmaktadır:
+
+    #include <linux/mutex.h>
+
+    void mutex_unlock(struct mutex *lock);
+
+    Bu durumda örneğin tipik olarak çekirdek kodlarında belli bir bölgeyi mutex yoluyla koruma işlemi şöyle yapılmaktadır:
+
+    static DEFINE_MUTEX(g_mutex);
+    ...
+
+    if (mutex_lock_interruptible(&g_mutex) != 0)
+        return -ERESTARTSYS;
+    ...
+    ...    KRİTİK KOD
+    ...
+    mutex_unlock(&g_mutex);
+
+    Mutex nesnesini kilitledikten sonra fonksiyonlarınızı geri döndürürken kilidi açmayı unutmayınız.
+
+    Çekirdeğin mutex nesneleri özyinelemeli (recursive) değildir. Yani thread bir mutex nesnesni klitlemişse aynı 
+    mutext nesnesini kilitlemeye çalışırsa "deadlock" oluşur. 
+
+    Aşağıda mutex mekanizmasının çalışmasına ilişkin bir örnek verilmiştir. Burada aygıt sürücü için iki ioctl kodu 
+    oluşturulmuştur. IOCTL_TEST1 kodunda mutex'in sahipliği alınp 30 saniye beklenmektedir. IOCTL_TEST2 kodunda ise 
+    bekleme yaılmadan mutex'in sahipliği alınmak istenmiştir. Test için önce "test-sync1" programını sonra da başka 
+    bir terminalde "test-sync2" programını çalıştırmalısınız. Mesajları "dmesg" komutuyla inceleyebilirsiniz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-driver.h */
+
+#ifndef TEST_DRIVER_H_
+#define TEST_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define TEST_DRIVER_MAGIC		't'
+#define IOC_TEST1		        _IO(TEST_DRIVER_MAGIC, 0)
+#define IOC_TEST2		        _IO(TEST_DRIVER_MAGIC, 1)
+
+#endif
+
+/* test-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/delay.h>
+#include "test-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("test-driver");
+
+static int test_driver_open(struct inode *inodep, struct file *filp);
+static int test_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_test1(struct file *filp, unsigned long arg);
+static long ioctl_test2(struct file *filp, unsigned long arg);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = test_driver_open,
+	.read = test_driver_read,
+	.write = test_driver_write,
+	.release = test_driver_release,
+    .unlocked_ioctl = test_driver_ioctl
+};
+
+static DEFINE_MUTEX(g_mutex);
+
+static int __init test_driver_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "test-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static int test_driver_open(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static int test_driver_release(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	return 0;
+}
+
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	return 0;
+}
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+	
+    switch (cmd) {
+        case IOC_TEST1:
+            result = ioctl_test1(filp, arg);
+            break;  
+		case IOC_TEST2:
+            result = ioctl_test2(filp, arg);
+            break;  
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+long ioctl_test1(struct file *filp, unsigned long arg)
+{
+	if (mutex_lock_interruptible(&g_mutex) != 0)
+		return -ERESTARTSYS;
+
+	printk(KERN_INFO "mutex locked and wait 30 seconds...\n");
+
+	ssleep(30);
+
+	mutex_unlock(&g_mutex);
+
+	printk(KERN_INFO "mutex unlocked...\n");
+
+    return 0;
+}
+
+long ioctl_test2(struct file *filp, unsigned long arg)
+{
+	if (mutex_lock_interruptible(&g_mutex) != 0)
+		return -ERESTARTSYS;
+
+	printk(KERN_INFO "mutex locked...\n");
+
+	mutex_unlock(&g_mutex);
+
+	printk(KERN_INFO "mutex unlocked...\n");
+
+    return 0;
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* test-sync1.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+
+    if ((fd = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, IOC_TEST1) == -1)
+        exit_sys("ioctl");
+
+    close(fd);
+    
+    return 0;
+}
+
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/* test-sync2.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+
+    if ((fd = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, IOC_TEST2) == -1)
+        exit_sys("ioctl");
+
+    close(fd);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de çekirdekteki mutex kodlarına göz gezdirelim. Güncel çekirdeklerde mutex yapısı "linux/mutex_types.h" dosyası 
+    içerisinde şöyle bildirilmiştir:
+
+    struct mutex {
+        atomic_long_t		owner;
+        raw_spinlock_t		wait_lock;
+    #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
+        struct optimistic_spin_queue osq; /* Spinner MCS lock */
+    #endif
+        struct list_head	wait_list;
+    #ifdef CONFIG_DEBUG_MUTEXES
+        void			*magic;
+    #endif
+    #ifdef CONFIG_DEBUG_LOCK_ALLOC
+        struct lockdep_map	dep_map;
+    #endif
+    };
+
+    Yapıya bazı elemanların konfigürasyon seçeneklerine bağlı olarak eklendiğine dikkat ediniz. Burada owner elemanı 
+    mutex kilidi için kullanılmaktadır. wait_lock elemanı nesnenin bazı elemanlarına erişirken nesneyi korumak için 
+    bulundurulmuştur. Bloke olan thread'ler yapının wait_list elemanında kaydedilmemiktedir. mutex_lock fonksiyonu 
+    "kernel/locking/mutex.c" dosyasında şöyle tanımlanmıştır:
+
+    void __sched mutex_lock(struct mutex *lock)
+    {
+        might_sleep();
+
+        if (!__mutex_trylock_fast(lock))
+            __mutex_lock_slowpath(lock);
+    }
+    EXPORT_SYMBOL(mutex_lock);
+    #endif
+
+    Buradaki might_sleep fonksiyonu eğer mutex nesnesi "atomik bir bağlamda (atomic context)" çağrılmışsa debug mesajları
+    oluşturmaktadır. Bunun dışında çaışma üzerinde bir etkisi yoktur.  __mutex_trylock_fast fonksiyonu kilide bakıp eğer 
+    eğer kilit açıksa hemen onu almaktadır. Kilit kapalı ise __mutex_lock_slowpath fonksiyonu çağrılmaktadır. Bu 
+    fonksiyon kendi içerisinde yukarıda belirttiğimiz gibi önce spin yaparak kilidin açılmasını beklemekte eğer kilit 
+    açılmazsa thread'i wait kuyruğuna yerleştirerek bloke olmaktadır. Linux çekirdeğinin ileri versiyonlarındaki bu 
+    tür spin mekanizmalarına "optimistic spin" de denilmektedir. Buradaki spin süresi belli koşullara bağlı olarak
+    değişebilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+		                                    52. Ders 25/01/2026 - Pazar							
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdekte yaygın kullanılan senkronizasyon nesnelerinden bir diğeri de "semaphore" nesneleridir. Semaphore nesneleri
+    1965 yılında Hollandalı bilgisayar bilimcisi Edsger W. Dijkstra tarafından ortaya atılmıştır. Semaphore'lar bugün 
+    işletim sistemlerinin çekirdeklerinde ve kullanıcı modundaki thread senkronizasyonunda en yaygın kullanılan senkronizasyon 
+    nesnelerinden biridir. (Semaphore "tren yollarındaki dur-geç lambaları" için kullanılan bir sözcüktür. Bunu anafor 
+    sözcüğü ile karıştırmayınız.) Eskiden Linux çekirdeklerinde mutex nesneleri yoktu. Mutex nesneleri yerine sonraki 
+    paragraflarda açıklayacağımız binary semaphore nesneleri kullanılıyordu. 
+
+    Semaphore'lar sayaçlı senkronizasyon nesneleridir. Kritik koda en fazla n tane thread'in girebilmesini sağlamaktadır. 
+    Örneğin biz kritik koda en fazla 3 thread'in girebilmesini isteyelim. Bu durumda birinci thread kritik koda girecektir. 
+    İkinci thread de üçüncü thread de girecektir. Ancak dördüncü ve beşinci thread'ler kritik koda giremeyecek ve bloke 
+    edilerek bekleme kuyruklarında bekletilecektir. Kritik kod içerisindeki üç thread'ten birinin kritik kodda çıktığını 
+    varsayalım. Bu durumda kritik koda girmek için bekleyen thread'lerden biri kritik koda girecektir. Görüldüğü gibi 
+    kritik kodun içerisinde en fazla 3 thread bulunabilmektedir. 
+
+    Kritik koda en fazla n tane thread'in girebilmesinin sağlanması size anlamsız gelebilir. Ne de olsa kritik koddaki 
+    iki thread bile paylaşılan kaynağı bozabilmektedir. Ancak semaphore'lar genellikle kaynak paylaştırmak için 
+    kullanılmaktadır. Örneğin elimizde üç kaynak olabilir. Her gelen thread'e bunlardan birini tahsis edebiliriz. 
+    Bu durumda ilk üç thread'e eldek, üç kaynak atanacaktır ancak kaynağı talep eden diğer thread'ler CPU zamanı harcamadan 
+    blokede bekletilecektir. İşte bu mekanizma semapore nesneleriyle oluşturulabilmektedir. 
+    
+    Semaphore nesnelerinin bir başlangıç sayaç değeri vardır. Bu başlangıç sayaç değeri kritik koda en fazla kaç thread'in 
+    girebileceğini belirtir. Kritik koda giren thread bu sayaç değerini azaltır, çıkan thread bu sayaç değerini artırır. 
+    Eğer semaphore'un sayacı 0 ise kritik koda girmek isteyen thread bloke edilerek bekletilir. Ta ki sayaç değeri 0'dan 
+    büyük olana kadar. Tabii sayacın artırılması ve azaltılması atomik bir biçimde yapılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek semaphore nesnelerini şöyle kullanılmaktadır:
+
+    1) Semaphore nesnesi semaphore isimli bir yapıyla temsil edilmiştir. Güncel çekirdeklerede semaphore yapısı şöyledir:
+
+    struct semaphore {
+        raw_spinlock_t		lock;
+        unsigned int		count;
+        struct list_head	wait_list;
+
+    #ifdef CONFIG_DETECT_HUNG_TASK_BLOCKER"
+        unsigned long		last_holder;
+    #endif
+    };
+
+    Buradaki lock elemanı nesne üzerinde işlem yaparken kritik kod oluşturmak için kullanılmaktadır. count elemanı 
+    semaphore sayacının o anki değerini belirtmektedir. wait_list elemanı ise bloke olan thread'lerin saklandığı bekleme 
+    kuyruğunu temsil etmektedir. last_holder elemanın konfigürasyon seçeneği ile yapıya eklendiğine dikkat ediniz. 
+    Bu eleman semaphore'dan geçen son thread'e ilişkin bilgiyi tutmaktadır. 
+    
+    Bir semaphore nesnesi DEFINE_SEMAPHORE(name) makrosuyla oluşturulabilir. Bu makro tıpkı mutex nesnelerinde olduğu 
+    gibi hem semaphore nesnesini tanımlar hem de ona ilkdeğerini verir:
+
+    #include <linux/semaphore.h>
+
+    static DEFINE_SEMAPHORE(g_sem);
+
+    Güncel çekirdeklerde bu makro şöyle tanımlanmıştır:
+
+    #define DEFINE_SEMAPHORE(_name, _n)	    \
+	    struct semaphore _name = __SEMAPHORE_INITIALIZER(_name, _n)
+
+    Buaradaki __SEMAPHORE_INITIALIZER makrosu da şöyle tanımlanmıştır:
+
+    #define __SEMAPHORE_INITIALIZER(name, n)				\
+    {									\
+        .lock		= __RAW_SPIN_LOCK_UNLOCKED((name).lock),	\
+        .count		= n,						\
+        .wait_list	= LIST_HEAD_INIT((name).wait_list)		\
+        __LAST_HOLDER_SEMAPHORE_INITIALIZER				\
+    }
+
+    DEFINE_SEMAPHORE makrosunun birinci parametresi semaphore değişkeninin ismini, ikinci parametresi ise başlangıç 
+    semaphore sayacını belirtmektedir. Eskiden DEFINE_SEMAPHORE makrosu tek parametreliydi. Semaphore sayacı da default 
+    1 değeriyle olarak oluşturuluyordu. Bu makro 6.4 çeekirdeği ile birlikte iki parametreli hale getirilmiştir. 2.6 
+    çekirdeği öncesinde bu makro yerine DECLARE_MUTEX makrosu kullanılıyordu. 
+
+    Semaphore nesnelerine başlangıç değerlerini vermek için ayrıca sema_init isimli bir fonksiyon da bulundurulmuştur. 
+    Çünkü bazen semaphore nesnelerine ilkdeğer vermek mümkün olmayabilir. (Örneğin semaphore nesnesi çekirdeğin 
+    heap alanında yaratılıyor olabilir.) Fonksiyonun prototipi şöyledir:
+
+    #define <linux/semaphore.h>
+    
+    void sema_init(struct semaphore *sem, int val);
+
+    Fonksiyon inline olarak yazılmıştır. Fonksiyonun birinci parametresi semaphore nesnesinin adresini, ikinci parametresi 
+    ise semaphore sayacının başlangıç değerini belirtmektedir. Güncel çekirdeklerde bu fonksiyon inline olarak şöyle 
+    yazılmıştır:
+
+    static inline void sema_init(struct semaphore *sem, int val)
+    {
+        static struct lock_class_key __key;
+        *sem = (struct semaphore) __SEMAPHORE_INITIALIZER(*sem, val);
+        lockdep_init_map(&sem->lock.dep_map, "semaphore->lock", &__key, 0);
+    }
+
+    Fonksiyonun içerisinde ilkdeğer verme işleminin "designated initializer" sentaksıyla yapıldığına dikkat ediniz. 
+
+    2) Kritik kod down ve up fonksiyonları arasına alınır. down"fonksiyonları sayacı bir eksilterek kritik koda 
+    giriş yapar. up fonksiyonu ise sayacı bir artırmaktadır. Fonksiyonların prototipleri şöyledir:
+
+    #define <linux/semaphore.h>
+
+    void down(struct semaphore *sem);
+    int down_interruptible(struct semaphore *sem);
+    int down_killable(struct semaphore *sem);
+    int down_trylock(struct semaphore *sem);
+    int down_timeout(struct semaphore *sem, long jiffies);
+    void up(struct semaphore *sem);
+
+    Kritik kod down fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılamamaktadır. Ancak kritik 
+    kod down_interruptible fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. 
+    (Örneğin biz kritik koda down fonksiyonuyla girmiş olalım. Therad'imizin bloke olduğunu varsayalım. Şimdi kullanıcı 
+    modunda Ctrl+C tuşuşla SIGINT sinyalini oluşturduğumuzda bu bloke çözülmeyecektir.) down_interruptible fonksiyonu 
+    normal sonlanmada 0 değerine, sinyal yoluyla sonlanmada -ERESTARTSYS değeri ile geri döner. Normal uygulama eğer bu 
+    fonksiyonlar -ERESTARTSYS ile geri dönerse aygıt sürücüdeki fonksiyonun da aynı değerle geri döndürülmesidir. Zaten 
+    çekirdek bu -ERESTARTSYS geri dönüş değerini aldığında asıl sistem fonksiyonunu eğer sinyal için otomatik restart 
+    mekanizması aktif değilse -EINTR değeri ile geri döndürmektedir. Bu da tabii POSIX fonksiyonlarının başarısız olup 
+    errno değerini EINTR biçiminde set eder.
+    
+    down_killable fonksiyonu bloke olmuş thread'in yalnızca SIGKILL sinyalini kabul edip sonlandırılabilmesini sağlamaktadır. 
+    down_killable fonksiyonunda eğer thread bloke olursa diğer sinyaller yine blokeyi sonlandıramamaktadır. 
+    
+    down_trylock nesnenin açık olup olmadığına bakmak için kullanılır. Eğer nesne açıksa yine sayaç 1 eksiltilir ve kritik 
+    koda girilir. Bu durumda fonksiyon 0 dışı bir değerle geri döner. Nesne kapalıysa (yani semaphore sayacı 0 ise) fonksiyon 
+    bloke olmadan 0 değerine geri döner. down_timeout ise en kötü olasılıkla belli miktar "jiffy" zamanı kadar blokeye 
+    yol açmaktadır. ("jiffy" kavramı ileride ele alınacaktır.) Fonksiyon zaman aşımı dolduğundan dolayı sonlanmışsa negatif 
+    hata koduna, normal bir biçimde sonlanmışsa 0 değerine geri dönmektedir. 
+
+    up fonksiyonu yukarıda da belirttiğimiz gibi semaphore sayacını 1 artırmaktadır. 
+
+    Bu durumda semaphore nesneleri ile kritik kod tipik olarak şöyle oluşturulmaktadır:
+
+    down_interruptible(&sem);
+    .....
+    .....       KRİTİK KOD
+    .....
+    up(&sem);
+
+    Aşağıda daha önce yapmış olduğumuz örneğin binary semaphore versiyonunu veriyoruz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-driver.h */
+
+#ifndef TEST_DRIVER_H_
+#define TEST_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+#define TEST_DRIVER_MAGIC		't'
+#define IOC_TEST1		        _IO(TEST_DRIVER_MAGIC, 0)
+#define IOC_TEST2		        _IO(TEST_DRIVER_MAGIC, 1)
+
+#endif
+
+/* test-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/delay.h>
+#include "test-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("test-driver");
+
+static int test_driver_open(struct inode *inodep, struct file *filp);
+static int test_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_test1(struct file *filp, unsigned long arg);
+static long ioctl_test2(struct file *filp, unsigned long arg);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = test_driver_open,
+	.read = test_driver_read,
+	.write = test_driver_write,
+	.release = test_driver_release,
+    .unlocked_ioctl = test_driver_ioctl
+};
+
+static DEFINE_SEMAPHORE(g_sem, 1);
+
+static int __init test_driver_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "test-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static int test_driver_open(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static int test_driver_release(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	return 0;
+}
+
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	return 0;
+}
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+	
+    switch (cmd) {
+        case IOC_TEST1:
+            result = ioctl_test1(filp, arg);
+            break;  
+		case IOC_TEST2:
+            result = ioctl_test2(filp, arg);
+            break;  
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+long ioctl_test1(struct file *filp, unsigned long arg)
+{
+	if (down_interruptible(&g_sem) != 0)
+		return -ERESTARTSYS;
+
+	printk(KERN_INFO "semaphore down and wait 30 seconds...\n");
+
+	ssleep(30);
+
+	up(&g_sem);
+
+	printk(KERN_INFO "semaphore up...\n");
+
+    return 0;
+}
+
+long ioctl_test2(struct file *filp, unsigned long arg)
+{
+	if (down_interruptible(&g_sem) != 0)
+		return -ERESTARTSYS;
+
+	printk(KERN_INFO "semaphore down...\n");
+
+	up(&g_sem);
+
+	printk(KERN_INFO "semaphore up...\n");
+
+    return 0;
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* test-sync1.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+
+    if ((fd = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, IOC_TEST1) == -1)
+        exit_sys("ioctl");
+
+    close(fd);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/* test-sync2.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "test-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+
+    if ((fd = open("test-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    if (ioctl(fd, IOC_TEST2) == -1)
+        exit_sys("ioctl");
+
+    close(fd);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki mutex nesneleriyle binary semaphore'lar arasından ne fark vardır? İki nesne arasındaki tipik farklılıklar 
+    şunlardır:
+
+    1) Mutex nesnelerinin sahipliği thread temelinde alınmaktadır. Dolayısıyla mutex nesnelerini hangi thread kilitlemişse 
+    kilidini aynı thread açmak zorundadır. Halbuki semaphore'larda up işlemleri herhangi bir thread tarafından yapılabilmektedir. 
+    Bu da semaphore'ların "üretici-tüketici problemi (producer-consumer problem)" gibi klasik senkronizasyon kalıplarında
+    kullanılabilmesini sağlamaktadır. 
+
+    2) Linux çekirdeğinde semaphore nesneleri spin yapmamaktadır. Bir kez semaphore sayacına bakılmakta, eğer sayaç 
+    sıfırsa hemen thread bloke edilmektedir. Halbuki mutex nesnelerinde "optimistic spinning" işlemi yapılmaktadır. 
+    Yani "nesne belki açılır diye bloke biraz ertelenmektedir. 
+
+    3) Mutex nesnelerinin kilidi alındığında çekirdek yüksek öncelikli bloke olmuş thread'lerin önceliklerini biraz 
+    yükseltmektedir. Ancak semaphore nesnelerinde bu yapılmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeklerinde belki de en yoğun kullanılan senkronizasyon nesnesi "spinlock" denilen nesnedir. Spinlock 
+    nesneleri hiçbir zaman blokeye yol açmamaktadır. Bu nesnelerde lock yapılmak istendğinde eğer kilit başka bir akış 
+    tarafından zaten alınmışsa bir döngü içerisinde sürekli "acaba kilit açıldı mı?" diye kilide bakılmaktadır. Spinlock 
+    nesnelerinin "meşgul döngü (busy loop)" oluşturduğuna dikkat ediniz. İlk bakışta bu nesnelerin kullanılmasının 
+    önemli bir CPU zamanının harcanmasına yol açacağını düşünebilirsiniz. Ancak bu nesneler çekirdek tasarımcıları 
+    tarafından zaten "çok uzun süre beklenmeyecek durumlarda" kullanılmaktadır. Bu nesnelerin yanlış yerlerde kullanılması 
+    çekirdeğin çökmesine ve "deadlock" oluşumuna yol açabilmektedir. 
+    
+    Spin işlemine duyulan gereksinim açıktır. Thread'in uykuya yatırılması ve uyandrılması belli bir zaman kaybına 
+    yol açmaktadır. Spinlock nesneleri bu zaman kaybını elimine etmek için düşünülmüştür. Spinlock nesneleri "doğru 
+    yerde kullanılması koşuluyla" çok önemli ve faydalı nesnelerdir. Çekirdeğin her yerinde brikaç satırlık kritik 
+    kodları oluşturmak için spinlock kullanıyla karşılaşılabilmektedir. 
+
+    Spinlock nesnelerinde kilit alındığında aynı zamanda ilgili CPU'da ya da çekirdekte threadler arası geçiş (context 
+    switch) kapatılmaktadır. Böylece kilit bırakılana kadar kodun kesilmemesi garanti edilmiş olur. (Tabii birden çok 
+    CPU ya da çekirdek söz konsu olduğunda yalnızca ilgili CPU'daki ya da çekirdekteki thread'ler arası geçiş 
+    kapatılmaktadır.) Eğer ilgili CPU ya da çekirdek thread'ler arası geçişe kapatılmasaydı bu durumda başka bir therad 
+    işlemi keser ve başka thread'ler aynı spinlock nesnesini kilitlemeye çalıştığında tüm quanta süresince CPU'yu meşgul 
+    bırakırdı.
+
+    Spinlock nesneleri "çok işlemcili ya da çok çekirdekli" sistemlerde anlamlı nesnelerdir. Tek CPU'lu ya da tek 
+    çekirdekli sistemlerde spin yapmanın hiçbir anlamı yoktur. Örneğin tek CPU'lu ya da tek çekirdekli bir sistem 
+    söz konusu olsun. Bu sistemlerde hiçbir zaman zaten bir thread spinlock nesnesini kilitli göremez. Çünkü spinlock'a
+    girildiğinde zaten CPU ya da çekirdek thread'ler arası geçişe kapatılmaktadır. spinlock ile korunan kritik kod da 
+    zaten hiç kesilmeden çalıştırılmaktadır. Bu durumda her zaman zaten spinlock kilidini alan thread'in onu bırakacağı
+    garanti edilmektedir. O halde spinlock kullanımından asıl amaç başka bir işleci ya da çekirdek kritik koda girmişse
+    o çıkana kadar spin yapmaktır. Peki aşağıdaki açıklayacağımız çekirdek fonksiyonları hem tek işlemcili ya da 
+    çekirdekli hem de çok işlemcili ya da çekirdekli sistemlerde çalıştığına göre tek işlemcili ya da tek çekirekli 
+    sistemlerde spin nasıl devre dışı bırakılmaktadır. İşte çekirdek kodları bu durumda CONFIG_SMP konfigürasyon
+    parametresine bakmaktadır. Sembolik kod olarak çok işlemcili ya da çok çekirdekli sistemlerde spinlock fonksiyonarı 
+    şu yapıdadır:
+
+    spin_lock(...) 
+    {
+        disable_preemption();
+
+        for (;;) {
+            if (kilit açıldı mı)
+                <kilidi al>
+                break;
+        }
+    }
+
+    spin_unlock(...)
+    {
+        <kilidi_serbest_bırak>
+
+        enable_preemption();
+    }
+
+    Oysa tek işlemcili ya da tek çekirdekli sistemlerde kilidin alınması şu hale gelmektedir:
+
+    spin_lock(...) 
+    {
+        disable_preemption();    
+    }
+
+    spin_unlock(...)
+    {
+        enable_preemption();
+    }
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeğindeki spinlock işlemleri şöyle yütürülmektedir:
+
+    1) Spinlock nesnesi spinlock_t türü ile temsil edilmektedir. Spinlock nesnesi aşağıdaki gibi tanımlanabilir:
+
+    static spinlock_t g_spinlock;
+
+    Güncel Linux çekirdeklerinde çok işlemcili ya da çok çekirdekli sistemlerde CONFIG_SMP konfigürasyon parametresi "=y" 
+    yapıldığı için spinlock_t yapısı şöyle bildirilmiştir:
+
+    typedef struct spinlock {
+        struct rt_mutex_base	lock;
+    #ifdef CONFIG_DEBUG_LOCK_ALLOC
+        struct lockdep_map	dep_map;
+    #endif
+    } spinlock_t;
+
+    Tek işlemcili ya da tek çekirdekli sistemlerde ise spinlock_t yapısının bildirimi şöyledir:
+
+    typedef struct { } spinlock_t;
+
+    C'de içi boş bir yapı bildirilememektedir. İçi boş yapı bildirimi gcc derleyicilerinin bir eklentisidir. 
+
+    2) spinlock nesnesine ilkdeğer DEFINE_SPINLOCK makrosuyla verilebilmektedir. Bu makro aynı zamanda yapı nesnesini 
+    de tanımlar. Örneğin:
+
+    #include <linux/spinlock.h>
+
+    static DEFINE_SPINLOCK(g_spinlock);
+
+    Buradaki DEFINE_SPINLOCK makrosu da güncel çekirdeklerde şöyle tanımlanmıştır:
+
+    #define ___SPIN_LOCK_INITIALIZER(lockname)	\
+	{					\
+        .raw_lock = __ARCH_SPIN_LOCK_UNLOCKED,	\
+        SPIN_DEBUG_INIT(lockname)		\
+        SPIN_DEP_MAP_INIT(lockname) }
+
+    #define __SPIN_LOCK_INITIALIZER(lockname) \
+        { { .rlock = ___SPIN_LOCK_INITIALIZER(lockname) } }
+
+    #define __SPIN_LOCK_UNLOCKED(lockname) \
+        (spinlock_t) __SPIN_LOCK_INITIALIZER(lockname)
+
+    #define DEFINE_SPINLOCK(x)	spinlock_t x = __SPIN_LOCK_UNLOCKED(x)
+
+    spinlock nesnesine spinlock_init makrosouyla da başlangıç değer verilebilmektedir. Güncel çekirdeklerde bu makro 
+    şöyle bildirilmiştir:
+
+    # define spin_lock_init(_lock)			\
+    do {						            \
+        spinlock_check(_lock);			    \
+        *(_lock) = __SPIN_LOCK_UNLOCKED(_lock);	\
+    } while (0)
+
+    Makronun parametre olarak spinlock nesnesinin adresini aldığını görüyorsunuz. Örneğin:
+
+    static spinlock_t g_spinlock;
+    /* ... */
+
+    spinlock_init(&g_spinlock);
+
+    2) Spinlock kilidini almak için aşağıdaki fonksiyonlar kullanılmaktadır:
+
+    #include <linux/spinlock.h>
+
+    void spin_lock(spinlock_t *lock);
+    void spin_lock_irq(spinlock_t *lock);
+    void spin_lock_irqsave(spinlock_t *lock, unsigned long flags);
+    void spin_lock_bh(spinlock_t *lock);
+
+    spin_lock fonksiyonu klasik spin yapan fonksiyondur. Bu fonksiyon thread'ler arası geçişi (preemption mekanizmasını) 
+    kapatır ancak kesmeleri kapatmamaktadır. Preemption işleminin kapatılması IRQ'ların (yani donnaım kesmelerinin) 
+    kapatıldığı anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemci ya da çekirdekteki 
+    IRQ'ları da (yani donanım kesmelerini de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak 
+    kilidi bırakana kadar donanım kesmeleri oluşmayacaktır. spin_lock_irqsave fonksiyonu kritik koda girerken donanım 
+    kesmelerini kapatmakla birlikte CPU'nun kesme öncesindeki bayrak yazmacını da saklamaktadır. Aslında bu fonksiyonların 
+    bazıları makro olarak yazılmıştır. Örneğin spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci 
+    parametresine nesne adresini geçmemiş olsak da bu bir makro olduğu için aslında ikinci parametrede verdiğimiz 
+    nesnenin içerisine IRQ durumları  yazılmaktadır. spin_lock_bh fonksiyonu ise yalnızca yazılım kesmelerini 
+    kapatmaktadır.
+
+    3) Spinlock kilidini bırakmak için spin_unlock fonksiyonları kullanılmaktadır:
+
+    #include <linux/spinlock.h>
+
+    void spin_unlock(spinlock_t *lock);
+    void spin_unlock_irq(spinlock_t *lock);
+    void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags);
+    void spin_unlock_bh(spinlock_t *lock);
+
+    lock fonksiyonlarının hepsinin birer unlock karşılığının olduğunu görüyorsunuz. Biz kilidi hangi lock fonksiyonu ile 
+    almışsak o unlock fonksiyonu ile bırakmalıyız. Kritik kod spin_lock ile spin_unlock fonksiyonları arasında alınmalıdır. 
+    Örneğin:
+
+    spin_lock(&g_spinlock);
+    ...
+    ... <KRİTİK KOD>
+    ...
+    spin_unlock(&g_spinlock);
+
+    Ya da örneğin:
+
+    unsigned long irqstate;
+    ...
+
+    spin_lock_irqsave(&g_spinlock, irqstate);
+    ...
+    ... <KRİTİK KOD>
+    ...
+    spin_unlock_irqrestore(&g_spinlock, irqstate);
+
+    Yine kernel spinlock nesnelerinde de try'lı lock fonksiyonları bulunmaktadır:
+
+    #include <linux/spinlock.h>
+
+    int spin_trylock(spinlock_t *lock);
+    int spin_trylock_bh(spinlock_t *lock);
+
+    Bu fonksiyonlar eğer spinlock kilitliyse spin yapmazlar ve 0 ile geri dönerler. Eğer kilidi alırlarsa sıfır dışı bir 
+    değerle geri dönerler.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+		                                53. Ders 01/02/2026 - Pazar							
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    
+/*----------------------------------------------------------------------------------------------------------------------
+	Biz simplfs dosya sistemimizde kendi süper blok nesnemize yaptığımız eşzamanlı (concurrent) erişimlerde kodumuz 
+    zarar görmesin diye spinlock nesnesi kullanmıştık. Zaten çekirdeğin diğer veri yapıları kullandığımız çekirdek 
+    fonksiyonları tarafından spinlock ile korunmaktaydı. Dolayısıyla biz yalnızca simplefs dosya sistemimizde kendimize 
+    ilişkin çekirdeğin korumadığı nesneleri korumakla yükümlüydük. Kodumuzun bu kısmını anımsatmak istiyoruz:
+
+    static int simplefs_alloc_inode_num(struct super_block *sb)
+    {
+        struct simplefs_super_block *sfs_sb;
+        struct simplefs_disk_super_block *sfs_sbd;
+        int ino;
+
+        /* ... */
+        
+        spin_lock(&sfs_sb->lock);
+        
+        if (sfs_sbd->free_inodes == 0) {
+            spin_unlock(&sfs_sb->lock);
+            return -ENOSPC;
+        }
+        
+        ino = find_first_zero_bit(sfs_sb->inode_bitmap, sfs_sbd->inode_count);
+        if (ino >= sfs_sbd->inode_count) {
+            spin_unlock(&sfs_sb->lock);
+            return -ENOSPC;
+        }
+        
+        set_bit(ino, sfs_sb->inode_bitmap);
+        sfs_sbd->free_inodes--;
+        mark_buffer_dirty(sfs_sb->inode_bitmap_bh);
+        mark_buffer_dirty(sfs_sb->sb_bh);
+        
+        spin_unlock(&sfs_sb->lock);
+
+        /* ... */
+
+        return ino;
+    }
+
+    spinlock nesnesini bir fonksiyon içerisinde kilitlediyseniz fonksiyondan geri dönmeden önce onun kilidini açmayı
+    unutmayınız.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Diğer çok kullanılan bir senkronizasyon nesnesi de "okuma yazma kilitleri (readers-writer lock)" denilen nesnelerdir. 
+    Önce bu nesnelere neden gereksinim duyulduğunu bir örnekle açıklamak istiyoruz. Çekirdek kodlarında paylaşılan bir 
+    kaynak bulunuyor olsun. Örneğin bunun global bir bağlı liste (linked list) olduğunu düşünelim. Bu bağlı listeye bir 
+    grup thread eleman (düğüm) ekliyor olsun, bir grup thread de bu bağlı listeyi dolaşarak eleman arıyor olsun. Burada 
+    bağlı listede arama yapmak "okuma (read)" işlemi gibi düşünülebilir. Çünkü bu işlem paylaşılan kaynakta (burada bağlı 
+    liste) bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilir. Ancak bağlı listeye 
+    eleman ekleyen thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o sırada başka bir thread 
+    de ekleme yaparsa ya da arama yaparsa bu durum çökmeye yol açabilir. Burada bağlı listeye eleman eklemek bir yazma 
+    (write) işlemi olarak düşünülebilir. O halde bizim öyle bir kritik kod oluşturmamız gerekir ki birden fazla okuma 
+    yapan thread bu kritik koda girebilsin ancak bir thread okuma yaparken yazma yapan bir thread okuma yapan thread 
+    kritik koddan çıkana kadar beklesin. Benzer biçimde eğer yazma yapan bir thread kritik koda girmişse bu işlem bitene 
+    kadar okuma yapan thread de kritik koda giremesin. Aşağıda Thread-1 kritik koda girmişse Thread-2'nin durumu 
+    açıklanmaktadır:
+
+    Thread-1            Thread-2        Kritik Koda Girebilmeli Mi?
+    ---------------------------------------------------------------
+    Okuma               Okuma           Evet
+    Okuma               Yazma           Hayır
+    Yazma               Okuma           Hayır
+    Yazma               Yazma           Hayır
+
+    Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalara izin vermektedir.
+
+    Böyle bir mekanizma tek başına mutex ya da semaphore nesneleriyle sağlanamaz. Aşağıdaki temsili koda (pseudo code) 
+    dikkat ediniz:
+
+    static DEFINE_MUTEX(g_mutex);
+
+    read()
+    {
+        mutex_lock(&g_mutex);
+        <okuma işlemi yapılıyor>
+        mutex_unlock(&g_mutex);
+    }
+
+    write()
+    {
+        mutex_lock(&g_mutex);
+        <yazma işlemi yapılıyor>
+        mutex_unlock(&g_mutex);
+    }
+
+    Burada birden fazla okuma işlemi de blokeye yol açacaktır.								
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Linux çekirdeğinde readers/writer lock nesneleri spinlock mekanizmasıyla çalışmaktadır. Yani bu nesneler thread'i 
+    bloke ederek uykuya daldırmazlar. Thread'ler arası geçişi (preemption) kapatarak meşgul bir döngüde kilidin açılmasını 
+    beklerler. Yine bu nesnelerin de tek işlemcili ya da tek çekirdekli sistemlerde bir kullanımı yoktur. Bu sistemlerde 
+    bu kilit fonksiyonları yalnızca thread'ler arası geçişi kapatıp açmaktadır.
+    
+    Okuma yazma kilitleri rwlock_t türüyle temsil edilmektedir. Bu yapı güncel çekirdeklerde şöyle bildirilmiştir:
+
+    typedef struct {
+        struct rwbase_rt	rwbase;
+        atomic_t		readers;
+    #ifdef CONFIG_DEBUG_LOCK_ALLOC
+        struct lockdep_map	dep_map;
+    #endif
+    } rwlock_t;
+    
+    Okuma yazma kilitlerinin nesnelerinin yaratılması DEFINE_RWLOCK(name) makrosuyla ya da rwlock_init fonksiyonuyla 
+    yapılmaktadır. DEFINE_RWLOCK(name) makrosu "include/linux/rwlock_types.h" dosyası içerisinde şöyle bildirilmiştir:
+
+    #ifdef CONFIG_DEBUG_SPINLOCK
+    #define __RW_LOCK_UNLOCKED(lockname)					    \
+        (rwlock_t)	{	.raw_lock = __ARCH_RW_LOCK_UNLOCKED,	\
+                    .magic = RWLOCK_MAGIC,			            \
+                    .owner = SPINLOCK_OWNER_INIT,		        \
+                    .owner_cpu = -1,			                \
+                    RW_DEP_MAP_INIT(lockname) }
+    #else
+    #define __RW_LOCK_UNLOCKED(lockname)                        \
+        (rwlock_t)	{	.raw_lock = __ARCH_RW_LOCK_UNLOCKED,	\
+                    RW_DEP_MAP_INIT(lockname) }
+    #endif
+
+    #define DEFINE_RWLOCK(x)	rwlock_t x = __RW_LOCK_UNLOCKED(x)
+
+    wrlock_init fonksiyonunun parametrik yapısı da şöyledir:
+
+    #include <linux/rwlock.h>
+
+    void rwlock_init(rwlock_t *lock);
+
+    Okuma yazma kilitlerinin kilidini alan ve kilidini açan fonksiyonlar şunlardır:
+
+    #include <linux/rwlock.h>
+
+    void read_lock(rwlock_t *lock);
+    void read_lock_irq(rwlock_t *lock);
+    void read_lock_irqsave(rwlock_t *lock, unsigned long flags);
+    void read_lock_bh(rwlock_t *lock);
+
+    void read_unlock(rwlock_t *lock);
+    void read_unlock_irq(rwlock_t *lock);
+    void read_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
+    void read_unlock_bh(rwlock_t *lock);
+
+    void write_lock(rwlock_t *lock);
+    void write_lock_irq(rwlock_t *lock);
+    void write_lock_irqsave(rwlock_t *lock, unsigned long flags);
+    void write_lock_bh(rwlock_t *lock);
+    int write_trylock(rwlock_t *lock);
+
+    void write_unlock(rwlock_t *lock);
+    void write_unlock_irq(rwlock_t *lock);
+    void write_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
+    void write_unlock_bh(rwlock_t *lock);
+
+    Nesne okuma amaçlı lock edilmişse read amaçlı unlock işlemi, yazma amaçlı lock edilmişse yazma amaçlı unlock işlemi 
+    uygulanmalıdır. Fonksiyonların diğer işlevleri normal spinlock nesnelerinde olduğu gibidir. Örneğin okuma amaçlı 
+    krtik kod şöyle oluşturulabilir:
+
+    static DEFINE_RWLOCK(g_rwlock);
+    /* ... */
+
+    read_lock(&g_rwlock);
+    ...
+    ...         <KRİTİK KOD>
+    ...
+    read_unlock(&g_rwlock);
+
+    Yazma amaçlı kritik kod da şöyle oluşturulabilir:
+
+    write_lock(&g_rwlock);
+    ...
+    ...        <KRİTİK KOD>
+    ...
+    write_unlock(&g_rwlock);
+
+    Örneğin biz bu fonksiyonlarla okuma yazma işlemlerini aşağıdaki gibi senkronize edebiliriz:
+
+    static DEFINE_RWLOCK(g_rwlock);
+
+    read()
+    {
+        read_lock(&g_rwlock);
+        <okuma işlemi yapılıyor>
+        read_unlock(&g_rwlock);
+    }
+
+    write()
+    {
+        write_lock(&g_rwlock);
+        <yazma işlemi yapılıyor>
+        write_unlock(&g_rwlock);
+    }
+
+    Burada artık okuma yapmak isteyen thread read fonksiyonunu çağırdığında read_lock fonksiyonu ile spinlock kilidi alınır, 
+    başka bir thread bu kilidi write_lock ile alamaz ve spin yapmaya başlar. Ancak başka bir thread kilidi yine read_lock 
+    ile alabilir. Eğer bir thread kilidi write_lock ile almışsa başka bir thread kilidi read_lock ile de write_lock ile 
+    de alamaz ve spin yaparak bekler.
+
+    read_lock ve write_lock fonksiyonlarının irq sonekli versiyonları yine akış kritik kodda girdiğinde ilgili CPU ya da 
+    çekirdeğin yerel kesmelerini kapatmaktadır.								
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz Linux çekirdeğindeki temel senkronizasyon nesnelerini tanıttık. Ancak çekirdek senkronizasyon mekanizmasının 
+    özellikle çok işlemcili ya da çok çekirdekli sistemler söz konusu olduğunda pek çok ayrıntısı da vardır. Burada bu 
+    ayrıntılar üzerinde duracağız. 
+
+    Bugün çok işlemcili ya da çok çekirdekli sistemlerde CPU ile bellek arasındaki bağlantı söz konusu olduğunda iki
+    mimari kullanılmaktadır: SMP (Symmetric Multiprocessor) Mimarisi ve NUMA (Non-Unified Memory Access) Mimarisi.
+    SMP mimarisinde tüm CPU ya da çekirdekler aynı fiziksel RAM'e bağlıdır. Dolayısıyla bir CPU ya da çekirdek RAM'e 
+    erişirken diğeri o erişim bitene kadar beklemektedir. Tabii bu senkronizasyon donanım tarafından sağlanmaktadır. 
+    SMP mimarisindeki RAM erişimini aşağıdaki şekille betimleyebiliriz:
+
+    ┌─────────┐   ┌─────────┐
+    │   CPU   │   │   CPU   │
+    │    1    │   │    2    │
+    └────┬────┘   └────┬────┘
+         │             │
+         ├─────────────┤
+         │             │
+    ┌────▼─────────────▼────┐
+    │   Paylaşılan Bellek   │
+    │   (Tek Bellek Alanı)  │
+    └───────────────────────┘
+    
+    SMP sisteminde bir CPU ya da çekirdek DRAM belleğe eriştiği zaman diğeri nano saniyeler mertebesinde beklediği 
+    için tam bir paralel çalışma mümkün olamamaktadır. Tabii CPU'ların içsel önbellekleri DRAM erişimini azaltmayı 
+    hedeflemektedir. Ancak CPU içerisindeki önbellek mekanizmasının da "önbellek tutarlılığı (cache coherency)" denilen 
+    sorunları vardır. Örneğin bir CPU ya da çekirdek DRAM bellekten belli bir yeri içsel önbelleğine çekmiş olsun. 
+    Şimdi o CPU ya da çekirdek oraya bir şey yazdığında diğer CPU'ların ya da çekirdeklerin onu fark etmek gerekmektedir. 
+    İşte bu bunu sağlamak için bazı "önbellek tutarlılığına" ilişkin mekanizmalar işletilmektedir. Biz burada önbellek 
+    protokolleri üzerinde durmayacağız. Bunlar hakkındaki bilgileri başka kaynaklardan edinebilirsiniz. 
+
+    NUMA mimarisinde DRAM bellek bank'lara ayrılmıştır. Her CPU'nun ya da çekirdeğin ayrı bir bank'ı vardır. Bunlar 
+    kendi bank'larına da diğer bank'lara da erişebilirler ancak kendi bank'larına daha hızlı erişmektedir. Çünkü bunlar 
+    kendi bank'larına erişirken diğer CPU ya da çekirdekleri durdurmamaktadır. Bu nedenle bu mimarilerde belleğin her 
+    bölgesine erişim aynı sürede yapılamamaktadır. "Non-unified" sözcüğü bunu anlatmaktadır. Bu mimariyi aşağıdaki 
+    şekille betimleyebiliriz:
+
+    ┌─────────────────┐        ┌─────────────────┐
+    │    Çekirdek 0   │        │    Çekirdek 1   │
+    │    ┌───────┐    │        │    ┌───────┐    │
+    │    │  CPU  │    │        │    │  CPU  │    │
+    │    │   0   │    │        │    │   1   │    │
+    │    └───┬───┘    │        │    └───┬───┘    │
+    │        │        │        │        │        │
+    │  ┌─────▼─────┐  │        │  ┌─────▼─────┐  │
+    │  │  Bank 0   │  │        │  │  Yerel    │  │
+    │  └───────────┘  │        │  └───────────┘  │
+    └─────────────────┘        └─────────────────┘
+
+    SMP mimarisinin de NUMA mimarisinin de bazı avantajları ve dezavantajları vardır. Ancak kişisel bilgisayarlarımızda
+    yaygın olarak SMP mimarisi kullanılmaktadır. Bu sistemlerin avantaj ve dezavantajlarını aşağıda listeliyoruz:
+
+    NUMA Mimarisinin Avantajları:
+
+    - Daha yüksek ölçeklenebilirlik sunar (64+ işlemciye kadar ölçeklenebilir).
+    - Yerel bellek erişimleri çok hızlıdır (düşük gecikme).
+    - Bellek bant genişliği toplamda daha yüksektir (her düğüm kendi belleğine erişir).
+    - Büyük ve paylaşımlı bellek sistemleri için daha uygundur.
+    - Bellek kapasitesi daha kolay arttırılabilir (düğüm başına bellek eklenebilir).
+    - Performansı artırmak için veri yerelliği (data locality) optimizasyonu yapılabilir
+  
+    NUMA Mimarisinin Dezavantajları:
+
+    - Programlama ve yönetimi daha karmaşıktır.
+    - Uzak bellek erişimleri yavaştır (yerelden 2-3 kat daha yavaş olabilir).
+    - İşletim sisteminin ve uygulamaların NUMA-farkında (NUMA-aware) olması gerekir.
+    - Yanlış veri yerleşimi performansı ciddi şekilde düşürebilir
+    - Donanım maliyeti daha yüksektir.
+    - Önbellek tutarlılık trafiği (coherence traffic) daha karmaşıktır.
+
+    SMP Mimarisinin Avantajları:
+
+    - Programlama modeli çok daha basittir.
+    - Tüm işlemciler için bellek erişim gecikmesi aynıdır (tutarlı performans).
+    - İşletim sistemlerinin ve uygulamaların geliştirilmesi daha kolaydır.
+    - Donanım tasarımı nispeten daha basittir.
+    - Küçük sistemlerde (2-8 işlemci) daha verimli olabilir.
+    - Önbellek tutarlılık mekanizması daha basittir.
+
+    SMP Mimarisinin Dezavantajları:
+
+    - Ölçeklenebilirlik sınırlıdır (genellikle 8 işlemciden sonra verim düşer).
+    - Bellek veri yolu (memory bus) darboğaz oluşturabilir.
+    - Tüm işlemciler ya da çekirdekler aynı veri yolunu paylaştığı için trafik sıkışabilir.
+    - Bellek bant genişliği sınırlıdır (paylaşılan veri yolu kapasitesiyle sınırlı).
+    - Büyük sistemlerde performans ölçeklemesi zayıftır.
+    - Yüksek işlemci sayılarında veri yolu çakışmaları artar.
+
+    Kullanım Senaryoları Karşılaştırması:
+
+    SMP: Küçük sunucular, iş istasyonları, gömülü sistemler.
+    NUMA: Büyük veritabanı sunucuları, HPC sistemleri, bulut sunucuları.
+    SMP: Daha az sayıda thread çalıştıran uygulamalar.
+    NUMA: Yüzlerce thread çalıştıran paralel uygulamalar.
+    SMP: Bellek erişim modelinin basit olması gereken durumlar.
+    NUMA: Bellek kapasitesi ve bant genişliğinin kritik olduğu durumlar.
+
+    Modern Eğilim:
+    
+    - Günümüzde çok işlemcili sunucuların çoğu NUMA mimarisi kullanır.
+    - Modern işletim sistemleri (Linux, Windows) NUMA optimizasyonları içerir.
+    - Bulut bilişimde NUMA performans için kritiktir.
+    - Sanallaştırma ortamlarında NUMA yapılandırması önemli bir optimizasyon alanıdır.
+
+    Linux çekirdeği hem SMP hem de NUMA mimarisini destekleyecek biçimde gerçekleştirilmiştir. Yani biz SMP içeren 
+    sistemlerde de NUMA içeren sistemlerde de Linux'u kurduğumuzda Linux bunu fark etmekte ve o mimariye özgü çalışmayı 
+    desteklemektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Çok CPU'lu ya da çok çekirdekli sistemlerde senkronizasyon bakımından iki önemli sorun kaynağı vardır:
+
+    1) Aynı bellek bölgesine erişimde oluşan sorunlar.
+    2) Komutların yer değiştirmesi (instruction reordering) nedeniyle oluşan sorunları.
+
+    Birden fazla CPU ya da çekirdeğin aynı global değişkeni tesadüfen aynı zamanda güncellediğini düşünelim. Ya da 
+    bir CPU ya da çekirdek o global değişkeni güncellerken diğerinin onu okumaya çalıştığını düşünelim. Yukarıda biz 
+    modern sistemlerde bir CPU ya da çekirdeğin belleğe erişirken zaten diğerini durdurduğunu belirtmiştik. Ancak Intel 
+    gibi bazı mimarilerde bu durdurma bazı durumlarda tüm makine komutu süresinde yapılmamaktadır. Intel ve 64 bit ARM 
+    işlemcileri bazı koşullarda belleğe erişim yapan makine komutu çalışırken veri yolunu birden fazla kez tutup bırakabilmektedir.  
+    Örneğin 32 bit Intel işlemcilerinde aslında CPU fiziksel belleğe hep 32 bit genişliğinde erişmektedidr. Bu işlemciler 
+    bellekten 1 byte bile okuyacak olsalar aslında 4 byte okuyup o 4 byte içerisinden o byte'ı vermektedir. İşte bu 
+    işlemcilerde eğer 4 byte'lık nesneler hizalanmamışsa makine komutunun başından sonuna kadar veri yolu tutulmamaktadır.
+    Aşağıdaki gibi bir bellek içeriğinde işlemcinin 4'ün katlarına hizalanmamış olan yyyy byte'larını tek bir makine komutuyla
+    yazmak istediğini varsayalım:
+
+    ...
+    xxxx
+    xxxx
+    xxyy
+    yyxx
+    xxxx
+    ...
+
+    İşte bu biçimdeki hizalı olamayan erişimlerde işlemci makine komutunun sonuna kadar veri yolunu tutarak diğer işlemcileri 
+    durdurmamaktadır. Performans artışını sağlamak için işlemci önce xxyy satırını yazamakta, o sırada veri yolunu bırakmakta,
+    sonra diğer yyxx satırını yazamktadır. İşte tam bu sırada diğer işlemci ya da çekirdek araya girerse buradaki hizalanmamış 
+    nesne içindeki değeri yanlış okunabilmektedir. Intel işlemcileri bunu yalnızca hizalanmamış veri üzerinde yapmaktadır.
+    Burada hizalama demekle "her nesnenin kendi uzunluğunun katlarında bulunması durumunu" kastediyoruz. Örneğin 1 byte bir 
+    bilginin okunup yazılmasında hiçbir sorun oluşmayacaktır:
+
+    ...
+    xxxx
+    xxxx
+    xxxx
+    xyxx
+    xxxx
+    ...
+
+    Ya da aşağıdaki 2 byte'lık bilginin okunup yazılmasında da bir sorun oluşmayacaktır:
+
+    ...
+    xxxx
+    xxxx
+    xxxx
+    yyxx
+    xxxx
+    ...
+
+    Ancak aşağıdaki 2 byte'lık bilginin okunup yazılmasında bir sorun oluşabilecektir:
+
+    ...
+    xxxx
+    xxxx
+    xxxy
+    yxxx
+    xxxx
+    ...
+
+    Çünkü 32 bit Intel işlemcileri bellek okumalarını 4'ün katlarından dörder byte'lık bilgileri çekerek yapmaktadır.
+    Benzer biçimde 64 bit Intel işlemcileri de 4'ün katları yerine 8'in katlarıyla okuma ve yazma yapmaktadır. 
+
+    Tabii bildiğiniz gibi C/C++ derleyicileri zaten default ayarlarında hizalamayı yapmaktadır. Bu nedenle yukarıda 
+    bahsettiğimiz sorun genellikle ortaya çıkmayacaktır. Peki Intel'de hizalanmamış olan yukarıdaki gibi durumlarda 
+    sistem programcısının ne yapması gerekir? İşte Intel işlemcilerini tasarlayanlar komutların önüne getirilebilen 
+    1 byte'lık   LOCK önek komutu da bulndurmuşlardır. Eğer erişim bu LOCK önekiyle yapılırsa makine komuu sonuna kadar 
+    veri yolunu (data bus) diğer işlemciler ya da çekirdekler erişmesin diye tutmaktadır. Tabii C'de ve C++'ta biz 
+    makine komutlarını doğrudan kullanamayız ancak sembolik makine dilinde yazılmış fonksiyonları çağırabiliriz ya da 
+    derleyicilerin sunduğu "inline assembly" özelliği ile taşınabilir olmayan bir biçimde C/C++ kodları ile makine 
+    kodlarını bir arada kullanabiliriz. Linux çekirdeğinde mümkün olduğunca "gcc derleyicisinin "inline assmebly"
+    özelliği kullanılmıştır.  
+
+    32 bir ARM işlemcilerinde (ARM V7) zaten bellek erişimlerinin hizalanmış olması zorunludur. Aksi takdirde işlemci 
+    exception oluşturmaktadır. Ancak daha sonra 64 bit ARM işlemcileri (ARM V8) de hizalanmamış nesneler üzerinde 
+    exception oluşturmadan işlem yapabilir hale getirilmiştir. 64 bit ARM işlemcilerinde bu durumu oratdan kaldırmak 
+    için Intel'in LOCK önekinin işlevinin benzerini yapan özel LDREX (load exclusive) ve STREX (store exclusive) makine 
+    komutları bulunmaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çok işlemcili ya da çok çekirdekli sistemlerdeki diğer bir sorun da "komutların yer değiştirmesi (instruction 
+    reoderding) denilen sorundur. İşlemciler biri diğerini etkilemeyen makine komutlarının sırasını değiştirerek 
+    çalıştırabilmektedir. (Genel olarak böyle ifade edilse de aslında sıra değil görünürlük değişebilmektedir. Konun 
+    ayrıntılarını izleyen paragraflarda ele alacağız.) Örneğin:
+
+    MOV reg1, [mem1]
+    MOV reg2, [mem2]
+
+    Burada belleğin iki farklı bölgesindeki değerler CPU'nun farklı iki yazmacına çekilmiştir. Bu makine komutlarınn 
+    hangisinin önce yapıldığı sonuç üzerinde etkili olmayacaktır. İşte modern işlemciler kodun çalışmasını hızlandırmak 
+    için bu komutları derleyicinin yazdığı sırada değil farklı sıralarda yapabilmektedir. Örneğin yukarıdaki makine 
+    komutları işlemci tarafından aşağıdaki sırada da yapılabilecektir:
+
+    MOV reg2, [mem2]
+    MOV reg1, [mem1]
+   
+    Tabii işlemciler biribirleriyle ilişkili olan makine komutlarının sırasını değiştirmezler: örneğin:
+    
+    MOV reg1, [mem]
+    MOV reg2, reg1
+
+    Ya da örneğin:
+
+    MOV [mem], reg1
+    MOV reg2, [mem]
+
+    Bu makine komutlarının yer değiştirmesi programın yanlış çalışmasına yol açacağından işlemci bunları yer değiştirmez.
+
+    Burada "medemki çalışan kodu etkilemiyor o zaman sorun nerede?" diye düşünebilirsiniz. Ancak işte bazı durumlarda 
+    özellikle "bellek tabanlı IO (memory-mapped IO) işlemlerinde ve birden fazla işlemci ya da çekirdeğin bulunduğu 
+    sistemlerde bu komut yer değiştirmesi (daha doğru bir ifadeyle görünümün yer değiştrmesi) bazı sorunlara yol 
+    açabilmektedir. Örneğin bellek tabanlı IO işlemlerinde erişilen yerler farklı bile olsa bunların ifade ettiği anlam 
+    önemli olabilmektedir. Biz bir aygıtın bir yazamacına belleğe erişir gibi bir şey yazdıktan sonra onun başka bir 
+    yazmacına da bir şey yazmak isteyebiliriz. Bu iki erişim CPU için bağımısız bellek bölgelerine yapılıyor gibi olsa 
+    da aslında ilk erişimde aygıt ayarlanıyor olabilir, ikinci erişimde de ayarlanmış aygıt üzerinde işlem yapılıyor
+    olabilir.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+
+
+
+
