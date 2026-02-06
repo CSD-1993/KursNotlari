@@ -3962,34 +3962,41 @@ void exit_sys(const char *msg)
     Çekirdeğin mutex mekanizması kullanıcı modundaki mutex mekanizmasına çok benzemektedir. Çekirdek mutex nesnelerinin yine 
     thread temelinde sahipliği vardır. Çekirdek mutex nesneleri thread'i bloke edip onu bekleme kuyruklarında bekletebilmektedir. 
 
-    Mutex mekanizması şöyle işletilmektedir: Önce bir mutex nesnesi yaratılır. Kritik koda girişte bu mutex nesnesinin sahipliği
-    ele geçirilmeye çalışılır. Mutex'in sahipliğinin ele geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer 
-    mutex'in sahipliği ele geçirilirse (yani mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir 
-    thread kritik koda giremez. Mutex'in sahipliğini almaya çalışan thread mutex kilitli ise bloke olarak mutex kilidi açılana kadar 
-    bekler. Mutex'in sahipliğini almış olan thread kritik koddan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). 
-    Böylece blokede bekleyen thread'lerden biri mutex'in sahipliğini alarak kritik koda girer. Kritik kod tipik olarak şöyle 
-    oluşturulmaktadır:
+   Mutex mekanizması şöyle işletilmektedir: Önce global düzeyde ya da çekirdeğin heap sisteminde bir mutex nesnesi yaratılır. 
+   Kritik koda girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin sahipliğinin ele 
+   geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer  mutex'in sahipliği ele geçirilirse (yani mutex 
+   kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik koda giremez. Mutex'in 
+   sahipliğini almaya çalışan thread mutex kilitli ise bloke olarak mutex kilidi açılana kadar bekler. Mutex'in sahipliğini 
+   almış olan thread kritik koddan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). Böylece blokede bekleyen 
+   thread'lerden biri mutex'in sahipliğini alarak kritik koda girer. Kritik kod tipik olarak şöyle oluşturulmaktadır:
 
-    mutex_lock(...)
+    mutex_lock(...);
     ...
     ...    KRİTİK KOD
     ...
-    mutex_unlock(...)
+    mutex_unlock(...);
 
-    Thread'lerden biri mutex_lock fonksiyonuna geldiğinde eğer mutex kilitlenmemişse mutex'i kilitler ve kritik koda giriş yapar. 
-    Eğer mutex zaten kilitlenmişse mutex_lock fonksiyonunda thread bloke edilir ve bekleme kuyruğuna alınır. Kritik koda girmiş
-    olan thread mutex_unlock fonksiyonu ile mutex nesnesinin kilidini bırakır. Böylece nesneyi bekleyen thread'lerden biri nesnenin 
-    sahipliğini alarak mutex'i kilitler. Birden fazla thread'in mutex_lock fonksiyonunda bloke edilmesi durumunda mutex'in kilidi 
-    açıldığında bunlardan hangisinin mutex kilidini alarak kritik koda gireceği konusunda bir garanti verilmemektedir. (İlk bloke 
-    olan thread'in mutex kilidini alarak kritik koda gireceğini düşünebilirsiniz, ancak bunun bir garantisi yoktur.)
+    
+    Akışlardan biri mutex_lock fonksiyonuna geldiğinde eğer mutex kilitlenmemişse mutex'i kilitler ve kritik koda giriş yapar. 
+    Eğer mutex zaten kilitlenmişse mutex_lock fonksiyonunda thread bloke edilir ve bekleme kuyruğuna alınır. Kritik koda 
+    girmiş olan akış mutex_unlock fonksiyonu ile mutex nesnesinin kilidini bırakır. Böylece nesneyi bekleyen thread'lerden 
+    biri nesnenin sahipliğini alarak mutex'i kilitler. Birden fazla akışın mutex_lock fonksiyonunda bloke edilmesi durumunda 
+    mutex'in kilidi açıldığında bunlardan hangisinin mutex kilidini alarak kritik koda gireceği konusunda bir garanti verilmemektedir. 
+    (İlk bloke olan akışın mutex kilidini alarak kritik koda gireceğini düşünebilirsiniz, ancak bunun bir garantisi yoktur.)
 
     Çekirdekteki mutex mekanizmasının tipik gerçekleştirimi şöyledir:
 
-    1) mutex_lock işlemi sırasında işlemcinin maliyetsiz compare/set (compare/exchange) komutlarıyla mutex'in kilitli olup olmadığına 
-    bakılır.
-    2) Diğer bir işlemcideki thread mutex'i kilitlemişse boşuna bloke olmamak için yine compare/set komutlarıyla biraz spin 
-    işlemi yapılır. Spin işleminin be olduğu izleyen paragraflarda açıklanacaktır.
-    3) Spin işleminden sonuç elde edilemezse bloke oluşturulur.
+    1) mutex_lock işlemi sırasında işlemcinin maliyetsiz compare/set (compare/exchange) komutlarıyla mutex'in kilitli 
+    olup olmadığına bakılır.
+
+    2) Diğer bir işlemcideki thread mutex'i kilitlemişse boşuna bloke olmamak için yine compare/set komutlarıyla biraz 
+    spin işlemi yapılır. Buradkai spin süresi çeşitli faktörlere bağlı olarak değişebilmektedir. Ancak ortalama 1 ile 
+    10 ms arasında sürebilmektedir. Spin işleminin be olduğu izleyen paragraflarda açıklanacaktır.
+    
+    3) Spin işleminden sonuç elde edilemezse bloke oluşturulur. 
+
+    4) Mutex nesnesinin kilidini alan thread mutex'in kilidini bırakınca çekirdek bu mutex'i bekleyen therad'leri 
+    uykudan uyandırır ve bunlardan biri mutex'in kilidini ele geçirir, diğerleri yine uykuya dalar.
 
     Çekirdeğin mutex nesneleri tipik olarak şöyle kullanılmaktadır:
 
@@ -4030,7 +4037,12 @@ void exit_sys(const char *msg)
 
     void mutex_lock(struct mutex *lock);
 
-    Mutex'in kilitli olup olmadığı ise mutex_trylock fonksiyonuyla kontrol edilebilir:
+    Fonksiyon paranetresiyle mutex nesnesinin adresini almaktadır. Bloke olmadan mutex'i kilitlemek için mutex_trylock 
+    fonksiyonu da bulundurulmuştur:
+
+    #include <linux/mutex.h>
+
+    int mutex_trylock(struct mutex *lock);
 
     #include <linux/mutex.h>
 
@@ -4060,20 +4072,20 @@ void exit_sys(const char *msg)
 
     3) Mutex nesnesinin kilidini bırakmak için (nesneyi unlock etmek için) mutex_unlock fonksiyonu kullanılmaktadır:
 
+    #include <linux/mutex.h>
+
     void mutex_unlock(struct mutex *lock);
 
-    Bu durumda örneğin tipik olarak aygıt sürücü içerisinde belli bir bölgeyi mutex yoluyla koruma şöyle yapılmaktadır:
+    Bu durumda örneğin tipik olarak aygıt sürücü içerisinde belli bir bölgeyi mutex yoluyla koruma işlemi şöyle yapılmaktadır:
 
-    DEFINE_MUTEX(g_mutex);
+    static DEFINE_MUTEX(g_mutex);
     ...
 
     if (mutex_lock_interruptible(&g_mutex) != 0)
         return -ERESTARTSYS;
-
     ...
     ...    KRİTİK KOD
     ...
-
     mutex_unlock(&g_mutex);
 
     Mutex nesnesini kilitledikten sonra fonksiyonlarınızı geri döndürürken kilidi açmayı unutmayınız.
@@ -4457,11 +4469,17 @@ void exit_sys(const char *msg)
     Bu biçimde yaratılan semaphore nesnesinin başlangıçta sayaç değeri 1'dir. Yeni çekirdeklerde (v6.4-rc1 ve sonrası) bu makro iki 
     parametreli olarak da kullanılabilmektedir:
 
-    static DEFINE_SEMAPHORE(g_sem);
+    static DEFINE_SEMAPHORE(g_sem, 1);
 
     Buradaki ikinci parametre semaphore sayacının başlangıçtaki değerini belirtmektedir.
 
-    Semaphore nesneleri sema_init fonksiyonuyla da yaratılabilmektedir:
+    Semaphore nesnelerine sema_init fonksiyonuyla da ilkdeğer verilebilmkektedir:
+
+    #define <linux/semaphore.h>
+    
+    void sema_init(struct semaphore *sem, int val);
+
+    Kullanımı şöyle olabilir:
 
     static struct semaphore g_sem;
     ...
@@ -4469,8 +4487,9 @@ void exit_sys(const char *msg)
 
     Fonksiyonun ikinci parametresi başlangıç sayaç numarasıdır.
 
-    2) Kritik kod "down" ve "up" fonksiyonları arasına alınır. "down" fonksiyonları sayacı bir eksilterek kritik koda giriş yapar. 
-    "up" fonksiyonu ise sayacı bir artırmaktadır. Fonksiyonların prototipleri şöyledir:
+    2) Kritik kod down ve up fonksiyonları arasına alınır. down"fonksiyonları sayacı bir eksilterek kritik koda giriş yapar. 
+    up fonksiyonu ise sayacı bir artırmaktadır. Fonksiyonların prototipleri şöyledir:
+
 
     #define <linux/semaphore.h>
 
@@ -4481,31 +4500,33 @@ void exit_sys(const char *msg)
     int down_timeout(struct semaphore *sem, long jiffies);
     void up(struct semaphore *sem);
 
-    Kritik kod "down" fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılamamaktadır. Ancak kritik kod 
-    "down_interruptible" fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. down_killable
-    bloke olmuş thread'in yalnızca SIGKILL sinyalini kabul edip sonlandırılabilmesini sağlamaktadır. down_killable fonksiyonunda 
-    eğer thread bloke olursa diğer sinyaller yine blokeyi sonlandıramamaktadır. down_trylock yine nesnenin açık olup olmadığına 
-    bakmak için kullanılır. Eğer nesne açıksa yine sayaç 1 eksiltilir ve kritik koda girilir. Bu durumda fonksiyon 0 dışı bir 
-    değerle geri döner. Nesne kapalıysa (yani semaphore sayacı 0 ise) fonksiyon bloke olmadan 0 değerine geri döner. down_timeout 
-    ise en kötü olasılıkla belli miktar "jiffy" zamanı kadar blokeye yol açmaktadır. ("jiffy" kavramı ileride ele alınacaktır.) 
-    Fonksiyon zaman aşımı dolduğundan dolayı sonlanmışsa negatif hata koduna, normal bir biçimde sonlanmışsa 0 değerine geri 
-    dönmektedir. down_interruptible fonksiyonu normal sonlanmada 0 değerine, sinyal yoluyla sonlanmada -ERESTARTSYS değeri ile 
-    geri döner. Normal uygulama eğer bu fonksiyonlar -ERESTARTSYS ile geri dönerse aygıt sürücüdeki fonksiyonun da aynı değerle 
-    geri döndürülmesidir. Zaten çekirdek bu -ERESTARTSYS geri dönüş değerini aldığında asıl sistem fonksiyonunu eğer sinyal için 
-    otomatik restart mekanizması aktif değilse -EINTR değeri ile geri döndürmektedir. Bu da tabii POSIX fonksiyonlarının başarısız 
-    olup errno değerini EINTR biçiminde set edilmesine yol açmaktadır. up fonksiyonu yukarıda da belirttiğimiz gibi semaphore 
-    sayacını 1 artırmaktadır.
+    Kritik kod down fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılamamaktadır. Ancak kritik 
+    kod down_interruptible fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. (Örneğin
+    biz kritik koda down fonksiyonuyla girmiş olalım. Therad'imizin bloke olduğunu varsayalım. Şimdi kullanıcı modunda Ctrl+C
+    tuşuyla SIGINT sinyalini oluşturduğumuzda bu bloke çözülmeyecektir.) down_interruptible fonksiyonu normal sonlanmada 0 
+    değerine, sinyal yoluyla sonlanmada -ERESTARTSYS değeri ile geri döner. Normal uygulama eğer bu fonksiyonlar -ERESTARTSYS 
+    ile geri dönerse aygıt sürücüdeki fonksiyonun da aynı değerle geri döndürülmesidir. Zaten çekirdek bu -ERESTARTSYS geri 
+    dönüş değerini aldığında asıl sistem fonksiyonunu eğer sinyal için otomatik restart mekanizması aktif değilse -EINTR 
+    değeri ile geri döndürmektedir. Bu da tabii POSIX fonksiyonlarının başarısız olup errno değerini EINTR biçiminde set eder.
+    
+    down_killable fonksiyonu bloke olmuş thread'in yalnızca SIGKILL sinyalini kabul edip sonlandırılabilmesini sağlamaktadır. 
+    down_killable fonksiyonunda eğer thread bloke olursa diğer sinyaller yine blokeyi sonlandıramamaktadır. 
+    
+    down_trylock nesnenin açık olup olmadığına bakmak için kullanılır. Eğer nesne açıksa yine sayaç 1 eksiltilir ve kritik 
+    koda girilir. Bu durumda fonksiyon 0 dışı bir değerle geri döner. Nesne kapalıysa (yani semaphore sayacı 0 ise) fonksiyon 
+    bloke olmadan 0 değerine geri döner. down_timeout ise en kötü olasılıkla belli miktar "jiffy" zamanı kadar blokeye yol 
+    açmaktadır. ("jiffy" kavramı ileride ele alınacaktır.) Fonksiyon zaman aşımı dolduğundan dolayı sonlanmışsa negatif 
+    hata koduna, normal bir biçimde sonlanmışsa 0 değerine geri dönmektedir. 
 
-    Kernel semaphore nesneleriyle kritik kod aşağıdaki gibi oluşturulmaktadır:
+    up fonksiyonu yukarıda da belirttiğimiz gibi semaphore sayacını 1 artırmaktadır. 
 
-    DEFINE_SEMAPHORE(g_sem, 3);
-    ...
+    Bu durumda semaphore nesneleri ile kritik kod tipik olarak şöyle oluşturulmaktadır:
 
-    down_interruptible(&g_sem);
-    ...
-    ... <KRİTİK KOD>
-    ...
-    up(&g_sem);
+    down_interruptible(&sem);
+    .....
+    .....       KRİTİK KOD
+    .....
+    up(&sem);
 
     Yukarıdaki boru örneğinde biz mutex nesnesi yerine binary semaphore nesnesi de kullanabilirdik. Aşağıda aynı örneğin 
     binary semaphore ile gerçekleştirimi görülmektedir.
@@ -4873,25 +4894,28 @@ void exit_sys(const char *msg)
     void spin_lock_irqsave(spinlock_t *lock, unsigned long flags);
     void spin_lock_bh(spinlock_t *lock);
 
-    spin_lock fonksiyonu klasik spin yapan fonksiyondur. spin_lock_irq fonksiyonu o anda çalışılan işlemci ya da çekirdekteki 
-    IRQ'ları (yani donanım kesmelerini) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana 
-    kadar donanım kesmeleri oluşmayacaktır. spin_lock_irqsave fonksiyonu kritik koda girerken donanım kesmelerini kapatmakla 
-    birlikte önceki bir durumu geri yükleme yeteneğine sahiptir. Aslında bu fonksiyonların bazıları makro olarak yazılmıştır. 
-    Örneğin spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci parametresine nesne adresini geçmemiş olsak da 
-    bu bir makro olduğu için aslında ikinci parametrede verdiğimiz nesnenin içerisine IRQ durumları yazılmaktadır. spin_lock_bh
-    fonksiyonu yalnızca yazılım kesmelerini kapatmaktadır.
+    spin_lock fonksiyonu klasik spin yapan fonksiyondur. Bu fonksiyon thread'ler arası geçişi (preemption mekanizmasını) 
+    kapatır ancak kesmeleri kapatmamaktadır. Preemption işleminin kapatılması IRQ'ların (yani donnaım kesmelerinin) kapatıldığı 
+    anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemci ya da çekirdekteki IRQ'ları da (yani 
+    donanım kesmelerini de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana kadar 
+    donanım kesmeleri oluşmayacaktır. spin_lock_irqsave fonksiyonu kritik koda girerken donanım kesmelerini kapatmakla 
+    birlikte CPU'nun kesme öncesindeki bayrak yazmacını da saklamaktadır. Aslında bu fonksiyonların bazıları makro olarak 
+    yazılmıştır. Örneğin spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci parametresine nesne adresini 
+    geçmemiş olsak da bu bir makro olduğu için aslında ikinci parametrede verdiğimiz nesnenin içerisine IRQ durumları 
+    yazılmaktadır. spin_lock_bh fonksiyonu ise yalnızca yazılım kesmelerini kapatmaktadır.
 
-    3) Kilidin geri bırakılması için spin_unlock fonksiyonları kullanılmaktadır:
+    3) Spinlock kilidini bırakmak için spin_unlock fonksiyonları kullanılmaktadır:
 
     #include <linux/spinlock.h>
 
     void spin_unlock(spinlock_t *lock);
-    void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags);
     void spin_unlock_irq(spinlock_t *lock);
+    void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags);
     void spin_unlock_bh(spinlock_t *lock);
 
-    Yukarıdaki lock fonksiyonlarının hepsinin bir unlock karşılığının olduğunu görüyorsunuz. Biz kilidi hangi lock fonksiyonu 
-    ile almışsa o unlock fonksiyonu ile bırakmalıyız. Örneğin:
+    lock fonksiyonlarının hepsinin birer unlock karşılığının olduğunu görüyorsunuz. Biz kilidi hangi lock fonksiyonu ile 
+    almışsak o unlock fonksiyonu ile bırakmalıyız. Kritik kod spin_lock ile spin_unlock fonksiyonları arasında alınmalıdır. 
+    Örneğin:
 
     spin_lock(&g_spinlock);
     ...
@@ -4901,8 +4925,7 @@ void exit_sys(const char *msg)
 
     Ya da örneğin:
 
-    ...
-    unsigned long irqstate;
+        unsigned long irqstate;
     ...
 
     spin_lock_irqsave(&g_spinlock, irqstate);
@@ -4918,11 +4941,11 @@ void exit_sys(const char *msg)
     int spin_trylock(spinlock_t *lock);
     int spin_trylock_bh(spinlock_t *lock);
 
-    Bu fonksiyonlar eğer spinlock kilitliyse spin yapmazlar ve 0 ile geri dönerler. Eğer kilidi alırlarsa sıfır dışı bir değerle
-    geri dönerler.
+    Bu fonksiyonlar eğer spinlock kilitliyse spin yapmazlar ve 0 ile geri dönerler. Eğer kilidi alırlarsa sıfır dışı bir 
+    değerle geri dönerler.
 
-    Her ne kadar yukarıdaki boru sürücüsündeki read ve write fonksiyonlarında kuyruğu korumak için spinlock kullanımı uygun değilse 
-    de biz yine kullanım biçimini göstermek için aşağıdaki örneği veriyoruz.
+    Her ne kadar yukarıdaki boru sürücüsündeki read ve write fonksiyonlarında kuyruğu korumak için spinlock kullanımı uygun
+    değilse de biz yine kullanım biçimini göstermek için aşağıdaki örneği veriyoruz.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /* pipe-driver.c */
@@ -5218,31 +5241,30 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    Diğer çok kullanılan bir senkronizasyon nesnesi de "okuma yazma kilitleri (readers-writer locks)" denilen nesnelerdir. 
-    Önce bu nesnelere neden gereksinim duyulduğunu bir örnekle açıklamak istiyoruz. Aygıt sürücümüzde paylaşılan bir kaynak 
-    bulunuyor olsun. Örneğin bunun global bir liste (linked lists) olduğunu düşünelim. Bu bağlı listeye bir grup thread eleman
-    (node) ekliyor olsun, bir grup thread de bu bağlı listeyi dolaşarak eleman arıyor olsun. Tabii burada thread demekle aslında
-    aygıt sürücümüzdeki fonksiyonu çağıran kullanıcı modundaki herhangi bir prosesin herhangi bir thread'ini kastediyoruz. Burada
-    bağlı listede arama yapmak "okuma (read)" işlemi gibi düşünülebilir. Çünkü bu işlem paylaşılan kaynakta (burada bağlı liste)
-    bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilir. Ancak bağlı listeye eleman ekleyen 
-    thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o sırada başka bir thread de ekleme yaparsa ya 
-    da arama yaparsa bir çökme oluşturabilir. Burada bağlı listeye eleman eklemek bir yazma (write) işlemi olarak düşünülebilir. 
-    O halde bizim öyle bir kritik kod oluşturmamız gerekir ki birden fazla okuma yapan thread bu kritik koda girebilsin ancak 
-    bir thread okuma yaparken yazma yapan bir thread kritik koda girmeden okuma yapan thread çıkana kadar beklesin. Benzer biçimde
-    eğer yazma yapan bir thread kritik koda girmişse bu işlem bitene kadar okuma yapan bir thread de yazma yazma yapan bir thread 
-    de kritik koda giremez. Aşağıda Thread-1 kritik koda girmişse Thread-2'nin durumu açıklanmaktadır:
+    Diğer çok kullanılan bir senkronizasyon nesnesi de "okuma yazma kilitleri (readers-writer lock)" denilen nesnelerdir. 
+    Önce bu nesnelere neden gereksinim duyulduğunu bir örnekle açıklamak istiyoruz. Çekirdek kodlarında paylaşılan bir kaynak 
+    bulunuyor olsun. Örneğin bunun global bir bağlı liste (linked list) olduğunu düşünelim. Bu bağlı listeye bir grup thread 
+    eleman (düğüm) ekliyor olsun, bir grup thread de bu bağlı listeyi dolaşarak eleman arıyor olsun. Burada bağlı listede 
+    arama yapmak "okuma (read)" işlemi gibi düşünülebilir. Çünkü bu işlem paylaşılan kaynakta (burada bağlı liste) bir durum 
+    değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilir. Ancak bağlı listeye eleman ekleyen thread 
+    bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o sırada başka bir thread de ekleme yaparsa ya da 
+    arama yaparsa bu durum çökmeye yol açabilir. Burada bağlı listeye eleman eklemek bir yazma (write) işlemi olarak 
+    düşünülebilir. O halde bizim öyle bir kritik kod oluşturmamız gerekir ki birden fazla okuma yapan thread bu kritik koda 
+    girebilsin ancak bir thread okuma yaparken yazma yapan bir thread okuma yapan thread kritik koddan çıkana kadar beklesin. 
+    Benzer biçimde eğer yazma yapan bir thread kritik koda girmişse bu işlem bitene kadar okuma yapan thread de kritik koda 
+    giremesin. Aşağıda Thread-1 kritik koda girmişse Thread-2'nin durumu açıklanmaktadır:
 
-    Thread-1            Thread-2        Bloke Oluşmalı Mı?
-    -------------------------------------------------------
-    Okuma               Okuma           Hayır
-    Okuma               Yazma           Evet
-    Yazma               Okuma           Evet
-    Yazma               Yazma           Evet
+    Thread-1            Thread-2        Kritik Koda Girebilmeli Mi?
+    ---------------------------------------------------------------
+    Okuma               Okuma           Evet
+    Okuma               Yazma           Hayır
+    Yazma               Okuma           Hayır
+    Yazma               Yazma           Hayır
 
     Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalara izin vermektedir.
 
-    Bu mekanizma tek başına mutex ya da semaphore nesneleriyle sağlanamaz. Aşağıdaki temsili koda (pseudo code) dikkat 
-    ediniz:
+    Böyle bir mekanizma tek başına mutex ya da semaphore nesneleriyle sağlanamaz. Aşağıdaki temsili koda (pseudo code) 
+    dikkat ediniz:
 
     static DEFINE_MUTEX(g_mutex);
 
@@ -5260,58 +5282,98 @@ void exit_sys(const char *msg)
         mutex_unlock(&g_mutex);
     }
 
-    Burada birden fazla okuma işlemi de blokeye yol açacaktır.
+    Burada birden fazla okuma işlemi de blokeye yol açacaktır.	
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    Okuma yazma kilitleri Linux'ta spinlock oluşturarak çalışmaktadır. Bu nedenle bu nesnelere Linux'ta "spinlock'lu okuma yazma
-    kilitleri" reader/writer spinlock de denilmektedir.
+    Linux çekirdeğinde readers/writer lock nesneleri spinlock mekanizmasıyla çalışmaktadır. Yani bu nesneler thread'i bloke 
+    ederek uykuya daldırmazlar. Thread'ler arası geçişi (preemption) kapatarak meşgul bir döngüde kilidin açılmasını beklerler. 
+    Yine bu nesnelerin de tek işlemcili ya da tek çekirdekli sistemlerde bir kullanımı yoktur. Bu sistemlerde bu kilit 
+    fonksiyonları yalnızca thread'ler arası geçişi kapatıp açmaktadır.
+    
+    Okuma yazma kilitleri rwlock_t türüyle temsil edilmektedir. Bu yapı güncel çekirdeklerde şöyle bildirilmiştir:
 
-    Spinlock'lu okuma yazma kilitleri rwlock_t türüyle temsil edilmektedir. Bu nesnelerin tanımlanması yine iki biçimde yapılabilmektedir. 
-    Birinci biçimde DEFINE_RWLOCK(x) makrosu kullanılır. Örneğin:
+    typedef struct {
+        struct rwbase_rt	rwbase;
+        atomic_t		readers;
+    #ifdef CONFIG_DEBUG_LOCK_ALLOC
+        struct lockdep_map	dep_map;
+    #endif
+    } rwlock_t;
+    
+    Okuma yazma kilitlerinin nesnelerinin yaratılması DEFINE_RWLOCK(name) makrosuyla ya da rwlock_init fonksiyonuyla 
+    yapılmaktadır. DEFINE_RWLOCK(name) makrosu "include/linux/rwlock_types.h" dosyası içerisinde şöyle bildirilmiştir:
 
-    #include <linux/rwlock.h>
 
-    static DEFINE_RWLOCK(g_rwlock);
+    #ifdef CONFIG_DEBUG_SPINLOCK
+    #define __RW_LOCK_UNLOCKED(lockname)					    \
+        (rwlock_t)	{	.raw_lock = __ARCH_RW_LOCK_UNLOCKED,	\
+                    .magic = RWLOCK_MAGIC,			            \
+                    .owner = SPINLOCK_OWNER_INIT,		        \
+                    .owner_cpu = -1,			                \
+                    RW_DEP_MAP_INIT(lockname) }
+    #else
+    #define __RW_LOCK_UNLOCKED(lockname)                        \
+        (rwlock_t)	{	.raw_lock = __ARCH_RW_LOCK_UNLOCKED,	\
+                    RW_DEP_MAP_INIT(lockname) }
+    #endif
 
-    Bu makro eski çekirdeklerde bulunmamaktadır. Dolayısıyla kullanırken hata oluşursa diğer yöntemi deneyebilirsiniz. Spinlock'lu 
-    okuma yazma kilit nesneleri global düzeyde tanımlanıp bunlara rwlock_init fonksiyonuyla da ilkdeğer verilebillmektedir.
+    #define DEFINE_RWLOCK(x)	rwlock_t x = __RW_LOCK_UNLOCKED(x)
+
+    wrlock_init fonksiyonunun parametrik yapısı da şöyledir:
 
     #include <linux/rwlock.h>
 
     void rwlock_init(rwlock_t *lock);
 
-    Spinlock'lu okuma yazma kilitleri ile kritik kod oluşturmak için aşağıdaki fonksiyonlar kullanılmaktadır:
+    Okuma yazma kilitlerinin kilidini alan ve kilidini açan fonksiyonlar şunlardır:
 
     #include <linux/rwlock.h>
 
     void read_lock(rwlock_t *lock);
-    void read_lock_irqsave(rwlock_t *lock, unsigned long flags);
     void read_lock_irq(rwlock_t *lock);
+    void read_lock_irqsave(rwlock_t *lock, unsigned long flags);
     void read_lock_bh(rwlock_t *lock);
 
     void read_unlock(rwlock_t *lock);
-    void read_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void read_unlock_irq(rwlock_t *lock);
+    void read_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void read_unlock_bh(rwlock_t *lock);
 
     void write_lock(rwlock_t *lock);
-    void write_lock_irqsave(rwlock_t *lock, unsigned long flags);
     void write_lock_irq(rwlock_t *lock);
+    void write_lock_irqsave(rwlock_t *lock, unsigned long flags);
     void write_lock_bh(rwlock_t *lock);
     int write_trylock(rwlock_t *lock);
 
     void write_unlock(rwlock_t *lock);
-    void write_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void write_unlock_irq(rwlock_t *lock);
+    void write_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void write_unlock_bh(rwlock_t *lock);
 
-    Nesne read amaçlı lock edilmişse read amaçlı unlock işlemi, write amaçlı lock edilmişse write amaçlı unlock işlemi 
-    uygulanmalıdır. Fonksiyonların diğer işlevleri normal spinlock nesnelerinde olduğu gibidir.
+    Nesne okuma amaçlı lock edilmişse read amaçlı unlock işlemi, yazma amaçlı lock edilmişse yazma amaçlı unlock işlemi uygulanmalıdır. 
+    Fonksiyonların diğer işlevleri normal spinlock nesnelerinde olduğu gibidir. Örneğin okuma amaçlı krtik kod şöyle oluşturulabilir:
+
+    static DEFINE_RWLOCK(g_rwlock);
+    /* ... */
+
+    read_lock(&g_rwlock);
+    ...
+    ...         KRİTİK KOD
+    ...
+    read_unlock(&g_rwlock);
+
+    Yazma amaçlı kritik kod da şöyle oluşturulabilir:
+
+    write_lock(&g_rwlock);
+    ...
+    ...         KRİTİK KOD
+    ...
+    write_unlock(&g_rwlock);
 
     Örneğin biz bu fonksiyonlarla okuma yazma işlemlerini aşağıdaki gibi senkronize edebiliriz:
 
-     static DEFINE_RWLOCK(g_rwlock);
+    static DEFINE_RWLOCK(g_rwlock);
 
     read()
     {
