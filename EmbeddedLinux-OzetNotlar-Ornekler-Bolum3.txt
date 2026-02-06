@@ -1,4 +1,3 @@
-
 /*-----------------------------------------------------------------------------------------------------------------------------
                                             C ve Sistem Programcıları Derneği
 
@@ -9623,6 +9622,582 @@ void exit_sys(const char *msg)
     $ sudo umount fat
     $ sudo umount ext4
     $ sudo losetup -d /dev/loop0
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            156. Ders 22/01/2026 - Perşembe
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi "sdcard.img" disk imajını SD kartımıza yazalım. SD kartımızı SD kart okuyucuya takıp "lsblk" uyguladığımızda şunları 
+    görüyoruz:
+
+    $ lsblk
+    NAME   MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+    sda      8:0    0  100G  0 disk 
+    ├─sda1   8:1    0    1M  0 part 
+    ├─sda2   8:2    0  513M  0 part /boot/efi
+    └─sda3   8:3    0 97,7G  0 part /
+    sdb      8:16   1    0B  0 disk 
+    sdc      8:32   1 14,8G  0 disk 
+    ├─sdc1   8:33   1   16M  0 part /media/kaan/0326-0405
+    └─sdc2   8:34   1  512M  0 part /media/kaan/rootfs
+
+    Burada SD kart içerisinde daha önce disk bölümleri oluşturulduğu için otomatik mount işlemi yapılmıştır. SD karta yazma 
+    işlemindne önce bu disk bölümlerinin unmount edilmesi gerekir:
+
+    $ sudo umount /dev/sdc1
+    $ sudo umount /dev/sdc2
+
+    Artık "dd" komutuyla "output/images/sdcard.img" dosyasını SD karta yazabiliriz:
+
+    $ sudo dd if=output/images/sdcard.img of=/dev/sdc bs=4096 status=progress
+    19456+1 kayıt girdi
+    19456+1 kayıt çıktı
+    79692288 bytes (80 MB, 76 MiB) copied, 11,6621 s, 6,8 MB/s
+
+    Artık SD kartımızı çıkartıp BBB'ye takıp "boot" düğmesine basarak BBB'yi SD karttan boot edebiliriz. Bunun için yine 
+    seri kabloyu bağlayacağız ve picocom programını da çalıştıracğız:
+
+    $ sudo picocom -b 115200 /dev/ttyUSB0
+
+    Artık BBB'yi Buildroot ile oluşturduğumuz imajla boot ettik. Karşımıza şöyle bir login ekranı gelecektir:
+
+    buildroot login: 
+
+    Burada "root" isimli kullanıcı yaratılmış durumdadır. Ancak bu kullanıcıya parola atanmamıştır. Dolayısıyla kullanıcı 
+    isimi için "root" yazılıp ENTER tuşuna basılırsa kabuk ortamına geçeceğiz. Biz "root" kullanıcısıyla login olduğumuza 
+    göre "/home/root" dizininde olmalıyız:
+
+    # pwd
+    /root
+
+    Örneğin "/bin" dizinine baktığımızda şunları görmekteyiz:
+
+    # ls -l /bin
+    total 850
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 arch -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 ash -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 base32 -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 base64 -> busybox
+    -rwsr-xr-x    1 root     root        870032 Jan 20  2026 busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 cat -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 chattr -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 chgrp -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 chmod -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 chown -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 cp -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 cpio -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 date -> busybox
+    lrwxrwxrwx    1 root     root             7 Jan 20  2026 dd -> busybox
+    ......
+
+    Görüldüğü gibi Buildroot default konfigürasyonda BusyBox kullanmıştır.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bizim default konfigürasyonla oluşturduğumuz disk çok küçüktür. Zaten Buildroot genel olarak küçük kapasiteli gömülü 
+    sistemler için tercih edilmetedir. Oluşturulan disk bölümlerinin büyüklerine dikkat ediniz:
+
+    Device       Boot StartCHS    EndCHS        StartLBA     EndLBA    Sectors  Size Id Type
+    /dev/mmcblk0p1 *  0,0,2       2,10,9               1      32768      32768 16.0M  c Win95 FAT32 (LBA)
+    /dev/mmcblk0p2    2,10,10     67,79,13         32769    1081344    1048576  512M 83 Linux
+
+    Göürldüğü gibi default konfigürasyonda 512 MB Linux disk bölümü için 16 MB de FAT disk bölümü için ayrılmıştır. Şimdi 
+    "df" komutu ile Linux disk bölümünün ne kadarının dolu olduğuna bakalım:
+
+    # df
+    Filesystem           1K-blocks      Used Available Use% Mounted on
+    /dev/root                52282     35045     12937  73% /
+    devtmpfs                219124         0    219124   0% /dev
+    tmpfs                   244212         0    244212   0% /dev/shm
+    tmpfs                   244212        36    244176   0% /tmp
+    tmpfs                   244212        24    244188   0% /run
+
+    Görüldüğü gibi disk bölümümüzün %73'ü dolu biçimdedir. Yaklaşık 130 MB boş bir alan bulunmaktadır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Aslında yukarıda da belirttiğimiz gibi Buildroot için make işlemi yapıldıktan sonra "output/target" dizininde zaten kök 
+    oluşturulan kök dosya sistemi sıkıştırılmamış biçimde bulunmaktadır. Biz istersek o dizine chroot yapabiliriz. Anımsayacağınız
+    gibi bu kök dosya sistemi ARM için kod bulundurduğundan dolayı qemu için aşağıdaki gibi binfmt-support paketinin yüklenmesi 
+    gerekmektedir. 
+
+    $ sudo apt install qemu qemu-user-static binfmt-support
+
+    Artık chroot yapabiliriz:
+
+    $ sudo chroot output/target /bin/sh -i
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Buildroot derlemesi sonucunda oluşan dosyaları manuel olarak SD karta yazalım. Çünkü bazı hedef maimariler için 
+    "sdcard.img" dosyası hiç oluşturulmamaktadır. Buildroot tarafından oluşturulan dosyaların manuel bir biçimde SD karta 
+    kopyalanması şöyle yapılabilir:
+
+    1) SD kartta yine iki disk bölümü oluşturulur. Birinci disk bölümü FAT ikinci disk bölümü ext4 olabilir. Bu işlemi biz 
+    "fdisk" programıyla ya da "gparted" gibi GUI arayüzüyle yapmayı görmüştük. Biz de burada 16 MB FAT ve geri kalan bölümü 
+    ext4 disk bölümü biçiminde oluşturduk.
+
+    2) Oluşturulan disk bölümlerinin formatlanması gerekmektedir:
+
+    $ sudo mkfs.fat -F32 /dev/sdc1
+    $ sudo mkfs.ext4 /dev/sdc2
+
+    3) Kök dosya sistemini SD kartın Linux disk bölümüne bire bir kopyalayabiliriz. Tabii önce bu disk bölümünü mount etmemiz 
+    gerekir. mount dizinin "ext4" olduğunu varsayalım:
+
+    $ sudo mount /dev/sdc2 ext4
+    $ sudo cp -r output/target/* ext4
+    $ sudo umount ext4
+
+    4) Şimdi de FAT disk bölümüne dosyaları kopyalayalım. Öncelikle FAT disk bölümünü de mount edelim. Mount dizininin "fat" 
+    olduğunu varsayıyoruz:
+    
+    $ sudo mount /dev/sdc1 fat
+    
+    Anımsanacağı gibi "MLO" ve "u-boot.img" dosyalarının FAT disk bölümünün kök dizininde bulunması gerekiyordu:
+
+    $ cp output/images/MLO fat
+    $ cp output/images/u-boot.img fat
+
+    Aslında geleneksel olarak Linux sistemlerinde çekirdeğe ilişkin dosyalar kök dosya sisteminin içerisindeki "/boot" 
+    dizininde bulundurulmaktadır. Ancak Buildroot'un oluşturduğu kök dosya sisteminde "boot" dizini yoktur. Tabii biz bunu 
+    manuel olarak oluşturabiliriz. Ancak Buildroot tarafından oluşturulan "uEnv.txt" dosyasındaki komutlar da çekirdeğe
+    ilişkin bu dosyaların FAT dosya sistemiin kök dizininde olduğunu varsaymaktadır. Tabii biz aslında Buildroot tarafından 
+    oluşturulan "uEnv.txt" dosyasını kullanmak zorunda değiliz. Ama burada onu kullanalım. Buildroot tarafından oluşturulan 
+    "uEnv.txt" dosyasının içeriği şöyledir:
+
+    bootpart=0:1
+    devtype=mmc
+    bootdir=
+    bootfile=zImage
+    bootpartition=mmcblk0p2
+    console=ttyS0,115200n8
+    loadaddr=0x82000000
+    fdtaddr=0x88000000
+    set_mmc1=if test $board_name = A33515BB; then setenv bootpartition mmcblk1p2; fi
+    set_bootargs=setenv bootargs console=${console} root=/dev/${bootpartition} rw rootfstype=ext4 rootwait
+    uenvcmd=run set_mmc1; run set_bootargs;run loadimage;run loadfdt;printenv bootargs;bootz ${loadaddr} - ${fdtaddr}
+
+    O halde gerekli olan dosyaları da aşağıdaki gibi FAT disk bölümünün kök dizinine kopayalabiliriz:
+
+    $ cp output/images/zImage fat
+    $ cp output/images/am335x-boneblack.dtb fat
+    $ cp output/images/uEnv.txt fat
+
+    Artık FAT bölümünü de unmount edebiliriz:
+
+    $ sudo umount fat
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            157. Ders 27/01/2026 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Buildroot tarafındna oluşturulan dosyaları manuel olarak da kopyaladık. Şimdi Buildroot konfigürasyonu üzerinde duralım.
+    Biz yukarıda default bir konfigürasyon dosyasını çekip onun üzerinde hiç değişiklik yapmadan make işlemini yaptık. Aslında"
+    "make menuconfig" menüsünde pek çok senek ayarlanabilmektedir. Şimdi bu seçenekler üzerinde duracağız. "make menuconfig" 
+    yaptığımızda aşağıdaki gibi bir menü çıkartılmaktadır:
+
+    ┌─┤ Target options  ───>
+    │  Toolchain  ───>
+    │  Build options  ───>
+    │  System configuration  ───>
+    │  Kernel  ───>
+    │  Target packages  ───>
+    │  Filesystem images  ───>
+    │  Bootloaders  ───>
+    │  Host utilities  ───>
+    │  Legacy config options  ───>
+
+    Burada "Taget options" alt menüsü hedef makinenin özelliklerini belirlemek için kullanılmaktadır. Tabii biz "beaglebone_defconfig"
+    konfigürasyon dosyasındna hareketle ".config" dosyasını oluşturduğumuz için bu alt menüdeki seçenekler zaten BBB'ye uygun
+    bir biçimde set edilmiş olcaktır:
+
+    ┌─ Target Architecture (ARM (little endian))  ───>
+    │  Target Architecture Variant (cortex-A8)  ───>
+    │  Target ABI (EABIhf)  ───>
+    │  Floating point strategy (VFPv3)  ───>
+    │  ARM instruction set (ARM)  ───>
+    │  Target Binary Format (ELF)  ───>
+
+    Görüldüğü gibi burada her şey olması gerektiği gibidir. Şimdi Toolchain alt menüsüsüne bakalım. Toolchain alt menüsü 
+    araç zinciri (derleyici, bağlayıcı, binary araçlar vs) hakkında belirlemelerin yapıldığı yerdir. Bu menü aşağıdaki yapıdadır:
+
+    ┌─█ ┤ Toolchain type (Buildroot toolchain)  ───>
+    │      *** Toolchain Buildroot Options ***
+    │  (buildroot) custom toolchain vendor name (NEW)
+    │      C library (glibc)  ───>
+    │      *** Kernel Header Options ***
+    │      Kernel Headers (Same as kernel being built)  ───>
+    │      Custom kernel headers series (6.12.x)  ───>
+    │      *** Glibc Options ***
+    │  [ ] Enable compatibility shims to run on older kernels (NEW)
+    │  [ ] Install glibc utilities (NEW)
+    │      *** Binutils Options ***
+    │      Binutils Version (binutils 2.43.1)  ───>
+    │  [ ] gprofng support (NEW)
+    │  ()  Additional binutils options (NEW)
+    │      *** GCC Options ***
+    │      GCC compiler Version (gcc 14.x)  ───>
+    │  ()  Additional gcc options (NEW)
+    │  [ ] Enable C++ support (NEW)
+    │  [ ] Enable Fortran support (NEW)
+    │  [ ] Enable compiler OpenMP support (NEW)
+    │  [ ] Enable graphite support (NEW)
+    │      *** Host GDB Options ***
+    │  [ ] Build cross gdb for the host (NEW)
+    │      *** Toolchain Generic Options ***
+    │  [ ] Copy gconv libraries (NEW)
+    │  ()  Extra toolchain libraries to be copied to target (NEW)
+    │  ()  Target Optimizations (NEW)
+    │  ()  Target linker options (NEW)
+    │      *** Bare metal toolchain ***
+    │  [] Build bare metal toolchains (NEW)
+
+    Buradaki "Toolchain type" aslında iki seçenekten oluşmaktadır:
+
+    ┌─ (X) Buildroot toolchain
+    │  ( ) External toolchain
+
+    "Buildroot toolchain" seçeneği "araç zinciri dosyalarının indirilerek Buildroot tarafından derlenmek suretiyle oluşturulacağı 
+    anlamına geşmektedir. "External toolchain" ise zaten hazır var olan (örneğin ARM şirketinin, Linaro vs.) araç zincirinin 
+    indilip derlenmedne kullanılacağı anlamına gelmektedir. Tabii bu seçenek seçildiğinde başka bir alt menüde hangi external 
+    araç zincirinin kullanılacağı sorulmaktadır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                        158. Ders 29/01/2026 - Perşembe                                            
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    "C library" seçeneği C derleyicisinin kullanacağı standart C kütüphanesinin ve POSIX kütüohanesinin hangisi olacağını 
+    belirlemekte kullanılmaktadır. Bu seçenek seçildiğinde aşağıdaki alt menü görünecektir:
+
+    ( ) uClibc-ng
+    (X) glibc
+    ( ) musl
+
+    Görüldüğü gibi default durumda GNU'nun glibc kütüphanesi seçilmiştir. uClibc-ng ve musl daha az yer kaplayan minimalistik 
+    C ve POSIX kütüphaneleridir. 
+
+    "Kernel Headers" alt menüsünde çeşitli bileşenlerin derlenmesi için ve aygıt sürücü yazımında kullanabilmek için başlık 
+    çekirdek dosyalarının versiyonu seçilmektedir:
+
+    (X) Same as kernel being built
+    ( ) Linux 5.10.x kernel headers
+    ( ) Linux 5.15.x kernel headers
+    ( ) Linux 6.1.x kernel headers
+    ( ) Linux 6.6.x kernel headers
+    ( ) Linux 6.12.x kernel headers
+
+    Buradaki en normal durum "Same as kernel being built" seçeneğinin seçilmesidir. Bu durumda hangi çekirdek derlenecekse 
+    ona ilişkin başlık dosyaları diğer derlemeler için kullanılmaktadır. 
+
+    "Custom kernel heder series" alt menüsü spesifik bir çekirdeğe ilişkin başlık dosyalarının kullanılmasına olanak sağlamaktdır. 
+
+    "Binutils Version" alt menüsünde "binutils" paketnine ilişkin versiyon numarasının belirlemesi yapılmaktadır:
+
+    ( ) binutils 2.42
+    (X) binutils 2.43.1
+    ( ) binutils 2.44
+
+    Binutils isimli paket içerisinde sistem programlama araçlarının önemli bir bölümü bulunmaktadır. Bu paket Linux sistemleri 
+    için son derece temel bir pakettir. Bu paketin içerdiği araçlar şunlardır:
+
+    – ar — Statik kütüphaneler (.a) oluşturur ve yönetir
+    – as — GNU assembler (assembly → object)
+    – ld — GNU linker
+    – ld.bfd — BFD tabanlı klasik GNU linker
+    – gold — Alternatif, daha hızlı linker (artık çoğu yerde deprecated)
+    – nm — Object dosyalarındaki sembolleri listeler
+    – objdump — Object / ELF dosyalarını ayrıntılı analiz eder
+    – objcopy — Object dosyalarını dönüştürür, section ekler/siler
+    – ranlib — Statik kütüphaneler için sembol indeksini oluşturur
+    – size — Object dosyalarının section boyutlarını gösterir
+    – strings — Binary içindeki yazdırılabilir string’leri çıkarır
+    – strip — Sembol ve debug bilgilerini siler
+    – addr2line — Adresleri kaynak kod satırlarına çevirir
+    – c++filt — C++ mangled sembol isimlerini çözer
+    – readelf — ELF dosyalarının header ve section bilgilerini okur
+    – elfedit — ELF header alanlarını düzenler
+    – dwp — DWARF debug bilgilerini birleştirir
+    – gprof — Program profil çıktısını analiz eder
+    – dlltool — Windows DLL import/export tanımları üretir
+    – windres — Windows resource dosyalarını derler
+    – windmc — Windows message compiler
+
+    Bu paket hedef kök dosya sistemine kurulmamaktadır. Yalnızca bazı derlemelerin yapılması için kullanılmaktadır. 
+
+    "gprofng support" seçeneği "modern profiler" desteğinin istenip istenmediğini belirtmektedir:
+
+    [ ] gprofng support
+
+    Ancak bu desteğin verilmiş olması bu aracın hedef kök dosya sisteminde bulunacağı anlamına gelmemektedir. Bu araç sayesinde
+    biz gömülü sistemde bir program çalıştırıp onu host sistemde profile edebiliriz. 
+
+    "GCC compiler OVersionption" alt menüsü ile derlemenim yapılacağı C derleyicisinin versiyon numarası seçilmektedir. Alt menünün 
+    görünümü şöyledir:
+
+    ( ) gcc 13.x
+    (X) gcc 14.x
+    ( ) gcc 15.x
+
+    "Additional gcc options" alt menüsünde araçlar derlenirken gcc için kullanılacak ek komut satırı argümanları belirtilmektedir. 
+    "Enable C++ support" Host sistem için C++ derleyicisinin (g++) kurulup kurulmayacağını belirtmektedir:
+
+    [ ] Enable C++ support
+
+    Buranın çarpılanması C++ derleyicisinin hedef kök dosya sistemine yerleştirileceği anlamına gelmemektedir. Host sisteme 
+    bu çapraz derleyicinin de kurulacağı anlamına gelmektedir. 
+
+    "Enable Fortran Support" seçeneği host sistem içim Fortran çapraz derleyicisinin de kurulup kurulmaayacağını belirtmektedir:
+
+    [ ] Enable Fortran support 
+
+    "Enable graphite support" seçeneği gcc derleyicisie “Graphite” optimizasyon altyapısını eklemektedir:
+
+    [ ] Enable graphite support   
+
+    "Build cross gdb for the host" seçeneği host sistem için çağraz "gdb" debugger'ını da dahil etmek için kullanılmaktadır. 
+    Bu sayede biz host sistemde hedef sistem için derlediğimiz programları debug edebiliriz. Aynı zamanda gömülü sistemde 
+    program çalışırken host sistemden de onu debug edebiliriz:
+
+    [] Build cross gdb for the host    
+
+    "Extra toolchain libraries to be copied to target" seçeneği hedef kök dosya sistemine araç zinvciri ile ilgili başka 
+    kütüphanelerin de derlenerek kopyalanıp kopyalanmayacağını belirtmektedir:
+
+    ()  Extra toolchain libraries to be copied to target  
+
+    Burada belirtilecek olan kütüphaneler hedef kök dosya sisteminin "/lib" ya da "/usr/lib" dizinlerine çekilmektedir. 
+    Burada biz herhangi bir kütüphaneyi belirtemeyiz. Araç zincirinin bir parçası olan kütüphaneleri belirtebiliriz. 
+
+    "Target Optimizations" seçeneği hedef sistem için derlenecek tüm paketlere uygulanacak varsayılan derleyici optimizasyon 
+    bayraklarını belirtmektedir:
+
+    ()  Target Optimizations  
+
+    "Target linker options" seçeneği derlenmiş olan araçların link edilmesi sırasında kullanılacak ekstra komut satırı 
+    argümanlarını belirtmektedir:
+
+    ()  Target linker options  
+
+    "Build bare metal toolchains" seçeneği işletim sistemi olmadan çalışabilecek "bare metal" araç zincirinin de oluşturulup 
+    oluşturulmayacağını belirtmektedir:
+
+    [ ] Build bare metal toolchains  
+
+    Bu seçenek seçildiğinde araç zinciri "bare metal" ortamlar için üretilmektedir. 
+
+    Görüldüğü gibi "Toolchain" menüsündeki seçenekler aslında öoğu durumda bir ayrıntı biçimindedir. Burada "C kütüphanesi" 
+    ve "C++ desteği" dışındaki seçenekler genellikle seçilmemektedir. 
+
+    Burada dikkat edilmesi gereken bir durum da vardır. Özellikle "Toolchain" menüsünde yapılan bazı değişikliklerden sonra 
+    "make" işlemini yapabilmek için maalesef "make clean" gerekebilmektedir. Örneğin C kütüphanesini "glibc" yerine "musl" 
+    olarak seçtiğimizde eskiden yaptığımız make işlemi artık tümden geçersiz hale gelmektedir. (Çünkü biz derleyicinin temel 
+    kütüphanesini değiştirdiğimiz için tüm derlemelerin yeniden bu koşula göre yapılması gerekecektir.) Bu tür durumlarda 
+    "make clean" otomatik yapılmamaktadır.  
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Ana menüdeki "Build Options" alt menüsü tamamen "make" işlemi ile ilgilidir. Genellikle bu alt menü default değerler seçili 
+    biçimde bırakılmaktadır. Biz burada bu alt menünün önemli girişleri hakkında bazı açıklamalar yapacağız. 
+
+    "Commands" alt menüsünde "make" işlemi sırasında kullanılacak kabuk komutları belirtilmektedir. Burada geliştirici bazı
+    yerine başka komut isimleri de girebilmektedir. Ancak genellikle bu "Commands" alt menüsünde bir değişiklik yapılmaz. 
+
+    "($(TOPDIR)/dl) Download dir" seöeneği indirlecek paketlerin save edileceği dizini belirtmektedir. Default durumda gördüğünüz 
+    gibi paketler ana dizindeki "dl" dizininin altına save edilmektedir. 
+
+    "($(BASE_DIR)/host) Host dir" seçeneği derlenmiş olan host sistemde çalışacak çapraz araçların konuşlandırıldığı ana dizinin 
+    yerini belirtmektedir. Buradaki $(BASE_DIR) çevre dğeişkeni Buildroot'u indirdiğimiz ana dizinin altındaki "output" dizinini
+    belirtmektedir. Dolayosıyla "$(BASE_DIR)/host" dizini de aslında "output" dizini içerisindeki "host" isimli dizindir. Biz bu 
+    dizini bu seçenekle değiştirebiliriz. Bu dizin de kendi içerisinde aşağıdaki alt dizinlerden oluşmaktadır:
+
+    output/host/
+    ├── bin/
+    │   ├── arm-linux-gcc
+    │   ├── arm-linux-ld
+    │   ├── pkg-config
+    │   ├── cmake
+    │   └── gprofng
+    ├── lib/
+    ├── include/
+    ├── share/
+    └── arm-buildroot-linux-gnueabihf/
+        ├── bin/
+        │   ├── gcc
+        │   ├── objdump
+        │   └── strip
+        └── sysroot/
+            ├── lib/
+            └── usr/
+
+    Bu "host" dizininde şu binary araçlar bulunmaktadır:
+
+    - Çapraz derleyiciler ve diğer çapraz işlem yapan araçlar.
+    - Çapraz işlem yapmayan ancak host sistemde bulunması gereken bazı temel araçlar (örneğin "flex"i "bison" gibi). Bu 
+    araçların bazıları zaten tipilk Linux sistemlerinde bulunuyor olsa da Buildroot yeniden bu araöları bu dizine çekmektedir. 
+    Böylece daha sağlam bir çalışmayı sağlamaktadır. Buradakş araçları iki kısma ayırabiliriz:
+
+    1) Çapraz araçlar (yani hıost sistemde çalışan ancak hedef sistem için üretim yapan araçlar)
+    2) Build araçları. Bunlar hedef sistem içim üretim yazpmazlar. Host sistemde çalışan ancak make işlemi işlemi sırasında 
+    kullanılan araçlardır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            159. Ders 03/02/2026 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    "Strip target binaries" seçeneği çalıştırılabilir program dosyalarının ELF formatındaki bazı bölümlerinin atılacağını 
+    ("strip" isimli utility de bunu zaten yapmaktadır) belirtmektedir:
+
+    [*] strip target binaries
+    ( ) executables that should not be stripped
+    ( ) directories that should be skipped when stripping
+    
+    Burada istenirse seçilen dosyalar ya da dizinler bu işlemlerin dışında bırakılabilmektedir. Strip işlemi binary dosyaların 
+    boyutunu küçültmektedir. Gömülü sistemlerde kısıtlı bir disk alanı olduğu için bu durum genellikle tercih edilmektedir. 
+   
+    Normal olarak sistem araçlarının çoğu gcc ile -O2 optimizasyon düzeyinde derlenmektedir. Ancak bu durum da "gcc optimization 
+    level" seçeneği ile ayarlanablmektedir:
+
+    gcc optimization level (optimization level 2)  --->  
+
+    Bu seçenek seçildiğinde aşağıdaki alt menu görüntülenecektir:
+
+    ( ) optimization level 0
+    ( ) optimization level 1
+    (X) optimization level 2
+    ( ) optimization level 3
+    ( ) optimize for debugging
+    ( ) optimize for size
+
+    gcc'de O1, O2 ve O3 optimizasyon düzeyleri aslında bir grup optimizasyon seçeneğini aktif hale getirmektedir. Optimizasyon 
+    düzeyi yükseltildikçe derleme zamanı uzamakta ve üretilen kodlar da büyüyebilmektedir. 
+
+    "Libraries (Shared Only)" seçeneği sistem kütüphanelerinin dinamik olarak mı statik olarak mı kullanılacağını belirtmektedir:
+
+    libraries (shared only)  ---> 
+
+    Bu seçenek seçildiğinde aşağıdaki alt menü görüntülenecektir:
+
+    (X) shared only                                       
+    ( ) both static and shared                            
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Ana menüdeki "System Configuration" menüsü genel olarak oluşturulan sistemin konfigürasyonu ile ilgili seçenekleri 
+    barındırmaktadır. Bu menü seçildiğinde aşağıdaki alt menü görüntülenecektir:
+
+    ┌──────────────────────────────────────────────────────────────────────────────────────────┐
+    │ Root FS skeleton (default target skeleton)  --->                                         │
+    │ (buildroot) System hostname                                                              │
+    │ (Welcome to Buildroot) System banner                                                     │
+    │     Passwords encoding (sha-256)  --->                                                   │
+    │     Init system (BusyBox)  --->                                                          │
+    │     /dev management (Dynamic using devtmpfs + mdev)  --->                                │
+    │ (system/device_table.txt) Path to the permission tables                                  │
+    │ [ ] Support extended attributes in device tables                                         │
+    │ [ ] Merged /usr                                                                          │
+    │ [*] Enable root login with password                                                      │
+    │     () Root password                                                                     │
+    │     /bin/sh (busybox' default shell)  --->                                               │
+    │ [*] Run a getty (login prompt) after boot  --->                                          │
+    │ [*] remount root filesystem read-write during boot                                       │
+    │ ( ) Network interface to configure through DHCP                                          │
+    │ (/bin:/sbin:/usr/bin:/usr/sbin) Set the system's default PATH                            │
+    │ [*] Purge unwanted locales                                                               │
+    │ (C en_US) Locales to keep                                                                │
+    │     Generate locale data                                                                 │
+    │ [ ] Enable Native Language Support (NLS)                                                 │
+    │ [ ] Install timezone info                                                                │
+    │ ( ) Path to the users tables                                                             │
+    │ ( ) Root filesystem overlay directories                                                  │
+    │ ( ) Custom scripts to run before commencing the build                                    │ 
+    │  (support/scripts/genimage.sh) Custom scripts to run after creating filesystem images    │ 
+    │  (-c board/beaglebone/beaglebone/genimage.cfg) Extra arguments passed to custom scripts  │ 
+    │  ( ) Extra arguments passed to BR2_ROOTFS_POST_BUILD_SCRIPT                              │ 
+    │  () Extra arguments passed to POST IMAGE SCRIPT                                          │
+    └──────────────────────────────────────────────────────────────────────────────────────────┘
+
+    "Root FS skeleton (default target skeleton)" seçeneği kök dosya sisteminin dizin yapısını belirtmektedir. Standart Linux 
+    sistemlerindeki dizin yapısının yanı sıra uygulamacı burada kendi dizinlerinin de kök dosya sistemi içerisinde yaparılmasını 
+    sağlayabilmektedir. 
+
+    "(buildroot) System hostname" seçenği host ismininin istenildiği gibi seçilebilmesine olanak sağlamaktadır:
+
+    "(Welcome to Buildroot) System banner" seçeneği login programına düşmeden önce console ekranına basılacak mesjı belirtmektedir. 
+    DDefault durumda bu mesaj "Welcome to Buildroot" biçimindedir. Buradan onu değiştirebiliriz. 
+
+    "Init System" seçeneği boot sonrasında çalıştırılacak "init" paketini belirlemek için kullanılmaktadır. Modern sistemlerde 
+    "systemd" kullanıldığını anımsayınız. Ancak "systemd" fazla yer kaplama eğiliminde olan bir init sistemidir. Bu menü 
+    seçildiğinde aşağıdaki alt menü görüntülenecekti:r
+
+    (X) BusyBox
+    ( ) systemV
+    ( ) OpenRC
+    ( ) systemd
+
+    BusyBox kök dosya sisteminin aynı zamanda hafif bir init sistemine de sahip olduğunu anımsayınız. Burada örneğin "systemd" 
+    init paketinin seçilmesi "ls" gibi "cat" gibi komutlara ilişkin program dosyalarının bağımsız çalıştırılabilen dosyalar 
+    biçiminde oluşturulacağı anlamına gelmemektedir. Yalnızca "init" sistemi olarak "systemd" kullanılacağı anlamına gelmektedir. 
+    Daha önceleri de belirttiğimiz gibi gömülü sistemlerin kaynakları bol olmadığı için BusyBox pek çk projede iyi bir seçenektir. 
+    Zaten Buildroot bu nedenden dolayı onu "default init paketi" durumuna getirmiştir. BusyBox init paketinin çok hafif olması 
+    sistemin de hızlı kendine gelmesine yol açmaktadır. 
+
+    "systemd" init sistemine geçerken iki duruma dikkat ediniz:
+
+    1) "systemd" init sistemi diskte çok yer kaplamaktadır. Dolayısıyla Linux disk bölümünü artırmanız gerekebilir. Bunun 
+    için "board/beagleboard/genimage.cfg" dosyasında "partition rootfs" kısmında size değerini yükseltmelisiniz. 
+
+    ...
+    partition rootfs {
+        partition-type = 0x83
+        image = "rootfs.ext4"
+        # BU SATIRI DEĞİŞTİRİN:
+        size = "1024M"  # 512M yerine 1024M yapın
+    }
+    ...
+
+    2) Linux disk bölümünün boyutunu değiştirdikten sonra ayrıca ext4 dosya sisteminin boyutunu da izleyen paragraflarda 
+    açıklayacağımız gibi değiştirmelisiniz. Bu işlem ".config" dosyasındaki BR2_TARGET_ROOTFS_EXT2_SIZE konfigürayon 
+    seçeneği ile hızlı bir biçimde yapılabilmektedir:
+
+    BR2_TARGET_ROOTFS_EXT2_SIZE="1000M"
+
+    "(system/device_table.txt) Path to the permission tables" seçeneği kök dosya sistemindeki dizinlerin erişim haklarının
+    ve bazı özelliklerinin değiştirilmesi amacıyla kullanılmaktadır. Burada default durumda "system/device_table.txt" dosyası 
+    seçilidir. Doğrudan bu dosya üzerinde değişiklikler yapılabilir ya da buraya başka bir dosyanın yol ifadesi girilebilir. 
+    Default "device_table.txt" dosyasının içeriği şöyledir:
+
+    # <name>				<type>	<mode>	<uid>	<gid>	<major>	<minor>	<start>	<inc>	<count>
+    /dev					d	755	0	0	-	-	-	-	-
+    /tmp					d	1777	0	0	-	-	-	-	-
+    /etc					d	755	0	0	-	-	-	-	-
+    /root					d	700	0	0	-	-	-	-	-
+    /var/www				d	755	33	33	-	-	-	-	-
+    /etc/shadow				f	600	0	0	-	-	-	-	-
+    /etc/passwd				f	644	0	0	-	-	-	-	-
+    /etc/network/if-up.d			d	755	0	0	-	-	-	-	-
+    /etc/network/if-pre-up.d		d	755	0	0	-	-	-	-	-
+    /etc/network/if-down.d			d	755	0	0	-	-	-	-	-
+    /etc/network/if-post-down.d		d	755	0	0	-	-	-	-	-
+    # uncomment this to allow starting x as non-root
+    #/usr/X11R6/bin/Xfbdev		     	f	4755	0	0	-	-	-	-	-
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
