@@ -23,12 +23,12 @@
 /*----------------------------------------------------------------------------------------------------------------------
     Kursumuzun bu bölümünde Linux çekirdeğindeki senkronizasyon mekanizmaları üzerinde duracağız. Çekirdek içerisindeki
     kodlar iç içe geçebilecek biçimde (re-entrant) çalışabilmektedir. Eğer makinenizde birden fazla işlemci ya da çekirdek 
-    varsa çekirdek kodları bunlar tarafından eş zamanlı biçimde işletilebilmektedir. Tem işlemcili ya da çekirdekli 
+    varsa çekirdek kodları bunlar tarafından eş zamanlı biçimde işletilebilmektedir. Tek işlemcili ya da çekirdekli 
     sistemlerde bile "thread'ler arası geçiş ve kesme mekanizmalarından dolayı" iç içe geçme söz konusu olabilmektedir. 
-    Linux çekirdekleri 2.6 ile birlikte "preemptive" hale getirilmiştir. Eskidne 2.6 öncesinde bir thread akışı 
-    çekirdek moduna geçtiğinde oradan çıkana kadar threadler arası geçiş (preemtion) oluşmuyordu. Ancak 2.6 çekirdekleriyle
-    birlikte bir thread akışı örneğin bir sistem fonksiyonunda ilerlerken quanta süresi dolduğundan dolayı çekirdek 
-    içerisinde de kesilebilmektedir. 
+    Linux çekirdekleri 2.6 ile birlikte "preemptive" hale getirilmiştir. Eskidne 2.6 öncesinde bir thread akışı çekirdek 
+    moduna geçtiğinde oradan çıkana kadar threadler arası geçiş (preemtion) oluşmuyordu. Ancak 2.6 çekirdekleriyle birlikte 
+    bir thread akışı örneğin bir sistem fonksiyonunda ilerlerken quanta süresi dolduğundan dolayı çekirdek içerisinde 
+    de kesilebilmektedir. 
 
     Linux çekirdeğinde oldukça ayrıntılı ve çeşitli senkronizasyon nesneleri bulunmaktadır. Bu bölümde biz bu nesneleri
     ele alıp onların nasıl kullanıldığını açıklayacağız. 
@@ -37,11 +37,11 @@
 /*----------------------------------------------------------------------------------------------------------------------
     Çekirdek kodlarında senkronizasyon uygulamaya ne gerek vardır? İşte tıpkı kullanıcı modundaki çok thread'li uygulamalarda 
     olduğu gibi bir akış çekirdek içerisinde paylaşılan bir veri yapısı üzerinde işlem yaparken bir biçimde thread'ler 
-    arası geçiş ya da kesme olayı söz konusu olduğunda başka bir akış başka bir akış da bu paylaşılan veri yapısını 
-    kullanmak isterse bu veri yapısı bozulabilmektedir. Tabii çok çekirdekli sistemlerde farklı çekirdeklerdeki thread'ler 
-    de çekirdek içerisindeki ortak veri yapıları üzerinde eş zamanlı işlemler yapabilmektedir. Örneğin çekirdek kodunun 
-    bir bağlı listeye bir eleman eklediğini varsayalım. Tam bu işlemin ortalarında bir yerde thread'ler arası geçiş 
-    oluşursa ya da başka bir çekirdekteki thread de aynı bağlı liste üzerinde işlem yapmaya çalışırsa tüm veri yapısı 
+    arası geçiş ya da kesme olayı söz konusu olduğunda başka bir akış da bu paylaşılan veri yapısını kullanmak isterse 
+    bu veri yapısı bozulabilmektedir. Tabii çok çekirdekli sistemlerde farklı çekirdeklerdeki thread'ler de çekirdek 
+    içerisindeki ortak veri yapıları üzerinde eş zamanlı işlemler yapabilmektedir. Örneğin çekirdek kodunun bir bağlı 
+    listeye bir eleman eklediğini varsayalım. Tam bu işlemin ortalarında bir yerde thread'ler arası geçiş oluşursa 
+    ya da başka bir çekirdekteki thread de aynı bağlı liste üzerinde işlem yapmaya çalışırsa tüm veri yapısı 
     bozulabilecektir. 
 
     Çekirdek senkronizasyonunda en önemli kavram "kritik kod (ciritical section)" denilen kavramdır. Başından sonuna 
@@ -59,22 +59,22 @@
     edilmesi) oldukça zordur. 
 
     Çekirdek içerisindeki kritik kod bloklarının önemli bir bölümü birden fazla akışın paylaşılan bir veri yapısına 
-    erişimesi durumunda oluşmaktadır. Örneğin aynı hash tablosuna birden fazla prosesin çağırdığı sistem fonksiyonları 
+    erilmesi nedeniyle oluşturulmaktadır. Örneğin aynı hash tablosuna birden fazla prosesin çağırdığı sistem fonksiyonları 
     eleman ekleyebilir. Bu durumda bu hash tablosunun böyle erişimlerde seri hale getirilmesi ("serialize" edilmesi)
     gerekir. Ancak senkronizasyon sorunu yalnızca ortak veri yapılarına ve nesnelere erişirken ortaya çıkmaz. Bu bölümde
     ele alacağımız senkronizasyonu gerektiren başka durumlar da vardır. 
 
     Genel olarak (ancak her zaman değil) bir nesne (nesne demekle burada çekirdek alanı içerisinde tahsis edilmiş bir 
-    yapıyı kastediyoruz) eğer birden fazla akış tarafından kullanılıyorsa bu nesnesi senkronize etmek için ayrı bir 
-    senkronizasyon nesnesi bulundurulmaktadır. Linux'un çekirdek kodlarında farklı yapıların içerisinde senkronizasyon
-    nesnelerini görürseniz şaşırmayınız. Bir senkronizasyon nesnesi nesnesi ile birden fazla nesneyi korumuk genel olarak
-    iyi bir teknik değildir. Çünkü bu nesnelerden birine erişirken kilit alındığı için aslında alakasız olan diğerine
+    alanı kastediyoruz) eğer birden fazla akış tarafından kullanılıyorsa bu nesnenin senkronize edilmesi için ayrı 
+    bir senkronizasyon nesnesi bulundurulmaktadır. Linux'un çekirdek kodlarında yapıların içerisinde senkronizasyon
+    nesnelerini görürseniz şaşırmayınız. Bir senkronizasyon nesnesi nesnesi ile birden fazla nesneyi korumak genel olarak
+    iyi bir fikir değildir. Çünkü bu nesnelerden birine erişirken kilit alındığı için aslında alakasız olan diğerine
     erişim de engellenmiş olacaktır. Her nesnenin ayrı bir senkronizasyon nesnesi ile korunması en normal olan durumdur. 
     Linux çekirdek nesnelerini incelediğinizde onları belirten yapıların elemanlarında senkronizasyon nesneleri 
     göreceksiniz. 
 
-    Kritik kodlar özel makine komutları kullanılarak oluşturulabilmektedir. Aşağdaki gibi basit bir mantıkla kritik kod
-    oluşturulamaz:
+    Kritik kodlar ancak özel makine komutları kullanılarak oluşturulabilmektedir. Aşağdaki gibi basit bir mantıkla 
+    kritik kod oluşturulamaz:
 
     int g_flag = 0;
 
@@ -82,7 +82,7 @@
         ;
     g_flag = 1;
     .....
-    .....       KRİTİK KOD
+    .....       <KRİTİK KOD>
     .....
     g_flag = 0;
 
@@ -91,7 +91,7 @@
     1) Bekleme bloke edilerek değil meşgul bir döngüde (busy loop) yapılmaktadır. Yani bir thread kritik kod içerisindeyse
     diğeri CPU zamanı harcayarak meşgul bir döngüde sürekli bekler. 
     
-    2) Yukarıdaki kodun diğer bir sorunu da kodda açıkbir  pencerenin bulunmasıdır:
+    2) Yukarıdaki kodun diğer bir sorunu da kodda açık bir  pencerenin bulunmasıdır:
 
     while (g_flag)
         ;
@@ -103,12 +103,11 @@
     g_flag = 0;
     
     Burada ok belirtilen noktada thread'ler arası geçiş oluşursa birden fazla thread kritik koda girebilir. İşte 
-    bu sakıncıyaı ortadan kaldırmak için özel makine komutlarından faydalanılmaktadır. Bugün bilgisayar sistemlerinde 
+    bu sakıncıyı ortadan kaldırmak için özel makine komutlarından faydalanılmaktadır. Bugün bilgisayar sistemlerinde 
     birden fazla çekirdek bulunabildiği için kritik kod oluşturan sistem programcılarının bunlara dikkat etmesi 
-    gerekmektedir. Linux işletim sisteminin çekirdek kodlarında zaten çeşitli senaryolar için kullanılabilecek 
-    senkronizasyon nesneleri hazır bçimde bulunmaktadır. Bu bölümde biz bu senkronizasyon nesnelerini ele alacağız. 
-    Bölümün sonlarına doğru da bu senkronizasyon nesnelerinin oluşturulabilmesi için gereken makine komutları hakkında
-    bilgiler vereceğiz. 
+    gerekir. Linux'un çekirdek kodlarında zaten çeşitli senaryolar için kullanılabilecek senkronizasyon nesneleri 
+    hazır biçimde bulunmaktadır. Bu bölümde biz bu senkronizasyon nesnelerini ele alacağız. Bölümün sonlarına doğru da 
+    bu senkronizasyon nesnelerinin oluşturulabilmesi için gereken makine komutları hakkında bilgiler vereceğiz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -117,11 +116,11 @@
     1) Blokeye yol açan senkronizasyon nesneleri 
     2) Blokeye yol açmayan senkronizasyon nesneleri
 
-    Blokeye yol açan senkronizasyon nesneleri çalışmakta olan kodun çalışmasına ara verilerek ileride ala alacağımız 
-    "bekleme kuyruklarında (wait queue)" bekletildiği yani göreli olark uzun süre beklemeye yol açan senkronizasyon 
+    Blokeye yol açan senkronizasyon nesneleri çalışmakta olan kodun çalışmasına ara vererek ileride ala alacağımız 
+    "bekleme kuyruklarında (wait queue)" bekletildiği yani göreli olarak uzun süre beklemeye yol açan senkronizasyon 
     nesneleridir. Blokeye yol açmayan senkronizasyon nesneleri ise akışın bekletilmediği senkronizasyon nesneleridir. 
     Bunları da kendi aralarında iki kısma ayırabiliriz. Bunların bir bölümü döngü içerisinde spin yaparak beklemyi 
-    sağlamaktadır. Diğer bölümü ise modern "lock-free" veri yapılarındanoluşmaktadır. 
+    sağlamaktadır. Diğer bölümü ise modern "lock-free" veri yapılarından oluşmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -138,18 +137,17 @@
 
 /*----------------------------------------------------------------------------------------------------------------------
     Kritik kod oluşturmak için en çok kullanılan senkronizasyon nesnelerinden biri "mutex (mutual exclusion)" denilen 
-    nesnelerdir. UNIX/Linux sistemlerinde kullanıcı modundan kullanılabilecek mutex nesneleri de vardır. Yukarıda belirttiğimiz 
-    gibi biz burada çekirdeğin içerisinde bulunan mutex nesneleri üzerinde duracağız.
-
-    Mutex nesneleri Linux çekirdeğine 2.6 versiyonlarıyla eklenmiştir. Bundan önce mutex işlemleri binary semaphore'larla 
-    yapılıyordu. Çekirdeğin mutex mekanizması kullanım bakımından kullanıcı modundaki mutex mekanizmasına çok benzemektedir. 
-    Çekirdek mutex nesnelerinin yine thread temelinde sahipliği vardır. Çekirdek mutex nesneleri thread'i bloke edip 
-    onu bekleme kuyruklarında bekletebilmektedir.
+    nesnelerdir. (UNIX/Linux sistemlerinde kullanıcı modundan kullanılabilecek mutex nesneleri de vardır. Yukarıda belirttiğimiz 
+    gibi biz burada çekirdeğin içerisinde bulunan mutex nesneleri üzerinde duracağız.) Mutex nesneleri Linux çekirdeğine 
+    2.6 versiyonlarıyla eklenmiştir. Bundan önce mutex işlemleri binary semaphore'larla yapılıyordu. Çekirdeğin mutex 
+    mekanizması kullanım bakımından kullanıcı modundaki mutex mekanizmasına çok benzemektedir. Çekirdek mutex nesnelerinin 
+    yine thread temelinde sahipliği vardır. Çekirdek mutex nesneleri thread'i bloke edip onu bekleme kuyruklarında 
+    bekletebilmektedir.
 
     Mutex mekanizması şöyle işletilmektedir: Önce global düzeyde ya da çekirdeğin heap sisteminde bir mutex nesnesi 
-    yaratılır. Kritik koda girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin sahipliğinin 
-    ele geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer  mutex'in sahipliği ele geçirilirse 
-    (yani mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik koda giremez. 
+    yaratılır. Kritik koda girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin ele 
+    geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer  mutex'in sahipliği ele geçirilirse (yani 
+    mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik koda giremez. 
     Mutex'in sahipliğini almaya çalışan thread mutex kilitli ise bloke olarak mutex kilidi açılana kadar bekler. Mutex'in 
     sahipliğini almış olan thread kritik koddan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). 
     Böylece blokede bekleyen thread'lerden biri mutex'in sahipliğini alarak kritik koda girer. Kritik kod tipik olarak 
@@ -157,7 +155,7 @@
 
     mutex_lock(...);
     ...
-    ...    KRİTİK KOD
+    ...    <KRİTİK KOD>
     ...
     mutex_unlock(...);
 
@@ -174,9 +172,9 @@
     1) mutex_lock işlemi sırasında işlemcinin maliyetsiz compare/set (compare/exchange) komutlarıyla mutex'in kilitli 
     olup olmadığına bakılır.
 
-    2) Diğer bir işlemcideki thread mutex'i kilitlemişse boşuna bloke olmamak için yine compare/set komutlarıyla biraz 
-    spin işlemi yapılır. Buradkai spin süresi çeşitli faktörlere bağlı olarak değişebilmektedir. Ancak ortalama 1 ile 
-    10 ms arasında sürebilmektedir. Spin işleminin be olduğu izleyen paragraflarda açıklanacaktır.
+    2) Diğer bir işlemcideki ya da çekirdekteki thread mutex'i kilitlemişse boşuna bloke olmamak için yine compare/set 
+    komutlarıyla biraz spin işlemi yapılır. Buradaki spin süresi çeşitli faktörlere bağlı olarak değişebilmektedir. 
+    Ancak ortalama 1 ile 10 ms arasında sürebilmektedir. Spin işleminin be olduğu izleyen paragraflarda açıklanacaktır.
     
     3) Spin işleminden sonuç elde edilemezse bloke oluşturulur. 
 
@@ -185,9 +183,9 @@
 
     Çekirdeğin mutex nesneleri tipik olarak şöyle kullanılmaktadır:
 
-    1) Mutex nesnesi mutex isimli bir yapıyla temsil edilmektedir. Sistem programcısı bu yapı türünden global ya da 
-    çekirdeğin heap sisteminde bir nesne yaratır ve ona ilk değerini verir. DEFINE_MUTEX(name) makrosu hem struct mutex 
-    türünden nesneyi tanımlamakta hem de ona ilk değerini vermektedir. Örneğin:
+    1) Mutex nesnesi mutex isimli bir yapıyla temsil edilmektedir. Sistem programcısı bu yapı türünden global olarak 
+    ya da çekirdeğin heap sisteminde dinanik biçimde bir nesne yaratır ve ona ilk değerini verir. DEFINE_MUTEX(name) 
+    makrosu hem struct mutex türünden nesneyi tanımlamakta hem de ona ilk değerini vermektedir. Örneğin:
 
     #include <linux/mutex.h>
 
@@ -580,7 +578,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-		                                52. Ders 25/01/2026 - Pazar							
+		                                    52. Ders 25/01/2026 - Pazar							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -691,23 +689,23 @@ void exit_sys(const char *msg)
     void up(struct semaphore *sem);
 
     Kritik kod down fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılamamaktadır. Ancak kritik 
-    kod down_interruptible fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. (Örneğin
-    biz kritik koda down fonksiyonuyla girmiş olalım. Therad'imizin bloke olduğunu varsayalım. Şimdi kullanıcı modunda 
-    Ctrl+C tuşuşla SIGINT sinyalini oluşturduğumuzda bu bloke çözülmeyecektir.) down_interruptible fonksiyonu normal 
-    sonlanmada 0 değerine, sinyal yoluyla sonlanmada -ERESTARTSYS değeri ile geri döner. Normal uygulama eğer bu fonksiyonlar 
-    -ERESTARTSYS ile geri dönerse aygıt sürücüdeki fonksiyonun da aynı değerle geri döndürülmesidir. Zaten çekirdek bu 
-    -ERESTARTSYS geri dönüş değerini aldığında asıl sistem fonksiyonunu eğer sinyal için otomatik restart mekanizması 
-    aktif değilse -EINTR değeri ile geri döndürmektedir. Bu da tabii POSIX fonksiyonlarının başarısız olup errno değerini 
-    EINTR biçiminde set eder.
+    kod down_interruptible fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. 
+    (Örneğin biz kritik koda down fonksiyonuyla girmiş olalım. Therad'imizin bloke olduğunu varsayalım. Şimdi kullanıcı 
+    modunda Ctrl+C tuşuşla SIGINT sinyalini oluşturduğumuzda bu bloke çözülmeyecektir.) down_interruptible fonksiyonu 
+    normal sonlanmada 0 değerine, sinyal yoluyla sonlanmada -ERESTARTSYS değeri ile geri döner. Normal uygulama eğer bu 
+    fonksiyonlar -ERESTARTSYS ile geri dönerse aygıt sürücüdeki fonksiyonun da aynı değerle geri döndürülmesidir. Zaten 
+    çekirdek bu -ERESTARTSYS geri dönüş değerini aldığında asıl sistem fonksiyonunu eğer sinyal için otomatik restart 
+    mekanizması aktif değilse -EINTR değeri ile geri döndürmektedir. Bu da tabii POSIX fonksiyonlarının başarısız olup 
+    errno değerini EINTR biçiminde set eder.
     
     down_killable fonksiyonu bloke olmuş thread'in yalnızca SIGKILL sinyalini kabul edip sonlandırılabilmesini sağlamaktadır. 
     down_killable fonksiyonunda eğer thread bloke olursa diğer sinyaller yine blokeyi sonlandıramamaktadır. 
     
-    down_trylock nesnenin açık olup olmadığına bakmak için kullanılır. Eğer nesne açıksa yine sayaç 1 eksiltilir ve 
-    kritik koda girilir. Bu durumda fonksiyon 0 dışı bir değerle geri döner. Nesne kapalıysa (yani semaphore sayacı 
-    0 ise) fonksiyon bloke olmadan 0 değerine geri döner. down_timeout ise en kötü olasılıkla belli miktar "jiffy" 
-    zamanı kadar blokeye yol açmaktadır. ("jiffy" kavramı ileride ele alınacaktır.) Fonksiyon zaman aşımı dolduğundan 
-    dolayı sonlanmışsa negatif hata koduna, normal bir biçimde sonlanmışsa 0 değerine geri dönmektedir. 
+    down_trylock nesnenin açık olup olmadığına bakmak için kullanılır. Eğer nesne açıksa yine sayaç 1 eksiltilir ve kritik 
+    koda girilir. Bu durumda fonksiyon 0 dışı bir değerle geri döner. Nesne kapalıysa (yani semaphore sayacı 0 ise) fonksiyon 
+    bloke olmadan 0 değerine geri döner. down_timeout ise en kötü olasılıkla belli miktar "jiffy" zamanı kadar blokeye 
+    yol açmaktadır. ("jiffy" kavramı ileride ele alınacaktır.) Fonksiyon zaman aşımı dolduğundan dolayı sonlanmışsa negatif 
+    hata koduna, normal bir biçimde sonlanmışsa 0 değerine geri dönmektedir. 
 
     up fonksiyonu yukarıda da belirttiğimiz gibi semaphore sayacını 1 artırmaktadır. 
 
