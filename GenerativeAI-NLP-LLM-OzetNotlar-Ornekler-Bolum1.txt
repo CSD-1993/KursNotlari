@@ -1,5 +1,5 @@
-
 #--------------------------------------------------------------------------------------------------------------------------
+
                                                C ve Sistem Programcıları Derneği
 
                                     Üretici Yapay Zeka, Doğal Dil İşleme ve Büyük Dil Modelleri
@@ -18,7 +18,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
                                                             
-                                    Son Güncelleme Tarihi: 13/02/2026 - Cuma
+                                    Son Güncelleme Tarihi: 17/02/2026 - Salı
                                          
 #---------------------------------------------------------------------------------------------------------------------------
 
@@ -1256,6 +1256,12 @@ else:
                 │
                 ▼
    ┌────────────────────────────┐
+   │    Verileri Temizlenmesi   │
+   └────────────────────────────┘
+                │
+                │
+                ▼
+   ┌────────────────────────────┐
    │    Metin Normalizasyonu    │
    └────────────────────────────┘
                │
@@ -1292,7 +1298,7 @@ else:
     Normalizasyon süreci aslında hedefe uygun biçimde yapılmaktadır. Hedeflenen şey neyse kayıplar ve kazançlar ona göre 
     göz önüne alınmalıdır. Biz aşağıda normalizasyonda kullanılan temel alt yöntemleri açıklayacağız. Ancak bu alt yöntemlerin 
     hepsinin bir doğal dil işleme sürecinde uygulanması gerekmemektedir. Bunların amaca göre gerektiği kadar uygulanması
-    gerekir. Doğal dil işleme uzmanı “ne kaybettiğini ve ne kzandığını bilerek" işlemleri yütürmelidir.
+    gerekir. Doğal dil işleme uzmanı “ne kaybettiğini ve ne kazandığını bilerek" işlemleri yütürmelidir.
     
     Atomlara ayırma öncesindeki metin normalizasyon işlemini çeşitli alt başlıklara ayırabiliriz:
 
@@ -1305,7 +1311,7 @@ else:
     - Yapısal Normalizasyon
         - Boşluk (Whitespace) Normalizasyonu
         - Noktalama Normalizasyonu
-        - Kesme İşareti (Apostrophe) Normalizasyonu
+        - Tırnak (Apostrophe) Normalizasyonu
         - Satır Sonu ve Kontrol Karakterleri
         
     - İçerik Normalizasyonu
@@ -1633,6 +1639,683 @@ else:
     def diacritical_normalize(text):
         ntext = unicodedata.normalize('NFD', text)
         return ''.join((c for c in ntext if unicodedata.category(c) != 'Mn'))
+
+    Fonksiyonu şöyle düzeltebiliriz:
+
+    def diacritical_normalize(text):
+        chars = []
+        for c in text:
+            if c in 'çğıöşüÇĞİÖŞÜ':
+                chars.append(c)
+            else:
+                nfd = unicodedata.normalize('NFD', c)
+                for d in nfd:
+                    if unicodedata.category(d) != 'Mn':
+                        chars.append(d)
+        return ''.join(chars)
+
+    Burada biz yazıdaki karakterleri tek tek gözden geçirip eğer karakter özel Türkçe karakterlerinden biriyse onu 
+    chars listesine ekledik. Ancak karakter özel Türkçe karakterlerinden biri değilse onu NFD normalizasyonuna sokup 
+    aksan karakterlrini yok ettik. Kodun bu kısmına dikkat ediniz:
+
+    nfd = unicodedata.normalize('NFD', c)
+    for d in nfd:
+        if unicodedata.category(d) != 'Mn':
+            chars.append(d)
+
+    Genellikle bir karakteri NFD normalizasyonuna soktuğumuzda karakter aksanlı ise dönüştürme sonucunda iki karakter
+    elde edilmektedir: Asıl karakter ve aksan karakteri. Ancak yukarıda da belirttiğimiz gibi aksan karakterleri bir 
+    tane olmak zorunda değildir ve aslında asıl karakterin başta bulunması da zorunlu değildir. Bu nedenle biz yukarıda 
+    NFD normalizasyonuna soktuğumuz karakterleri bir döngü ile dolaşarak aksan karakterlerini elimine etme yoluna gittik.
+
+    Yukarıdaki fonksiyon daha hızlı çalışacak hale de getirilebilir. Örneğin her defasında in operatörü ile sıralı 
+    arama yapmak yerine bunun için bir sözlük oluşturup bir çeşit "lookup table" ile hızlandırma sağlanabilir. Ayrıca 
+    NFD normaklizasyonundan sonraki döngü "liste içlemiyle" ya da "üretici ifade" ile de hızlandırılabilir. Python'daki 
+    kodu hızlandırmak istediğinizde mutlaka öngürünüzü doğrulamak için timeit modülü ile test ediniz. Ya da bu konuda 
+    LLM'lere başvurunuz.
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                                            9. Ders 14/02/2026 - Cumartesi
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda karakter temelinde normalizasyon işlemlerini ele aldık. Şimdi yapısal normalizasyonlar üzerinde duralım. 
+    Yapısal normalizasyonlar olarak grupladığımız normalizasyonları anımsatmak istiyoruz:
+
+    - Yapısal Normalizasyon
+        - Boşluk (Whitespace) Normalizasyonu
+        - Noktalama Normalizasyonu
+        - Tırnak (Apostrophe) Normalizasyonu
+        - Satır Sonu ve Kontrol Karakterleri
+
+    Metinde tutarsız biçimde bulunan boşluk karakterlerinin (white space)" aynı biçime (örneğin tek boşluk biçimine) 
+    dönüştürülmesi işlemine "boşluk normalizasyonu" denilmektedir. Boşluk karakterleri atomlara ayırma (tokenization) 
+    sırasında da metinden çıkartılabilmektedir. Ancak uygulamacının bu işlemi özel olarak yapması daha iyi bir kontrol 
+    sağlayabilmektedir. 
+    
+    Boşluk karakterleri boşluk duygusu oluşturan karakterlerdir. SPACE, New Line, TAB, VTAB ve CR karakterleri ASCII 
+    tablosunda da bulunan tipik boşluk karakterleridir. Ancak Unicode tabloda temel ASCII tablosunda bulunmayan boşluk 
+    karakterleri de vardır. Dolayısıyla böyle bir normalizasyonun ayrı bir biçimde yapılması çoğu zaman önerilmektedir. 
+    Unicode tablodaki tüm boşluk karakterlerini aşağıda tablo biçiminde veriyoruz:
+
+    ┌─────────┬──────────────────────────────────────┐
+    │ Unicode │        Karakter Adı                  │
+    ├─────────┼──────────────────────────────────────┤
+    │ U+0009  │ Horizontal Tab (HT)                  │
+    │ U+000A  │ Line Feed (LF)                       │
+    │ U+000B  │ Vertical Tab (VT)                    │
+    │ U+000C  │ Form Feed (FF)                       │
+    │ U+000D  │ Carriage Return (CR)                 │
+    │ U+0020  │ Space                                │
+    │ U+00A0  │ No-Break Space                       │
+    │ U+1680  │ Ogham Space Mark                     │
+    │ U+2000  │ En Quad                              │
+    │ U+2001  │ Em Quad                              │
+    │ U+2002  │ En Space                             │
+    │ U+2003  │ Em Space                             │
+    │ U+2004  │ Three-Per-Em Space                   │
+    │ U+2005  │ Four-Per-Em Space                    │
+    │ U+2006  │ Six-Per-Em Space                     │
+    │ U+2007  │ Figure Space                         │
+    │ U+2008  │ Punctuation Space                    │
+    │ U+2009  │ Thin Space                           │
+    │ U+200A  │ Hair Space                           │
+    │ U+200B  │ Zero Width Space                     │
+    │ U+200C  │ Zero Width Non-Joiner                │
+    │ U+200D  │ Zero Width Joiner                    │
+    │ U+202F  │ Narrow No-Break Space                │
+    │ U+205F  │ Medium Mathematical Space            │  
+    │ U+2060  │ Word Joiner                          │
+    │ U+3000  │ Ideographic Space                    │
+    │ U+FEFF  │ Zero Width No-Break Space (BOM)      │
+    └─────────┴──────────────────────────────────────┘
+
+    Daha önceden de belirttiğimiz gibi regex dili standardize edilmiş bir dil değildir. Dolayısıyla regex motorları 
+    arasında farklılıklar bulunmaktadır. Regex kalıplarında kullanılan karakter tablosu Python'un regex matorunda default 
+    olarak Unicode tablodur. Ancak daha önceden de belirttiğimiz gibi Python'daki regex fonksiyonlarının son parametrelerine 
+    ayarlama bayrakları girilebilmektedir. Bu bayrakların listesi şöyledir:
+
+    ┌─────────────────┬───────────────┬─────────────────────────────────────────────────┐
+    │ Bayrak          │ Kısa Kullanım │                 Açıklama                        │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.IGNORECASE   │ re.I          │ Büyük/küçük harf duyarsız eşleme yapar          │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.MULTILINE    │ re.M          │ Çok satırlı mod - ^ ve $ her satırın            │
+    │                 │               │ başında/sonunda çalışır                         │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.DOTALL       │ re.S          │ Nokta (.) karakterinin yeni satır               │
+    │                 │               │ karakterini de eşlemesini sağlar                │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.UNICODE      │ re.U          │ Unicode karakterler için (Python 3'te           │
+    │                 │               │ varsayılan)                                     │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.ASCII        │ re.A          │ ASCII modu - \w, \b, \d gibi ifadeleri          │
+    │                 │               │ ASCII ile sınırlar                              │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.VERBOSE      │ re.X          │ Regex içinde yorum ve boşluklara izin verir     │
+    ├─────────────────┼───────────────┼─────────────────────────────────────────────────┤
+    │ re.LOCALE       │ re.L          │ Yerel ayarlara göre eşleme yapar                │
+    │                 │               │ (Tavsiye edilmez, Unicode kullanın)             │
+    └─────────────────┴───────────────┴─────────────────────────────────────────────────┘
+
+    re.UNICODE bayrağı "Unicode karakter kümesini kullan" anlamına gelmektedir. Yukarıda da belirttiğimiz gibi bu bayrak 
+    Python için default durumdadır. re.ASCII bayrağı "standart ASCII karakterlerininin" kullanılmasını sağlamaktadır.
+    re.LOCALE ise seçilen locale dikkate alınarak belirleme yapıacağı anlamına gemektedir. 
+
+    Ayrıca regex motorlarında bazı bayraklar ve direktifler kalıp içerisinde de (?X...) biçiminde belirtilebilmektedir. 
+    Biz bu konunun ayrıntılarına girmeyeceğiz. Ancak bayrak ve direktif belirten karakterleri bir tablo halinde aşağıda 
+    vermek istiyoruz:
+
+    ┌────────────┬──────────────────────────────────────────────────────┐
+    │ Önek       │ Anlamı                                               │
+    ├────────────┼──────────────────────────────────────────────────────┤
+    │ (?:...)    │ Yakalamayan grup (non-capturing group)               │
+    │ (?=...)    │ İleriye bakış - eşleşir ama yakalamaz (lookahead)    │
+    │ (?!...)    │ Olumsuz ileriye bakış (negative lookahead)           │
+    │ (?<=...)   │ Geriye bakış (lookbehind)                            │
+    │ (?<!...)   │ Olumsuz geriye bakış (negative lookbehind)           │
+    │ (?P<ad>...)│ İsimli yakalama grubu (named group)                  │
+    │ (?i)       │ Büyük/küçük harf duyarsız (ignore case)              │
+    │ (?m)       │ Çok satır modu (multiline)                           │
+    │ (?s)       │ Nokta her şeyi eşleştirir (dotall)                   │
+    │ (?u)       │ Unicode modu                                         │
+    │ (?x)       │ Verbose mod - boşluk ve yorum satırı izin verir      │
+    └────────────┴──────────────────────────────────────────────────────┘
+
+    Regex dilinde Unicode karakter kümesindeki yukarıdaki karakterlerin çoğu '\s' ile uyuşmaktadır. Ancak istisna olarak 
+    aşağıdaki karakterler uyuşum sağlamamaktadır:
+
+    ┌─────────┬──────────────────────────────────────┐
+    │ Unicode │ Karakter Adı                         │
+    ├─────────┼──────────────────────────────────────┤
+    │ U+200B  │ Zero Width Space                     │
+    │ U+200C  │ Zero Width Non-Joiner                │
+    │ U+200D  │ Zero Width Joiner                    │
+    │ U+2060  │ Word Joiner                          │
+    │ U+FEFF  │ Zero Width No-Break Space (BOM)      │
+    └─────────┴──────────────────────────────────────┘
+
+    Buu karakterleri de boşluk normalizasyonuna dahil edebiliriz:
+
+    def whitespace_normalize(text):
+        return re.sub(r'\s+|[\u200B\u200C\u200D\u2060\uFEFF]+', ' ', text).strip()
+
+    Burada birkaç noktaya değinmek istiyoruz. Biz yazıdaki birden fazla boşluk karakterini tek bir SPACE karakteri 
+    ile değiştirdik. Ancak bu durumda yazının başında ve sonunda bir tane SPACE karakteri kalabilmektedir. Bunları 
+    da strip metouyla sildik. Python'da ve pek çok dilde \uHHHH biçimindeki karakter dizilimi HHHH hex kod numarasına 
+    ilişkin Unicode karakter anlamına gelmektedir. Burada HHHH ilgili Unicode karakterin UTF-16 değeridir. UTF-32 
+    için \UHHHHHHHH sentaksı kullanılmaktadır. Buradaki Unicode dönüşümü yorumlayıcı tarafından ilk aşamada yapıldığı 
+    için sub fonksiyonu ters bölü karakterlerini hiç görmeyecektir. 
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Noktalama normalizasyonu peşi sıra gelen aynı noktalama işaretlerinden yalnızca bir tanesini ya da n tanesini 
+    alıp diğerlerini atarak gerçekleştirilmektedir. Tabii daha önceden de belirttiğimiz gibi bu tür normalizasyonlar duygu 
+    kaybına yol açabilmektedir. Örneğin "dikkat!" ile "dikkat!!!" arasında bir vurgu farkı olabilir. Bazı alanlarda ise 
+    birden fazla noktalama karakterinin peşi sıra gelmesi özel bir anlam ifade edebilmektedir. Örneğin satrançta "!!" çok 
+    iyi hamle için "??" çok kötü hamle için kullanılan bir gösterimdir. Tabii daha önceden de belirttiğimiz gibi normalizasyon 
+    hedefe göre gerçekeleştirilen bir süreçtir. Burada ele aldığımız türm normalizasyonların buradaki gibi uygulanması 
+    zorunlu değildir.
+
+    Önce tireleme normalizasyonu üzerinde duralım. Unicode tabloda tire görüntüsüne benzer görüntüye sahip olan birden 
+    fazla karakter vardır. Onların listesini de aşağıda veriyoruz:
+
+    ┌─────────┬───────┬──────────────────────────────────────┐
+    │ Unicode │ Char  │ Karakter Adı                         │
+    ├─────────┼───────┼──────────────────────────────────────┤
+    │ U+002D  │ -     │ Hyphen-Minus                         │
+    │ U+00AD  │ ­      │ Soft Hyphen                          │
+    │ U+2010  │ ‐     │ Hyphen                               │
+    │ U+2011  │ ‑     │ Non-Breaking Hyphen                  │
+    │ U+2012  │ ‒     │ Figure Dash                          │
+    │ U+2013  │ –     │ En Dash                              │
+    │ U+2014  │ —     │ Em Dash                              │
+    │ U+2015  │ ―     │ Horizontal Bar                       │
+    │ U+2017  │ ‗     │ Double Low Line                      │
+    │ U+2E3A  │ ⸺   │ Two-Em Dash                          │
+    │ U+2E3B  │ ⸻ │ Three-Em Dash                         │
+    │ U+2212  │ −     │ Minus Sign                           │
+    │ U+FE58  │ ﹘    │ Small Em Dash                        │
+    │ U+FE63  │ ﹣    │ Small Hyphen-Minus                   │
+    │ U+FF0D  │－     │ Fullwidth Hyphen-Minus               │
+    └─────────┴───────┴──────────────────────────────────────┘
+
+    O halde bu karakterleri ASCII tablosundaki '-' karakteri ile normalize edebiliriz:
+
+    text = re.sub(r'[\u00AD\u2010\u2011\u2012\u2013\u2014\u2015\u2017\u2E3A\u2E3B\u2212\uFE58\uFE63\uFF0D]', '-', text)
+
+    Bilindiği gibi pek çok latin dilinde peşi sıra gelen üç nokta ayrı bir noktalama işaretdir. Buna İngilizce "ellipsis" 
+    denilmektedir. Ancak Unicode tabloda yan yana üç nokta için \u2026 numaralı ayrı bir karakter de bulunduurlmuştur. 
+    Bu karakteri de ... nokta ile temsil edebiliriz:
+
+    text = re.sub(r'\u2026', '...', text)
+
+    Ayrıca Unicode tabloda klasik noktalama işaretlerine benzeyen başka noktalama işaretleri de vardır. Bunların da 
+    normalize edilmesi gerekebilir:
+
+    text = re.sub(r'[\uFF01]', '!', text)                                 # fullwidth !
+    text = re.sub(r'[\uFF1F]', '?', text)                                 # fullwidth ?
+    text = re.sub(r'[\uFF0E]', '.', text)                                 # fullwidth .
+    text = re.sub(r'[\uFF0C]', ',', text)                                 # fullwidth ,
+    text = re.sub(r'[\uFF1B]', ';', text)                                 # fullwidth ;
+    text = re.sub(r'[\uFF1A]', ':', text)                                 # fullwidth :
+
+    Buradaki Unicode karakterler klasik ASCII  noktalama karakterlerine oldukça benzemektedir. Biz yukarıdaki işlemle 
+    onların hepsini standart bir biçime dönştürmüş olduk. 
+
+    Birden fazla noktalama karakterinin peşi sıra bulunması durumunda bunların normalizasyonu için birkaç teknik 
+    kullanılabilmektedir:
+
+    1) Peşi sıra gelen aynı noktalama karakterlerinden yalznıca birini alarak normalize etmek.
+
+    2) Peşi sıra gelen aynı noktalama karakterlerini "bir ya da çok" biçiminde normalize etmek. Bunun için "çok" durumunu 
+    aynı karakterden iki taneyle temsil edilebilir. Örneğin yazıdaki bir tane ! karakteri ! olarak bırakılır. Ancak !!!!! 
+    gibi birden fazla ! karakteri !! biçiminde temsil edilebilir. Ya da çok ! ayrı bir atomla da temsil edilebilir. Bunun 
+    için çok seyrek kullanılan bir Unicode karakteri seçebilirsiniz. Bazen uygulamacılar bu özel atomları açısal parantezler 
+    içerisine alınmış bir sözcükle de temsil edebilmektedir. Örneğin çok sayıda ! karakteri <EXCLMS> gibi bir yazıyla 
+    temsil edilebilir. Atomlarına ayırma sırasında da bu yazı tek bir atom olarak ayrıştırılabiir. Birden çok aynı nokatalama 
+    karakterinin iki tane ile temsil edilmesi (collapsing) ile açısal parantez içerisinde bir sözcükle tamsil edilmesinin 
+    avantajları ve dezavantajları vardır. Bu avantajları ve dezavantajları bir tablo halinde listeliyoruz:
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────┐
+    │            ÇOK SAYIDA AYNI NOKTALAMA İŞARETLERİ İÇİN STRATEJİ KARŞILAŞTIRMASI             │
+    ├─────────────────────────────────────────────┬─────────────────────────────────────────────┤
+    │         "collapse"  ( !!!  →  !! )          │        "token"  ( !!!  →  <EXCLMS> )        │
+    ├──────────────────────┬──────────────────────┼──────────────────────┬──────────────────────┤
+    │     ✔  ARTILARI      │     ✘  EKSİLERİ      │     ✔  ARTILARI      │     ✘  EKSİLERİ      │
+    ├──────────────────────┼──────────────────────┼──────────────────────┼──────────────────────┤
+    │ Pretrained vocab     │ Yoğunluk bilgisi     │ Atomik semantik      │ Pretrained modelde   │
+    │ değişmez             │ kaybolur             │ birim oluşturur      │ embedding matrisi    │
+    │                      │ (!! = !!!! = !!!!!)  │                      │ genişletilmeli       │
+    │ ! → !! gradyan       │                      │ Vocab boyutu         │                      │
+    │ sürekliliği sağlar   │ Karışık !?!?         │ öngörülebilir        │ Yeni embedding'ler   │
+    │                      │ kural yönetimi       │                      │ sıfırdan öğrenir     │
+    │ Ham metin            │ karmaşıklaşır        │ Sınıflandırmada      │                      │
+    │ okunabilir kalır     │                      │ net sinyal verir     │ Ham metnin           │
+    │                      │ Eşik seçimi          │                      │ okunabilirliği       │
+    │ BPE / WordPiece      │ keyfi kalabilir      │ Yoğunluk             │ bozulur              │
+    │ ile doğal uyum       │                      │ kategorisi korunur   │                      │
+    │                      │ !! ile !             │                      │ Az veriyle eğitim    │
+    │ Az miktarda ince     │ sınırı               │ Sıfırdan eğitim      │ gürültü yaratır      │
+    │ ayar verisi yeterli  │ belirsizleşebilir    │ için ideal           │                      │
+    │                      │                      │                      │ Eşik değeri kritik   │
+    │                      │                      │                      │ hiperparametre       │
+    └──────────────────────┴──────────────────────┴──────────────────────┴──────────────────────┘
+
+    Biz birden fazla aynı noktalama karakterini iki tane olacak biçimde normalize etmek isteyelim. Bu işlemi şöyle 
+    yapabiliriz:
+
+    text = re.sub(r'\.{3,}', '...', text)           # dört ve üzeri noktayı üç noktaya indir
+    text = re.sub(r'!{2,}',  '!!',   text)          # tekrarlanan ünlemi iki tane yap
+    text = re.sub(r'\?{2,}', '??',   text)          # tekrarlanan soru işaretini iki tane yap
+    text = re.sub(r',{2,}',  ',,',   text)          # tekrarlanan virgülü iki tane yap
+    text = re.sub(r';{2,}',  ';;',   text)          # tekrarlanan noktalı virgülü iki tane yap
+    text = re.sub(r':{2,}',  '::',   text)          # tekrarlanan iki noktayıiki tane yap
+    text = re.sub(r'-{2,}',  '--',   text)          # tekrarlanan tireyi iki tane yap
+    text = re.sub(r'(\?!)+|(!\?)+',  '!?', text)    # tekrarlanan ?! için !? yerleştir
+
+    Yazılarda noktalama işaretlerinden önce boşluk karakteri bırakılmaz. Fakat noktalama işaretlesinden sonra bir SPACE 
+    boşluk bırakılır. Ancak yazıları yazanlar bu dilbilgisi kuralına uymayabilmektedir. Dolaysıyla bu biçimde de bir 
+    normalizasyonun yapılması çoğu kez uygun olmaktadır. Bu işlemi şöyle yapailiriz:
+
+    text = re.sub(r'\s+([.,!?;:\)])', r'\1', text)                 # noktalama işaretlerinden önceki boşlukları kaldır
+    text = re.sub(r'([.,!?;:])(?![.,!?;:])(?=\S)', r'\1 ', text)   # noktalama işaretlerinden sonra bir boşluk yerleştir
+
+    ilk satırda noktalama işaretlerinin solundaki boşluk karakterleri elimine edilmiştir. ikinci satırda ise noktadan 
+    sonra sıfır tane ya da daha fazla boşluk karakteri tek bir boşluk karakteriyle değiştirilmiştir. Ancak bu ikinci 
+    kalıpta ? ya da ! karakterinin solunda da bunlardan biri varsa bu ikisinin arasına boşluk karakteri konulması 
+    engellenmşiştir. Regex'te (?=...) biçimindeki direktife "ileriye bakış (lookahead)", (?!...) biçimindeki direktife 
+    ise "olumsuz ileriye bakış (negative lookahead)" denilmektedir. (?=...) direktifinde ... ile temsil ettiğimiz kalıp 
+    uyuşum sağlamak zorundadır, ancak kalıba dahil edilmez ve tüketilmez. Yukarıdaki ikinci kalıptaki (?=\S) kısmına
+    dikkat ediniz. Bu kısım şu anlama gelmektedir: "Burada boşluk karakterlerinin dışında bir karakter olmak zorunda
+    ama bu karakter kalıpta yer almayacak ve tüketilmeyecek". Yani sonraki arama bu karakterden başlatılacaktır. (?!...) 
+    direktifinde ... temsil ettiğimiz kalıp ise uyuşum sağlamamak zorundadır, ancak kalıba dahil edilmez ve tüketilmez. 
+    İkinci kalıptaki (?![.,!?;:]) kısım şu anlama gelmektedir: "Burada .,!?;: karakterinden biri olmayan bir karakter 
+    bulunmak zorunda ama bu karakter kalıpta yer almayacak ve tüketilmeyecek".
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                                            10. Ders 15/02/2026 - Pazar
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Şimdi de noktalama normalizasyonunu yapan bir fonksiyon yazalım:
+
+    def punctuation_normalize(text):
+        text = re.sub(r'[\u00AD\u2010\u2011\u2012\u2013\u2014\u2015'
+                    '\u2017\u2E3A\u2E3B\u2212\uFE58\uFE63\uFF0D]', '-', text)
+        text = re.sub(r'\u2026', '...', text)
+        text = re.sub(r'[\uFF01]', '!', text)           # fullwidth !
+        text = re.sub(r'[\uFF1F]', '?', text)           # fullwidth ?
+        text = re.sub(r'[\uFF0E]', '.', text)           # fullwidth .
+        text = re.sub(r'[\uFF0C]', ',', text)           # fullwidth ,
+        text = re.sub(r'[\uFF1B]', ';', text)           # fullwidth ;
+        text = re.sub(r'[\uFF1A]', ':', text)           # fullwidth :
+        text = re.sub(r'\.{3,}', '...', text)           # dört ve üzeri noktayı üç noktaya indir
+        text = re.sub(r'!{2,}',  '!!',   text)          # tekrarlanan ünlemi iki tane yap
+        text = re.sub(r'\?{2,}', '??',   text)          # tekrarlanan soru işaretini iki tane yap
+        text = re.sub(r',{2,}',  ',,',   text)          # tekrarlanan virgülü iki tane yap
+        text = re.sub(r';{2,}',  ';;',   text)          # tekrarlanan noktalı virgülü iki tane yap
+        text = re.sub(r':{2,}',  '::',   text)          # tekrarlanan iki noktayıiki tane yap
+        text = re.sub(r'-{2,}',  '--',   text)          # tekrarlanan tireyi iki tane yap
+        text = re.sub(r'(\?!)+|(!\?)+',  '!?', text)    # tekrarlanan ?! için !? yerleştir
+        text = re.sub(r'\s+([.,!?;:\)])', r'\1', text)
+        text = re.sub(r'([.,!?;:])(?![.,!?;:])(?=\S)', r'\1 ', text) 
+        return text
+
+    Fonksiyonda yukarıda belirttiğimiz işlemler peşi sıra yapılmıştır. 
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Şimdi de "tırnak (apostrophe) normalizasyonu" üzerinde duralım. Unicode tabloda tırnak anlamına gelen farklı karakterler 
+    bulunmaktadır. Bunların da aynı biçime dönüştürülmesi gerekebilmektedir. Unicode tabloda bulunan tırnak karakterlerinin 
+    listesini tabloda halinde aşağıda veriyoruz:
+
+    ┌────────┬───────┬──────────────────────────────────────┐
+    │ Unicode│ Char  │ Karakter Adı                         │
+    ├────────┼───────┼──────────────────────────────────────┤
+    │ U+0022 │ "     │ Quotation Mark                       │
+    │ U+0027 │ '     │ Apostrophe                           │
+    │ U+00AB │ «     │ Left-Pointing Double Angle Quote     │
+    │ U+00BB │ »     │ Right-Pointing Double Angle Quote    │
+    │ U+2018 │ '     │ Left Single Quotation Mark           │
+    │ U+2019 │ '     │ Right Single Quotation Mark          │
+    │ U+201A │ ‚     │ Single Low-9 Quotation Mark          │
+    │ U+201B │ ‛     │ Single High-Reversed-9 Quotation Mark│
+    │ U+201C │ "     │ Left Double Quotation Mark           │
+    │ U+201D │ "     │ Right Double Quotation Mark          │
+    │ U+201E │ „     │ Double Low-9 Quotation Mark          │
+    │ U+201F │ ‟     │ Double High-Reversed-9 Quotation Mark│
+    │ U+2032 │ ′     │ Prime                                │
+    │ U+2033 │ ″     │ Double Prime                         │
+    │ U+2034 │ ‴     │ Triple Prime                         │
+    │ U+2035 │ ‵     │ Reversed Prime                       │
+    │ U+2036 │ ‶     │ Reversed Double Prime                │
+    │ U+2037 │ ‷     │ Reversed Triple Prime                │
+    │ U+2039 │ ‹     │ Single Left-Pointing Angle Quote     │
+    │ U+203A │ ›     │ Single Right-Pointing Angle Quote    │
+    │ U+FF02 │ ＂    │ Fullwidth Quotation Mark             │
+    │ U+FF07 │ ＇    │ Fullwidth Apostrophe                 │
+    └────────┴───────┴──────────────────────────────────────┘
+
+    Burada dış çerçevenin kusurlu olmasının nedeni VSCode editöründe bazı Unicode karakterlerin diğerlerinden farklı 
+    genişlikte görüntülenmesindendir. Bu karakterleri onlara uygun tek bir karakterle temsil edebiliriz:
+
+    text = re.sub(r'[\u201C\u201D\u201E\u201F\u2033\u2036]', '"', text)     # çift tırnak varyantları
+    text = re.sub(r'[\u2018\u2019\u201A\u201B\u2032\u2035]', "'", text)     # tek tırnak varyantları
+
+    Tırnak normalizasyonunu yapan fonksiyonu aşağıdaki gibi yazabiliriz:
+
+    def apostrophe_normalize(text):
+        text = re.sub(r'[\u201C\u201D\u201E\u201F\u2033\u2036]', '"', text)     # çift tırnak varyantları
+        text = re.sub(r'[\u2018\u2019\u201A\u201B\u2032\u2035]', "'", text)     # tek tırnak varyantları
+        return text
+
+    Şimdi de yukarıda yazdığımız tüm fonksiyonları manuel bir boru hattı biçiminde test edelim:
+
+    s = """
+        “Merhaba Dünya!!! Nasılsın?İyi misin???”
+    """
+
+    text = unicode_normalize(s)
+    text = case_normalize(text)
+    text = diacritical_normalize(text)
+    text = whitespace_normalize(text)
+    text = punctuation_normalize(text)
+    text = apostrophe_normalize(text)
+
+    print(text)
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıdaki örnekte manuel boru hattı uyguladık. Yani bir fonksiyonun çıktısını diğerinin girdisine verdik. Bu 
+    boru hattını nesne yönelimli hale getirebiliriz. Boru hatları genellikle sınıflarla temsil edilmektedir. Boru hattının 
+    elemanları da (bunlara adım "step" de diyebiliriz) genellikle ikili demetlerden oluşmaktadır. Demet elemanlarının 
+    ilki boru hattı elemanına verilen ismi, ikincisi ise çağrılabilir (callable) nesneyi belirtmektedir. 
+    
+    Boru hattını temsil eden NormalizePipeline sınıfını şöyle yazabiliriz:
+
+    class NormalizerPipeline:
+        def __init__(self, steps=None):
+            self.steps= steps or []
+        
+        def add_step(self, name, f):
+            self.steps.append((name, f))
+            
+        def pop_step(self):
+            return self.steps.pop()
+        
+        def insert_step(self, index, name, f):
+            self.steps.insert(index, (name, f))
+                
+        def remove_step(self, name):
+            for i in range(len(self.steps)):
+                if self.steps[i][0] == name:
+                    return self.steps.pop(i)
+            
+        def __call__(self, text):
+            for _, f in self.steps:
+                text = f(text)
+            return text
+
+    Sınıfın __init__ metodunda boru hattı elemanları bir liste olarak verilebilmektedir. Aynı zamanda bu elemanlar daha 
+    sonra add_step metoduyla da eklenebilmektedir. pop_step metodu son elemanı, remove_step metodu ise belli bir isme 
+    ilişkin elemanı boru hattından çıkarmaktadır. insert_step metodu da boru hattının arasına eleman eklemektedir. Burada 
+    __call__ metodunun nasıl yazıldığına dikkat ediniz:
+
+    def __call__(self, text):
+        for _, f in self.steps:
+            text = f(text)
+        return text
+
+    Metot boru hattı elemanlarındaki fonksiyonları önceki elemanın çıktısını sonraki elemanın girdisine vererek tek tek 
+    çağırmaktadır. Metodun son elemanın çıktısıyla geri döndürüldüğüne dikkat ediniz.
+
+    Yukarıdaki NormalizerPipeline sınıfını aşağıdaki gibi test edebiliriz:
+
+    text = """
+        “Merhaba Dünya!!! Nasılsın?İyi misin???”
+    """
+
+    npl = NormalizerPipeline([
+        ('UN', unicode_normalize), 
+        ('CN', case_normalize), 
+        ('DCN', diacritical_normalize), 
+        ('WSN', whitespace_normalize), 
+        ('PN', punctuation_normalize),
+        ])
+
+    npl.add_step('AN', apostrophe_normalize)
+    npl.pop_step()
+    npl.remove_step('CN')
+
+    normaized_text = npl(text)
+    print(normaized_text)
+
+    Buradan şöyle bir çıktı elde edilecektir:
+
+    “Merhaba Dünya!! Nasılsın?İyi misin??”
+
+    Bir boru hattı nesnesi boru hattı elemanı olarak da kullanılabilir. Ne de olsa o da fonksiyon gibi "çağrılabilir 
+    (callable) bir nesnedir. Örneğin:
+
+    npl1 = NormalizerPipeline([
+        ('UN', unicode_normalize), 
+        ('CN', case_normalize), 
+        ('DCN', diacritical_normalize), 
+        ])
+    
+    npl2 = NormalizerPipeline([
+        ('NPL1', npl1), 
+        ('WSN', whitespace_normalize), 
+        ('PN', punctuation_normalize),
+        ('AN', apostrophe_normalize),
+        ])
+
+    text = npl2(text)
+    print(text)       
+
+    Burada birincş boru hattı nesnesi fonksiyon gibi çağrıldığında o boru hattındaki fonksiyonlar çağrılacaktır.         
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıdaki örneklerimizde Türkçeyi temel aldık. Normalizasyonların dile de bağlı olduğunu anımsayınız. Örneğin 
+    İngilizce'de "isn't" gibi "aren't" gibi kısaltmaların da normalize edilmesi egrekmektedir. Ancak Türkçe'de bu biçimde 
+    yaygın bir kısaltma kalıbı yoktur. Bizim farklı diller için çok sayıda normalizasyon fonksiyonu yazdığımızı düşünün. 
+    İşte bu tür durumalarda uygun bir dile ilişkin boru hattı nesnesini kolay oluşturmak için yardımcı fonksiyonlardan da 
+    faydalanılmaktadır. Örneğin:
+
+    def make_turkish_normalizer():
+        return NormalizerPipeline([
+            ('UN', unicode_normalize), 
+            ('CN', case_normalize), 
+            ('DCN', diacritical_normalize), 
+            ('WSN', whitespace_normalize), 
+            ('PN', punctuation_normalize),
+            ('AN', apostrophe_normalize)
+            ])
+
+    Bu fonksiyonu şöyle kullanabiliriz:
+
+    tn = make_turkish_normalizer()
+    normalized_text = tn(text)
+    print(normalized_text)
+
+    Benzer biçimde örnein biz make_ascii_normalizer isimli bir yardımcı fonksiyonla ASCII normalizasyonu için boru 
+    hattı nesnesi oluşturabiliriz:
+
+    def make_ascii_normalizer():
+        return NormalizerPipeline([
+            ('UN', unicode_normalize), 
+            ('CN', case_normalize), 
+            ('DCN', diacritical_normalize), 
+            ('WSN', whitespace_normalize), 
+            ('PN', punctuation_normalize),
+            ('AN', apostrophe_normalize),
+            ('ASN', asciify_turkish_normalize),
+            ])
+
+    Aşağıda şimdiye kadar yapmoş olduğumuz nromalizasyonlara ilişkin tüm kodları bir bütün oalrak veriyoruz. 
+#------------------------------------------------------------------------------------------------------------------------
+
+import unicodedata
+import re
+
+def unicode_normalize(text):
+    return unicodedata.normalize('NFKC', text)
+
+def case_normalize(text):
+    return text.replace('İ', 'i').replace('I', 'ı').lower()
+
+def asciify_turkish_normalize(text):
+    return text.translate(str.maketrans('çğıöşüÇĞİÖŞÜ', 'cgiosuCGIOSU'))
+        
+def diacritical_normalize(text):
+    chars = []
+    for c in text:
+        if c in 'çğıöşüÇĞİÖŞÜ':
+            chars.append(c)
+        else:
+            nfd = unicodedata.normalize('NFD', c)
+            for d in nfd:
+                if unicodedata.category(d) != 'Mn':
+                    chars.append(d)
+    return ''.join(chars)
+        
+def whitespace_normalize(text):
+    return re.sub(r'\s+|[\u200B\u200C\u200D\u2060\uFEFF]+', ' ', text).strip()
+
+def punctuation_normalize(text):
+    text = re.sub(r'[\u00AD\u2010\u2011\u2012\u2013\u2014\u2015'
+                  '\u2017\u2E3A\u2E3B\u2212\uFE58\uFE63\uFF0D]', '-', text)
+    text = re.sub(r'\u2026', '...', text)
+    text = re.sub(r'[\uFF01]', '!', text)           # fullwidth !
+    text = re.sub(r'[\uFF1F]', '?', text)           # fullwidth ?
+    text = re.sub(r'[\uFF0E]', '.', text)           # fullwidth .
+    text = re.sub(r'[\uFF0C]', ',', text)           # fullwidth ,
+    text = re.sub(r'[\uFF1B]', ';', text)           # fullwidth ;
+    text = re.sub(r'[\uFF1A]', ':', text)           # fullwidth :
+    text = re.sub(r'\.{3,}', '...', text)           # dört ve üzeri noktayı üç noktaya indir
+    text = re.sub(r'!{2,}',  '!!',   text)          # tekrarlanan ünlemi iki tane yap
+    text = re.sub(r'\?{2,}', '??',   text)          # tekrarlanan soru işaretini iki tane yap
+    text = re.sub(r',{2,}',  ',,',   text)          # tekrarlanan virgülü iki tane yap
+    text = re.sub(r';{2,}',  ';;',   text)          # tekrarlanan noktalı virgülü iki tane yap
+    text = re.sub(r':{2,}',  '::',   text)          # tekrarlanan iki noktayıiki tane yap
+    text = re.sub(r'-{2,}',  '--',   text)          # tekrarlanan tireyi iki tane yap
+    text = re.sub(r'(\?!)+|(!\?)+',  '!?', text)    # tekrarlanan ?! için !? yerleştir
+    text = re.sub(r'\s+([.,!?;:\)])', r'\1', text)
+    text = re.sub(r'([.,!?;:])(?![.,!?;:])(?=\S)', r'\1 ', text)
+    return text
+
+def apostrophe_normalize(text):
+    text = re.sub(r'[\u201C\u201D\u201E\u201F\u2033\u2036]', '"', text)     # çift tırnak varyantları
+    text = re.sub(r'[\u2018\u2019\u201A\u201B\u2032\u2035]', "'", text)     # tek tırnak varyantları
+    return text
+
+class NormalizerPipeline:
+    def __init__(self, steps=None):
+        self.steps= steps or []
+     
+    def add_step(self, name, f):
+        self.steps.append((name, f))
+        
+    def pop_step(self):
+        return self.steps.pop()
+    
+    def insert_step(self, index, name, f):
+        self.steps.insert(index, (name, f))
+            
+    def remove_step(self, name):
+        for i in range(len(self.steps)):
+            if self.steps[i][0] == name:
+                return self.steps.pop(i)
+           
+    def __call__(self, text):
+        for _, f in self.steps:
+            text = f(text)
+        return text
+            
+def make_turkish_normalizer():
+    return NormalizerPipeline([
+        ('UN', unicode_normalize), 
+        ('CN', case_normalize), 
+        ('DCN', diacritical_normalize), 
+        ('WSN', whitespace_normalize), 
+        ('PN', punctuation_normalize),
+        ('AN', apostrophe_normalize)
+        ])
+
+def make_ascii_normalizer():
+    return NormalizerPipeline([
+        ('UN', unicode_normalize), 
+        ('CN', case_normalize), 
+        ('DCN', diacritical_normalize), 
+        ('WSN', whitespace_normalize), 
+        ('PN', punctuation_normalize),
+        ('AN', apostrophe_normalize),
+        ('ASN', asciify_turkish_normalize),
+        ])
+            
+# test 
+
+text = """
+   “Merhaba Dünya!!! Nasılsın?İyi misin???”
+"""
+
+npl = NormalizerPipeline([
+    ('UN', unicode_normalize), 
+    ('CN', case_normalize), 
+    ('DCN', diacritical_normalize), 
+    ('WSN', whitespace_normalize), 
+    ('PN', punctuation_normalize),
+    ])
+
+npl.add_step('AN', apostrophe_normalize)
+npl.pop_step()
+npl.remove_step('CN')
+
+normaized_text = npl(text)
+print(normaized_text)
+
+text = """
+   “Merhaba Dünya!!! Nasılsın?İyi misin???”
+"""
+
+npl1 = NormalizerPipeline([
+    ('UN', unicode_normalize), 
+    ('CN', case_normalize), 
+    ('DCN', diacritical_normalize), 
+    ])
+ 
+npl2 = NormalizerPipeline([
+    ('NPL1', npl1), 
+    ('WSN', whitespace_normalize), 
+    ('PN', punctuation_normalize),
+    ('AN', apostrophe_normalize),
+    ])
+
+text = npl2(text)
+print(text)
+
+text = """
+   “Merhaba Dünya!!! Nasılsın?İyi misin???”
+"""
+
+tn = make_turkish_normalizer()
+normalized_text = tn(text)
+print(normalized_text)
+
+text = """
+   “Merhaba Dünya!!! Nasılsın?İyi misin???”
+"""
+
+tn = make_ascii_normalizer()
+normalized_text = tn(text)
+print(normalized_text)
+
+#------------------------------------------------------------------------------------------------------------------------
+                                                    <BURADA KALDIK>
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
@@ -1647,6 +2330,6 @@ else:
 
 #------------------------------------------------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------------------------------------------------
 
-
-
+#------------------------------------------------------------------------------------------------------------------------
