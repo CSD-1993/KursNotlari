@@ -1,4 +1,3 @@
-
 /*----------------------------------------------------------------------------------------------------------------------
                                         C ve Sistem Programcıları Derneği
 
@@ -13,10 +12,10 @@
     Aslan, K. (2025), "Linux Kernel - İşletim Sistemlerinin Tasarımı ve Gerçekleştirilmesi Kursu, Sınıfta Yapılan 
         Örnekler ve Özet Notlar", C ve Sistem Programcıları Derneği, İstanbul.
 
-                    (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
-                        (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
+                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
+                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                    Son Güncelleme: 06/02/2026 - Cuma
+                                    Son Güncelleme: 23/02/2026 - Pazartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -1173,12 +1172,10 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    
-/*----------------------------------------------------------------------------------------------------------------------
 	Biz simplfs dosya sistemimizde kendi süper blok nesnemize yaptığımız eşzamanlı (concurrent) erişimlerde kodumuz 
-    zarar görmesin diye spinlock nesnesi kullanmıştık. Zaten çekirdeğin diğer veri yapıları kullandığımız çekirdek 
-    fonksiyonları tarafından spinlock ile korunmaktaydı. Dolayısıyla biz yalnızca simplefs dosya sistemimizde kendimize 
-    ilişkin çekirdeğin korumadığı nesneleri korumakla yükümlüydük. Kodumuzun bu kısmını anımsatmak istiyoruz:
+    zarar görmesin diye spinlock nesnesi kullanmıştık. Çağırdığımız çekirdek fonksiyonları ise zaten çekirdek nesnelerine 
+    erişirken kendi içlerinde spinlock nesnelerini kullanıyordu. Dolayısıyla bizim simplefs dosya sisteminde yalnızca 
+    kendimize ilişkin nesneleri korumamız yetiyordu. Kodumuzun bu kısmını anımsatmak istiyoruz:
 
     static int simplefs_alloc_inode_num(struct super_block *sb)
     {
@@ -1214,32 +1211,32 @@ void exit_sys(const char *msg)
     }
 
     spinlock nesnesini bir fonksiyon içerisinde kilitlediyseniz fonksiyondan geri dönmeden önce onun kilidini açmayı
-    unutmayınız.
+    unutmayınız. Yukarıdakş fonksiyonda da fonksiyondan çıkmadan önce spinlock kildinin açıldığına dikkat ediniz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Diğer çok kullanılan bir senkronizasyon nesnesi de "okuma yazma kilitleri (readers-writer lock)" denilen nesnelerdir. 
+	Diğer çok kullanılan senkronizasyon nesneleri de "okuma yazma kilitleri (readers-writer lock)" denilen nesnelerdir. 
     Önce bu nesnelere neden gereksinim duyulduğunu bir örnekle açıklamak istiyoruz. Çekirdek kodlarında paylaşılan bir 
     kaynak bulunuyor olsun. Örneğin bunun global bir bağlı liste (linked list) olduğunu düşünelim. Bu bağlı listeye bir 
     grup thread eleman (düğüm) ekliyor olsun, bir grup thread de bu bağlı listeyi dolaşarak eleman arıyor olsun. Burada 
     bağlı listede arama yapmak "okuma (read)" işlemi gibi düşünülebilir. Çünkü bu işlem paylaşılan kaynakta (burada bağlı 
-    liste) bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilir. Ancak bağlı listeye 
-    eleman ekleyen thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o sırada başka bir thread 
-    de ekleme yaparsa ya da arama yaparsa bu durum çökmeye yol açabilir. Burada bağlı listeye eleman eklemek bir yazma 
-    (write) işlemi olarak düşünülebilir. O halde bizim öyle bir kritik kod oluşturmamız gerekir ki birden fazla okuma 
-    yapan thread bu kritik koda girebilsin ancak bir thread okuma yaparken yazma yapan bir thread okuma yapan thread 
-    kritik koddan çıkana kadar beklesin. Benzer biçimde eğer yazma yapan bir thread kritik koda girmişse bu işlem bitene 
-    kadar okuma yapan thread de kritik koda giremesin. Aşağıda Thread-1 kritik koda girmişse Thread-2'nin durumu 
-    açıklanmaktadır:
+    liste) bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilmektedir. Ancak bağlı 
+    listeye eleman ekleyen thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o sırada başka bir 
+    thread de aynı baplı listeye ekleme yaparsa ya da arama yaparsa bu durum çökmeye yol açabilir. Burada bağlı listeye 
+    eleman eklemek bir "yazma (write)" işlemi olarak düşünülebilir. O halde bizim öyle bir kritik kod oluşturmamız gerekir 
+    ki birden fazla okuma yapan thread bu kritik koda girebilsin ancak bir thread okuma yaparken yazma yapan bir thread 
+    okuma yapan thread kritik koddan çıkana kadar beklesin. Benzer biçimde eğer yazma yapan bir thread kritik koda girmişse 
+    bu işlem bitene kadar okuma yapan bir thread de kritik koda giremesin. Aşağıda Thread-1 kritik koda girmişse Thread-2'nin 
+    kritik koda girip girmeyeceği bir tablo biçiminde verilmiştir:
 
-    Thread-1            Thread-2        Kritik Koda Girebilmeli Mi?
-    ---------------------------------------------------------------
+    Thread-1            Thread-2        Thread-2 Kritik Koda Girebilmeli Mi?
+    ------------------------------------------------------------------------
     Okuma               Okuma           Evet
     Okuma               Yazma           Hayır
     Yazma               Okuma           Hayır
     Yazma               Yazma           Hayır
 
-    Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalara izin vermektedir.
+    Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalar için kritik koda girilmesine izin vermektedir. 
 
     Böyle bir mekanizma tek başına mutex ya da semaphore nesneleriyle sağlanamaz. Aşağıdaki temsili koda (pseudo code) 
     dikkat ediniz:
@@ -1260,16 +1257,18 @@ void exit_sys(const char *msg)
         mutex_unlock(&g_mutex);
     }
 
-    Burada birden fazla okuma işlemi de blokeye yol açacaktır.								
+    Burada birden fazla okuma işlemi de blokeye yol açacaktır. Halbukş bizim istediğimiz biredne fazla okumanın kilide 
+    yakalanmadan kritik koda girmebilmesidir.							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Linux çekirdeğinde readers/writer lock nesneleri spinlock mekanizmasıyla çalışmaktadır. Yani bu nesneler thread'i 
-    bloke ederek uykuya daldırmazlar. Thread'ler arası geçişi (preemption) kapatarak meşgul bir döngüde kilidin açılmasını 
+    bloke ederek uykuya yatırmazlar. Thread'ler arası geçişi (preemption) kapatarak meşgul bir döngüde kilidin açılmasını 
     beklerler. Yine bu nesnelerin de tek işlemcili ya da tek çekirdekli sistemlerde bir kullanımı yoktur. Bu sistemlerde 
-    bu kilit fonksiyonları yalnızca thread'ler arası geçişi kapatıp açmaktadır.
+    bu kilit fonksiyonları yalnızca thread'ler arası geçişi kapatıp açmaktadır. (Yani kritik kodun kesilmeden çalıştırılmasını
+    sağlamaktadır.)
     
-    Okuma yazma kilitleri rwlock_t türüyle temsil edilmektedir. Bu yapı güncel çekirdeklerde şöyle bildirilmiştir:
+    Okuma yazma kilitleri rwlock_t türünden bir yapıyla temsil edilmektedir. Bu yapı güncel çekirdeklerde şöyle bildirilmiştir:
 
     typedef struct {
         struct rwbase_rt	rwbase;
@@ -1279,8 +1278,8 @@ void exit_sys(const char *msg)
     #endif
     } rwlock_t;
     
-    Okuma yazma kilitlerinin nesnelerinin yaratılması DEFINE_RWLOCK(name) makrosuyla ya da rwlock_init fonksiyonuyla 
-    yapılmaktadır. DEFINE_RWLOCK(name) makrosu "include/linux/rwlock_types.h" dosyası içerisinde şöyle bildirilmiştir:
+    Okuma yazma kilit nesnelerinin yaratılması DEFINE_RWLOCK(name) makrosuyla ya da rwlock_init fonksiyonuyla yapılmaktadır. 
+    DEFINE_RWLOCK(name) makrosu "include/linux/rwlock_types.h" dosyası içerisinde aşağıdaki gibi bildirilmiştir:
 
     #ifdef CONFIG_DEBUG_SPINLOCK
     #define __RW_LOCK_UNLOCKED(lockname)					    \
@@ -1303,7 +1302,7 @@ void exit_sys(const char *msg)
 
     void rwlock_init(rwlock_t *lock);
 
-    Okuma yazma kilitlerinin kilidini alan ve kilidini açan fonksiyonlar şunlardır:
+    Okuma yazma kilitlerinin kilidini alan ve kilidini bırakan fonksiyonlar şunlardır:
 
     #include <linux/rwlock.h>
 
@@ -1328,8 +1327,8 @@ void exit_sys(const char *msg)
     void write_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void write_unlock_bh(rwlock_t *lock);
 
-    Nesne okuma amaçlı lock edilmişse read amaçlı unlock işlemi, yazma amaçlı lock edilmişse yazma amaçlı unlock işlemi 
-    uygulanmalıdır. Fonksiyonların diğer işlevleri normal spinlock nesnelerinde olduğu gibidir. Örneğin okuma amaçlı 
+    Nesne read_lock fonksiyonalrıyla kilitlenmişse nesnenin açılması read_unlock fonksiyonlarıyla, nesne write_lock 
+    fonksiyonlarıyla kilitlenmişse nesnenin açılması write_unlock fonksiyonlarıyla yapılmalıdır. Örneğin okuma amaçlı 
     krtik kod şöyle oluşturulabilir:
 
     static DEFINE_RWLOCK(g_rwlock);
@@ -1367,10 +1366,10 @@ void exit_sys(const char *msg)
         write_unlock(&g_rwlock);
     }
 
-    Burada artık okuma yapmak isteyen thread read fonksiyonunu çağırdığında read_lock fonksiyonu ile spinlock kilidi alınır, 
-    başka bir thread bu kilidi write_lock ile alamaz ve spin yapmaya başlar. Ancak başka bir thread kilidi yine read_lock 
-    ile alabilir. Eğer bir thread kilidi write_lock ile almışsa başka bir thread kilidi read_lock ile de write_lock ile 
-    de alamaz ve spin yaparak bekler.
+    Burada artık okuma yapmak isteyen thread read_lock fonksiyonu ile spinlock kilidini aldığında başka bir thread bu 
+    kilidi write_lock ile alamaz ve spin yapmaya başlar. Ancak başka bir thread kilidi yine read_lock ile kilidi alabilr. 
+    Eğer bir thread kilidi write_lock ile almışsa başka bir thread kilidi read_lock ile de write_lock ile de alamaz ve 
+    spin yaparak bekler.
 
     read_lock ve write_lock fonksiyonlarının irq sonekli versiyonları yine akış kritik kodda girdiğinde ilgili CPU ya da 
     çekirdeğin yerel kesmelerini kapatmaktadır.								
@@ -1381,10 +1380,10 @@ void exit_sys(const char *msg)
     özellikle çok işlemcili ya da çok çekirdekli sistemler söz konusu olduğunda pek çok ayrıntısı da vardır. Burada bu 
     ayrıntılar üzerinde duracağız. 
 
-    Bugün çok işlemcili ya da çok çekirdekli sistemlerde CPU ile bellek arasındaki bağlantı söz konusu olduğunda iki
-    mimari kullanılmaktadır: SMP (Symmetric Multiprocessor) Mimarisi ve NUMA (Non-Unified Memory Access) Mimarisi.
-    SMP mimarisinde tüm CPU ya da çekirdekler aynı fiziksel RAM'e bağlıdır. Dolayısıyla bir CPU ya da çekirdek RAM'e 
-    erişirken diğeri o erişim bitene kadar beklemektedir. Tabii bu senkronizasyon donanım tarafından sağlanmaktadır. 
+    Bugün çok işlemcili ya da çok çekirdekli sistemlerde işlemci ile bellek arasındaki bağlantı söz konusu olduğunda 
+    iki mimari kullanılmaktadır: SMP (Symmetric Multiprocessor) Mimarisi ve NUMA (Non-Unified Memory Access) Mimarisi.
+    SMP mimarisinde tüm işlemci ya da çekirdekler aynı fiziksel RAM'e bağlıdır. Dolayısıyla bir işlemci ya da çekirdek 
+    RAM'e erişirken diğeri o erişim bitene kadar beklemektedir. Tabii bu senkronizasyon donanım tarafından sağlanmaktadır. 
     SMP mimarisindeki RAM erişimini aşağıdaki şekille betimleyebiliriz:
 
     ┌─────────┐   ┌─────────┐
@@ -1400,18 +1399,18 @@ void exit_sys(const char *msg)
     └───────────────────────┘
     
     SMP sisteminde bir CPU ya da çekirdek DRAM belleğe eriştiği zaman diğeri nano saniyeler mertebesinde beklediği 
-    için tam bir paralel çalışma mümkün olamamaktadır. Tabii CPU'ların içsel önbellekleri DRAM erişimini azaltmayı 
-    hedeflemektedir. Ancak CPU içerisindeki önbellek mekanizmasının da "önbellek tutarlılığı (cache coherency)" denilen 
-    sorunları vardır. Örneğin bir CPU ya da çekirdek DRAM bellekten belli bir yeri içsel önbelleğine çekmiş olsun. 
-    Şimdi o CPU ya da çekirdek oraya bir şey yazdığında diğer CPU'ların ya da çekirdeklerin onu fark etmek gerekmektedir. 
-    İşte bu bunu sağlamak için bazı "önbellek tutarlılığına" ilişkin mekanizmalar işletilmektedir. Biz burada önbellek 
+    için tam bir paralel çalışma mümkün olamamaktadır. Tabii işlemcilerin ya da çekirdeklerin içsel önbellekleri DRAM 
+    erişimini azaltmayı hedeflemektedir. Ancak işelmci içerisindeki önbellek mekanizmasının da "önbellek tutarlılığı 
+    (cache coherency)" denilen sorunları vardır. Örneğin bir işlemci ya da çekirdek DRAM bellekten belli bir yeri içsel 
+    önbelleğine çekmiş olsun. Şimdi o işelemci ya da çekirdek oraya bir şey yazdığında diğer işlemcilerin ya da çekirdeklerin 
+    onu fark etmesi gerekmektedir. İşte bunu sağlamak için "önbellek tutarlılığına" ilişkin bazı mekanizmalar işletilmektedir. 
+    Biz burada önbellek 
     protokolleri üzerinde durmayacağız. Bunlar hakkındaki bilgileri başka kaynaklardan edinebilirsiniz. 
 
-    NUMA mimarisinde DRAM bellek bank'lara ayrılmıştır. Her CPU'nun ya da çekirdeğin ayrı bir bank'ı vardır. Bunlar 
-    kendi bank'larına da diğer bank'lara da erişebilirler ancak kendi bank'larına daha hızlı erişmektedir. Çünkü bunlar 
-    kendi bank'larına erişirken diğer CPU ya da çekirdekleri durdurmamaktadır. Bu nedenle bu mimarilerde belleğin her 
-    bölgesine erişim aynı sürede yapılamamaktadır. "Non-unified" sözcüğü bunu anlatmaktadır. Bu mimariyi aşağıdaki 
-    şekille betimleyebiliriz:
+    NUMA mimarisinde DRAM bellek bank'lara ayrılmıştır. Her işelemcinin ya da çekirdeğin ayrı bir bank'ı vardır. Bunlar 
+    kendi bank'larına diğer bank'lardan daha hızlı erişebilmektedir. Çünkü bunlar kendi bank'larına erişirken diğer CPU 
+    ya da çekirdekleri durdurmamaktadır. Bu nedenle bu mimarilerde belleğin her bölgesine erişim aynı sürede yapılamamaktadır. 
+    "Non-unified" sözcüğü bunu anlatmaktadır. Bu mimariyi aşağıdaki şekille betimleyebiliriz:
 
     ┌─────────────────┐        ┌─────────────────┐
     │    Çekirdek 0   │        │    Çekirdek 1   │
@@ -1435,21 +1434,21 @@ void exit_sys(const char *msg)
     - Bellek bant genişliği toplamda daha yüksektir (her düğüm kendi belleğine erişir).
     - Büyük ve paylaşımlı bellek sistemleri için daha uygundur.
     - Bellek kapasitesi daha kolay arttırılabilir (düğüm başına bellek eklenebilir).
-    - Performansı artırmak için veri yerelliği (data locality) optimizasyonu yapılabilir
+    - Performansı artırmak için veri yerelliği (data locality) optimizasyonu yapılabilir.
   
     NUMA Mimarisinin Dezavantajları:
 
-    - Programlama ve yönetimi daha karmaşıktır.
-    - Uzak bellek erişimleri yavaştır (yerelden 2-3 kat daha yavaş olabilir).
+    - Programlama tarafı ve yönetimi daha karmaşıktır.
+    - Uzak bellek erişimleri (diğer bank'lara erişim) yavaştır (yerelden 2-3 kat daha yavaş olabilir).
     - İşletim sisteminin ve uygulamaların NUMA-farkında (NUMA-aware) olması gerekir.
-    - Yanlış veri yerleşimi performansı ciddi şekilde düşürebilir
+    - Yanlış veri yerleşimi performansı ciddi şekilde düşürebilir.
     - Donanım maliyeti daha yüksektir.
-    - Önbellek tutarlılık trafiği (coherence traffic) daha karmaşıktır.
+    - Önbellek tutarlılık mekanizmaları daha karmaşıktır.
 
     SMP Mimarisinin Avantajları:
 
     - Programlama modeli çok daha basittir.
-    - Tüm işlemciler için bellek erişim gecikmesi aynıdır (tutarlı performans).
+    - Tüm işlemciler ya da çekirdekler için bellek erişim gecikmesi aynıdır (tutarlı performans).
     - İşletim sistemlerinin ve uygulamaların geliştirilmesi daha kolaydır.
     - Donanım tasarımı nispeten daha basittir.
     - Küçük sistemlerde (2-8 işlemci) daha verimli olabilir.
@@ -1484,18 +1483,18 @@ void exit_sys(const char *msg)
     sistemlerde de NUMA içeren sistemlerde de Linux'u kurduğumuzda Linux bunu fark etmekte ve o mimariye özgü çalışmayı 
     desteklemektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
-
+XXXX
 /*----------------------------------------------------------------------------------------------------------------------
 	Çok CPU'lu ya da çok çekirdekli sistemlerde senkronizasyon bakımından iki önemli sorun kaynağı vardır:
 
     1) Aynı bellek bölgesine erişimde oluşan sorunlar.
     2) Komutların yer değiştirmesi (instruction reordering) nedeniyle oluşan sorunları.
 
-    Birden fazla CPU ya da çekirdeğin aynı global değişkeni tesadüfen aynı zamanda güncellediğini düşünelim. Ya da 
-    bir CPU ya da çekirdek o global değişkeni güncellerken diğerinin onu okumaya çalıştığını düşünelim. Yukarıda biz 
-    modern sistemlerde bir CPU ya da çekirdeğin belleğe erişirken zaten diğerini durdurduğunu belirtmiştik. Ancak Intel 
-    gibi bazı mimarilerde bu durdurma bazı durumlarda tüm makine komutu süresinde yapılmamaktadır. Intel ve 64 bit ARM 
-    işlemcileri bazı koşullarda belleğe erişim yapan makine komutu çalışırken veri yolunu birden fazla kez tutup bırakabilmektedir.  
+    Birden fazla CPU ya da çekirdeğin aynı global değişkeni tesadüfen aynı zamanda güncellediğini düşünelim. Ya da bir 
+    CPU ya da çekirdek o global değişkeni güncellerken diğerinin onu okumaya çalıştığını düşünelim. Yukarıda biz modern 
+    sistemlerde bir CPU ya da çekirdeğin belleğe erişirken zaten diğerini durdurduğunu belirtmiştik. Ancak Intel gibi bazı 
+    mimarilerde bu durdurma bazı durumlarda tüm makine komutu süresinde yapılmamaktadır. Intel ve 64 bit ARM işlemcileri 
+    bazı koşullarda belleğe erişim yapan makine komutu çalışırken veri yolunu birden fazla kez tutup bırakabilmektedir.  
     Örneğin 32 bit Intel işlemcilerinde aslında CPU fiziksel belleğe hep 32 bit genişliğinde erişmektedidr. Bu işlemciler 
     bellekten 1 byte bile okuyacak olsalar aslında 4 byte okuyup o 4 byte içerisinden o byte'ı vermektedir. İşte bu 
     işlemcilerde eğer 4 byte'lık nesneler hizalanmamışsa makine komutunun başından sonuna kadar veri yolu tutulmamaktadır.
@@ -1602,6 +1601,1910 @@ void exit_sys(const char *msg)
     yazmacına da bir şey yazmak isteyebiliriz. Bu iki erişim CPU için bağımısız bellek bölgelerine yapılıyor gibi olsa 
     da aslında ilk erişimde aygıt ayarlanıyor olabilir, ikinci erişimde de ayarlanmış aygıt üzerinde işlem yapılıyor
     olabilir.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+					                    54. Ders 07/02/2026 - Cumartesi				
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Komutların yer değiştirmesi (instruction reordering) aslında derleyici tarafından da yapılan br optimizasyon 
+    etkinliğidir. Derleyiciler de komutlar daha hızlı çalışsın diye birbirleriyle ilişkisi olmayan makine komutlarının 
+    yerlerini değiştirebilmektedir. Ancak senkronizasyon sorunlarını oluşturan ana unsur derleyicden ziyade işlemci 
+    tarafından yapılan komut yer değiştirmesidir. Zaten bildiğiniz gibi derleyiciler optimizasyon aşamasında programcının 
+    yazdığı deyimleri de elimine edebilmektedir. Örneğin:
+
+    a = 10;
+    a = 20;
+
+    Burada derleyici a = 10 deyimini taamen elimine edebilir. Çünkü bu deyim kaldırıldığında programın gözlemlenebilir 
+    davranışında bir değişiklik oluşmayacaktır. Ancak işlemciler böyle bir eleminasyonu yapmazlar. İşlemciler yalnızca 
+    komut çalıştırması sırasında basit birtakım iyileştirmeler yapabilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	İşlemciler aslında makine komutlarını saırasıyla çalıştırıyormuş gibi bir işlem uygulamaktadır. Ancak makine komutlarının
+    çalışması "boru hattı (pipeline) mekanizması" nedeniyle aslında tek bir cycle'da yapılmamaktadır. İşlemci komutları 
+    boru hattı kuyruğuna göndermekte, bu kuyrukta işlemler daha küçük mikrokod (microcode) tabir edilen parçalara ayrılmakta
+    ve bu parçalar mümkün olduğu kadar eşzamanlı biçimde yapılmaktadır. Dolayısıyla bu mekanizma nedeniyle diğerinden 
+    daha önce kuyruğua gönderilmiş makine komutları diğerindne daha sonra işlemini bitirebilmektedir. İşlemcilerin 
+    boru hattı mekanizması oldukça ilginç ve detaylı bir mekanizmadır. Biz burada bu mekanizmanın ayrıntıları üzerinde 
+    durmayacağız. Ancak bütün bunların bir sonucu olarak birbirleriyle ilişkili olmayan makine komutları sanki farklı 
+    sıralarda yapılmış gibi bir etki oluşabilmektedir. 
+
+    İşlemcilerde pek çok komutun 1 cycle'da yapıldığını görebilirsiniz. Aslında bu 1 cycle süre komutun çalıştırma 
+    aşamalarında alt parçalara ayrılmaktadır. Bu alt parçalarda yapılan işlemlere "mikro işlem" diyebiliriz. İşte 
+    pipeline mekanizması bu mikro işlemler düzeyinde yapılan bir mekanizmadır. 
+
+    Ayrıca işlemciler daha karmaşık komutları kendi içerisinde de parçalara ayırabilmektedir. Bunlara da işlemci 
+    terminolojisinde genel olarak "mikrokod (microcode)" denilmektedir. Mikrokod'ları “işlemcinin kendi içindeki 
+    yazılımı” gibi de düşünebilirsiniz. Örneğin aşağıdaki gibi bir makine komutu söz konusu olsun:
+    
+    ADD R1, R2 komutu
+
+    Bu komut işlemci tarafından alt ilemlere ayrılmaktadır. Örneğin:
+
+    1) R1’i oku 
+    2) R2’yi oku 
+    3) ALU’da topla 
+    4) sonucu R1’e yaz
+
+    Mikrokodlar daha çok CISC işlemcilerine özgüdür. RISC işlemcileri komutları mikrokodlara bölerek işlem yapmaz. 
+    Tek bir lojik devreyle bütünsel bir biçimde işlemleri yapar. Tabii bu sırada komutlar mikroişlemlere ayrılarak 
+    yuklarıda belirttiğimiz gibi kemdi içlerinde pipeline mekanizması eşliğinde çalıştırışmaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Peki çok işlemcili ya da çok çekirdekli sistemlerde "atomik işlem" ne anlama gelmektedir? Bilindiği gibi atomik 
+    işlem demek "kesilmeden, bölünmeden yani araya başka bir unsur girmeden tek parça halinde yapılan işlem" demektir. 
+    Peki bir işlemci ya da çekirdekte çalışan makine komutları atomik midir? İşte bu durum işlemcilerde çeşitli unsurlara 
+    bağlı olarak değişebilmektedir. Örneğin Intel ve ARM 8 işlemcilerinde hizalanmamış bellek bölgelerine yapılan erişimler 
+    atomik değildir. Çünkü bu işlem yapılırken araya başka bir işlemci ya da çekirdek girip yapılan işlemi kararsız bir
+    biçimde görebilmektedir. Çok işlemcili ya da çok çekirdekli sistemlerde atomiklik "bir işlem bir CPU'da yapılırken 
+    diğer CPU'ların da bu işlemin yan etkisini ya tamamen görmeleri ya da hiç görmemeleri" biçiminde tanımlanabilir. 
+    Peki yukarıdaki hizlanmamış bellek erişimleri dışında makine komutları bu yaptığımız tanıma göre atomik midir? Evet 
+    istisnai başka birkaç durum dışında makine komutları genel olarak atomiktir. 
+
+    Intel gibi CISC işlemlerinde doğrudan bellek üzerinde işlem yapan makine komutları vardır. Örneğin bu işlemcilerde 
+    aşağıdaki gibi tek bir makine komutuyla bellekteki bir nesnenin içindeki değer 1 artırılabilmektedir:
+
+    INC mem
+
+    Peki Intel gibi bir işlemcide bu işlem de atomik midir? Evet bu işlem eğer mem ile belrtilen adres hizalanmışsa 
+    atomiktir. Ancak burada çok işlemcili ya da çok çekirdekli sistemlerde başka bir sorun daha vardır. Bu makine 
+    komutunun tesadüfen birden fazla işlemci tarafından aynı adres üzerinde yapılmaya çalışıldığını düşünelim. 
+    Biz atomikliği yukarıda "bir işlemcinin yaptığı işlemi diğeri ya tam olarak görecek ya da görmeyecek" biçimde 
+    tanımlamıştık. İşlemcilerden her ikisi de bu belleğe başvurup bilgiyi alırsa ve iç içe geçmeli bir biçimde bunu
+    çalıştırırsa birinin belleğe yazdığı artırılmış değeri diğeri onu ezerek yazabilir. Bu durumda da bellekdeki 
+    değer iki kez değil sanki bir kez artırılmış gibi bir durum oluşabilir. Görüldüğü gibi bu örnekte bu makine 
+    komutu atomik olduğu halde sonuçta oluşan durum arzu edilen durum değildir. İşte bu tür durumlar işlemcilerin 
+    makine komutu bitene kadar veri yolunu kilitlemesiyle ya da buna benzer bir mekanizmayla engellenmektedir. Interl 
+    işlemcilerinde LOCK öneki bu işlemi yapmaktadır. 
+
+    Atomiklik kavramı ile komutların yer değiştirmesi (instruction reordering) kavramları farklıdır. Komutların yer 
+    değiştirmesinde komutlar yine atomik olabilir. Ancak diğer bir işlemci ya da çekirdek bunları farklı sıralarda 
+    yapılmış gibi görebilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki mademki makine komutları büyük ölçüde atomik o halde çekirdek kodlamasında ya da kullanııc alanındaki thread 
+    senkronizasyonunda bu bakımdan bir sorun mu vardır? İşte makine komutları atomik olsa da bizim C'de yazdığımız 
+    ve masum sandığımız pek çok ifade atomik olmayabilir. Örneğin:
+
+    ++count;
+
+    Burada count değişkeni 1 artırılmıştır. Ancak bu işlem derleyici tarafından tek bir makine komutuyla yapılmak 
+    zorunda değildir. Derleyiciler Intel gibi CISC mimarisinde bile bu işlemi birden fazla makine komutuyla yapabilmektedir. 
+    Zaten ARM gibi RISC işlemcilerinde böyle bir deyimin tek bir makine komutuyla yapılması mğmkün değildir. Tipik olarak 
+    derleyiciler yukarıdakiş gibi C'de tek bir operatörle yapılmış olan işlemi bile aşağıdaki gibi üç makine komutuyla
+    yapabilmektedir:
+
+    MOV reg, count
+    INC reg
+    MOV count, reg
+
+    Kaldı ki yukarıda da belirtmiştik derleyici bunu Intel işlemcileri için aşağıdaki gibi tek makine komutuyla yapmaya 
+    çalışsa bile sorun oratadan kalkmamaktadır:
+
+    INC count
+
+    Burada ver, yolu kilitlenmedikten sonra birden fazla işlemcinin bu komutu tesadüfen aynı zaman diliminde çalıştırması 
+    sonucunda artırım değeri yanlış oluşabilecektir. Neyse ki Intel işlemcilerinde komutun başına LOCK öneki getirilerek 
+    bu durum ortadan kaldırılabilmektedir:
+
+    LOCK INC count
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Aslında C'deki basit birtakım işlemler için derleyicinin atomik kod üretmesi çeşitli biçimlerde sağlanabilmektedir. 
+    Örneğin C11 ile C'ye _Atomic anahtar sözcüğü ile atomik niteleyicisi eklenmiştir. Eğer bir değişken bu _Atomic 
+    tür niteleyicisi ile tanımlanırsa derleyici o değişkenle yapılan işlemlerin atomik yapılmasını (örneğin LOCK önekleriyle
+    yapılmasını) kendi sağlamaktadır. Örneğin:
+
+    _Atomic int g_count;
+
+    C11'de _Atomic tür niteleyicisinin yanı sıra _Atomic tür belirleyicisi de bulunmaktadır. _Atomic tür belirleyicisi 
+    parantezli biçimde kullanılmaktadır. Örneğin:
+
+    _Atomic(int) g_count;
+
+    C11 ile C'ye sokulan _Atomic niteleyicisi ve tür belirleyicisi "isteğe bağlı (optional)" bir özelliktir. Derleyicierin
+    bunu desteklemesi zorunlu değildir. 
+
+    Artık biz ++g_count gibi bir işlemi yaptığımızda derleyici bunu atomik yapacak kodu kendisi üretmektedir. Ayrıca 
+    C11 ile eklenen <stdatomic.h> dosyasında aiağıdaki typedef bildirimleri de bulunmaktadır:
+
+    typedef atomic_bool _Atomic _Bool;
+    typedef atomic_char _Atomic char;
+    typedef atomic_schar _Atomic signed char;
+    typedef atomic_uchar _Atomic unsigned char;
+    typedef atomic_short _Atomic short;
+    typedef atomic_ushort _Atomic unsigned short;
+    typedef atomic_int _Atomic int;
+    typedef atomic_uint _Atomic unsigned int;
+    typedef atomic_long _Atomic long;
+    typedef atomic_ulong _Atomic unsigned long;
+    typedef atomic_llong _Atomic long long;
+    typedef atomic_ullong _Atomic unsigned long long;
+    ...
+
+    Ancak _Atomic tür niteleyicisi hala Microsoft C derleyicileri tarafından desteklenmemektedir. C11 standartlarına göre 
+    _Atomic niteleyicisi geçek sayı türleriyle, göstericilerle ve yapı türleriyle de kullanılabilmektedir. Ancak bu 
+    durumda derleyici atomikliği tek bir makine komutuyla sağlayamadığı için derleyici kendi içerisindeki senkronizasyon 
+    nesnelerini kullanabilmektedir. Derleyiciler arasında bu konuda işlevsel farklılıklar ve birtakım kusurlar bulunabilmektedir. 
+
+    Ayrıca C11'den daha eski zamanalarda da C derleyicileri atomik işlemler için "built-in" (ya da "intrinsic" de 
+    denilmektedir) fonksiyonlar bulunduruyordu. Örneğin atomik işlemler gcc tarafından sağlanan built-in __atomic_xxx 
+    önekli fonksiyonlar tarafından yapılabilmektedir. Microsodt derleyicileri de aynı amaçla InterlockedXXX fonksiyonlarını
+    bulundurmaktadır. 
+
+    C++'ta da <atomic> başlık dosyası içerisinde bildirilmiş olan atomic isimli sınıf şablonu ile atomik işlemler 
+    yapılabilmektedir. Örneğin:
+
+    atomic<int> count;
+
+    Ancak Linux çekirdeği yukarıda bahsettiğimiz gcc derleyicilerinin sağladığı _Atomic tür niteleyicisini ve 
+    built-in __atomic_xxx fonksiyonlarını kullanmamaktadır. Bunun en önemli nedeni çekirdeğin derleyicinin versiyonundan 
+    ve yeteneğinden bağımsız biçimde pek çok platformu destekleyecek biçimde yazılmak istenmesidir. Atomik işlemler 
+    için çekirdek içerisinde buluan fonksiyonlar kullanılmaktadır. Çekirdek geliştirmesi yapan ve aygıt sürücü yazan 
+    sistem programcıları da bu mekanizmayı kullanmalıdır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Linux çekrdeklerinde atomik işlemler için atomic_t, atomic64_t ve atomic_long_t isimli yapılar kullanılmaktadır. 
+    Bu yapılar "include/linux/types.h" içerisinde şöyle bildirilmiştir:
+
+    /* include/linux/types.h */
+
+    typedef struct {
+        int counter;
+    } atomic_t;
+
+    #ifdef CONFIG_64BIT
+    typedef struct {
+        s64 counter;
+    } atomic64_t;
+    #endif
+
+    typedef struct {
+        long counter;
+    } atomic_long_t;
+
+    Yeni çekirdeklerde atomic_long_t türü "include/linuc/atomic/atomic_long.h" dosyası içerisinde diğer türlerle 
+    typede dilmiş durumdadır:
+
+    #ifdef CONFIG_64BIT
+    typedef atomic64_t atomic_long_t;
+    /* ... */
+    #else
+    typedef atomic_t atomic_long_t;
+    /* ... */
+    #endif
+
+    atomic_t türündeki atomik değişken int türünden, atomic64_t türündeki atomik değişken ise long long türündendir. 
+    atomic_long_t türündeki atomik değiken de o sistemdeki long türünün uzunluğuna bağlı olarak int ya da long long 
+    türündendir. Bu türlerin neden yapıyla sarmalandığını merak edebilirsiniz. Bunun en önemli nedeni atomik işlemler 
+    yapan çekirdek fonksiyonlarına yanlışlıkla başka bir türün parametre olarak geçilmesini ve atomik türlerle işlemlerin
+    yanlışlıkla yapılmaını engellemektir. Aynı zamanda bu atomik temsilin daha okunabilir olacağı düşünülmüştür. Örneğin
+    bu tesmil sayesinde atomik işlemlerin C operatörleriyle işleme sokulması engellenmitir:
+
+    count++;                /* HATA: invalid operands to binary ++ */
+    count = count + 1;      /* HATA: invalid operands to binary + */
+
+    Atomik türden bir nesneye pratik biçimde ilkdeğe vermek için makrolar bulundurulmuştur. Örneğin:
+
+    static atomic_t my_counter = ATOMIC_INIT(0);
+    static atomic64_t my_long_counter = ATOMIC64_INIT(1000);
+    static atomic_long_t my_platform_counter = ATOMIC_LONG_INIT(-1);
+
+    Bu makrolar aslında küme parantezleir oluşturup yapının counter elemanına değer atanmasını sağlamaktadır. Örneğin:
+
+    #define ATOMIC_INIT(i) { (i) }
+
+    Ancak yerel değişken söz konusu ise bu biçimde ilkdeğer verme atomikliği bozabilmektedir. Çünkdü derleyiciler 
+    yerel değişkenlere de makine komutlarıyla değer atamaktadır. Atomik değişkenlere daha sonra değer atamak için 
+    atomic_set fonksiyonu kullanılmaktadır. Güncel çekirdeklerde atomic_set fonksiyonu inline biçimde şöyle bildirilmiştir:
+
+    static __always_inline void
+    atomic_set(atomic_t *v, int i)
+    {
+        instrument_atomic_write(v, sizeof(*v));
+        raw_atomic_set(v, i);
+    }
+
+    Görüldüğü gibi fonksiyonun birinci parametresi atomic_t türünden nesnenin adresini ikinci parametresi ise buna 
+    atanacak değeri değeri almaktadır. Buradaki asıl işlem platforma göre değişebilen raw_atomic_set tarafından 
+    yapılmaktadır. Buadaki instrument_atomic_write fonksiyonu çekirdek geliştirme süreci için debug amaçlı bulunmaktadır. 
+    Normal olarak koddan çıkartılmaktadır. atomic64_t türü için de atomic64_set isimli fonksiyon bulunmaktadır:
+
+    static __always_inline void
+    atomic64_set(atomic64_t *v, s64 i)
+    {
+        instrument_atomic_write(v, sizeof(*v));
+        raw_atomic64_set(v, i);
+    }
+
+    Benzer biçimde atomic_long_t türü için de atomic_long_set fonksiyonu bulundurulmuştur:
+    
+    static __always_inline void 
+    atomic_long_set(atomic_long_t *v, long i)
+    {
+        instrument_atomic_write(v, sizeof(*v));
+        raw_atomic_long_set(v, i);
+    }
+
+    Şimdi atomic_set fonksiyonunun çağırdığı raw_atomic_set fonksiyonuna bakalım:
+
+    static __always_inline void
+    raw_atomic_set(atomic_t *v, int i)
+    {
+        arch_atomic_set(v, i);
+    }
+
+    Burada arch_atomic_set fonksiyonu işlemciye bağlı olarak değişebilecek asıl işlemi yapan fonksiyondur. Derlemenin 
+    yapıldığı işlemci modeli neyse "arch/<işlemci_türü>/include/asm/atomic.h" içerisindeki arch_atomic_set fonksiyonu 
+    çağrılmaktadır. arch_atomic_set bazı mimariler için makro olarak nazı mimariler için inline fonksiyon olarak 
+    yazılmıştır. Örneğin "arch/x86/include/asm/atomic.h" içeisindeki Intel X86 işlemcileri için gu fonksiyon şöyle
+    yazılmıştır:
+
+    static __always_inline void arch_atomic_set(atomic_t *v, int i)
+    {
+        __WRITE_ONCE(v->counter, i);
+    }
+
+    Buradaki __WRITE_ONCE makrosu da şöyle yazılmıştır:
+
+    #define __WRITE_ONCE(x, val)						\
+    do {									            \
+        *(volatile typeof(x) *)&(x) = (val);			\
+    } while (0)
+
+    Burada görüldüğü gibi erişim volatile olarak yapılmıştır. Yani yazma işleminin doğrudan bellek erişimi ile yapılması 
+    istenmiştir. Yukarıdaki makroda aklınıza şu sorular gelebilir: 
+    
+    - Nesne hizalanmamışsa yukarıdaki atama işlemi atomik olur mu?
+    - volatile erişim tamanın tek hamlede yapılmasını garanti eder mi?
+    
+    Nesne hizalanmamışsa yukarıdaki atama tek makine komutuyla yapılsa bile atomik olmaz. Ancak Linux çekirdeğindeki 
+    tüm nesneler her zaman zaten hizalıdır. Yani bu garanti zaten vardır. Yukarıdaki volatile erişim için gcc'nin 
+    tek makine makine komutu üreteceği de bilinmektedir. gcc volarile atama işlemlerini her zaman tek makine komutuyla 
+    yapmaktadır. Ayrıca yukardaki işlemde ileride ele alacağımız bir bellek bariyerinin kullanılmadığına dikkatinizi 
+    çekmek istiyoruz. Bellek bariyerleri bir grup makine komutunun sıralamasını garanti etmek için kullanılmaktadır. 
+    Atomiklik ise ise bir işlemin araya girilmeden, kesilmeden tek parça bir işlem olarka yapılması anlamına gelmektedir. 
+
+    Yukarıdarıdaki akış Linux çekirdeğinde çok karşılaşına bir kalıptır. İşlemler işlemci bağımsız fonksiyonlar çağrılarak 
+    yapılır. Ancak belli bir aşamadan sonra işelmci "arch" dizini içerisindeki işlemci bağımlı fonksiyonlar ya da makrolar
+    devreye girer. Bazen yalnızca bazı işlemciler için özel işlemlerin yapılması gerekebilir. Bu durumda ilgili fonksiyonlar 
+    ya da makrolar o işlemciler için yazılır diğerleri için de "generic" bir yazım yapılır. Bu tür kodlarda isminde "generic"
+    geçen dosyalar görürseniz şaşırmayınız. Bunlar adeta "geri kalan işlemcilerin hepsi için" anlamına gelmektedir. 
+    Atomik fonksiyonlardaki çağırma dizgesi tipik olarka şöyledir:
+
+    atromic_xxx ---> raw_atomic_xxx ---> arch_atomic_xxx (işlemciye özgü fonksiyon ya da makro)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+					                        55. Ders 08/02/2026 - Pazar				
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Atomik türlerden değer okumak için read fonksiyonları kullanılmaktadır:
+
+    int atomic_read(const atomic_t *v);
+    s64 atomic64_read(const atomic64_t *v);
+    long atomic_long_read(const atomic_long_t *v);
+
+    Tabii bu değer okuma işlemi de tek bir işlemle yani başka bir işlemcinin araya girmesi engellenerek yapılmaktadır. 
+    atomic_read fonksiyonu şöyle yazılmıştır:
+
+    static __always_inline int
+    atomic_read(const atomic_t *v)
+    {
+        instrument_atomic_read(v, sizeof(*v));
+        return raw_atomic_read(v);
+    }
+
+    Buradaki instrument_atomic_read fonksiyonu çekirdek geliştirmesi sırasında debug amaçlı çağrılmaktadır. Normal çekirdek 
+    derlemelerinde bu çağrı koddan çıkartılmaktadır. raw_atomic_read fonksiyonu şöyle tanımlanmıştır:
+
+    static __always_inline int
+    raw_atomic_read(const atomic_t *v)
+    {
+        return arch_atomic_read(v);
+    }
+
+    arch_atomic_read fonksiyonunun Intel x86 gerçekleştirimi şöyledir:
+
+    static __always_inline int arch_atomic_read(const atomic_t *v)
+    {
+        /*
+        * Note for KASAN: we deliberately don't use READ_ONCE_NOCHECK() here,
+        * it's non-inlined function that increases binary size and stack usage.
+        */
+        return __READ_ONCE((v)->counter);
+    }
+
+    __READ_ONCE makrosu da şöyle oluşturulmuştur:
+
+    #define __READ_ONCE(x)	(*(const volatile __unqual_scalar_typeof(x) *)&(x))
+
+    Burada değişkenin adresi alınarak bu adres volatile bir adrese dönüştürülmüş ve yukarıda belirttiğimiz gibi volatile 
+    erişim yapılmıştır. Fonksiyonun kullanımına şöyle bir örnek verebiliriz:
+
+    atomic_t counter = ATOMIC_INIT(100);
+
+    int value = atomic_read(&counter);          /* Atomik okuma */
+
+    Atomik artırımlar ve eksiltimler için şu fonksiyonlar bulundurulmuştur:
+
+    void atomic_inc(atomic_t *v);      /* v++ */
+    void atomic_dec(atomic_t *v);      /* v-- */
+
+    void atomic64_inc(atomic64_t *v);
+    void atomic64_dec(atomic64_t *v);
+
+    atomic_long_inc(atomic_long_t *v);
+    atomic_long_dec(atomic_long_t *v);
+
+    Bu fonksiyonlar artırımın atomik bir biçimde yapılmasını garanti etmektedir. Intel'de bellek artırımları tek makine 
+    komutuyla yapılabilmektedir. Ancak ARM gibi RISC işlemcilerinde bu işlemler bir döngü içerisinde özel makine komutlarıyla 
+    yapılmaktadır. atomic_inc fonksiyonu güncel çekirdeklerde şöyle yazılmıştır:
+
+    static __always_inline void
+    atomic_inc(atomic_t *v)
+    {
+        instrument_atomic_read_write(v, sizeof(*v));
+        raw_atomic_inc(v);
+    }
+
+    raw_atomic_inc fonksiyonu da şöyle yazılmıştır:
+
+    static __always_inline void
+    raw_atomic_inc(atomic_t *v)
+    {
+    #if defined(arch_atomic_inc)
+        arch_atomic_inc(v);
+    #else
+        raw_atomic_add(1, v);
+    #endif
+    }
+
+    Her mimaride 1 artırma yapan makine komutu olmadığı için yukarıdaki kodda bir kontrolün yapıldığını görüyorsunuz. 
+    raw_atomic_add fonksiyonu da şöyle yazılmıştır:
+
+    static __always_inline void
+    raw_atomic_add(int i, atomic_t *v)
+    {
+        arch_atomic_add(i, v);
+    }
+
+    Burada artık işelmciye özgü fonksiyon çağrılmıştır. Intel x86 mimarisi için bu fonksiyon şöyledir:
+
+    static __always_inline void arch_atomic_add(int i, atomic_t *v)
+    {
+        asm_inline volatile(LOCK_PREFIX "addl %1, %0"
+                : "+m" (v->counter)
+                : "ir" (i) : "memory");
+    }
+
+    Intel'de bellek üzerinde artırım işlemi yapan INC ve ADD makine komutları çok işlemcili ya da çok çekirdekli ortamlarda 
+    atomik değildir. Bu nedenle inline assembly kodunda makine komutunun başına LOCK öneki getirilip veri yolu kilitlenmiştir. 
+
+    Artırma yapan atomik fonksiyonların artırılmış yeni değeri veren biçimleri de vardır:
+
+    int  atomic_inc_return(atomic_t *v);   
+    int  atomic_dec_return(atomic_t *v);    
+
+    s64  atomic64_inc_return(atomic64_t *v);
+    s64  atomic64_dec_return(atomic64_t *v);
+
+    long atomic_long_inc_return(atomic_long_t *v);
+    long atomic_long_dec_return(atomic_long_t *v);
+
+    Örneğin çekirdek kodlarında ya da aygıt sürücülerde aşağıdaki gibi bir referans sayacı oluşturulabilir:
+
+    struct my_object {
+        atomic_t refcount;
+        /* ... */
+    };
+
+    struct my_object *create_object(void)
+    {
+        struct my_object *obj;
+        
+        obj = kzalloc(sizeof(*obj), GFP_KERNEL);
+        if (!obj)
+            return NULL;
+        
+        atomic_set(&obj->refcount, 1);
+        
+        return obj;
+    }
+
+    void get_object(struct my_object *obj)
+    {        
+        atomic_inc(&obj->refcount);
+
+        /* ... */
+    }
+
+    void put_object(struct my_object *obj)
+    {
+        int new_count;
+        
+        if (atomic_dec_return(&obj->refcount) == 0) {
+            /* kaynaklar boşaltılıyor */
+        }
+        /* ... */
+    }
+
+    Bellekteki atomik nesneye değer eklemek ve onun içerisinden değer eksiltmek için de şu fonksiyonlar bulundurulmuştur:
+
+    void atomic_add(int i, atomic_t *v);     /* v += i */
+    void atomic_sub(int i, atomic_t *v);     /* v -= i */
+
+    void atomic64_add(s64 a, atomic64_t *v);
+    void atomic64_sub(s64 a, atomic64_t *v);
+
+    void atomic_long_add(long i, atomic_long_t *v);
+    void atomic_long_sub(long i, atomic_long_t *v);
+
+    Bunların artırılmış ya daeksiltilmiş değerle geri dönen biçimleri de vardır:
+
+    int atomic_add_return(int i, atomic_t *v);
+    int atomic_sub_return(int i, atomic_t *v);
+
+    s64  atomic64_add_return(s64 a, atomic64_t *v);
+    s64  atomic64_sub_return(s64 a, atomic64_t *v);
+
+    long atomic_long_add(long i, atomic_long_t *v);   
+    long atomic_long_sub(long i, atomic_long_t *v);
+
+    Artırım ve eksiltim işlemlerinde artırılmış ya da eksiltilmiş değerle değil de eski değerle geri dönün yukarıdaki 
+    fonksiyonların fetch'li biçimleri de vardır:
+
+    int atomic_fetch_add(int i, atomic_t *v);  
+    int atomic_fetch_sub(int i, atomic_t *v);  
+
+    s64 atomic64_fetch_add(s64 i, atomic64_t *v);  
+    s64 atomic64_fetch_sub(s64 i, atomic64_t *v);  
+
+    long  atomic_long_fetch_add(long  i, atomic_long_t *v);  
+    long  atomic_long_fetch_sub(long  i, atomic_long_t *v);  
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Atomik işlem yapan xchg fonksiyonları da vardır:
+
+    int atomic_xchg(atomic_t *v, int new);
+    s64 atomic64_xchg(atomic64_t *v, s64 new);
+    long atomic_long_xchg(atomic_long_t *v, long new);
+
+    Bu fonksiyonlar read-modify-write tabir edilen atama işlemini yapmaktadır. Yani bu fonksiyonlar atomik bir biçimde 
+    bellekteki nesneye değer atayıp onun eski değerini geri döndürmektedir. atomic_xchg fonksiyonu şöyle yazılmıştır:
+
+    static __always_inline int
+    atomic_xchg(atomic_t *v, int new)
+    {
+        kcsan_mb();
+        instrument_atomic_read_write(v, sizeof(*v));
+        return raw_atomic_xchg(v, new);
+    }
+
+    raw_atomic_xchg fonksiyonu da şöyle yazılmıştır:
+
+    static __always_inline int
+    raw_atomic_xchg(atomic_t *v, int new)
+    {
+    #if defined(arch_atomic_xchg)
+        return arch_atomic_xchg(v, new);
+    #elif defined(arch_atomic_xchg_relaxed)
+        int ret;
+        __atomic_pre_full_fence();
+        ret = arch_atomic_xchg_relaxed(v, new);
+        __atomic_post_full_fence();
+        return ret;
+    #else
+        return raw_xchg(&v->counter, new);
+    #endif
+    }
+        
+    Buradaki arch_atomic_xchg fonksiyonu da Intel x86 işlemcileri için şöye yazılmıştır:
+
+    static __always_inline int arch_atomic_xchg(atomic_t *v, int new)
+    {
+        return arch_xchg(&v->counter, new);
+    }
+
+    Bundan sonra da Intel'deki XCHG makine komutu kullanılarak işlem yapılmıştır. ARM gibi RISC işlemcilerinde 
+    bu işlemlerin nasıl yapıldığını izleyen paragraflarda açıklayacağız. atomic_set fonksiyonlarının bir değer geri 
+    döndürmedğine atomic_xchg fonksiyonlarının ise eski değeri geri döndürdüğüne dikkat ediniz. Ayrıca atomic_xchg 
+    fonksiyonları işlemlerin başına ve sonuna bellek bariyerlerş de yerleştirmektedir. (Intel x86 işlemcilerinde XCHG 
+    makine komutu zaten atomic'tir yani LOCK uygulanmış gibidir. Dolayısıyşa bu işlemcilerde bellek bariyerine gerek 
+    kalmamaktadır.)
+    
+    Aslında atomik xchg fonksiyonun dışında herhangi bir nesneye atomik değer atayan genel bir xchg makrosu da 
+    bulunmaktadır. Bu makronun birinci parametresi nesnenin bellek adresini ikinci parametresi ise ona aktarılacak 
+    değeri almaktadır. Makro atomik bir biçimde bu değeri nesneye yerleştirirken onun önceki değerini de geri 
+    döndürmektedir:
+
+    #define xchg(ptr, new) /* arch-specific */
+
+    Bu genel makro herhangi temel tamsayı türüyle çalışabilmektedir:
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Özellikle senkronizasyon nesnelerinin gerçekleşleştirilmesinde kullanılan İnglizce genellikle "compare exchange" 
+    biçiminde ifade edilen önemli bir mekanizma vardır. İşlemciler bu mekanizmanın gerçekleştirilebilmesi için özel 
+    makine komutları bulundurmaktadır. Bu mekanizma Linux çekirdeğinde atomik fonksiyonlar biçiminde oluşturulmuştur:
+
+    int atomic_cmpxchg(atomic_t *v, int old, int new);
+    s64 atomic64_cmpxchg(atomic64_t *v, s64 old, s64 new);
+    long atomic_long_cmpxchg(long *v, long old, long new);
+
+    Ayrıca çekirdekte genel bir cmpxchg makrosu da bulunmaktadır. Bu genel makro herhangi bir temel tamsayı türüyle 
+    çalışabilmektedir:
+
+    #define cmpxchg(ptr, old, new)      /* ... */
+
+    "Compare exchange" mekanizması şunu sağlamaktadır: "Eğer bellekteki bir nesne içerisinde bulunan değer benim 
+    belirttiğim değerle aynısya o zaman onun yerine şu değeri yaz". Tabii bu işlem atomik bir biçimde yapılmaktadır. 
+    Örneğin bir nesne içerisinde 0 değeri bulunuyor olsun. Biz de bu mekanizmayla şu işlemi atomik olarak yapabiliriz:
+    "Eğer nesne içerisinde 0 varsa onu 1 yap". Burada bir koşulun yani karşılaştırmanın (compare) olduğuna dikkat 
+    ediniz. Bu örneğimizde nesne içerisinde 0 yoksa işlem başarısız olacaktır, ancak 0 varsa başarılı olacaktır. Buradaki 
+    karşılaştırma ve atama atomik bir biçimde yani tek bir işlemmiş gibi yapılmaktadır. "Compare exchange" işleminin 
+    mantıksal temsili şöyle ifade edilebilir:
+
+    int cmpxchg(int *ptr, int old_val, int new_val)     /* dikkat bu temsili bir koddur */
+    {
+        int current = *ptr;
+        
+        if (current == old_val) 
+            *ptr = new_val;  /* Eşitse güncelle */
+        
+        return current;  /* Eski değeri döndür */
+    }
+
+    Tabii tüm işlem aslında kesilmeden yapılmaktadır. Fonksiyonların hedeflenen nesnenin önceki değeriyle geri döndüğüne 
+    dikkat ediniz. 
+
+    "Compare exchange" mekanizması senkronizasyon nesnelerinin gerçekleştiriminde kullanılan bir mekanizmadır. Örneğin 
+    manuel bir spinlock gerçekleştirimi yapacak olalım:
+
+    static atomic_t g_flag = ATOMIC_INIT(0);
+    /* ... */
+
+    preempt_disable();
+
+    while (atomic_read(&g_flag) == 1)
+        ;
+    atomic_set(&g_flag , 1);    
+    ...
+    ... <KRİTİK KOD>
+    ...
+    atomic_set(&g_flag, 0);    
+
+    preempt_enable()
+
+    Buradaki sorun g_flag değişkeni 0 ise onun 1 yapılması sırasında başka bir işlemcideki kodun açık pencere bularak 
+    kritik koda girmesidir:
+
+    while (atomic_read(&g_flag) == 1)
+        ;
+    ---> DİKKAT BURADA AÇIK BİR PENCERE VAR!
+    atomic_set(&g_flag , 1);    
+
+    İşte "compare exchange" mekanizması bu pencerenin oluşumunu engellemektedir. Çünkü bu mekanizma atomik yürütülmektedir:
+
+    preempt_disable();
+
+    while (atomic_cmpxchg(&g_flag, 0, 1) != 0)
+        ;
+    ...
+    ... <KRİTİK KOD>
+    ...
+    atomic_set(&g_flag, 0);  
+
+    preempt_enable()
+
+    Yukarıdaki döngüye dikkat ediniz. cmpxchg fonksiyonları nesnenin önceki değeriyle geri dönmektedir. Buradaki spinlock 
+    gerçekleştirimini biraz daha gerçeğe benzetebiliriz:
+
+    typedef struct {
+        atomic_t lock;
+    } spinlock_t;
+
+    #define SPINLOCK_INIT { .lock = ATOMIC_INIT(0) }
+
+    static inline void spin_lock_init(spinlock_t *lock)
+    {
+        atomic_set(&lock->lock, 0);
+    }
+
+    static inline void spin_lock(spinlock_t *lock)
+    {
+        preempt_disable();
+        while (atomic_cmpxchg(&lock->lock, 0, 1) != 0) {
+            cpu_relax();
+        }
+        smp_mb();
+    }
+
+    static inline void spin_unlock(spinlock_t *lock)
+    {
+        smp_mb();
+        atomic_set(&lock->lock, 0);
+        preempt_enable();
+    }
+
+    static inline int spin_trylock(spinlock_t *lock)
+    {
+        preempt_disable();
+        if (atomic_cmpxchg(&lock->lock, 0, 1) == 0) {
+            smp_mb();
+            return 1;
+        }
+        preempt_enable();
+
+        return 0;
+    }
+
+    Bu gerçekleştirim biraz daha gerçeğe uygundur. smp_mb bariyer fonksiyonunu izleyen paragraflarda ele alacağız. 
+    cpu_relax işlemi CPU'da bir pause yaratmaktadır. Bu sürekli dönme durumlarında CPU'yu rahatlatıcı bir etki 
+    yaratmaktadır. 
+
+    Peki "compare exchange" biçiminde bir mekanizma olmasaydı ne olurdu? İşte bu tür durumlarda çok işlemcili ya da çok 
+    çekirdekli sistemlerdeki senkronizasyon nesnelerinin gerçekleştirilmesi mümkün olmazdı. "Compare exchage" işlemleri 
+    işlemcilerdeki özel makine komutlarıyla gerçekleştirilmektedir. Bu makine komutlarına sahip olmayan işlemcilerde
+    bu mekanizma oluşturulamamaktadır.  
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        56. Ders 14/02/2026 - Cumartesi								
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Linux çekirdeğinde bir koşula bağlı olarak atomik artırma ve eksiltme gibi işlemleri yapan atomik fonksiyonlar da 
+    vardır. atomic_add_unless fonksiyonu bir koşul sağlamadığında artırma yapmaktadır. Fonksiyonun parametrik yapısı 
+    şöyledir:
+
+    bool atomic_add_unless(atomic_t *v, int a, int u);
+
+    Bu fonksiyon v içerisindeki değer u'ya eşit değilse v içerisindeki değeri a kadar artırmaktadır. Fonksiyonun 
+    yaptığı işin temsili (pseudo) kodu şöyledir:
+
+    if (atomic_read(v) != u) {
+        atomic_add(a, v);
+        return 1;               /* Başarılı */
+    }
+    return 0;  /                * Değer u idi, ekleme yapılmadı */
+
+    Tabii yukarıda kod yalnızca temsili bir koddur. Yukarıdaki işlemler başka bir işlemci araya girmeden atomik bir 
+    biçimde yapılmaktadır. 
+
+    Örneğin çekirdek içerisinde belli bir sayaç belli bir değerden daha fazla artırılamayacak olsun. Bu işlem 
+    atomic_add_unless fonksiyonu ile kolay biçimde yapılabilir:
+
+    #define MAX_CONNECTIONS     1000
+
+    static atomic_t connection_count = ATOMIC_INIT(0);
+
+    int try_new_connection(void)
+    {
+        /* 1000'e ulaşmadıysa artır */
+
+        if (!atomic_add_unless(&connection_count, 1, MAX_CONNECTIONS)) {
+            printk(KERN_WARNING "Max connections reached!\n");
+            return -EBUSY;
+        }
+        
+        return 0;
+    }
+
+    Burada görüldüğü gibi sayaç değeri 1000 değilse 1 artırılmaktadır. Eğer sayaç değeri 1000'e gelmişse artırım 
+    yapılmamakta ve fonksiyon 0 değeri ile geri dönmektedir. Bu fonksiyonun koşullu biçimde 1 artıran biçi de vardır:
+
+    bool atomic_inc_not_zero(atomic_t *v);
+
+    Bu fonksiyonun temsili (pseudo) kodu da şöyledir:
+
+    if (atomic_read(v) != 0) {
+        atomic_inc(a);
+        return 1;               /* Başarılı */
+    }
+    return 0;  /                * Değer u idi, ekleme yapılmadı */
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdekte atomic türlerle "test and set" işlemlerini atomik bir biçimde yapan bir grup çekirdek fonksiyonu da 
+    bulunmaktadır. Bu işlemler de yine işlemcilerin bulundurduğu özel makine komutlarıyla yapılabilmektedir:
+
+    int atomic_dec_and_test(atomic_t *v);
+    int atomic_inc_and_test(atomic_t *v);
+    int atomic_sub_and_test(int i, atomic_t *v);
+    int atomic_add_negative(int i, atomic_t *v);
+
+    int atomic_dec_and_test fonksiyonu atomik değişkendeki değeri 1 eksiltir ve sonucun 0 olup olmadığına bakar. 
+    Eğer değer 0 olmuşsa 1, olmamışsa 0 geri döndürmektedir. atomic_inc_and_test fonksiyonu ise atomic değişkendeki 
+    değeri 1 artırır, eğer arttırılmış değer sıfırsa 1, sıfır değilse 0 geri döndürür. Bu foksiyon negatif değerden 
+    sıfırı geçişi anlamaj için kullanılmaktadır. atomic_sub_and_test değişkendeki değeri belli miktarda eksiltip 
+    sonucun 0 olup olmadığına bakmaktadır. Eğer eksiltilmiş değer 0 ise fonksiyon 1 değerine, değilse 0 değerine 
+    geri dönmektedir. atomic_add_negative fonksiyonu ise atomik değişkene belli bir değeri ekleyip sonucun hala 
+    negatif olup olmadığına bakmaktadır. Eğer sonuç negatif ise fonksiyon 1 değerine, negatif değisle 0 değerine 
+    geri dönmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Linux çekirdeklerinde atomik bir biçimde bir nesnenin bitleri üzerinde işlem yapan atomik fonksiyonlar da bulundurulmuştur. 
+    Bu fonksiyonlar ilgili işlemcideki özel makine komutlarını da kullanmaktadır. Tabii işlemleri bazıları "read-modify-write" 
+    biçimindedir. Intel işlemcileri bellek üzerinde doğrudan bit işlemlerini yapan  makine komutlarına sahiptir. Intel 
+    işlemcilerinde bu makine komutlarının başına LOCK öneki getirilmesi yeterli olmaktadır. Ancak ARM gibi RISC işlemcilerinde
+    bu tür işlemler izleyen paragraflarda açıklayacağıız gibi özel load/store komutlarını kullanarak bir döngü ile 
+    yapılabilmektedir. Atomik bit işlemleri için güncel çekirdeklerde farklı mimarilerde farklı inline fonksiyonlar 
+    ya da makrolar bulundurulmuştur. Ancak bu fonksiyonların ya da makroların parametrik yapıları şöyledir:
+
+    void set_bit(int nr, volatile unsigned long *addr);
+    void clear_bit(int nr, volatile unsigned long *addr);
+    void change_bit(int nr, volatile unsigned long *addr);
+
+    int test_and_set_bit(int nr, volatile unsigned long *addr);
+    int test_and_clear_bit(int nr, volatile unsigned long *addr);
+    int test_and_change_bit(int nr, volatile unsigned long *addr);
+
+    int test_bit(int nr, const volatile unsigned long *addr);
+
+    Örneğin Intel x86 mimarisinde set_bit işlemi aşağıdaki fonksiyon ile yapılmaktadır:
+   
+    static __always_inline void set_bit(long nr, volatile unsigned long *addr)
+    {
+        instrument_atomic_write(addr + BIT_WORD(nr), sizeof(long));
+        arch_set_bit(nr, addr);
+    }
+
+    Burada asıl işlemin arch_set_bit tarafından yapıldığını görüyorsunuz. Bu fonksiyon da çeşitli işlemciler için 
+    ayrı ayrı yazılmıştır. Tabii daha önceden belirttiğimiz gibi bir grup işlemci aynı özelliğe sahipse bunların bir 
+    "generic" biçimleri vardır. Intel x86 işlemcileri için buradaki arch_set_bit fonksiyonu şöyle yazılmıştır:
+
+    static __always_inline void
+    arch_set_bit(long nr, volatile unsigned long *addr)
+    {
+        if (__builtin_constant_p(nr)) {
+            asm_inline volatile(LOCK_PREFIX "orb %b1,%0"
+                : CONST_MASK_ADDR(nr, addr)
+                : "iq" (CONST_MASK(nr))
+                : "memory");
+        } else {
+            asm_inline volatile(LOCK_PREFIX __ASM_SIZE(bts) " %1,%0"
+                : : RLONG_ADDR(addr), "Ir" (nr) : "memory");
+        }
+    }
+
+    Burada inline assemly sentaksıyla doğrudan bellek üzernde LOCK öneki kullanılarak bit set işlemi yapılmıştır. 
+
+    Yukarıdaki atomik bit fonksiyonlarının parametrelerinin unsigned long * türünden olduğuna dikkat ediniz. Her ne 
+    kadar parametreler bu türdense de bu fonksiyonlar unsigned int türü için de tür dönüştürmesi uygulanarak kullanılabilir. 
+
+    Şimdi de bu fonksiyonların işlevlerini açıklayalım. set_bit fonksiyonu bir nesnenin diğer bitlerine dokunmadan 
+    belli bir bitini atomik bir biçimde 1 yapmak için kullanılmaktadır. clear_bit fonksiyonu ise atomik bir biçimde 
+    bir nesnenin diğer bitlerine dokunmadan belli bir bitini 0 yapmak için kullanılmaktadır. change_bit fonksiyonu 
+    ise yine atomik bir biçimde bir nesnenin diğer bitlerine dokunmadan belli bir bitini 1 ise 0, 0 ise 1 yapmaktadır. 
+
+    test_and_xxx fonksiyonları işlemi yapmakla birlikte ilgili bitin eski konumunu da bize vermektedir. Örneğin 
+    test_and_set_bit fonksiyonu diğer bitlere dokunmadan belli bir biti atomik olarak set eder ve eski değeri geri 
+    döndürür. Bu fonksiyonu "compare exchange" fonksiyonuna benzetebilirsiniz. Yani bu fonksiyon adeta ilgili bitteki
+    değer 0 ise onu 1 yapmaktadır. Tabii yukarıda da belirttiğimiz gibi genellikle bu işlemler için işlemcinin özel 
+    makine komutu kullanılmaktadır. Bu makine komutlarının içsel işyeişleri farklı olabilmektedir. test_and_clear_bit
+    ve test_and_change_bit fonksiyonları da benzer biçimde eski değeri geri döndürmektedir. test_bit fonksiyonu ise
+    belli bir bitin durumunu atomik bir biçimde elde etmek için kullanılmaktadır. Aşağıda bu fonksiyonların işlevlerini 
+    bir tablo biçiminde veriyoruz. 
+
+    ┌─────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────┐
+    │         Parametrik Yapı                 │                           İşlevi                                     │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ set_bit(nr, addr)                       │ addr adresindeki bellek alanının nr. bitini 1 yapar (atomik).        │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ clear_bit(nr, addr)                     │ addr adresindeki bellek alanının nr. bitini 0 yapar (atomik).        │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ change_bit(nr, addr)                    │ addr adresindeki nr. bitin değerini tersine çevirir (atomik).        │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ test_and_set_bit(nr, addr)              │ nr. bitin eski değerini döndürür, ardından o biti 1 yapar (atomik).  │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ test_and_clear_bit(nr, addr)            │ nr. bitin eski değerini döndürür, ardından o biti 0 yapar (atomik).  │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ test_and_change_bit(nr, addr)           │ nr. bitin eski değerini döndürür, ardından o biti tersine çevirir.   │
+    ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+    │ test_bit(nr, addr)                      │ addr adresindeki nr. bitin mevcut değerini okur; 0 veya 1 döner.     │
+    └─────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────┘
+
+    Atomik bit fonksiyonları bit maskelerinden luşan bayraklı nesnelerdeki bit bayraklarını set ya da cleat etmek 
+    için kullanılmaktadır. Örneğin:
+
+    unsigned long *flags_addr = <bellek tabalı aygıt adresi>;
+
+    /* Flag bit pozisyonları */
+
+    #define FLAG_DEVICE_READY       0
+    #define FLAG_DMA_ENABLED        1
+    #define FLAG_INTERRUPT_ENABLED  2
+    #define FLAG_LOW_POWER_MODE     3
+    #define FLAG_ERROR_STATE        4
+
+    /* Flag'leri ayarla */
+    void device_init(void)
+    {
+        set_bit(FLAG_DEVICE_READY, flags_addr);      /* Aygıtı hazır olarak işaretle */    
+        set_bit(FLAG_DMA_ENABLED, flags_addr);       /* DMA'yı etkinleştir */
+    }
+
+    /* Flag kontrolü */
+    int is_device_ready(void)
+    {
+        return test_bit(FLAG_DEVICE_READY, flags_addr);
+    }
+
+    /* Flag temizle */
+    void disable_dma(void)
+    {
+        clear_bit(FLAG_DMA_ENABLED, flags_addr);
+    }
+
+    /* Flag tersine çevir */
+    void toggle_interrupt(void)
+    {
+        change_bit(FLAG_INTERRUPT_ENABLED, flags_addr);
+    }
+
+    Burada bir aygıtı programlayan bazı fonksiyonlar bulunmaktadır. Aygıtın çeşitli bitleri çeşitli durumları temsil 
+    etmektedir. Tabii bu aygıtı "bellek tabanlı (memory mapped)" bir aygıt oalrak düşünebilirsiniz. Yukarıdaki 
+    fonksiyonlar da bu aygıtın çeşitli bitleriyle atomik işlemler yapmaktadır. 
+
+    test_and_xxxx fonksiyonları bit üzerinde spinlock işlemlerini yapmak için kullanılabilmektedir. Örneğin:
+
+    #define LOCK_BIT 0
+
+    static unsigned long lock_word = 0;
+
+    void my_lock(void)
+    {
+        /* Bit 0 set olana kadar dene */
+
+        preempt_disable();
+
+        while (test_and_set_bit(LOCK_BIT, &lock_word)) {
+            cpu_relax();  /* Busy-wait */
+        }
+
+        preempt_enable();
+        
+        /* Kilit alındı */
+    }
+
+    void my_unlock(void)
+    {
+        /* Bit 0'ı temizle */
+
+        clear_bit(LOCK_BIT, &lock_word);
+    }
+
+    Burada my_lock fonksiyonu belli bir bit üzerinde o bit 1 olduğu sürece spin yaparak beklemektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Şimdi de çok işlemcili ya da çok çekirdekli sistemlerdeki bellek bariyerleri üzerinde duralım. Konuya girişte 
+    işlemcilerin birbirileriyle ilişki olmayan makine komutlarının yerlerini değiştirebildiğini ya da daha doğru bir 
+    ifadeyle bunların dış dünya bakımından farklı sıralarda işleme sokuluyormuş gibi bir durum oluşabildiğini belirtmiştik. 
+    Örneğin:
+
+    a = 10;
+    b = 20;
+
+    İşlemci bu işlemlerdeki belleğe atama işlemlerini farklı sıralarda yapabilmektedir. Ancak konuya girişte de 
+    belirttiğimiz gibi derleyiciler de birbirlerine bağlı olmayan deyimler için farklı sıralarda makine kodları üretebilmektedir. 
+    Yani derleyici örneğin yukarıdaki iki atama işlemini sırasını optimizasyon nedeni ile değiştirebilmektedir. Komutların
+    yer değiştirmesi (instruction reordering) hem derleyici tarafından hem de işlemci tarafından yapılabilen bir 
+    optimizasyon işlemidir. Çok işlemcili ya da çok çekirdekli sistemlerde sistem programcısının (örneğin çekirdek 
+    geliştiricilerin) bu sorunu bilip önlem alması gerekmektedir. 
+
+    Bellek bariyerleri (memory barriers) temel olarak bir işlem yapılmadan önce diğer işlemlerin yapılmış olduğunu 
+    garanti etmek amacıyla oluşturulmuş mekanizmalardır. Bellek bariyerleri uygun yerlerde kullanılmazsa çok işlemcili 
+    ya da çok çekirdekli sistemlerde pek çok böcek oluşması kaçınılmazdır. Aşağıdaki koda dikkat ediniz:
+
+    /* Thread 1 */
+
+    data = 42;         
+    ready = 1;         
+
+    /* Therad 2 */
+
+    while (ready == 0)     
+        ;
+    use(data);       
+
+    Burada kodu yazan sistem programcısı "ready = 1 ise kesinlikle data = 42" olduğunu varsaymıştır. Çünkü data ataması 
+    ready atamasından önce yapılmıştır. Dolayısıyla Thread 2'de ready == 1 olduğunda data == 42 olacağı sanılmaktadır. 
+    Ancak burada bir yanıldı söz konusudur. İşte derleyici ya da işlemci data ve ready değişkenleri birbirinden alasız 
+    olduğu için bu atamaları yer değiştirebilmektedir. Bu atamalar yer değiştirildiğinde aşağıdaki durum oluşacaktır:
+
+     /* Thread 1 */
+
+    ready = 1; 
+    ---> Dikkat! diğer işlemcideki kod bu arada çalışabilir
+    data = 42;         
+
+    /* Therad 2 */
+
+    while (ready == 0)     
+        ;
+    use(data);      
+
+    Artık sorun kolaylıkla anlaşılabilir. diğer işlemci ya da çekirdek ready = 1 durumu oluştuğunda hemen hızlı davranıp 
+    use işlemine girebilir. Bu durumda data değişkeni eski değeriyle kullanılacaktır. İşte sistem programcısı yukarıdaki 
+    gibi görünürde biribirinden bağımsız olan ancak mantıksal bakımdan birbirileriyle ilişkili olan işlemlerde önlemini 
+    almalıdır Bu önlem de "bllek bariyerleri (memory barriers)" denilen mekanizmalarlarla alınmaktadır.
+
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. Derlyeici de işlemci de biribirleriyle ilgili olan komutları yer 
+    değiştirmemektedir. Örneğin:
+
+    data = 42;
+    use(data);
+
+    Buradaki iki işlem asla yer değiştirilemez. Çünkü sonraki öncekini zaten kullanmaktadır. Bu işlemin aşağıdakiyle 
+    farkına dşkkat ediniz:
+
+    data = 42;         
+    ready = 1;     
+
+    Derleyici ve işlemci yukarıdaki iki işlemin birbirini etkilemediğini düşünmektedir. Halbuki bunlar aslında mantıksal 
+    bakımdan birbirileriyle ilişkili olabilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Derleyicilerin ve işlemcilerin uyguladıkları dört farklı "yeniden sıralama (reordering)" durumu vardır: Load/Load, 
+    Load/Store, Store/Store ve Store/Load. 
+
+    ┌──────────────────────────────────────────────────────────┐
+    │              DÖRT TEMEL REORDERING TÜRÜ                  │
+    ├──────────────────────────────────────────────────────────┤
+    │  Load/Load Reordering:                                   │
+    │    Load A                                                │
+    │    ─ ─ ─  ← CPU, Load B'yi Load A'nın önüne taşıyabilir  │
+    │    Load B                                                │
+    │                                                          │
+    │  Load/Store Reordering:                                  │
+    │    Load A                                                │
+    │    ─ ─ ─  ← CPU, Store B'yi Load A'nın önüne taşıyabilir │
+    │    Store B                                               │
+    │                                                          │
+    │  Store/Store Reordering:                                 │
+    │    Store A                                               │
+    │    ─ ─ ─  ← CPU, Store B'yi Store A'nın önüne taşıyabir  │
+    │    Store B                                               │
+    │                                                          │
+    │  Store/Load Reordering:                                  │
+    │    Store A                                               │
+    │    ─ ─ ─  ← CPU, Load B'yi Store A'nın önüne taşıyabilir │
+    │    Load B                                                │
+    └──────────────────────────────────────────────────────────┘
+								
+    Ancak yukarıdaki dört yer değiştirme her türlü işlemci tarafından uygulanmamaktadır. Örneğin Intel işlemcileri 
+    yalnızca Stor/Load işlemlerini yer değiştirmektedir. Diğer işlemlerde yer değiştirme yapmamaktadır. Ancak genel 
+    olarak RISC işlemcileri yukarıdki dört yer değiştirmeyi de yapmaktadır. Aşağıda bazı yaygın işlemcilerin hangi 
+    yer değiştirmeleri yaptığını tablo biçiminde veriyoruz:
+
+    ┌─────────────────┬─────────────┬─────────────┬─────────────┬─────────────────┐
+    │ Reordering Turu │  x86 (TSO)  │    ARM64    │   RISC-V    │  POWER/PowerPC  │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
+    │ Load/Load       │     NO      │     YES     │     YES     │       YES       │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
+    │ Load/Store      │     NO      │     YES     │     YES     │       YES       │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
+    │ Store/Store     │     NO      │     YES     │     YES     │       YES       │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
+    │ Store/Load      │     YES     │     YES     │     YES     │       YES       │
+    └─────────────────┴─────────────┴─────────────┴─────────────┴─────────────────┘
+
+    Genel olarak işlemciler söz konusu olduğunda komutların yeniden sıralanması üç modele uygun yapılabilmektedir:
+
+    1) Sequential Consistency (SC): Bu modelde komut sıralaması yapılmaz. Komutları her zaman diğer işlemciler yapıldığı 
+    sırada görür.
+
+    2) Total Store Order (TSO): Bu modelde yalnızca Store/Load işlemlerinin sırası değiştirilebilmektedir. Intel x86 
+    işlemci ailesi bu modeli kullanmaktadır. 
+
+    3) Relaxed (Weak) Memory Ordering: Bu modelde yukarıda belirttiğimiz dört grup işlemin de sırası değiştirilebilmektedir. 
+    ARM64 gibi RISC-V gibi, Power PC gibi işlemciler bu modeli kullanmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Derleyici bariyerleri oldukça basittir. Biz bir derleyici bariyeri yerleştirirsek ondan önceki tüm Load/Store 
+    işlemleri ondan sonraki tüm Load/Store işlemlerinden önce yapılır. Yani biz bir yere derleyici bariyeri yerleştirdiğimizde
+    derleyiciye şunu demiş olmaktayız: "Önce yukarıdaki kodları için makine kodları üret, sonra aşağıdaki kodlar için 
+    makine kodları üret. Bariyerin yukarısıyla aşağı arasında komut yer değiştirmesi yapma". Linux çekirdeklerinde 
+    derleyici bariyerleri için barrier isimli makro kullanılmaktadır:
+
+    # define barrier()  __asm__ __volatile__("": : :"memory")
+
+    Örneğin:
+
+    a = 10;
+    b = 20;
+    barrier();
+    c = 30;
+    d = 40;
+
+    Burada asla derleyici bariyer yukarısıyla aşağısındaki kodları yer değiştirmemektedir. Ancak tabii bu örnekte 
+    a = 10 ile b = 20 kendi aralarında, c = 30 ile de d = 40 işlemleri kendi aralarında yer değiştirebilir. Derleyici 
+    bariyerlerinin bir makine kodu üretmediğine yalnızca derleyici için bir direktif oluşturduğuna dikkat ediniz. 
+
+    gcc derleyicilerinde (Linux'un çekirdeğinin gcc ile derlenebildiğini anımsayınız) volatile erişim zaten derleyici 
+    bariyeri anlamına da gelmektedir. Yani örneğin a değişkeni volatile ise ona yapılan atamalar ve ondan yapılan 
+    okumalar zaten bariyer etkisi yaratmaktadır. Başka bir deyişle gcc derleyicileri volatile erişimin yukarısını ve 
+    aşağısını kendi aralarında yer değiştirmemektedir. Tabii değişken volatile değilse biz onu tür dönüştürmesi ile 
+    sanki volatile imiş gibi de kullanabiliriz. Örneğin:
+
+    *(volatile int *)&x = 10;
+
+    Zaten Linux çekirdeğindeki READ_ONCE ve WRITE_ONCE makroları bu işlemi yapmaktadır. Yani bu makrolar iki işleve 
+    sahiptir:
+
+    1) Erişimi volatile olarak yaparlar. Dolayısıyla derleyici ilgili nnesneyi CPU yazmaçlarında bekletemez. 
+    2) volatile erişiminde dolayı aynı zamanda derleyici bariyeri de oluştururlar. 
+
+    Güncel çekirdeklerde READ_ONCE ve WRITE_ONCE makroları "include/asm-generic/rwonce.h" dosyası içerisinde şöyle 
+    yazılmıştır:
+
+    #ifndef __READ_ONCE
+    #define __READ_ONCE(x)	(*(const volatile __unqual_scalar_typeof(x) *)&(x))
+    #endif
+
+    #define READ_ONCE(x)							\
+    ({									            \
+        compiletime_assert_rwonce_type(x);			\
+        __READ_ONCE(x);							    \
+    })
+
+    #define __WRITE_ONCE(x, val)					\
+    do {									        \
+        *(volatile typeof(x) *)&(x) = (val);		\
+    } while (0)
+
+    Burada görüldüğü gibi tek yapılan şey volatile erişimdir. 
+    
+    C standartlarına göre volatile erişimler erişim sırasına göre yapılmak zorundadır. Birbirleriyle alakasız bile olsa 
+    C standartlarına göre iki volatile erişim birbirilerine göre sıra korunarak gerçekleştirilir. Ancak gcc standratlardaki 
+    bu kurala tam uymamaktadır. Örneğin:
+
+    x = READ_ONCE(val1)
+    y = READ_ONCE(val2)
+
+    Burada C standartlarına göre erişim bu sırada yapılmak zorundadır. Dolayısıyla C standartlarına göre bir derleyici 
+    bariyeri gerekmez. Ancak gcc bu kurala tam uymamaktadır. Dolayısıyla yukarıdaki okuma işlemini yer değiştirebilmektedir. 
+    Bunu engellemek için derleyici bariyerinin kullanılması gerekmektedir. 
+    
+    Daha önceden de belirttiğimiz gibi  çekirdeği zaten gcc ile derlenmek zorundadır. Linux çekirdeğinde gcc derleyicisine 
+    özgü onlarca özellik kullanılmaktadır. Dolayısıyla çekirdek kodları herhangi bir derleyiciyle  derlenenemektedir. Bilindiği 
+    gibi clang derleyicileri büyük ölçüde gcc uyumludur. Eskidne Linux çekirdeği clang derleyicileri ile derlenemiyordu. 
+    Ancak son yıllarda artık derlenebilir hale gelmiştir. Linux çekirdeğini derlerken  make işleminde derlyiciyi aşağıdaki 
+    gibi clang olarak belirleyebilirsiniz:
+
+    make CC=clang
+
+    volatile erişimlerin anlamını C Programlama Dili kurslarımızdan biliyorsunuz. Ancak burada bu konu üzerinde kısa 
+    bir açıklama yapmak istiyoruz. Derleyiciler kod optimizasyonunu tek tread'li çalışmayı esas alarak yapmaktadır. 
+    Dolayısıyla nesneleri yazmaçlarda saklayıp onları yazmaçlardan alarak kullanabilmektedir. İşte volatile niteleyici
+    derleyiciye adeta "bu nesneyi kullandığımda o yazmaçta olsa bile sen her zaman belleğe başvurarak ona eriş" demektedir. 
+    Örneğin:
+
+    int g_flag;
+    /* ... */
+
+    while (g_flag == 1) {
+        /* ... */
+    }
+
+    Burada başka bir thread g_flag değişkenini 0'a çektiğinde bu thread bunu anlamayabilir. Çünkü derleyici while 
+    ifadesindeki g_flag değişkeni için döngünün her yinelenmesinde belleğe başvurmak zorunda değildir. İşte bunu 
+    sağlamak için bu değişkenin volatile olarak tanımşanması gerekir:
+
+    volatile int g_flag;
+    /* ... */
+
+    while (g_flag == 1) {
+        /* ... */
+    }
+
+    Ancak Linux çekirdeğinde değişkenler genellikle volatile yapılamamaktadır. Çünkü bu durum performans kaybına 
+    yol açmaktadır. Linux çekirdeği READ_ONCE ve WRITE_ONCE makrolarıyla gerektiğinde volatile erişimi yapmaktadır. 
+    Örneğin:
+
+    int g_flag;
+    /* ... */
+
+    while (READ_ONCE(g_flag) == 1) {
+        /* ... */
+    }
+
+    Çekirdek kodlarında paylaşılan bellek alanlarına erişimlerde her zaman READ_ONCE ve WRITE_ONCE makrolarını 
+    kullanmalızınız. 
+/*----------------------------------------------------------------------------------------------------------------------
+                                        57. Ders 15/02/2026 - Pazar								
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Intel x86 mimarisi temel olarak CISC tarzı bir mimaridir. CISC mimarilerinde doğrudan bellek üzerinde, yazmaçla 
+    bellek üzerinde aritmetik işlemler yapan makine komutları bulunabilmektedir. Böylece zaten bazı işlemler tek 
+    makine komutuyla yapılabilmektedir. Daha önceden de belirttiğimiz gibi Intel x86 mimarisinde bu biçimdeki makine 
+    komutları çok işlemcili ya da çekirdekli ortamlarda atomik değildir. Biz bu atomikliği sağlamak için komutların 
+    başına LOCK önekinin getirildiğini belirtmiştik. Böylece örneğin Intel x86 mimarisinde bellekteki bir nesnenin 
+    çok işlemcili ya da çok çekirdekli sistemlerde atomik artırılması aşağıdaki gibi sağlanabiliyordu:
+
+    LOCK ADD [mem_addr], 1
+
+    Ancak ARM gibi RISC tarzı işlemcilerde doğrudan bellek üzerinde bu biçimde işlemler yapabilen makine komutları 
+    yoktur. Dolayısıyla yukarıdaki gibi bir işlem tek bir makine komutuyla yapılamamaktadır. ARM işlemcilerinde 
+    bu işlem tipik olarak şöyle yapılmaktadır:
+
+    LDR	R0, =mem_addr
+    LDR R1, [R0]
+    ADD	R2, R1, #1
+    STR R2, =memaddr
+
+    ARM işlemcilerinde genellikle bellek erişimleri doğrudan değil yazmaç indeksiyle yapılmaktadır. ARM gibi RISC 
+    işlemcilerinde "load" ve "store" isminde bellekten yazmaçlara, yazmaçlardan belleğe aktarım yapan makine komutları 
+    vardır. Ancak tüm artimetik, bitsel işlemler yazmaçlar üzerinde yapılmaktadır. RISC işlemcilerinde genel olarak 
+    load ve store dışındaki komutların üç operand'lı olduğunu kurusumuzun giriş kısımlarında belirtmiştik. İşte ARM 
+    işlemcilerinde bu tür işlemler tek makine komutuyla yapılamadığı için ne tek çekirdekli sistemlerde ne de çok 
+    çekirdekli sistemlerde atomiklik yukarıdaki biçimle sağlanamamaktadır. Ancak ARM işlemcileri 8.1 versyonuyla 
+    birlikte Intel'deki gibi atomik bellek üzerinde atomik işlemler yapabilen makine komutlarına sahip olmuştur. Fakat 
+    bu makine komutları ancak 64 bit yeni ARM işlemcilerinde kullanıılabilmektedir. ARM V8.1 öncesinde atomik işlemler 
+    LDREX ve STREX makine komutlarıyla bir döngü oluşturularak sağlanıyordu. 
+
+    ARM işlemcilerinde LDREX özel komutu bellekten yazmaca yükleme yaparken aynı zamanda işlemci içerisindeki bir 
+    yazmaç yoluyla "exclusive monitor" denilen bir bayrağı set etmektedir. Örneğin:
+
+    LDR	R0, =mem_addr
+    LDREX R1, [R0]
+
+    Burada işlemci içerisinde "exclusive monitor" denilen bayrak set edilmiştir. Bu bayrağın reset edilmesi üç 
+    makine komutuyla yapılmaktadır:
+
+    LDREX
+    STREX
+    CLREX
+
+    Aslında LDREX bayrak set durumdaysa onu reset etmekte, reset durumdaysa onu set etmektedir. Biz bayrağı LDREX ile 
+    set ettiğmizde başka bir çekirdek LDREX makine komutuyla benzer işlemi yapmaya çalıştığında bayrak otomatik olarak 
+    reset edilir. (LDREX ile bayrağın reset edilemsi için aynı adresin kullanılması gerekmez. Adrest temelinde bayrak 
+    yoktur. Bayrak işlemci temelinde bir tanedir. Bu komutlar hangi bölgesi için kullanılmış olursa olsun aynı bayrağı 
+    set ve reset yapmaktadır.) İşte STREX komutu bayrak set edildikten sonra onun durumunu da bize vermektedir. 
+    STREX makine komutu şöyle kullanılmaktadır:
+
+    LDR	R0, =mem_addr
+    LDREX R1, [R0]
+    ADD	R2, R1, #1
+    STREX R3, R2, =memaddtr
+
+    STREX makine komutundaki birinci operand (örneğimizdeki R3) işlemin başarısını belirtmektedir. Eğer bu birinci 
+    operand 0 olarak yüklenirse işlem başarılıdır ve yazma yapılmıştır, eğer bu birinci operand 1 ile yüklenirse işlem
+    başarısızdır yani yazma yapılamamıştır. Başka bir deyişle komutun birinci operand'ı (örneğiizdeki R3 yazmacı)
+    komutun yazma yapıp yapmadığını belirtmektedir. İşte eğer yazma yapılamamışsa bir döngü içerisinde bu işlem 
+    başarılana kadar deneme yapılmalıdır. Bu döngü işlemini şöyle yapabiliriz:
+
+    LDR	R0, =mem_addr
+    REPEAT: 
+    LDREX R1, [R0]
+    ADD	R2, R1, #1
+    STREX R3, R2, =memaddtr
+    CMP     r3, #0              
+    BNE     REPEAT
+
+    STREX komutunun da monitör bayrağını reset ettiğine dikkat ediniz. Yani STREX ile yazma başarılırsa bayrak aynı 
+    zamanda reset edilmiş olmaktadır. 
+
+    Yukarıdakşi döngü etkin bir çalışma sağlamakta mıdır? İşte 30, 40 çekirdeğe kadar işlemlerin bu biçimde yürütülmesi 
+    dikkate değer bir performans sorunu yaşatmıyordu. Ancak daha yüksek çekirdek sayılarında performans etkilendiği 
+    görülmüştür. Bu nedenle ARM işlemcileri 8.1 versiyonuyla birlikte read/modify/write işlemini kendi içerisinde yapan
+    Intel mimarisine benzer atomik makine komutlarını da komut kümesine eklemiştir. Bunların listesi şöyledir:
+
+    /* Atomic ADD */
+    LDADD   Xs, Xt, [Xn|SP]      // *Xn += Xs, return old value to Xt
+    LDADDA  Xs, Xt, [Xn|SP]      // + Acquire
+    LDADDL  Xs, Xt, [Xn|SP]      // + Release
+    LDADDAL Xs, Xt, [Xn|SP]      // + Acquire + Release
+
+    /* Atomic SET (OR) */
+    LDSET   Xs, Xt, [Xn|SP]      // *Xn |= Xs
+
+    /* Atomic CLR (AND NOT) */
+    LDCLR   Xs, Xt, [Xn|SP]      // *Xn &= ~Xs
+
+    /* Atomic XOR */
+    LDEOR   Xs, Xt, [Xn|SP]      // *Xn ^= Xs
+
+    /* Atomic SWAP */
+    SWP     Xs, Xt, [Xn|SP]      // swap *Xn and Xs
+    SWPA    Xs, Xt, [Xn|SP]      // + Acquire
+    SWPL    Xs, Xt, [Xn|SP]      // + Release
+    SWPAL   Xs, Xt, [Xn|SP]      // + Acquire + Release
+
+    /* Compare-and-Swap */
+    CAS     Xs, Xt, [Xn|SP]      // if (*Xn == Xs) *Xn = Xt
+    CASA    Xs, Xt, [Xn|SP]      // + Acquire
+    CASL    Xs, Xt, [Xn|SP]      // + Release
+    CASAL   Xs, Xt, [Xn|SP]      // + Acquire + Release
+
+    /* Byte/Halfword/Word variants */
+    LDADDB, LDADDH, LDADDW
+    CASB, CASH, CAS (word is default for W registers)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz daha önce barrier fonksiyonunu ve READ_ONCE ile WRITE_ONCE makrolarını görmüştük. Bunlar derleyici bariyeri 
+    oluşturmaktaydı. Şimdi de işlemlerin komut sıralaması üzerinde etkili olan bellek bariyerleri konusunu ele alaacağız.
+
+    İşlemciler için bellek bariyerleri işlemciye özgü özel makine komutlarıyla oluşturulmaktadır. Linux çekirdeği bazı 
+    fonksiyon ve makrolarla donanım bariyerlerinin işlemciden bağımsız biçimde kullanılmasını sağlamaktadır. İşlemci
+    bariyeri oluşturan üç temel çekirdek fonksiyonu vardır. Bu fonksiyonlar aslında birer makro olarak yazılmıştır ve 
+    parametre almamaktadır:
+
+    rmb
+    wmb
+    mb
+
+    Bu fonksiyonlar aşağıdaki bariyerleri uygulamaktadır:
+    
+    ┌─────────────────┬─────────────┬─────────────┬─────────────┬─────────────┐
+    │   FONKSİYON     │ LOAD / LOAD │ LOAD /STORE │ STORE/ LOAD │ STORE/STORE │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    │   rmb()         │     YES     │      NO     │      NO     │      NO     │
+    │  (read barrier) │             │             │             │             │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    │   wmb()         │      NO     │      NO     │      NO     │     YES     │
+    │ (write barrier) │             │             │             │             │
+    ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    │    mb()         │     YES     │     YES     │     YES     │     YES     │
+    │ (full barrier)  │             │             │             │             │
+    └─────────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
+
+    rmb fonksiyonu "okuma amaçlı bellek bariyeri" oluşturmaktadır. Bu fonksiyon "load/load" bariyeri oluşturmaktadır. 
+    Yani rmb() çağrısının yapıldığı yerin yukarındaki bellek okumalarıyla bu çağrının yapıldığı yerin aşağısındaki 
+    bellek okumaları yer değiştiremez. Örneğin:
+
+    bellek okuması - 1
+    bellek yazması - 2
+    bellek okuması - 3
+    rmb();
+    bellek okuması - 4
+    bellek yazması - 5
+    bellek okuması - 6
+
+    Burada rmb() çağrısı 1 ve 3'ün 4 ve 6 ile yer değiştirmesini engellemektedir. Yani aşağıdaki okumalar yapılmadan 
+    önce kesinlikle yukarıdaki okumalar yapılmış olmak zorudadır. Ancak örneğimizde bu rmb() çağrısı 1, 2 ve 3'ün kendi 
+    aralarındaki,  4, 5 ve 6'nın da kendi aralarındaki yer değişimi üzerinde etkili olmamaktadır. Bariyer üsttekilerle 
+    alttakiler arasında bir sınır çizmektedir. Burada rmb bariyeri 2 ile 5 arasındaki yer değiştirme üzerinde etkili 
+    olmaz. Çünkü bu bariyer yalnızca okuma load/load için kullanılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+		                                58. Ders 21/02/2026 - Cumartesi							
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    wmb fonksiyonu "yazma amaçlı bellek bariyeri" oluşturmaktadır. Bu fonksiyon store/store bariyeri oluşturmaktadır. 
+    Yani wmb çağrısının yapıldığı yerin yukarısındaki bellek yazmalarıyla bu çağrının yapıldığı yerin altındaki bellek 
+    yazmaları yer değiştiremez. Örneğin:
+
+    bellek yazması - 1
+    bellek okuması - 2
+    bellek yazması - 3
+    wmb();
+    bellek yazması - 4
+    bellek okuması - 5
+    bellek yazması - 6
+
+    Burada kesinlikle 1 ve 3 numaralı bellek yazmaları 4 ve 6 numaralı bellek yazmalarından daha önce yapılacaktır. 
+    Ancak 1, 2, 3 ve 4, 5, 6 bellek işlemlerini kendi aralarında işlemci tarafından uygun koşullar sağlanıyorsa yer 
+    değiştirebilir. wmb fonksiyonu yalnızca yazma bariyeri oluşturduğu için yukarıdaki örneğimizde 2 ile 5 yer değiştirebilir. 
+    Örneğin bellek tabanlı IO kullanılarak bir aygıtın kontrol yazmacına yazma yapılarak önce bir ayar yapılıyor olsun 
+    sonra da bu ayar doğrultusunda başka bir yazmacına yazma yapılıyor olsun:
+
+    kontrol_yazmacına_yazarak_durumu_ayarla
+    bilgiyi_hedefe_yaz
+
+    Bu iki bellek bölgesi birbirinden bağımsız olduğu için işlemci bu iki işlemi ters sırada yapabilir. Halbuki bunların 
+    yukarıda belirtilen sırada yapılması gerekmektedir. Çünkü kontrol yazmacını set etmeden diğer yazma işlemi anlamsızdır. 
+    İşte bu iki yazma arasına wmb eklenerek yazma sıralarının yer değiştirmemesi sağlanmalıdır:
+
+    kontrol_yazmacına_yazarak_durumu_ayarla
+    wnb()
+    bilgiyi_hedefe_yaz
+
+    mb fonksiyonu load/load, load/store, store/load ve store/store bariyerlerinin hepsini oluşturmaktadır. Yani bu 
+    fonksiyonun yukarısındaki bellek okuma ve yazmaları aşağısındaki bellek okuma ve yazmalarıyla yer değiştiremez. 
+    Örneğin:
+
+    bellek yazması - 1
+    bellek okuması - 2
+    bellek yazması - 3
+    mb();
+    bellek yazması - 4
+    bellek okuması - 5
+    bellek yazması - 6
+
+    Burada mb çağırısının yukarındaki okuma ve yazma işlemleri aşağısındaki okuma ve yazma işlemlerinden kesinlikle 
+    daha önce yapılacaktır. Yani 1, 2, 3 işlemi ile 4, 5, 6 işlemleri birbirleriyle yer değiştiremez. Tabii işlemci 
+    eğer koşullar uygunsa 1, 2, 3 ve 4, 5, 6 işlemlerini kendi aralarında yer değiştirebilir. Örneğin biz bellek tabanlı 
+    IO işlemlerinde önce ilgili aygıtın kontrol yazmacına bir değer yazarak belli bir yazmacının aktive edilmesini 
+    sağlıyor olabiliriz. Sonra o yazmaçtan okuma yapıyor olabiliriz:
+
+    kontrol_yazmacına_yazarak_durumu_ayarla
+    bilgiyi_hedeften_oku
+
+    Burada store/load durumu oluştuğuna dikkat ediniz. İşlemci bu iki bellek adresi biribiriyle ilgili olmadığı için 
+    bu iki işlemin yerlerini değiştirebilir. Bunun engellenmesi için araya mb fonksiyonu genel bariyer yerleştirmemiz
+    gerekir:
+
+    kontrol_yazmacına_yazarak_durumu_ayarla
+    mb()
+    bilgiyi_hedeften_oku
+
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. rmb fonksiyonu load/load, wmb fonksiyonu ise store/store bariyerini 
+    oluşturmaktadır. load/store ve store/load bariyerlerini oluşturan ayrı bir fonksiyon yoktur. mb fonksiyonu tüm 
+    bariyerleri oluşturmaktadır. Genel olarak işlemcilerde load/store ve stor/load bariyerleri için diğer bariyerlerin
+    de oluşturulması gerekmektedir. Linux çekirdeği de mb fonksiyonuyla genel bariyer oluşturmuştur. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    rmb, wmb ve mb fonksiyonları (aslında bunlar makro olarak yazılmıştır) zaten derleyici bariyerini de oluşturmaktadır. 
+    Yani bu fonksiyonları kullanıyorsanız ayrıca derleyici bariyeri oluşturmanıza gerek yoktur. Bu fonksiyonların herhangi 
+    birini çağırdığınızda onun yukarısıyla aşağısı arasında derleyici komut yer değiştirmesi yapmamaktadır. Derleyici 
+    için load/load, load/store, store/load ve store/store biçiminde ayrı yer değiştirme biçimleri yoktur. Derleyici 
+    bariyerleri barrier isimli fonksiyonla oluşturulmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi Intel x86 mimarisinde zaten işlemci load/load, load/store, store/store yer değiştimesini yapmıyordu.
+    Yalşnızca store/load yer değiştirmesini yapıyordu. Peki bu durumda biz çekirdek kodlarında kullandığımız rmb() ve 
+    wmb() fonksiyonlarının Intel'de bir etkisi olacak mıdır? Hayır genel olarak bu fonksiyonları Intel'de çağırdığınızda 
+    bazı ayrıntıları göz ardı edersek bu fonksiyonlar yalnızca derleyici bariyeri oluşturacaktır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı işlemcilerin komut yer değiştirmesi yalnızca çok işlemcili ya da çok çekirdekli sistemlerde sorun 
+    oluşturuyordu. Tek işlemcili ya da tek çekirdekli sistemlerde komut yer değiştirmesi genel olarak bir olumsuzluk 
+    oluşturmamaktadır. Peki bu durumda sistemimizde tek işlemci ya da tek çekirdek varsa rmb, wmb ve mb çağrıları gereksiz
+    bir işlem haline gelmez mi? Evet tek işlemcili ya da tek çekirdekli sistemlerde bu çağrılar gereksiz hale gelmektedir. 
+    İşte Linux çekirdeğinde bu durum için smp_rmb, smp_wmb ve smp_mb makroları bulundurulmuştur. Bu makrolar CONFIG_SMP 
+    çekirdek konfigürasyon parametresine göre işlevini değiştirmktedir:
+
+    /* include/asm-generic/barrier.h */
+
+    #ifdef CONFIG_SMP
+    #define smp_mb()    mb()         /* SMP: gerçek CPU bariyer */
+    #define smp_rmb()   rmb()
+    #define smp_wmb()   wmb()
+    #else
+    /* UP (Uniprocessor): CPU bariyer gerekli değil */
+    #define smp_mb()    barrier()    /* Sadece compiler bariyer */
+    #define smp_rmb()   barrier()
+    #define smp_wmb()   barrier()
+    #endif
+
+    Görüldüğü gibi bu makrolar tek işlemcili ya da tek çekirdekli sistemlerde yalnızca derleyici bariyeri oluşturmaktadır. 
+    O halde biz çekirdek kodlarımızda ya da aygıt sürücülerimizde rmb, wmb ya da mb yerine smp_rmb, smp_wmb ve smp_mb 
+    fonksiyonlarını kullanabiliriz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    İşlemci için oluşturulan yukarıda gördüğümüz bellek bariyerleri ve aşağıda göreceğimiz acquire/release bariyerleri 
+    özellikle birden çok işlemci ya da çekirdek durumunda vekullanılması gereken mekanizmalardır. Sistemde bir tane 
+    işlemci ya da çekirdek varsa bu işlemci için özel bazı durumlar dışında bellek bariyerleri oluşturmaya gerek yoktur. 
+    Zaten yukarıdaki smp_rmb, smp_wmb ve smp_mb fonksiyonları tek işlemcili sistemlerde işlemci için bir bariyer 
+    oluşturmamaktadır. Tek işlemcili sistemlerde işlemci yine komutların sırasını değiştirebilir. Ancak bundan çok 
+    thread'li çalışma olumsuz etkilenmez. Çünkü tek işlemcili sistemlerde bir kesme oluşsa bile işlemci önce o ana kadar 
+    yapılan işlemlerin hepsinin görünür olmasını sağladıktan sonra kesme durumunu ele almaktadır. Ancak tek işlemcili 
+    sistemlerde de derleyici bariyeri gerekebilmektedir. Çünkü derleyiciler komut sırasını değiştirlerse arada kesme 
+    oluşabilmektedir. Tüm bağlamsal geçişin (context switch) kesme yoluyla gerçekleştiğini de anımsayınız. 
+
+    Tek işlemcili sistemlerde yine de işlemci için bellek bariyerlerinin oluşturulması gerektiği bazı özel durumlar
+    vardır. En tipik durum bellek tabanlı IO (memory-mapped IO) kullanan aygıtlara erişim durumudur. Bellek tabanlı 
+    IO kullanan aygıtlara erişim yapılırken önce onların bir kontrol yazmacına bir şeyler yazılıp onları ayarladıktan 
+    sonra onların diğer yazmaçlarına komutların gönderilmesi gerekebilmektedir. İşlemci bu birbirleriyle ilgisiz 
+    bellek erişimlerinin sırasını değiştirirse sorunlar ortaya çıkabilmektedir. Bu tür durumlarda tek işlemcili 
+    sistem bile olsa işlemci için bellek bariyerleri kullanılmalıdır. Bu duruma aygıt sürücüleri yazanların da
+    dikkat etmesi gerekir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	rmb, wmb ve mb fonksiyonları çift yönlü bariyer sağlamaktadır. Bu bariyer modern işlemcilerdeki pipeline mekanizması 
+    üzerinde olumsuz etkiler oluşturduğu için çalışmayı göreli biçimde yavaşlatmaktadır. İşte mb ile genel bi bariyer 
+    oluşturmak yerine bu pipeline mekanizmasını bozmadan istenilen bellek erişimlerinin güvele yapılması için acquire/release 
+    makroları bulundurulmuştur. Buna acquire/release mekanizması da denilmektedir. Ancak acquire/release mekanizması 
+    her işlemci tarafından desteklenmemektedir. Çünkü Intel bazı işlemcilerde zaten komut yer değiştirmesi çok gevşek 
+    değildir. ARM işlemcileri için bu mekanizmalar önemlidir. Bu konu bazı programlama dillerinin standart kütüphaneleri 
+    içerisinde de "bellek sıralaması (memory order)" adı altında bulundurulmaktadır.
+
+    En çok kullanılan acquire/release makrosu smp_load_acquire isimli makrodur. Bu makronun parametrik yapısı şöyledir:
+
+    smp_load_acquire(p)
+
+    Makro load erişimi yapılacak nesnenin adresini alır. smp_load_acquire makrosu tek yönlü bir biçimde işlemcinin
+    komut sıralamsı üzerinde etki oluşturmaktadır. Bu makronun aşağısındaki bellek erişimleri bu çağrıdaki erişimin 
+    yukarısına taşınamaz. Ancak yukarısındaki bellek erişimleri aşağısına taşınabilir. Örneğin:
+
+    smp_load_acquire(&object);
+    bellek yazması - 1
+    bellek okuması - 2
+    bellek yazması - 3
+
+    Burada 1, 2, 3 numaralı bellek erişimleri CPU tarafından smp_load_acquire() çağrısının yukarına taşınamaz. Ancak 
+    yukarısındakiler aşağısına taşınabilir. Görüldüğü gibi burada tek yönlü bir bariyer söz konusudur. rmb, wmb ve mb 
+    fonksiyonlarının hepsi çift yönlü bariyer oluşturmaktadır. Peki bu bariyer anlamı nedir? İşte bazen önce bir bellek 
+    okuması yapılıp sonra ona göre başka yerlerden okumalar yapılabilir. Bunlar bağımsız işlemler olduğu için ARM gibi
+    işlemciler komutları yer değiştirebilmektedir. Bu tür durumlarda çift yönlü bariyer uygulamak yerine tek yönlü
+    bariyer uygulanması modern işlemcilerdeki performası artırabilmektedir. smp_load_acquire makrosunun bir erişim 
+    yaptığına ve bu erişimin aşağısındaki kodların bu erişimin yukarısına taşınmasının engellediğine dikkat ediniz. 
+    Bu makronun kullanım amacı deikkate alındığında zaten makronun yukarısındaki erişimlerin makrodaki erişimin 
+    aşağısına alınmasında bir sorun oluşmamaktadır. Örneğin birden fazla thread paylaşılan bir alandan bilgi okuyup 
+    yazacak olsun:
+    
+    struct shared_data {
+        int payload;
+        int flag;     /* 0 = boş, 1 = dolu */
+    };
+    
+    Okuyan taraf yeni bilginin geldiğini flga değişkenine bakarak tespit etsin. Bu durumda okuyan tarafın önce flag 
+    değişkenine bakarak payload elemanın dolu olup olmadığını tespit etmesi, eğer bu eleman doluysa onu alması gerekir. 
+    Bu işlemin aşağıdaki yapılması çok işlemcili ya da çok çekirdekli sistemlerde soruna yol açacaktır:
+
+    int consumer(void)
+    {
+        int val;
+
+        if (READ_ONCE(sd.flag) == 1) {              /* Dikkat! Sorun oluşabilir! */
+            val = READ_ONCE(sd.payload);        
+            WRITE_ONCE(sd.flag, 0);
+            return val;
+        }
+        return -1;
+    }
+
+    Burada eğer işlemci sd.payload okumasını sd.flag karşılaştırmasının yukarısına taşırsa (başka bir deyişle bu işlem 
+    daha önce yapılırsa) kod yanlış çalışır:
+
+    val = READ_ONCE(sd.payload);
+    if (READ_ONCE(sd.flag) == 1) {
+        WRITE_ONCE(sd.flag, 0);
+        return val;
+    }
+    /* koşul sağlanmıyorsa val işlemi yapılmamış gibi durum yaratılır */
+
+    Burada sd.payload ile sd.flag birbirleriyle ilgisiz bellek adreslerinde bulunduğu için işlemci bunların sıraısnı 
+    yer değiştirebilir. Tabii burada siz "işlemci bunu yukarıya taşıyamaz, çünkü o zaman kodun anlamı değişir" diye 
+    düşünebilirsiniz. Çünkü işlemci eğer payload okumasını yukarı taşırsa bu artık if içerisinde olmaktan çıkacaktır. 
+    Ancak işlemciler bu yukarı taşıma işlemini koşul altında bile yapabilmektedir. Buna "speculative load" işlemi 
+    denilmektedir. "Spekucative load" işleminde işlemci koşul altında bile olsa bellek erişimlerini koşulun yukarısına 
+    taşıyabilmektedir. Ancak koşul sağlanmıyorsa bu işlemi ortadan kaldımaktadır. İşte sorun başka bir işlemci 
+    ya da çekirdeğin koşul sağlanmadığında bu işlem ortadan kaldırılmadan onu görmesidir. Yukarıdaki işlem işlemci 
+    tarafından adreta şöyle yapılabilmektedir:
+
+    val = READ_ONCE(sd.payload);
+    if (READ_ONCE(sd.flag) == 1) {
+        WRITE_ONCE(sd.flag, 0);
+        return val;
+    }
+    else 
+        <sanki val = READ_ONCE(sd.payload) işlemi hiç yapılmamış gibi durum oluştur>
+
+    İşte işlemci kendi yaptığı speculative load işlemini ortadan kaldıramadan başka bir işlemci aynı alana erişirse 
+    koşul ihlal edilmiş gibi burum oluşabilmektedir:
+
+    val = READ_ONCE(sd.payload);
+    ---> Bu sırada diğer işlemci payload değerini değiştirirse burada eski değer gözükebilir 
+    if (READ_ONCE(sd.flag) == 1) {
+        WRITE_ONCE(sd.flag, 0);
+        return val;
+    }
+    else 
+        <sanki val = READ_ONCE(sd.payload) işlemi hiç yapılmamış gibi durum oluştur>
+    
+     Şimdi kodumuzu düzeltelim:
+
+    int consumer(void) 
+    {
+        int val;
+
+        if (smp_load_acquire(&sd.flag) == 1) {      /* Olması gereken biçim */
+            READ_ONCE(sd.payload);
+            WRITE_ONCE(sd.flag, 0);  
+        }
+        return -1;
+    }
+    
+    Burada artık sd.flag okumasının aşağısındaki bellek erişimleri bu okumanın yukarısına taşınmayacaktır. Biz burada 
+    bu işlemi bellek bariyeri ile de yapabilirdik:
+
+    int consumer(void) 
+    {
+        int val;
+
+        if (READ_ONCE(sd.flag) == 1) {
+            mb();                               /* Bellek bariyeri uygulanabilir ancak maliyeti yüksek */
+            val = READ_ONCE(sd.payload);
+            WRITE_ONCE(sd.flag, 0);   
+            return val;
+        }
+        return -1;
+    }
+
+    Ancak bu biçimdeki bellek bariyerleri yukarıda da belirttiğimiz gibi pipeline mekanizmasını bozması nedeniyle 
+    yavaşlamaya yol açmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        59. Ders 22/02/2026 - Pazar									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Diğer önemli acquire/release makrosu da smp_store_release isimli makrodur. Bu makro smp_load_acquire makrosunun 
+    ters yönlüsüdür. Bu makro erişilecek nesnenin adresini ve ona yerleştirilecek değeri parametre olarak almaktadır:
+
+    smp_store_release(ptr, val)
+
+    Bu makro ile yapılan erişimin yukarısındaki bellek erişimleri makronun çağrıldığı yerin aşağısına taşınmamaktadır. 
+    Örneğin:
+      
+    bellek yazması - 1
+    bellek okuması - 2
+    bellek yazması - 3
+    smp_store_release(&object, val);
+
+    Burada 1, 2 ve 3 numaralı bellek erişimlerini işlemci smp_store_release çağrısının aşağısına taşıyanaz. Genellikle 
+    üretici-tüketici problemi tarzındaki kalıplarda tüketici smp_load_acquire fonksiyonunu kullanırken üretici de 
+    smp_store_release fonksiyonunu kullanmaktadır. Yukarıdaki shared_data örneğimizde tüketici fonksiyonu şöyle 
+    yazmıştık:
+
+    int consumer(void) 
+    {
+        int val;
+
+        if (smp_load_acquire(&sd.flag) == 1) {
+            val = READ_ONCE(sd.payload);
+            WRITE_ONCE(sd.flag, 0);  
+        }
+        return -1;
+    }
+
+    Üretici tarafın da önce yapının payload elemanına yerleştirme yapıp ondan sonra flag değişkeni 1 yapması gerekir. 
+    Bu işlemi aşağıdaki gibi yaparsa sorun oluşur:
+
+    void producer(int val)
+    {
+        WRITE_ONCE(sd.payload, val);            /* Dikkat! sorun olulabilir */
+        WRITE_ONCE(sd.flag, 1);
+    }
+
+    Bradaki sorun işlemcinin yukarıdaki iki erişimin sırasını değiştirebilmesidir. Tam bariyer kullanmadan bu işlem 
+    daha maliyetsiz smp_store_release makrosuyla yapılabilir:
+
+    void producer(int val)
+    {
+        WRITE_ONCE(sd.payload, val);            
+        smp_store_release(&sd.flag, 1);
+    }
+
+    smp_store_release makrosunun yukarısındaki erişimler (yani örneğimizdeki payload elemanına değerin aktarılması)
+    makronun aşağısına taşınmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    smp_load_acquire ve smp_store_release makroları erişimi atomik yapmak zorunda değildir. Örneğin:
+
+    smp_store_release(&sd.flag, 1);
+
+    Burada sd.flag değişkenine 1 atanmıştır. Ancak ARM gibi RISC işlemcilerinde bu işlem tek bir makine komutuyla 
+    yapılamaz. Dolayısıyla yukarıdaki çağrı komut yer değiştirmesi üzerinde etkili olsa da atomiklik sağlamamaktadır. 
+    İşte acquire/release işlemlerinin atomik yapılabilmesi için ayrı fonksiyonlar bulunudurulmuştur:
+
+    atomic_read_acquire(v)              /* atomic_t için acquire load */
+    atomic_set_release(v, i)            /* atomic_t için release store */
+
+    atomic64_read_acquire(v)            /* 64-bit için */
+    atomic64_set_release(v, i)
+
+    atomic_long_read_acquire(v)         /* long için */
+    atomic_long_set_release(v, i)
+
+    Bu fonksiyonlar gördüğünüz gibi atomic_t, atomic64_t ve atomic_long türleri üzerinde acquire ve release işlemlerini 
+    yapmaktadır. Bunların işlem yapıp eski değeri döndüren fetch'li biçimleri de vardır:
+
+    atomic_fetch_add_acquire(i, v)    /* add ve eski değeri döndür, acquire */
+    atomic_fetch_add_release(i, v)    /* add ve eski değeri döndür, release */
+
+    atomic_fetch_sub_acquire(i, v)
+    atomic_fetch_sub_release(i, v)
+
+    atomic_fetch_or_acquire(i, v)
+    atomic_fetch_or_release(i, v)
+
+    atomic_fetch_and_acquire(i, v)
+    atomic_fetch_and_release(i, v)
+
+    atomic_cmpxchg_acquire(v, old, new)
+    atomic_cmpxchg_release(v, old, new)
+
+    Bunların compare-exchange biçimleri de bulunmaktadır:
+
+    /* Her iki durum için acquire */
+    atomic_cmpxchg_relaxed(v, old, new)  /* her iki durum için relaxed */
+
+    /* Gösterici versiyonları */
+    cmpxchg_acquire(ptr, old, new)
+    cmpxchg_release(ptr, old, new)
+    cmpxchg_relaxed(ptr, old, new)
+
+    Eğer hem atomik işlemlerin yapılması isteniyorsa hem de acquire/release işlemlerinin yapılması isteniyorsa 
+    yukarıdaki fonksiyonlar kullanılabilir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Konuya girişte de belirttiğimiz gibi acquire/release işlemleri artık çeşitli programlama dillerine de onların 
+    standanrt kütüphaneleri yoluyla sokulmuştur. Acquire/release mekanizması C'ye C11 ile birlikte "isteğe bağlı 
+    (optional)" bir özellik olarak eklnemiştir. Bu özelliğin derleyicide olup olmadığı __STDC_NO_ATOMICS__ makrosuyla 
+    belirlenebilmektedir. C11 ile eklenen acquire/release fonksiyonları ve bunların yaklaşık Linux çekirdeğindeki 
+    karşılıklarını aşağıda bir tablo biçiminde veriyoruz:
+
+    ┌────────────────────────────────────────────────────────────┬─────────────────────────────────────┬────────────────────────────────┐
+    │ C11                                                        │ Linux Kernel                        │ Açıklama                       │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_load_explicit(…, acquire)                           │ smp_load_acquire                    │ Acquire load, normal değişken  │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_load_explicit(…, acquire)                           │ atomic_read_acquire                 │ Acquire load, atomic_t         │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_store_explicit(…, release)                          │ smp_store_release                   │ Release store, normal değişken │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_store_explicit(…, release)                          │ atomic_set_release                  │ Release store, atomic_t        │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_exchange_explicit(…, acq_rel)                       │ xchg + barrier                      │ Exchange, her iki yön          │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_compare_exchange_strong_explicit(…, acquire, relaxed│ cmpxchg_acquire                     │ CAS, acquire                   │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_compare_exchange_strong_explicit(…, release, relaxed│ cmpxchg_release                     │ CAS, release                   │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_compare_exchange_strong_explicit(…, acq_rel, relaxed│ cmpxchg                             │ CAS, tam barrier               │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_fetch_add_explicit(…, acquire)                      │ atomic_fetch_add_acquire            │ Add + acquire load             │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_fetch_add_explicit(…, release)                      │ atomic_fetch_add_release            │ Add + release store            │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(acquire)                               │ smp_rmb / smp_acquire__after_ctrl_dep│ Acquire fence                 │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(release)                               │ smp_wmb                             │ Release fence                  │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(seq_cst)                               │ smp_mb                              │ Full barrier                   │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_load_explicit(…, relaxed)                           │ READ_ONCE                           │ Barrier yok, compiler fence    │
+    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_store_explicit(…, relaxed)                          │ WRITE_ONCE                          │ Barrier yok, compiler fence    │
+    └────────────────────────────────────────────────────────────┴─────────────────────────────────────┴────────────────────────────────┘
+
+    Bu fonksiyonların ayrıntılarını C standartlarından elde edebilirsiniz. Tabii hiçbir zaman Linux çekirdeğinde 
+    derleyicinin sunduğu bu tür fonksiyonlar kullanılmamaktadır. C++'a da C11 ile birlikte acquire/release fonksiyonları
+    sınıfsal bir temsille eklenmiştir:
+
+    ┌─────────────────────────────────────────────────┬─────────────────────────────────────┬────────────────────────────────┐
+    │ C++11                                           │ Linux Kernel                        │ Açıklama                       │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.load(memory_order_acquire)            │ smp_load_acquire                    │ Acquire load, normal değişken  │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.load(memory_order_acquire)            │ atomic_read_acquire                 │ Acquire load, atomic_t         │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.store(val, memory_order_release)      │ smp_store_release                   │ Release store, normal değişken │
+    ├─────────────────────────────────────────────────┼───────"──────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.store(val, memory_order_release)      │ atomic_set_release                  │ Release store, atomic_t        │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.exchange(val, memory_order_acq_rel)   │ xchg + barrier                      │ Exchange, her iki yön          │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.compare_exchange_strong(exp, des,     │ cmpxchg_acquire                     │ CAS, acquire                   │
+    │   memory_order_acquire, memory_order_relaxed)   │                                     │                                │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.compare_exchange_strong(exp, des,     │ cmpxchg_release                     │ CAS, release                   │
+    │   memory_order_release, memory_order_relaxed)   │                                     │                                │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.compare_exchange_strong(exp, des,     │ cmpxchg                             │ CAS, tam barrier               │
+    │   memory_order_acq_rel, memory_order_relaxed)   │                                     │                                │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.fetch_add(val, memory_order_acquire)  │ atomic_fetch_add_acquire            │ Add + acquire load             │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.fetch_add(val, memory_order_release)  │ atomic_fetch_add_release            │ Add + release store            │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(memory_order_acquire)       │ smp_rmb / smp_acquire__after_ctrl_dep│ Acquire fence                 │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(memory_order_release)       │ smp_wmb                             │ Release fence                  │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(memory_order_seq_cst)       │ smp_mb                              │ Full barrier                   │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.load(memory_order_relaxed)            │ READ_ONCE                           │ Barrier yok, compiler fence    │
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic<T>.store(val, memory_order_relaxed)      │ WRITE_ONCE                          │ Barrier yok, compiler fence    │
+    └─────────────────────────────────────────────────┴─────────────────────────────────────┴────────────────────────────────┘
+
+    Bu sınıfların ayrıntılarını C++ standartlarından inceleyebilirsiniz. 
+
+    Ayrıca daha önceden de belirttiğimiz gibi acquire/release mekanizması için gcc'de built-in fonksiyonlar da 
+    bulunmaktadır:
+
+    ┌──────────────────────────────────────────────┬────────────────────────┬──────────────────────────────────────────────┐
+    │ GCC __sync Built-in                          │ Linux Kernel           │ Açıklama                                     │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_fetch_and_add(ptr, val)               │ atomic_fetch_add       │ Add, full barrier, eski değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_fetch_and_sub(ptr, val)               │ atomic_fetch_sub       │ Sub, full barrier, eski değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_fetch_and_and(ptr, val)               │ atomic_fetch_and       │ AND, full barrier, eski değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_fetch_and_or(ptr, val)                │ atomic_fetch_or        │ OR, full barrier, eski değeri döndürür       │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_fetch_and_xor(ptr, val)               │ atomic_fetch_xor       │ XOR, full barrier, eski değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_fetch_and_nand(ptr, val)              │ —                      │ NAND, full barrier, kernel karşılığı yok     │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_add_and_fetch(ptr, val)               │ atomic_add_return      │ Add, full barrier, yeni değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_sub_and_fetch(ptr, val)               │ atomic_sub_return      │ Sub, full barrier, yeni değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_and_and_fetch(ptr, val)               │ —                      │ AND, full barrier, yeni değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_or_and_fetch(ptr, val)                │ —                      │ OR, full barrier, yeni değeri döndürür       │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_xor_and_fetch(ptr, val)               │ —                      │ XOR, full barrier, yeni değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_bool_compare_and_swap(ptr, old, new)  │ cmpxchg (bool sonuç)   │ CAS, full barrier, başarı/başarısız döndürür │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_val_compare_and_swap(ptr, old, new)   │ cmpxchg (eski değer)   │ CAS, full barrier, eski değeri döndürür      │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_lock_test_and_set(ptr, val)           │ xchg                   │ Exchange, yalnızca acquire barrier           │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_lock_release(ptr)                     │ smp_store_release      │ Sıfırlama, yalnızca release barrier          │
+    ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
+    │ __sync_synchronize()                         │ smp_mb                 │ Full memory barrier                          │
+    └──────────────────────────────────────────────┴────────────────────────┴──────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Şimdi de çekirdekteki RCU (read-copy-update) mekanizması üzerinde duralım. Biz daha önce bu mekanizmanın farkına 
+    varmıştık. Burada bu mekanizmann işleyişi üzerinde duracağız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	RCU "kilitsiz (lock-free)" veri yapılarının gerçekleştirilmesi için kullanılan bir tekniktir. Bir veri yapısından 
+    okuma yapan ve na yazma yapan birtakım thread'lerin bulunduğunu düşünelim. Biz daha önce bu tür durumlarda 
+    "okuma-yazma kilitlerinin (readers-writer lock)" kullanıldığını görmüştük. Anımsayacağınız gibi okuma-yazma kilitleri 
+    Linux çekirdeklerinde spinlock kullanıyordu. Paylaşılan alana okuma yazma kilidyle erişen aşağıdaki örneğe dikkat 
+    ediniz:
+
+    read()
+    {
+        read_lock(...);
+        ...
+        ...
+        ...
+        read_unlock(...);
+    }
+
+    write()
+    {
+        write_lock(...);
+        ...
+        ...
+        ...
+        write_unlock(...);
+    }
+
+    Buurada birden fazla okuyan thread beklemeden işlemlerini yapmaktadır. Ancak işin içerisine bir yazan thread 
+    girdiği zaman okuna thread'ler de yazan thread'lerde bekleme yapmaktadır. Okuma yazma kilitlerinin performans 
+    üzerinde etkisini şöyle özetleyebiliriz:
+
+    - Eğer çok sayıda yazan varsa beklemeler uzar
+    - Okuyan sayısı aşırı fazla ise, yazan sayısı az ise kilit hep okuyan thread'ler tarafından alındığı için yazan 
+    thread'lerin yazması gecikebilmektedir. 
+    - Çok sayıda okuma durumunda yine bir kilit alındığı için küçük bir perfomans kaybı oluşmaktadır. 
+
+    İşte RCU mekanizması okuma yazma kilitlerinin yukarıda belirttiğimiz sournlarını ortadan kaldırmak için düşünülmüştür.  
+    RUC mekanizması Linux çekirdeklerine 2.6 sürümü ile karalı biçimde eklenmiştir. Daha sonraki çekirdeklerde bu 
+    mekanizma geliştirilmiş ve yaygınlaştırılmıştır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	RCU mekanizmasının dayandı fikir basittir: Okuma yapan thread'ler hiö kilit almadan doğrudan okuma işlemini yaparlar. 
+    Ancak yazma yapan thread'ler paylaşılan veri yapısının bir kopyasını çıkartarak işlemleri onun üzerinde yaparlar. 
+    Sonra kopyayı asıl veri yapısı haline getirip onun kullanılmasını sağlarlar. Bu mekanizmada paylaşılan veri 
+    yapısı bir gösterici ile gösterilmektedir:
+
+      ptr
+    ┌─────┐        ┌──────────────┐
+    │  ●──┼───────►│  veri yapısı │
+    └─────┘        └──────────────┘			
+
+    Okuyan thread'ler ptr göstericisinin gösterdiği yerdeki paylaşılan alana hiç kilit almadan erişirler. Ancak yazma 
+    yapan thread'ler bu veri yapısının bir kopyasını oluşturup yazmayı bu kopya üzerinde yapmaktadır:
+
+    ┌──────┐       ┌────────────────────────┐
+    │  ptr │──────►│      veri yapısı       │
+    └──────┘       └────────────────────────┘
+                              │
+                              │    kopya çıkartılıyor
+                              ▼
+                   ┌────────────────────────┐
+                   │ veri yapısının kopyası │
+                   └────────────────────────┘
+
+    Yazan thread'ler kopya üzerinde yazma işlemini yaptıktan sonra artık ptr göstericisinin değiştirilmiş veri yapısını
+    göstermesini sağlamaktadır:
+
+    ┌──────┐        ┌───────────────────────┐
+    │  ptr │        │   eski veri yapısı    │
+    └──────┘        └───────────────────────┘
+        │
+        │
+        │           ┌────────────────────────┐
+        └─────────► │ veri yapısının kopyası │
+                    └────────────────────────┘
+
+    Burada önemli bir sorun eski veri yapısının ne zaman ve kim tarafından yok edileceğidir. En son okuyan tarafın 
+    işleminş bitrdiği zaman eski veri yapısını silmesi ilk akla gelen çözümdür. 
+          
+    RCU mekanizmasını şuna benzetebiliriz: Önümüzde bir beyaz tahta var. Kişiler bu tahtadaki yazıyı okuyorlar. Bu 
+    beyaz tahtada değişilik yapacak kişi okuyanların dikkati dağılmasın diye beyaz tahtanın üzerindekilerin bir kopyasını 
+    arkadaki başka bir beyaz tahtada oluşturuyor. Sonra tahtayı görünür hale geitiriyor. Ancak eski beyaz tahtadan 
+    okuyanlar okumayı bitirene kadar eski beyaz tahtayı da muhafaza ediyor. Sonra eski beyaz tahtayı çekiyor. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
