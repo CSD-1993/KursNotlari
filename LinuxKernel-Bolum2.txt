@@ -2650,24 +2650,24 @@ void exit_sys(const char *msg)
 
     Burada derleyici asla bariyerin yukarısıyla aşağısındaki kodları yer değiştirmemektedir. Ancak tabii bu örnekte 
     a = 10 ile b = 20 kendi aralarında, c = 30 ile de d = 40 işlemleri kendi aralarında yer değiştirebilir. Derleyici 
-<BURADA KALDIM>
     bariyerlerinin bir makine kodu üretmediğine yalnızca derleyici için bir direktif oluşturduğuna dikkat ediniz. 
-    gcc derleyicilerinde (Linux çekirdeğinin gcc ile derlenebildiğini anımsayınız) volatile erişim zaten derleyici 
-    bariyeri anlamına da gelmektedir. Yani örneğin a değişkeni volatile ise ona yapılan atamalar ve ondan yapılan 
-    okumalar zaten bariyer etkisi yaratmaktadır. Başka bir deyişle gcc derleyicileri volatile erişimin yukarısını ve 
-    aşağısını kendi aralarında yer değiştirmemektedir. Tabii değişken volatile değilse biz onu tür dönüştürmesi ile 
-    sanki volatile imiş gibi de kullanabiliriz. Örneğin:
+    gcc derleyicilerinde Linux çekirdeğinin gcc ile derlenebildiğini anımsayınız. (Son yıllarda clang derleyicileri 
+    ile derleme de artık başarılı biçimde yapılabilmektedir.) volatile erişim zaten derleyici bariyeri anlamına da 
+    gelmektedir. Yani örneğin a değişkeni volatile ise ona yapılan atamalar ve ondan sonra yapılan okumalar zaten bariyer 
+    etkisi yaratmaktadır. Başka bir deyişle gcc derleyicileri volatile erişimin yukarısını ve aşağısını kendi aralarında 
+    yer değiştirmemektedir. Tabii değişken volatile değilse biz onu tür dönüştürmesi ile sanki volatile imiş gibi de 
+    kullanabiliriz. Örneğin:
 
     *(volatile int *)&x = 10;
 
-    Zaten Linux çekirdeğindeki READ_ONCE ve WRITE_ONCE makroları bu işlemi yapmaktadır. Yani bu makrolar iki işleve 
-    sahiptir:
+    Zaten Linux çekirdeğindeki READ_ONCE ve WRITE_ONCE makroları bu işlemi yapmaktadır. READ_ONCE ve WRITE_ONCE makroları 
+    iki işleve sahiptir:
 
-    1) Erişimi volatile olarak yaparlar. Dolayısıyla derleyici ilgili nnesneyi CPU yazmaçlarında bekletemez. 
+    1) Erişimi volatile olarak yaparlar. Dolayısıyla derleyici ilgili nnesne için her zaman bellek başvurusu yapar. 
     2) volatile erişiminde dolayı aynı zamanda derleyici bariyeri de oluştururlar. 
 
     Güncel çekirdeklerde READ_ONCE ve WRITE_ONCE makroları "include/asm-generic/rwonce.h" dosyası içerisinde şöyle 
-    yazılmıştır:
+    tanımlanmıştır:
 
     #ifndef __READ_ONCE
     #define __READ_ONCE(x)	(*(const volatile __unqual_scalar_typeof(x) *)&(x))
@@ -2686,30 +2686,32 @@ void exit_sys(const char *msg)
 
     Burada görüldüğü gibi tek yapılan şey volatile erişimdir. 
     
-    C standartlarına göre volatile erişimler erişim sırasına göre yapılmak zorundadır. Birbirleriyle alakasız bile olsa 
-    C standartlarına göre iki volatile erişim birbirilerine göre sıra korunarak gerçekleştirilir. Ancak gcc standratlardaki 
-    bu kurala tam uymamaktadır. Örneğin:
+    C standartlarına göre volatile erişimler kodda yazıldığı sırada yapılmak zorundadır. Yani birbirleriyle alakasız 
+    bile olsa C standartlarına göre iki volatile erişimler kendi aralarındaki sıra korunarak gerçekleştirilir. Ancak 
+    gcc standartlardaki bu kurala tam olarak uymamaktadır. Örneğin:
 
     x = READ_ONCE(val1)
     y = READ_ONCE(val2)
 
-    Burada C standartlarına göre erişim bu sırada yapılmak zorundadır. Dolayısıyla C standartlarına göre bir derleyici 
-    bariyeri gerekmez. Ancak gcc bu kurala tam uymamaktadır. Dolayısıyla yukarıdaki okuma işlemini yer değiştirebilmektedir. 
-    Bunu engellemek için derleyici bariyerinin kullanılması gerekmektedir. 
+    Burada C standartlarına göre erişim bu sırada yapılmak zorundadır. Dolayısıyla C standartlarına göre bu iki işlem 
+    arasında bir derleyici bariyerinin kullanılmasına gerek yoktur. (Tabii bu durum volatile erişimlerin derleyici 
+    bariyeri oluşturduğu anlamına gelmemektedir. volatile erişimlerin sıraları yalnızca kendi aralarında korunmaktadır.)
+    Ancak gcc bu kurala tam uymamaktadır. Dolayısıyla yukarıdaki okuma işlemini yer değiştirebilmektedir. Bunu engellemek 
+    için derleyici bariyerinin kullanılması gerekmektedir. 
     
-    Daha önceden de belirttiğimiz gibi  çekirdeği zaten gcc ile derlenmek zorundadır. Linux çekirdeğinde gcc derleyicisine 
-    özgü onlarca özellik kullanılmaktadır. Dolayısıyla çekirdek kodları herhangi bir derleyiciyle  derlenenemektedir. Bilindiği 
-    gibi clang derleyicileri büyük ölçüde gcc uyumludur. Eskidne Linux çekirdeği clang derleyicileri ile derlenemiyordu. 
-    Ancak son yıllarda artık derlenebilir hale gelmiştir. Linux çekirdeğini derlerken  make işleminde derlyiciyi aşağıdaki 
-    gibi clang olarak belirleyebilirsiniz:
+    Daha önceden de belirttiğimiz gibi Linux çekirdeği zaten gcc ile ve bir süredir de clang ile derlenmek zorundadır. 
+    Linux çekirdeğinde gcc derleyicisine özgü onlarca özellik kullanılmaktadır. Dolayısıyla çekirdek kodları herhangi bir 
+    derleyiciyle derlenenemektedir. Bilindiği gibi clang derleyicileri büyük ölçüde gcc uyumludur. gcc'nin eklentilerini 
+    desteklemektedir. Eskiden Linux çekirdeği clang derleyicileri ile derlenemiyordu. Ancak son yıllarda artık derlenebilir 
+    hale gelmiştir. Linux çekirdeğini derlerken make işleminde derleyiciyi clang olarak şöyle seçebilirsiniz: 
 
     make CC=clang
 
     volatile erişimlerin anlamını C Programlama Dili kurslarımızdan biliyorsunuz. Ancak burada bu konu üzerinde kısa 
     bir açıklama yapmak istiyoruz. Derleyiciler kod optimizasyonunu tek tread'li çalışmayı esas alarak yapmaktadır. 
-    Dolayısıyla nesneleri yazmaçlarda saklayıp onları yazmaçlardan alarak kullanabilmektedir. İşte volatile niteleyici
-    derleyiciye adeta "bu nesneyi kullandığımda o yazmaçta olsa bile sen her zaman belleğe başvurarak ona eriş" demektedir. 
-    Örneğin:
+    Dolayısıyla nesneleri yazmaçlarda saklayıp onları bellek erişimi yapmadan yazmaçlardan alarak kullanabilmektedir. 
+    İşte volatile niteleyici derleyiciye adeta "bu nesneyi kullandığımda o nesne yazmaçta olsa bile sen her zaman belleğe
+    başvurarak ona eriş" demektedir. Örneğin:
 
     int g_flag;
     /* ... */
@@ -2719,8 +2721,8 @@ void exit_sys(const char *msg)
     }
 
     Burada başka bir thread g_flag değişkenini 0'a çektiğinde bu thread bunu anlamayabilir. Çünkü derleyici while 
-    ifadesindeki g_flag değişkeni için döngünün her yinelenmesinde belleğe başvurmak zorunda değildir. İşte bunu 
-    sağlamak için bu değişkenin volatile olarak tanımşanması gerekir:
+    parantezindek iifadesinde g_flag değişkeni için döngünün her yinelenmesinde belleğe başvurmak zorunda değildir. İşte 
+    bunu sağlamak için bu değişkenin volatile olarak tanımşanması gerekir:
 
     volatile int g_flag;
     /* ... */
@@ -2729,8 +2731,8 @@ void exit_sys(const char *msg)
         /* ... */
     }
 
-    Ancak Linux çekirdeğinde değişkenler genellikle volatile yapılamamaktadır. Çünkü bu durum performans kaybına 
-    yol açmaktadır. Linux çekirdeği READ_ONCE ve WRITE_ONCE makrolarıyla gerektiğinde volatile erişimi yapmaktadır. 
+    Ancak Linux çekirdeğinde değişkenler genellikle volatile yapılmamaktadır. Çünkü bu durum performans kaybına 
+    yol açmaktadır. Linux çekirdeği READ_ONCE ve WRITE_ONCE makrolarıyla "gerektiğinde volatile erişimi" yapmaktadır. 
     Örneğin:
 
     int g_flag;
@@ -2741,18 +2743,18 @@ void exit_sys(const char *msg)
     }
 
     Çekirdek kodlarında paylaşılan bellek alanlarına erişimlerde her zaman READ_ONCE ve WRITE_ONCE makrolarını 
-    kullanmalızınız. 
+    kullanmalısınız.
 /*----------------------------------------------------------------------------------------------------------------------
-                                        57. Ders 15/02/2026 - Pazar								
+                                            57. Ders 15/02/2026 - Pazar								
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Intel x86 mimarisi temel olarak CISC tarzı bir mimaridir. CISC mimarilerinde doğrudan bellek üzerinde, yazmaçla 
-    bellek üzerinde aritmetik işlemler yapan makine komutları bulunabilmektedir. Böylece zaten bazı işlemler tek 
-    makine komutuyla yapılabilmektedir. Daha önceden de belirttiğimiz gibi Intel x86 mimarisinde bu biçimdeki makine 
-    komutları çok işlemcili ya da çekirdekli ortamlarda atomik değildir. Biz bu atomikliği sağlamak için komutların 
-    başına LOCK önekinin getirildiğini belirtmiştik. Böylece örneğin Intel x86 mimarisinde bellekteki bir nesnenin 
-    çok işlemcili ya da çok çekirdekli sistemlerde atomik artırılması aşağıdaki gibi sağlanabiliyordu:
+    Intel x86 mimarisi temel olarak CISC tarzı bir mimaridir. CISC mimarilerinde doğrudan bellek üzerinde ve yazmaçla 
+    bellek üzerinde işlemler yapan makine komutları bulunabilmektedir. Böylece zaten bazı işlemler tek bir makine komutuyla 
+    yapılabilmektedir. Daha önceden de belirttiğimiz gibi Intel x86 mimarisinde bu biçimdeki makine komutları çok işlemcili 
+    ya da çekirdekli ortamlarda atomik değildir. Biz bu atomikliği sağlamak için komutların başına LOCK önekinin getirildiğini 
+    belirtmiştik. Böylece örneğin Intel x86 mimarisinde bellekteki bir nesnenin çok işlemcili ya da çok çekirdekli sistemlerde 
+    atomik bir artırılması aşağıdaki gibi sağlanabiliyordu:
 
     LOCK ADD [mem_addr], 1
 
@@ -2767,16 +2769,16 @@ void exit_sys(const char *msg)
 
     ARM işlemcilerinde genellikle bellek erişimleri doğrudan değil yazmaç indeksiyle yapılmaktadır. ARM gibi RISC 
     işlemcilerinde "load" ve "store" isminde bellekten yazmaçlara, yazmaçlardan belleğe aktarım yapan makine komutları 
-    vardır. Ancak tüm artimetik, bitsel işlemler yazmaçlar üzerinde yapılmaktadır. RISC işlemcilerinde genel olarak 
+    vardır. Ancak tüm artimetik ve bitsel işlemler yazmaçlar üzerinde yapılmaktadır. RISC işlemcilerinde genel olarak 
     load ve store dışındaki komutların üç operand'lı olduğunu kurusumuzun giriş kısımlarında belirtmiştik. İşte ARM 
     işlemcilerinde bu tür işlemler tek makine komutuyla yapılamadığı için ne tek çekirdekli sistemlerde ne de çok 
     çekirdekli sistemlerde atomiklik yukarıdaki biçimle sağlanamamaktadır. Ancak ARM işlemcileri 8.1 versyonuyla 
-    birlikte Intel'deki gibi atomik bellek üzerinde atomik işlemler yapabilen makine komutlarına sahip olmuştur. Fakat 
-    bu makine komutları ancak 64 bit yeni ARM işlemcilerinde kullanıılabilmektedir. ARM V8.1 öncesinde atomik işlemler 
+    birlikte Intel'deki gibi bellek üzerinde atomik işlemler yapabilen makine komutlarına sahip olmuştur. Fakat bu 
+    makine komutları ancak 64 bit yeni ARM işlemcilerinde kullanılabilmektedir. ARM V8.1 öncesinde atomik işlemler 
     LDREX ve STREX makine komutlarıyla bir döngü oluşturularak sağlanıyordu. 
 
     ARM işlemcilerinde LDREX özel komutu bellekten yazmaca yükleme yaparken aynı zamanda işlemci içerisindeki bir 
-    yazmaç yoluyla "exclusive monitor" denilen bir bayrağı set etmektedir. Örneğin:
+    yazmaç yoluyla "exclusive monitor" denilen bir bayrağı da set etmektedir. Örneğin:
 
     LDR	R0, =mem_addr
     LDREX R1, [R0]
@@ -2788,12 +2790,12 @@ void exit_sys(const char *msg)
     STREX
     CLREX
 
-    Aslında LDREX bayrak set durumdaysa onu reset etmekte, reset durumdaysa onu set etmektedir. Biz bayrağı LDREX ile 
+    Aslında LDREX bayrak set durumdaysa onu reset etmekte, reset durumundaysa onu set etmektedir. Biz bayrağı LDREX ile 
     set ettiğmizde başka bir çekirdek LDREX makine komutuyla benzer işlemi yapmaya çalıştığında bayrak otomatik olarak 
-    reset edilir. (LDREX ile bayrağın reset edilemsi için aynı adresin kullanılması gerekmez. Adrest temelinde bayrak 
-    yoktur. Bayrak işlemci temelinde bir tanedir. Bu komutlar hangi bölgesi için kullanılmış olursa olsun aynı bayrağı 
-    set ve reset yapmaktadır.) İşte STREX komutu bayrak set edildikten sonra onun durumunu da bize vermektedir. 
-    STREX makine komutu şöyle kullanılmaktadır:
+    reset edilir. (LDREX ile bayrağın reset edilmesi için aynı adresin kullanılması gerekmez. Exclusive monitor bayrakları 
+    adres temelinde çalışmamaktadır. Exclusive monitor bayrağı işlemci temelinde bir tanedir. Bu komutlar hangi bölgesi 
+    için kullanılmış olursa olsun aynı bayrağı set ve reset etmektedir. İşte STREX komutu bayrağı set etmenin yanı sıra 
+    onun durumunu da bize vermektedir. STREX makine komutu şöyle kullanılmaktadır:
 
     LDR	R0, =mem_addr
     LDREX R1, [R0]
@@ -2801,25 +2803,25 @@ void exit_sys(const char *msg)
     STREX R3, R2, =memaddtr
 
     STREX makine komutundaki birinci operand (örneğimizdeki R3) işlemin başarısını belirtmektedir. Eğer bu birinci 
-    operand 0 olarak yüklenirse işlem başarılıdır ve yazma yapılmıştır, eğer bu birinci operand 1 ile yüklenirse işlem
-    başarısızdır yani yazma yapılamamıştır. Başka bir deyişle komutun birinci operand'ı (örneğiizdeki R3 yazmacı)
-    komutun yazma yapıp yapmadığını belirtmektedir. İşte eğer yazma yapılamamışsa bir döngü içerisinde bu işlem 
-    başarılana kadar deneme yapılmalıdır. Bu döngü işlemini şöyle yapabiliriz:
+    operand 0 olarak yüklenirse işlem başarılıdır ve yazma yapılmıştır. Eğer bu birinci operand 1 ile yüklenirse işlem
+    başarısızdır, yani yazma yapılamamıştır. Başka bir deyişle komutun birinci operand'ı (örneğimizdeki R3 yazmacı)
+    komutun yazma yapıp yapmadığını belirtmektedir. İşte eğer yazma yapılamamışsa bir döngü içerisinde bu işlem başarılana 
+    kadar deneme yapılmalıdır. Bu döngüyü şöyle oluşturabiliriz:
 
     LDR	R0, =mem_addr
     REPEAT: 
     LDREX R1, [R0]
     ADD	R2, R1, #1
     STREX R3, R2, =memaddtr
-    CMP     R3, #0              
-    BNE     REPEAT
+    CMP  R3, #0              
+    BNE  REPEAT
 
-    STREX komutunun da monitör bayrağını reset ettiğine dikkat ediniz. Yani STREX ile yazma başarılırsa bayrak aynı 
-    zamanda reset edilmiş olmaktadır. 
+    STREX komutunun da monitör bayrağını reset ettiğine dikkat ediniz. Yani STREX ile yazma başarıldığında d bayrak 
+    aynı zamanda reset edilmiş olmaktadır. 
 
-    Yukarıdakşi döngü etkin bir çalışma sağlamakta mıdır? İşte 30, 40 çekirdeğe kadar işlemlerin bu biçimde yürütülmesi 
-    dikkate değer bir performans sorunu yaşatmıyordu. Ancak daha yüksek çekirdek sayılarında performans etkilendiği 
-    görülmüştür. Bu nedenle ARM işlemcileri 8.1 versiyonuyla birlikte read/modify/write işlemini kendi içerisinde yapan
+    Peki yukarıdaki döngü etkin bir çalışma sağlamakta mıdır? İşte 30, 40 çekirdeğe kadar işlemlerin bu biçimde yürütülmesi 
+    dikkate değer bir performans sorunu yaşatmıyordu. Ancak daha yüksek çekirdek sayılarında performansın etkilendiği 
+    görülmüştür. Bu nedenle ARM işlemcileri 8.1 versiyonuyla birlikte read-modify-write işlemini kendi içerisinde yapan
     Intel mimarisine benzer atomik makine komutlarını da komut kümesine eklemiştir. Bunların listesi şöyledir:
 
     /* Atomic ADD */
@@ -3196,7 +3198,7 @@ void exit_sys(const char *msg)
 
     void producer(int val)
     {
-        WRITE_ONCE(sd.payload, val);            /* Dikkat! sorun olulabilir */
+        WRITE_ONCE(sd.payload, val);            /* Dikkat! sorun oluşabilir */
         WRITE_ONCE(sd.flag, 1);
     }
 
