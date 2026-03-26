@@ -15,7 +15,7 @@
                      (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                          (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                      Son Güncelleme: 03/03/2026 - Salı
+                                      Son Güncelleme: 19/03/2026 - Perşembe
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -76,6 +76,7 @@
     kritik kod oluşturulamaz:
 
     int g_flag = 0;
+    /* ... */
 
     while (g_flag)
         ;
@@ -3039,13 +3040,13 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	rmb, wmb ve mb makroları çift yönlü bariyer sağlamaktadır. Bu bariyerler modern işlemcilerdeki pipeline mekanizması 
+	rmb, wmb ve mb makroları çift yönlü bariyer oluşturmaktadır. Bu bariyerler modern işlemcilerdeki pipeline mekanizması 
     üzerinde olumsuz etkiler oluşturduğu için çalışmayı göreli biçimde yavaşlatmaktadır. İşte mb ile genel bir bariyer 
     oluşturmak yerine pipeline mekanizmasını bozmadan istenilen bellek erişimlerinin güvenle yapılabilmesi için 
-    acquire/release denilen mekanizmalar da bulundurulmuştur. Ancak acquire/release mekanizması her işlemci tarafından
-    desteklenmemektedir. Çünkü Intel gibi bazı işlemcilerde zaten komut yer değiştirmesi çok gevşek değildir. Ancak ARM 
-    gibi RISC işlemcileri için bu mekanizmalar önemlidir. Bu mekanizmalar bazı programlama dillerinin standart kütüphaneleri 
-    içerisinde de "bellek sıralaması (memory order)" adı altında bulundurulmaktadır.
+    "acquire/release semantics" denilen mekanizmalar da bulundurulmuştur. Ancak acquire/release mekanizması her işlemci 
+    tarafından desteklenmemektedir. Çünkü Intel gibi bazı işlemcilerde zaten komut yer değiştirmesi çok gevşek değildir. 
+    Ancak ARM gibi RISC işlemcileri için bu mekanizmalar önemlidir. Bu mekanizmalar bazı programlama dillerinin standart 
+    kütüphaneleri içerisinde de "bellek sıralaması (memory order)" adı altında bulundurulmaktadır.
 
     En çok kullanılan acquire/release makrosu smp_load_acquire isimli makrodur. Bu makronun parametrik yapısı şöyledir:
 
@@ -3053,7 +3054,8 @@ void exit_sys(const char *msg)
 
     Bu makro parametre olarak okuma yapılacak nesnenin adresini almaktadır. smp_load_acquire makrosu tek yönlü bir 
     biçimde işlemcinin komut sıralamsı üzerinde etki oluşturmaktadır. Bu makronun aşağısındaki bellek erişimleri 
-    bu çağrıdaki erişimin yukarısına taşınamaz. Ancak yukarısındaki bellek erişimleri aşağısına taşınabilir. Örneğin:
+    (hem load hem de store erişimleri) bu çağrıdaki erişimin yukarısına taşınamaz. Ancak yukarısındaki bellek erişimleri 
+    aşağısına taşınabilir. Örneğin:
 
     smp_load_acquire(&object);
     bellek yazması - 1
@@ -3076,9 +3078,9 @@ void exit_sys(const char *msg)
         int flag;     /* 0 = boş, 1 = dolu */
     };
     
-    Okuyan taraf yeni bilginin geldiğini flga değişkenine bakarak tespit etsin. Bu durumda okuyan tarafın önce flag 
-    değişkenine bakarak payload elemanın dolu olup olmadığını tespit etmesi, eğer bu eleman doluysa onu alması gerekir. 
-    Bu işlemin aşağıdaki yapılması çok işlemcili ya da çok çekirdekli sistemlerde soruna yol açacaktır:
+    Okuyan taraf yeni bilginin geldiğini flag değişkenine bakarak tespit nediyor olsun. Bu durumda okuyan tarafın önce 
+    flag değişkenine bakarak payload elemanına başvurması gerekir. Bu işlemin aşağıdaki yapılması çok işlemcili ya da 
+    çok çekirdekli sistemlerde soruna yol açacaktır:
 
     int consumer(void)
     {
@@ -3093,23 +3095,23 @@ void exit_sys(const char *msg)
     }
 
     Burada eğer işlemci sd.payload okumasını sd.flag karşılaştırmasının yukarısına taşırsa (başka bir deyişle bu işlem 
-    daha önce yapılırsa) kod yanlış çalışır:
+    daha önce yapılırsa) kod hatalı çalışacaktır:
 
     val = READ_ONCE(sd.payload);
     if (READ_ONCE(sd.flag) == 1) {
         WRITE_ONCE(sd.flag, 0);
         return val;
     }
-    /* koşul sağlanmıyorsa val işlemi yapılmamış gibi durum yaratılır */
+    /* dikkat! Koşul sağlanmıyorsa val işlemi yapılmamış gibi durum yaratılır */
 
-    Burada sd.payload ile sd.flag birbirleriyle ilgisiz bellek adreslerinde bulunduğu için işlemci bunların sıraısnı 
+    Burada sd.payload ile sd.flag birbirleriyle ilgisiz bellek adreslerinde bulunduğu için işlemci bunların sırasısnı 
     yer değiştirebilir. Tabii burada siz "işlemci bunu yukarıya taşıyamaz, çünkü o zaman kodun anlamı değişir" diye 
     düşünebilirsiniz. Çünkü işlemci eğer payload okumasını yukarı taşırsa bu artık if içerisinde olmaktan çıkacaktır. 
     Ancak işlemciler bu yukarı taşıma işlemini koşul altında bile yapabilmektedir. Buna "speculative load" işlemi 
-    denilmektedir. "Spekucative load" işleminde işlemci koşul altında bile olsa bellek erişimlerini koşulun yukarısına 
-    taşıyabilmektedir. Ancak koşul sağlanmıyorsa bu işlemi ortadan kaldımaktadır. İşte sorun başka bir işlemci 
-    ya da çekirdeğin koşul sağlanmadığında bu işlem ortadan kaldırılmadan onu görmesidir. Yukarıdaki işlem işlemci 
-    tarafından adreta şöyle yapılabilmektedir:
+    denilmektedir. "Spekucative load" işleminde işlemci koşul altında bile olsa bellek erişimlerini koşulun yukarısına
+    taşıyabilmekte ancak koşul sağlanmıyorsa onun etkisini ortadan kaldırabilmektedir. İşte buradaki sorun başka bir 
+    işlemci ya da çekirdeğin koşul sağlanmadığında bu işlem henüz ortadan kaldırılmadan onun etkisini görebilmesidir. 
+    Yukarıdaki işlem işlemci tarafından adeta şöyle yapılabilmektedir:
 
     val = READ_ONCE(sd.payload);
     if (READ_ONCE(sd.flag) == 1) {
@@ -3119,7 +3121,7 @@ void exit_sys(const char *msg)
     else 
         <sanki val = READ_ONCE(sd.payload) işlemi hiç yapılmamış gibi durum oluştur>
 
-    İşte işlemci kendi yaptığı speculative load işlemini ortadan kaldıramadan başka bir işlemci aynı alana erişirse 
+    İşte işlemci kendi yaptığı speculative load işlemini ortadan kaldıramadan başka bir işlemci aynı nesneye erişirse 
     koşul ihlal edilmiş gibi burum oluşabilmektedir:
 
     val = READ_ONCE(sd.payload);
@@ -3131,29 +3133,52 @@ void exit_sys(const char *msg)
     else 
         <sanki val = READ_ONCE(sd.payload) işlemi hiç yapılmamış gibi durum oluştur>
     
-     Şimdi kodumuzu düzeltelim:
+    Burada diğer bir işlemcide ya da çekirdekte çalışan kod sd.payload değişkenini ok ile belirtilen yerde değiştirip
+    sd.flag değişkenini 1 yaparsa eski değerin okunması gibi bir durum oluşabilecektir. Şimdi kodumuzun bu kısmını 
+    düzeltelim:
 
     int consumer(void) 
     {
         int val;
 
-        if (smp_load_acquire(&sd.flag) == 1) {      /* Olması gereken biçim */
-            READ_ONCE(sd.payload);
+        if (smp_load_acquire(&sd.flag) == 1) {      /* olması gereken biçim */
+            val = READ_ONCE(sd.payload);
             WRITE_ONCE(sd.flag, 0);  
+            return val;
         }
         return -1;
     }
     
-    Burada artık sd.flag okumasının aşağısındaki bellek erişimleri bu okumanın yukarısına taşınmayacaktır. Biz burada 
-    bu işlemi bellek bariyeri ile de yapabilirdik:
+    Burada artık sd.flag okumasının aşağısındaki bellek erişimleri bu okumanın yukarısına taşınmayacaktır. Ancak hala 
+    burada bir sorun daha vardır. READ_ONCE okumsayıyla WRITE_ONCE okuması da işlemci tarafından farklı sıralarda 
+    yapılabilir:
+
+    int consumer(void) 
+    {
+        int val;
+
+        if (smp_load_acquire(&sd.flag) == 1) {      /* olması gereken biçim */
+            val = READ_ONCE(sd.payload);
+            ---->                                   /* dikkat burada yer değiştirme yapılabilir!
+            WRITE_ONCE(sd.flag, 0);  
+            return val;
+        }
+        return -1;
+    }
+    
+    İşte bu yer değiştirmenin de engellenmesi için izleyen paragrafta açıklayacağımız smp_store_release ile atamanın 
+    yapılması gerekmektedir. 
+    
+    Biz yukarıdaki işlemi bellek bariyeri ile de yapabilirdik:
 
     int consumer(void) 
     {
         int val;
 
         if (READ_ONCE(sd.flag) == 1) {
-            mb();                               /* Bellek bariyeri uygulanabilir ancak maliyeti yüksek */
+            smp_mb();                                   /* bellek bariyeri uygulanabilir ancak maliyeti yüksek */
             val = READ_ONCE(sd.payload);
+            smp_mb();                                   /* bellek bariyeri uygulanabilir ancak maliyeti yüksek */
             WRITE_ONCE(sd.flag, 0);   
             return val;
         }
@@ -3162,10 +3187,14 @@ void exit_sys(const char *msg)
 
     Ancak bu biçimdeki bellek bariyerleri yukarıda da belirttiğimiz gibi pipeline mekanizmasını bozması nedeniyle 
     yavaşlamaya yol açmaktadır. 
+
+    Intel işlemcilerinde Store/Load işlemlerinde komut yer değiştirmesinin uygulandığını anımsayınız. Bu nedenle Intel 
+    işlemcilerinde yukarıdaki önlem alınmasa bir sorun oluşmayacaktır. Ancak ARM gibi RISC işlemcilerinde bu önlemin 
+    mutlaka alınması gerekmektedir.  
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                        59. Ders 22/02/2026 - Pazar									
+                                            59. Ders 22/02/2026 - Pazar									
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3193,7 +3222,9 @@ void exit_sys(const char *msg)
 
         if (smp_load_acquire(&sd.flag) == 1) {
             val = READ_ONCE(sd.payload);
+            ---->                                   /* dikkat burada yer değiştirme yapılabilir!
             WRITE_ONCE(sd.flag, 0);  
+            return val;
         }
         return -1;
     }
@@ -3203,12 +3234,13 @@ void exit_sys(const char *msg)
 
     void producer(int val)
     {
-        WRITE_ONCE(sd.payload, val);            /* Dikkat! sorun oluşabilir */
+        WRITE_ONCE(sd.payload, val);            /* dikkat! sorun oluşabilir */
         WRITE_ONCE(sd.flag, 1);
     }
 
-    Bradaki sorun işlemcinin yukarıdaki iki erişimin sırasını değiştirebilmesidir. Tam bariyer kullanmadan bu işlem 
-    daha maliyetsiz smp_store_release makrosuyla yapılabilir:
+    Bradaki sorun işlemcinin yukarıdaki iki erişimin sırasını değiştirebilmesidir. Bu durumda diğer işlemcideki kod 
+    sd.flag değişkenini 1 gördüğünde sd.payload değişkenin önceki değerini okuyabilecektir. Tam bariyer kullanmadan bu 
+    işlem daha maliyetsiz smp_store_release makrosuyla yapılabilir:
 
     void producer(int val)
     {
@@ -3216,8 +3248,60 @@ void exit_sys(const char *msg)
         smp_store_release(&sd.flag, 1);
     }
 
-    smp_store_release makrosunun yukarısındaki erişimler (yani örneğimizdeki payload elemanına değerin aktarılması)
-    makronun aşağısına taşınmamaktadır. 
+    smp_store_release makrosunun yukarısındaki erişimler (örneğimizdeki payload elemanına değerin aktarılması işlemimi)
+    makronun aşağısına taşınmamaktadır. İşte aynı nedenelrden dolayı consumer fonksiyonunda da sd.flag değişkenine 0 
+    değerinin smp_restore_release fonksiyonuyla yapılması gerekmektedir. Bu fonksiyonun da düzeltilmiş biçimini veriyoruz:,
+    
+    int consumer(void) 
+    {
+        int val;
+
+        if (smp_load_acquire(&sd.flag) == 1) {
+            val = READ_ONCE(sd.payload);
+            smp_store_release(&sd.flag, 0); 
+            return val;
+        }
+        return -1;
+    }
+
+    Yukarıdaki üretici-tüketici probleminde bir noktaya daha dikkatinizi çekmek istiyoruz. Burada üretici yalnızca bir 
+    kez yerleştirme yapıp tüketici de yalnızca bir kez okuma yapıyorsa bir sorun oluşmaz. Ancak bu işlemler birden fazla 
+    kez yapılırsa iç içe geçmeden dolayı sorun oluşabilir. Bu tür durumlarda işlemler blokesiz yapılacaksa spinlock, blokeli 
+    yapılacaksa semaphore nesneleri tercih edilmelidir. Örneğin spinlock ile koruma şöyle sağlanabilir:
+    
+    spinlock ile koruma şöyle sağlanabilir:
+
+    struct shared_data {
+        int payload;
+        int flag;
+        spinlock_t lock;
+    };
+
+    void producer(int val)
+    {
+        spin_lock(&sd.lock);
+
+        WRITE_ONCE(sd.payload, val);
+        WRITE_ONCE(sd.flag, 1);
+
+        spin_unlock(&sd.lock);
+    }
+
+    int consumer(void)
+    {
+        int val;
+
+        spin_lock(&sd.lock);
+        if (READ_ONCE(sd.flag) == 1) {
+            val = READ_ONCE(sd.payload);
+            WRITE_ONCE(sd.flag, 0);
+            spin_unlock(&sd.lock);
+            return val;
+        }
+        spin_unlock(&sd.lock);
+
+        return -1;
+    }
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3226,7 +3310,7 @@ void exit_sys(const char *msg)
     smp_store_release(&sd.flag, 1);
 
     Burada sd.flag değişkenine 1 atanmıştır. Ancak ARM gibi RISC işlemcilerinde bu işlem tek bir makine komutuyla 
-    yapılamaz. Dolayısıyla yukarıdaki çağrı komut yer değiştirmesi üzerinde etkili olsa da atomiklik sağlamamaktadır. 
+    yapılamamaktadır. Dolayısıyla yukarıdaki çağrı komut yer değiştirmesi üzerinde etkili olsa da atomiklik sağlamamaktadır. 
     İşte acquire/release işlemlerinin atomik yapılabilmesi için ayrı fonksiyonlar bulunudurulmuştur:
 
     atomic_read_acquire(v)              /* atomic_t için acquire load */
@@ -3239,7 +3323,7 @@ void exit_sys(const char *msg)
     atomic_long_set_release(v, i)
 
     Bu fonksiyonlar gördüğünüz gibi atomic_t, atomic64_t ve atomic_long türleri üzerinde acquire ve release işlemlerini 
-    yapmaktadır. Bunların işlem yapıp eski değeri döndüren fetch'li biçimleri de vardır:
+    yapmaktadır. Bu fonksiyonların işlem yapıp eski değeri döndüren fetch'li biçimleri de vardır:
 
     atomic_fetch_add_acquire(i, v)    /* add ve eski değeri döndür, acquire */
     atomic_fetch_add_release(i, v)    /* add ve eski değeri döndür, release */
@@ -3256,7 +3340,7 @@ void exit_sys(const char *msg)
     atomic_cmpxchg_acquire(v, old, new)
     atomic_cmpxchg_release(v, old, new)
 
-    Bunların compare-exchange biçimleri de bulunmaktadır:
+    Bu fonksiyonların compare-exchange biçimleri de bulunmaktadır:
 
     /* Her iki durum için acquire */
     atomic_cmpxchg_relaxed(v, old, new)  /* her iki durum için relaxed */
@@ -3266,8 +3350,8 @@ void exit_sys(const char *msg)
     cmpxchg_release(ptr, old, new)
     cmpxchg_relaxed(ptr, old, new)
 
-    Eğer hem atomik işlemlerin yapılması isteniyorsa hem de acquire/release işlemlerinin yapılması isteniyorsa 
-    yukarıdaki fonksiyonlar kullanılabilir. 
+    Eğer hem atomik işlemlerin yapılması hem de acquire/release işlemlerinin yapılması isteniyorsa yukarıdaki 
+    fonksiyonlar kullanılabilir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3277,53 +3361,56 @@ void exit_sys(const char *msg)
     belirlenebilmektedir. C11 ile eklenen acquire/release fonksiyonları ve bunların yaklaşık Linux çekirdeğindeki 
     karşılıklarını aşağıda bir tablo biçiminde veriyoruz:
 
-    ┌────────────────────────────────────────────────────────────┬─────────────────────────────────────┬────────────────────────────────┐
-    │ C11                                                        │ Linux Kernel                        │ Açıklama                       │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_load_explicit(…, acquire)                           │ smp_load_acquire                    │ Acquire load, normal değişken  │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_load_explicit(…, acquire)                           │ atomic_read_acquire                 │ Acquire load, atomic_t         │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_store_explicit(…, release)                          │ smp_store_release                   │ Release store, normal değişken │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_store_explicit(…, release)                          │ atomic_set_release                  │ Release store, atomic_t        │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_exchange_explicit(…, acq_rel)                       │ xchg + barrier                      │ Exchange, her iki yön          │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_compare_exchange_strong_explicit(…, acquire, relaxed│ cmpxchg_acquire                     │ CAS, acquire                   │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_compare_exchange_strong_explicit(…, release, relaxed│ cmpxchg_release                     │ CAS, release                   │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_compare_exchange_strong_explicit(…, acq_rel, relaxed│ cmpxchg                             │ CAS, tam barrier               │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_fetch_add_explicit(…, acquire)                      │ atomic_fetch_add_acquire            │ Add + acquire load             │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_fetch_add_explicit(…, release)                      │ atomic_fetch_add_release            │ Add + release store            │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_thread_fence(acquire)                               │ smp_rmb / smp_acquire__after_ctrl_dep│ Acquire fence                 │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_thread_fence(release)                               │ smp_wmb                             │ Release fence                  │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_thread_fence(seq_cst)                               │ smp_mb                              │ Full barrier                   │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_load_explicit(…, relaxed)                           │ READ_ONCE                           │ Barrier yok, compiler fence    │
-    ├────────────────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_store_explicit(…, relaxed)                          │ WRITE_ONCE                          │ Barrier yok, compiler fence    │
-    └────────────────────────────────────────────────────────────┴─────────────────────────────────────┴────────────────────────────────┘
+    ┌──────────────────────────────────────────┬─────────────────────────────────────┬────────────────────────────────┐
+    │                C11                       │          Linux Çekirdeği            │          Açıklama              │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_load_explicit(…, acquire)         │ smp_load_acquire                    │ Acquire load, normal değişken  │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_load_explicit(…, acquire)         │ atomic_read_acquire                 │ Acquire load, atomic_t         │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_store_explicit(…, release)        │ smp_store_release                   │ Release store, normal değişken │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_store_explicit(…, release)        │ atomic_set_release                  │ Release store, atomic_t        │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_exchange_explicit(…, acq_rel)     │ xchg + barrier                      │ Exchange, her iki yön          │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_compare_exchange_strong_explicit  │ cmpxchg_acquire                     │ CAS, acquire                   │
+    │ (…, acquire, relaxed)                    │                                     │                                │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_compare_exchange_strong_explicit  │ cmpxchg_release                     │ CAS, release                   │
+    │ (…, release, relaxed)                    │                                     │                                │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_compare_exchange_strong_explicit  │ cmpxchg                             │ CAS, tam barrier               │
+    │ (…, acq_rel, relaxed)                    │                                     │                                │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_fetch_add_explicit(…, acquire)    │ atomic_fetch_add_acquire            │ Add + acquire load             │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_fetch_add_explicit(…, release)    │ atomic_fetch_add_release            │ Add + release store            │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(acquire)             │ smp_rmb/smp_acquire__after_ctrl_dep │ Acquire fence                  │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(release)             │ smp_wmb                             │ Release fence                  │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_thread_fence(seq_cst)             │ smp_mb                              │ Full barrier                   │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_load_explicit(…, relaxed)         │ READ_ONCE                           │ Barrier yok, compiler fence    │
+    ├──────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
+    │ atomic_store_explicit(…, relaxed)        │ WRITE_ONCE                          │ Barrier yok, compiler fence    │
+    └──────────────────────────────────────────┴─────────────────────────────────────┴────────────────────────────────┘
 
-    Bu fonksiyonların ayrıntılarını C standartlarından elde edebilirsiniz. Tabii hiçbir zaman Linux çekirdeğinde 
-    derleyicinin sunduğu bu tür fonksiyonlar kullanılmamaktadır. C++'a da C11 ile birlikte acquire/release fonksiyonları
-    sınıfsal bir temsille eklenmiştir:
+    Bu fonksiyonların ayrıntıları içinC standartlarına başvurabilirsiniz. Tabii daha önceden de belirttiğimiz gibi hiçbir 
+    zaman Linux çekirdeğinde derleyicinin sunduğu bu tür fonksiyonlar kullanılmamaktadır. C++'a da C++11 ile birlikte 
+    acquire/release fonksiyonlarısınıfsal bir temsille eklenmiştir:
 
     ┌─────────────────────────────────────────────────┬─────────────────────────────────────┬────────────────────────────────┐
-    │ C++11                                           │ Linux Kernel                        │ Açıklama                       │
+    │                    C++11                        │          Linux Çekirdeği            │          Açıklama              │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic<T>.load(memory_order_acquire)            │ smp_load_acquire                    │ Acquire load, normal değişken  │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic<T>.load(memory_order_acquire)            │ atomic_read_acquire                 │ Acquire load, atomic_t         │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic<T>.store(val, memory_order_release)      │ smp_store_release                   │ Release store, normal değişken │
-    ├─────────────────────────────────────────────────┼───────"──────────────────────────────┼────────────────────────────────┤
+    ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic<T>.store(val, memory_order_release)      │ atomic_set_release                  │ Release store, atomic_t        │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic<T>.exchange(val, memory_order_acq_rel)   │ xchg + barrier                      │ Exchange, her iki yön          │
@@ -3341,7 +3428,7 @@ void exit_sys(const char *msg)
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic<T>.fetch_add(val, memory_order_release)  │ atomic_fetch_add_release            │ Add + release store            │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
-    │ atomic_thread_fence(memory_order_acquire)       │ smp_rmb / smp_acquire__after_ctrl_dep│ Acquire fence                 │
+    │ atomic_thread_fence(memory_order_acquire)       │ smp_rmb/smp_acquire__after_ctrl_dep │ Acquire fence                  │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
     │ atomic_thread_fence(memory_order_release)       │ smp_wmb                             │ Release fence                  │
     ├─────────────────────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┤
@@ -3352,13 +3439,13 @@ void exit_sys(const char *msg)
     │ atomic<T>.store(val, memory_order_relaxed)      │ WRITE_ONCE                          │ Barrier yok, compiler fence    │
     └─────────────────────────────────────────────────┴─────────────────────────────────────┴────────────────────────────────┘
 
-    Bu sınıfların ayrıntılarını C++ standartlarından inceleyebilirsiniz. 
+    Bu sınıfların ayrıntıları için de C++ standartlarına başvurabilirsiniz. 
 
-    Ayrıca daha önceden de belirttiğimiz gibi acquire/release mekanizması için gcc'de built-in fonksiyonlar da 
-    bulunmaktadır:
+    Ayrıca daha önceden de belirttiğimiz gibi acquire/release mekanizması için gcc'de built-in fonksiyonlar da bulunmaktadır.
+    Bunların listesini de aşağıda tablo biçiminde veriyoruz:
 
     ┌──────────────────────────────────────────────┬────────────────────────┬──────────────────────────────────────────────┐
-    │ GCC __sync Built-in                          │ Linux Kernel           │ Açıklama                                     │
+    │          GCC __sync Built-in                 │    Linux Kernel        │                 Açıklama                     │
     ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
     │ __sync_fetch_and_add(ptr, val)               │ atomic_fetch_add       │ Add, full barrier, eski değeri döndürür      │
     ├──────────────────────────────────────────────┼────────────────────────┼──────────────────────────────────────────────┤
@@ -3396,7 +3483,7 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Şimdi de çekirdekteki RCU (read-copy-update) mekanizması üzerinde duralım. Biz daha önce bu mekanizmanın farkına 
-    varmıştık. Burada bu mekanizmann işleyişi üzerinde duracağız. 
+    varmıştık. Burada bu mekanizmann işleyişini ele alacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3695,7 +3782,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	                                    61. Ders 01/03/2026 - Pazar							
+	                                        61. Ders 01/03/2026 - Pazar							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -4269,7 +4356,7 @@ module_exit(test_driver_exit);
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Biz çekirdekteki veri yapılarını görürken bazı veri yapılarının RCU'lu biçimlerinin olduğunu da görmüştük. Örneğin 
-    bağlı liste oluşturan fonksiyonların RCU biçimleri de vardı. Bunların listesini anımsayınız:
+    bağlı liste işlemlerini yapan fonksiyonların RCU biçimleri de vardı. Bunların listesini anımsayınız:
 
     void list_add_rcu(struct list_head *new, struct list_head *head);
     void list_add_tail_rcu(struct list_head *new, struct list_head *head);
@@ -4290,10 +4377,1496 @@ module_exit(test_driver_exit);
     #define list_for_each_entry_continue_rcu(pos, head, member)
 
     Şimdi bu RCU'lu bağlı listeler üzerinde konu bağlamında ek açıklamalar yapmak istiyoruz. Buradaki RCU'lu bağlı 
-    liste fonksiyonları temel olarak "bir güncelleme (bu güncelleme eklame ya da silme biçiminde olabilir) yaparken 
-    bu güncellemenin o anda bağlı liste üzerinde okuma eylemleri yapan akışların bu işlemden etkilenmemesini" sağlamaktadır. 
-    Örneğin bağlı listeden bir düğüm silinirken okuyan taraflar "grace period" bitene kadar yapılan değişikliği 
-    görmemektedir. 
+    liste fonksiyonları ile bağlı liste üzerinde güncelleme yapılırken aynı bağlı listeden okuma yapan thread'ler 
+    bekletilmemektedir. Örneğin bağlı listeden bir düğüm silinecek olsun. Bu durumda okuma yapan thread'ler hiç bekleme 
+    yapmadan işlemlerine devam ederler ve ancak bu silme işlemi "grace period" bittiğinde görünür hale gelir.  
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+		                                62. Ders 08/03/2026 - Pazar							
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeğindeki RCU'lu bağlı lsteler yine aynı bağ yapılarını kullanmaktadır:
+
+    struct list_head {
+        struct list_head *next, *prev;
+    };
+
+    Bu yapı bağlı listenin bir düğümünü temsil ediyordu. Kök düğüm de bu yapıyla temsil ediliyordu. Hash tablolarında 
+    kök düğümün tek bir gösterici içerdiğini anımsayınız:
+
+    struct hlist_head {
+        struct hlist_node *first;
+    };
+
+    struct hlist_node {
+        struct hlist_node *next, **pprev;
+    };
+
+    Baplı listeden okuma yapan taraf (örneğin bağlı listeyei dolaşan taraf) yine rcu_read_lock ve rcu_read_unlock 
+    çağrıları arasında thread'ler arası geçişi kapatarak işlemlerini yapar: 
+
+    struct SAMPLE {
+        /* ... */
+        sturct list_head link;
+        struct rcu_head rcu;  
+    }
+    LIST_HEAD(g_mylist);
+
+    /* ... */
+
+    struct SAMPLE *ps;
+
+    rcu_read_lock();
+
+    list_for_each_entry_rcu(ps, &g_mylist, link) {
+        /* .. */
+    }
+
+    rcu_read_unlock();
+
+    Burada struct SAMPLE nesneleri bir bağlı liste ile birbirine bağlı durumdadır. Bağlı listeyi dolaşmadan önce 
+    rcu_read_lock fonksiyonun çağrıldığına, dolaşım sonunda da rcu_read_unlock fonksiyonun çağrıldığına dikkat ediniz.
+    Dolaşım yapan makro list_for_each_entry_rcu ismindedir. RCU'suz baplı listelerde bu makronun list_for_each_enty
+    biçiminde olduğunu anımsayınız. Aslında list_for_each_entry makrosuyla list_for_each_entry_rcu makrosu arasında 
+    çok küçük bir fark vardır. list_for_each_entry_rcu makroso "include/linux/rculist.h" içerisnde tanımlanmıştır:
+
+    #define list_for_each_entry_rcu(pos, head, member, cond...)		            \
+        for (__list_check_rcu(dummy, ## cond, 0),			                    \
+            pos = list_entry_rcu((head)->next, typeof(*pos), member);	        \
+            &pos->member != (head);					                            \
+            pos = list_entry_rcu(pos->member.next, typeof(*pos), member))
+
+    Buradaki list_entry_rcu makrosu ise şöyle tanımlanmıştır:
+
+    #define list_entry_rcu(ptr, type, member)                                   \
+	    container_of(READ_ONCE(ptr), type, member)
+
+    Aslında iki makro arasındaki fark okumanın READ_ONCE ile yapılmasıdır. 
+
+    RCU'lu bağlı listelerde liste üzerinde yazma işlemi (örneğin düüm ekleme, silme gibi) yaparken yine yazan tarafların 
+    bir spinlock ile senkronze edilmesi gerekmektedir. Bu spinlock nesnesini sistem programcısı kendisi oluşturmalıdır. 
+    Örneğin:
+
+    spin_lock(&g_myspinlock);                            /* yazan tarafların seknronize edilmesi gerekiyor */
+    list_add_rcu(&new_node->list, &g_mylist);
+    spin_unlock(&g_myspinlock);
+
+    Burada list_add_rcu fonksiyonu ile bağlı listeye bir düğüm eklenmiştir. Ancak bu işlem sırasında bir spinlock 
+    ile yazan tarafların senkronize edilmesi sağlanmıştır. 
+
+    list_add_rcu fonksiyonu okuyan atarfları bekletmeden işlemini nasıl yapmaktadır? İşte tipik olarak bu fonksiyon 
+    önce eklenecek düğümün next ve prev göstericilerini ayarlar. Sonra eklmeyi yaparken rcu_assign_pointer makrosunu 
+    kullanır. Böylece grace period bittikten sonra artık yeni okuyucular bu düğümü görmeye başlar. list_add_rcu 
+    fonksiyonunun gerçekleştirimi şöyle yapılmıştır:
+
+    static inline void list_add_rcu(struct list_head *new,
+                                struct list_head *head)
+    {
+        __list_add_rcu(new, head, head->next);
+    }
+
+    static inline void __list_add_rcu(struct list_head *new,
+        struct list_head *prev, struct list_head *next)
+    {
+        if (!__list_add_valid(new, prev, next))
+            return;
+
+        new->next = next;
+        new->prev = prev;
+        rcu_assign_pointer(list_next_rcu(prev), new);  /* store-release */
+        next->prev = new;
+    }
+
+    #define list_next_rcu(list)	(*((struct list_head __rcu **)(&(list)->next)))
+
+    Buradaki list_add_rcu fonksiyonu bağlı listenin başına düğüm eklemektedir. Peki bu düğüm ekleme işlemi burada nasıl 
+    yapılmıştır? Anımsayacağınız gibi bağlı listenin başına, sonuna ve arasında düğüm ekleme işlemi aynı ortak fonksiyonla 
+    yapılmaktadır. Bu fonksiyon da örneğimizde __list_add_rcu fonksiyonudur. Yeni düğümün next ve prev göstericileri 
+    aşağıdkai gibi ayarlanmıştır:
+
+    new->next = next;
+    new->prev = prev;
+
+    Sonra kök düğümün next göstericisinin ilk düğümü göstermesi sağlanmıştır. Tabii bu işlem yeni veri yapısının 
+    yayınlanması işlemidir. Dolayıısyla bu işlem rcu_assign_pointer makrosuyla yapılmıştır:
+
+    rcu_assign_pointer(list_next_rcu(prev), new);  /* store-release */
+
+    Nihayetinde eski ilk düğümün yeni düğüm göstermesi de şöyle sağlanmıştır:
+
+    next->prev = new;
+
+    Burada kök gösterici yayınlandıktan sonra next->prev = new işleminin yapılması bir soruna yol açmaz mı? Yani 
+    tam o sırada geriye doğru listeyi okuyan bir thread varsa bir karasızlık oluşmaz mı? İşte Linux çekirdeğinin RCU'lu
+    bağlı listelerinden okuma yapan taraflar hiçbir zaman geri doğru okuma yamamaktadır. Sizin de bu kurala uymanız 
+    gerekir. 
+
+    RCU'lu bağlı listelerden silme işlemi de yine benzer biçimde spinlock kilidi alınarak yapılmalıdır. Örneğin:
+
+    spin_lock(&g_myspinlock);
+    list_del_rcu(&node->link);
+    spin_unlock(&g_myspinlock);
+    call_rcu(&node->rcu, free_node_callback);   /* grace period sonrası serbest bırak */
+
+    Burada görüldüğü gibi önce spinlock kilidi alınmış sonra düğüm silme işlemi list_del_rcu fonksiyonu ile yapılmıştır. 
+    Düğüm silme işlemi grace period sonunda gerçekleştiğinde ek birtakım işlemlerin de yapılması gerekebilmektedir. 
+    Bu nedenle örneğimizde call_rcu fonksiyonu ile düğümün geri bırakılması sırasında free_node_callback isimli bizim 
+    bir fonksiyonumuz çağrılmıştır. Eğer düğümler çekirdeğin heap alanı içerisinde tahsis edilmişse bu fonksiyon onları 
+    servbest bırakabilir. list_del_rcu fonksiyonu da şöyle yazılmıştır:
+
+    static inline void list_del_rcu(struct list_head *entry)
+    {
+        __list_del_entry(entry);
+        entry->prev = LIST_POISON2;
+        /* entry->next kasıtlı olarak bozulmaz! */
+    }
+
+    static inline void __list_del_entry(struct list_head *entry)
+    {
+        if (!__list_del_entry_valid(entry))
+            return;
+
+        __list_del(entry->prev, entry->next);
+    }
+
+    static inline void __list_del(struct list_head * prev, struct list_head * next)
+    {
+        next->prev = prev;
+        WRITE_ONCE(prev->next, next);
+    }
+
+    Burada ilk düğüm silindiğinde bundan kök düğüm etkileniyor olsa da bir bellek bariyerinin oluşturulması gerekmemektedir. 
+    Bu nedenle süğüm silme işleminin herhangi bir yerinde rcu_assign_pointer makrosu kullanılmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Aşağıda "claude.ai" LLM'ine uygun prompt'lar girilerek RCU bağlı liste işlemlerine yönelik çekirdek modülü oluşturulmuştur.
+    modülü her zamanki gibi şöyle derleyebilirsiniz:
+
+    $ make file=rcu-list-module
+
+    Modülü şöyle yükleyebilirsiniz:
+
+    $ sudo insmod rcu-list-module.ko
+
+    Modülün oluşturğu mesajları şöyle görüntüleyebilirsiniz:
+
+    $ dmesg
+
+    Nihayet modülü şöyle kaldırabilrisiniz:
+
+    $ sudo rmmod rcu-list-module.ko
+
+    Modülde bir RCU bağlı listesi oluşturulmuştur:
+
+    struct process_record {
+        int id;
+        char name[16];
+        struct list_head list;     /* RCU list node */
+        struct rcu_head  rcu;      /* for call_rcu */
+    };
+
+    Modülün init fonksiyonu şöyle oluşturulmuştur:
+
+    static int __init rcu_list_demo_init(void)
+    {
+        printk(KERN_INFO "rcu_list_demo: module loaded\n");
+
+        /* Initial records */
+        record_add(1000, "init");
+        record_add(1001, "systemd");
+        record_add(1002, "kworker");
+        record_add(1003, "sshd");
+
+        printk(KERN_INFO "rcu_list_demo: initial list:\n");
+        record_print_all();
+
+        /* Start reader kthread */
+        g_reader_thread = kthread_run(reader_fn, NULL, "rcu_reader");
+        if (IS_ERR(g_reader_thread)) {
+            printk(KERN_ERR "rcu_list_demo: failed to create kthread\n");
+            return PTR_ERR(g_reader_thread);
+        }
+
+        /* Short delay -- perform writer operations while reader is active */
+        msleep(200);
+
+        printk(KERN_INFO "rcu_list_demo: deleting id=1002...\n");
+        record_del(1002);
+
+        msleep(200);
+
+        printk(KERN_INFO "rcu_list_demo: adding id=1004...\n");
+        record_add(1004, "nginx");
+
+        msleep(200);
+
+        printk(KERN_INFO "rcu_list_demo: deleting id=1001...\n");
+        record_del(1001);
+
+        return 0;
+    }
+
+    Burada önce bağlı listeye çeşitli düğümler eklenmiştir. Sonra da bir çekirdek thread'i oluşturulmuştur. Biz henüz 
+    çekirdek thread'leri konusunu görmedik. Çekirdek thread'inin başlangıç fonksiyonu reader_fn isimli fonksiyondur. 
+    Bu fonksiyon sürekli olarak bağlı listeyi dolaşıp arama yapmaktadır:
+
+    static int reader_fn(void *data)
+    {
+        printk(KERN_INFO "rcu_list_demo: reader thread started\n");
+
+        while (!atomic_read(&g_stop_reader)) {
+            struct process_record *found;
+
+            /* Read the entire list */
+            printk(KERN_INFO "rcu_list_demo: --- List scan ---\n");
+            record_print_all();
+
+            /* Search for a specific ID */
+            rcu_read_lock();
+            found = record_find_rcu(1001);
+            if (found)
+                printk(KERN_INFO "rcu_list_demo: id=1001 found: %s\n", found->name);
+            else
+                printk(KERN_INFO "rcu_list_demo: id=1001 not found\n");
+            rcu_read_unlock();
+
+            msleep(500);
+        }
+
+        printk(KERN_INFO "rcu_list_demo: reader thread terminated\n");
+        return 0;
+    }
+
+    Bu çekirdek thread'i g_stop_reader atomic değişkeni 1 yapıldığında işlemini bitirmektedir. init fonksiyonunda 
+    çekirdek thread'i yaratıldıktan sonra bağlı listeye çeşitli eklemeler ve çıkartmalar yapılmıştır. Çekirdek thread'inin
+    sonlandırılması modülün exit fonksiyonunda yapılmaktadır:
+
+    static void __exit rcu_list_demo_exit(void)
+    {
+        struct process_record *rec, *tmp;
+
+        /* Stop the reader thread */
+        atomic_set(&g_stop_reader, 1);
+        if (g_reader_thread)
+            kthread_stop(g_reader_thread);
+
+        /* Clean up all remaining records -- use synchronize_rcu on module exit */
+        spin_lock(&g_proc_list_lock);
+        list_for_each_entry_safe(rec, tmp, &g_proc_list, list) {
+            list_del_rcu(&rec->list);
+            call_rcu(&rec->rcu, record_free_rcu);
+        }
+        spin_unlock(&g_proc_list_lock);
+
+        /*
+        * Wait for all grace periods to finish before the module is
+        * unloaded from memory. Without this, callbacks may run after
+        * the module code is removed -> use-after-free.
+        */
+        rcu_barrier();
+
+        printk(KERN_INFO "rcu_list_demo: module unloaded\n");
+    }
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* rcu-list-module.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/slab.h>
+#include <linux/list.h>
+#include <linux/rculist.h>
+#include <linux/spinlock.h>
+#include <linux/rcupdate.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kernel Eğitim");
+MODULE_DESCRIPTION("RCU List Demo");
+
+/* ------------------------------------------------------------------ */
+/*  Data structure                                                    */
+/* ------------------------------------------------------------------ */
+
+struct process_record {
+    int  id;
+    char name[16];
+    struct list_head list;     /* RCU list node */
+    struct rcu_head  rcu;      /* for call_rcu */
+};
+
+/* Global list head and protective spinlock */
+static LIST_HEAD(g_proc_list);
+static DEFINE_SPINLOCK(g_proc_list_lock);
+
+/* ------------------------------------------------------------------ */
+/*  Helper functions                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * record_alloc - Allocates a new process_record.
+ * Caller: writer thread (outside spinlock).
+ */
+static struct process_record *record_alloc(int id, const char *name)
+{
+    struct process_record *rec;
+
+    rec = kmalloc(sizeof(*rec), GFP_KERNEL);
+    if (!rec)
+        return NULL;
+
+    rec->id = id;
+    strscpy(rec->name, name, sizeof(rec->name));
+    INIT_LIST_HEAD(&rec->list);
+
+    return rec;
+}
+
+/*
+ * record_free_rcu - call_rcu callback.
+ * Called after the grace period ends; frees the memory.
+ */
+static void record_free_rcu(struct rcu_head *head)
+{
+    struct process_record *rec = container_of(head, struct process_record, rcu);
+
+    printk(KERN_INFO "rcu_list_demo: [after grace period] id=%d freed\n", rec->id);
+    kfree(rec);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Writer API                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * record_add - Adds a new record to the list.
+ * Acquires spinlock -> RCU-safe insert -> releases spinlock.
+ */
+static int record_add(int id, const char *name)
+{
+    struct process_record *rec;
+
+    rec = record_alloc(id, name);
+    if (!rec)
+        return -ENOMEM;
+
+    spin_lock(&g_proc_list_lock);
+    list_add_rcu(&rec->list, &g_proc_list);
+    spin_unlock(&g_proc_list_lock);
+
+    printk(KERN_INFO "rcu_list_demo: added -- id=%d name=%s\n", id, name);
+    return 0;
+}
+
+/*
+ * record_del - Deletes the record with the given ID.
+ * Searches and removes under spinlock; frees memory via call_rcu.
+ */
+static int record_del(int id)
+{
+    struct process_record *rec;
+    int found = 0;
+
+    spin_lock(&g_proc_list_lock);
+    list_for_each_entry(rec, &g_proc_list, list) {
+        if (rec->id == id) {
+            list_del_rcu(&rec->list);
+            found = 1;
+            break;
+        }
+    }
+    spin_unlock(&g_proc_list_lock);
+
+    if (found) {
+        printk(KERN_INFO "rcu_list_demo: deleted  -- id=%d (waiting for grace period)\n", id);
+        call_rcu(&rec->rcu, record_free_rcu);
+        return 0;
+    }
+    return -ENOENT;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reader API                                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * record_print_all - Reads all records without locks.
+ * Uses rcu_read_lock / rcu_read_unlock pair; list_for_each_entry_rcu.
+ */
+static void record_print_all(void)
+{
+    struct process_record *rec;
+
+    rcu_read_lock();
+    list_for_each_entry_rcu(rec, &g_proc_list, list) {
+        printk(KERN_INFO "rcu_list_demo:   id=%-6d name=%s\n",
+                rec->id, rec->name);
+    }
+    rcu_read_unlock();
+}
+
+/*
+ * record_find_rcu - Searches for a specific ID without locks.
+ * WARNING: The returned pointer must not be used after rcu_read_unlock.
+ */
+static struct process_record *record_find_rcu(int id)
+{
+    struct process_record *rec;
+
+    /* rcu_read_lock is the caller's responsibility */
+    list_for_each_entry_rcu(rec, &g_proc_list, list) {
+        if (rec->id == id)
+            return rec;
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Kthread: reader simulation                                        */
+/* ------------------------------------------------------------------ */
+
+static struct task_struct *g_reader_thread;
+static atomic_t g_stop_reader = ATOMIC_INIT(0);
+
+static int reader_fn(void *data)
+{
+    printk(KERN_INFO "rcu_list_demo: reader thread started\n");
+
+    while (!atomic_read(&g_stop_reader)) {
+        struct process_record *found;
+
+        /* Read the entire list */
+        printk(KERN_INFO "rcu_list_demo: --- List scan ---\n");
+        record_print_all();
+
+        /* Search for a specific ID */
+        rcu_read_lock();
+        found = record_find_rcu(1001);
+        if (found)
+            printk(KERN_INFO "rcu_list_demo: id=1001 found: %s\n", found->name);
+        else
+            printk(KERN_INFO "rcu_list_demo: id=1001 not found\n");
+        rcu_read_unlock();
+
+        msleep(500);
+    }
+
+    printk(KERN_INFO "rcu_list_demo: reader thread terminated\n");
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Module init / exit                                                */
+/* ------------------------------------------------------------------ */
+
+static int __init rcu_list_demo_init(void)
+{
+    printk(KERN_INFO "rcu_list_demo: module loaded\n");
+
+    /* Initial records */
+    record_add(1000, "init");
+    record_add(1001, "systemd");
+    record_add(1002, "kworker");
+    record_add(1003, "sshd");
+
+    printk(KERN_INFO "rcu_list_demo: initial list:\n");
+    record_print_all();
+
+    /* Start reader kthread */
+    g_reader_thread = kthread_run(reader_fn, NULL, "rcu_reader");
+    if (IS_ERR(g_reader_thread)) {
+        printk(KERN_ERR "rcu_list_demo: failed to create kthread\n");
+        return PTR_ERR(g_reader_thread);
+    }
+
+    /* Short delay -- perform writer operations while reader is active */
+    msleep(200);
+
+    printk(KERN_INFO "rcu_list_demo: deleting id=1002...\n");
+    record_del(1002);
+
+    msleep(200);
+
+    printk(KERN_INFO "rcu_list_demo: adding id=1004...\n");
+    record_add(1004, "nginx");
+
+    msleep(200);
+
+    printk(KERN_INFO "rcu_list_demo: deleting id=1001...\n");
+    record_del(1001);
+
+    return 0;
+}
+
+static void __exit rcu_list_demo_exit(void)
+{
+    struct process_record *rec, *tmp;
+
+    /* Stop the reader thread */
+    atomic_set(&g_stop_reader, 1);
+    if (g_reader_thread)
+        kthread_stop(g_reader_thread);
+
+    /* Clean up all remaining records -- use synchronize_rcu on module exit */
+    spin_lock(&g_proc_list_lock);
+    list_for_each_entry_safe(rec, tmp, &g_proc_list, list) {
+        list_del_rcu(&rec->list);
+        call_rcu(&rec->rcu, record_free_rcu);
+    }
+    spin_unlock(&g_proc_list_lock);
+
+    /*
+     * Wait for all grace periods to finish before the module is
+     * unloaded from memory. Without this, callbacks may run after
+     * the module code is removed -> use-after-free.
+     */
+    rcu_barrier();
+
+    printk(KERN_INFO "rcu_list_demo: module unloaded\n");
+}
+
+module_init(rcu_list_demo_init);
+module_exit(rcu_list_demo_exit);
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Bu bölümde bekleme kuyruklarının (wait queues) genel yapısı thread'lerin çalışma kuyruğundan (run queue) bekleme 
+    kuyruklarına nasıl aktarıldığı (yani thread'lerin nasıl bloke edildiği) ve yeniden nasıl çalışır duruma geitirldiği 
+    (yani blokenin nasıl çözüldüğü) konuları üzerinde duracağız. Çizelgeleyici (scheduler) alt sistem başka bir bölümde 
+    ayrıntılarıyla ele alınacaktır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeklerinde çizelgeleyici (scheduler) alt sistem zaman içerisinde birkaç kere önemli ölçüde değiştirilmiştir. 
+    Mevcut Linux çekirdeklerinde sistemdeki her işlemci ya da çekirdek için ayrı bir "çalışma kuyruğu (run queue)" 
+    bulundurulmaktadır. Yani her işlemci ya da çekirdek kendi çalışma kuyruğundaki thread'leri çizelgelemektedir. Çalışma 
+    kabaca "zaman paylaşımlı (tme sharing)" biçimde yapılmaktadır. Yani sıradaki thread CPU'ya atanır. Belli bir süre 
+    çalıştırılır. Sonra thread'in çalışmasına ara verilir ve kuyruktaki yeni thread CPU'ya atanır. Bir thread'in parçalı 
+    çalışma süresine "quanta süresi (time quantum)" denilmektedir. Thread'lerin quanta süeleri aynı olmak zorunda değildir. 
+    Bu konunun ayrıntılarını çizelgeeyici alt sistemin ele alındaığı bölümde açıklayacağız. 
+
+                    ┌─────────────────┐
+                    │   Thread'ler    │
+                    │                 │
+                    │  T1  T2  T3  T4 │
+                    │  T5  T6  T7  T8 │
+                    │  T9, T10        │
+                    └────────┬────────┘
+                             │
+                        Çizelgeleyici 
+                         (Scheduler)
+                 
+         ┌─────────────┬──────────────┬─────────────┬
+         │             │              │             │  
+         ▼             ▼              ▼             ▼
+    ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐
+    │  CPU 0    │ │  CPU 1    │ │  CPU 2    │ │  CPU 3    │
+    │ RUN QUEUE │ │ RUN QUEUE │ │ RUN QUEUE │ │ RUN QUEUE │
+    │           │ │           │ │           │ │           │
+    │ ┌───────┐ │ │ ┌───────┐ │ │ ┌───────┐ │ │ ┌───────┐ │
+    │ │  T1   │ │ │ │  T3   │ │ │ │  T5   │ │ │ │  T8   │ │  
+    │ └───────┘ │ │ └───────┘ │ │ └───────┘ │ │ └───────┘ │
+    │     │     │ │     │     │ │     │     │ │     │     │
+    │ ┌───────┐ │ │ ┌───────┐ │ │ ┌───────┐ │ │ ┌───────┐ │
+    │ │  T2   │ │ │ │  T6   │ │ │ │  T7   │ │ │ │  T9   │ │  
+    │ └───────┘ │ │ └───────┘ │ │ └───────┘ │ │ └───────┘ │
+    │     │     │ │     │     │ │           │ │           │
+    │ ┌───────┐ │ │ ┌───────┐ │ │           │ │           │
+    │ │  T4   │ │ │ │  T10  │ │ │           │ │           │
+    │ └───────┘ │ │ └───────┘ │ │           │ │           │
+    │           │ │           │ │           │ │           │
+    └───────────┘ └───────────┘ └───────────┘ └───────────┘
+           │                                        │
+           └───────────── Yük Dengeleme ────────────┘
+                        (Load Balancing)
+        
+
+    Çalışma kuyruğundaki thread'e çalışma sırası geldiğinde o thread CPU'ya atanıp belli bir süre çalıştırılmaktadır. 
+    Bu süre dolduğunda bir sonraki turda kalınan yerden çalıştırılması için thread çalışma kuyruğuna geri bırakılır, 
+    Bir thread'in çalışmasına ara verilip çalışma kuyruğundaki diğer thread'in CPU'ya atanması sürecine işletim 
+    sistemleri terminolojisinde "bağlamsal geçiş (context switch)" denilmektedir. Bağlamsal geçiş terimi yerine 
+    "task switch" terimi de kullanılabilmektedir. Thread'in quanta süresi bittiğinde CPU'dan kopartılması işlemine 
+    "preemption" da denilmektedir. "Preemption" İngilizcede "zorla ele geçirmek, el koymak" gibi anlamlara gelmektedir. 
+    Bağlamsal geçiş donanım kesmeleriyle yapılmaktadır. Sistemlerde periyodik kesme üreten zamanlayıcı (timer) devreleri 
+    vardır. Zamanlayıcı kesmeleleri belli bir sayıya geldiğinde çizelgeleyici o anda çalışmakta olan kodu herhangi bir 
+    noktasında keserek çalışmaya ara vebilmektedir. Çalışmaya ara verme ve o çalılmayı kaldığı yerden devam ettirme 
+    aslında zor bir işlem değildir. Thread'in o andaki tüm konumu aslında CPU yazmaçlarının içerisinde saklanmaktadır. 
+    Bağlamsal geçiş sırasında CPU yazmaçlarının içerisindeki değerler thread'in task_struct alanına kaydedilmektedir. 
+    Thread CPU'ya atanırken de bu yazmaç bilgileri oradan alınarak yeniden CPU yazmaçlarına aktarılmaktadır. Tabii 
+    tüm bu işlemler bir zaman kaybına da yol açmaktadır. Eğer quanta süresi çok kısa tutulursa çok bağlamsal geçiş 
+    oluşur. Birim zamanda yapılan iş miktarı (throughput) düşer. Eğer bağlamsal geçiş çok uzun tutulursa interaktivite 
+    azalır. Bir thread işletim sistemi tarafından bir CPU'nun çalışma kuyruğuna atandığında hep onun hep o kuyrukta 
+    kalması garanti değildir. Zaman içerisinde tıpkı süper market kasa kuyruklarında olduğu gibi kuyruklar arasında 
+    dengesizlikler oluşabilmektedir. Bu durumda işletim sistemi bir denge sağalamk için thread'i daha boş olan bir 
+    CPU'nun çalışma kuyruğuna aktarabilmektedir. 
+
+    Bir thread dışsal uzun zürebilecek dışsal bir olayı bekleyeceği zaman bunu CPU zamanı harcayarak beklemez. Bu tür 
+    durumlarda thrad CPU'nun çalışma kuyruğundan çıkartılarak bekleme kuyruklarında bekletilir. Bu sürece "thread'in 
+    bloke olması" denilmektedir. Örneğin read POSIX fonksiyonula bir dosyadan okuma yapılmak istensin. Anımsanacağı gibi 
+    read POSIX fonksiyonu sys_read sistem fonksiyonunu çağırmaktadır. Bu fonksiyon da önce okunacak yerin page cache 
+    içerisinde olup olmadığına bakmaktadır. Okunacak yer page cache içerisindeyse thread bloke olmadan okuma yapılır. 
+    Ancak okunacak yer page cache içerisinde değilse disk okumaları yavaş olduğu için thread bloke edilir, çalışma 
+    kuyruğundan çıkartılır ve bir bekleme kuyruğunda bekletilir. Disk okuması gerçekleştiğinde thread yeniden çalışma
+    kıuruğuna yerleştirilmektedir. Spinlock ve readers/writer lock nesneleri dışındaki senkroniasyon nesnelerinde de 
+    eğer kilit kapalıysa lock işlemini yapmaya çalışan thread benzer biçimde bloke olmaktadır. sleep gibi fonksiyonlar 
+    da blokeye yol açmaktadır. Örneğin:
+
+    sleep(10);
+
+    Burada thread'in 10 saniye bekletilme istenmiştir. İşte işletim sistem bu bekleme boşuna CPU zamanı harcamasın diye 
+    thread'i çalışma kuyruğundan çıakrtır ve bekleme kuyruğuna alır. 10 saniye süre geçince işletim sistemi thread'i 
+    yeniden çalışma kuyruğuna yerleştirir. Böylece thread hiç CPU zamanı harcamadan 10 saniye bakletilmiş olur. 
+
+    Bir thread'in yaşam döngüsü şöyle betimlenebilir:
+
+                           Quanta süresi bitti
+                      ┌─────────────────────────────┐
+                      │                             │
+                      ▼                             │
+                 ┌─────────┐                  ┌──────────┐
+    Thread       │         │   CPU'ya atandı  │          │
+    ────────>    │ Running │<─────────────────│  Ready   │
+    yaratılıyor  │         │                  │          │
+                 └─────────┘                  └──────────┘
+                  │     │                           ▲
+                  │     │ Bloke oldu                │ 
+                  │     │                           │
+                  │     ▼                           │  Bloke çözüldü
+                  │  ┌─────────┐                    │
+                  │  │         │                    │
+                  │  │ Waiting │────────────────────┘
+                  │  │         │
+                  │  └─────────┘
+                  │
+                  │ Thread sonlanıyor
+                  ▼
+                  
+    Buradaki "Running" thread'in CPU'ya atanmış ve çalışmakta olduğu anlamına gelmektedir. "Ready" ise thread'in 
+    çalışma kuyruğunda sonraki quanta'yı beklediğini belirtmektedir. Thread dışsal bir olay nedeniyle bloka olduğunda 
+    bekleme kuyruklarına alınır. Şeklimizdeki "Waiting" bekleme thread'in bekleme kuyruğunda beklediğini belirtmektedir.  
+    Dışsal olay gerçekleştiğinde thread'in blokesi çözülüp yeniden çalışma kuyruğuna yerleştirilmektedir. Tabii buradaki
+    şekil oldukça sadeleştirilmiş bir şekildir. Örneğin thread'in sonlanması başka biçimlerde de gerçekleşebilmektedir. 
+
+    Bir thread CPU'ya atandığında eğere quanta süresinin çok azını kullanıp hemen bloke olup uykuya dalıyorsa bu biçimdeki 
+    thread'lere "IO yoğun (IO bound) thread'ler" denilmektedir. Sistemde çok sayıda IO ypun thread'in bulunması CPU'yu 
+    meşgul etmeyeceği için ciddi bir yavaşlamaya da yol açmayacaktır. Uygulama programlarının büyük çoğunluğu IO yoğun 
+    biçimdedir. Örneğin:
+
+    double val;
+    /* ... */
+
+    for (;;) {
+        printf("Bir deger sayi giriniz:");
+        fflush(stdout);
+        scanf("%lf", &val);
+        if (val == 0)
+            break;
+        printf("%f\n", val);
+    }
+
+    Buradaki thread'in CPU kullanım oranı çok düşüktür. Çünkü hemen bloke olmaktadır. Eğer bir thread CPU'ya atandığında 
+    quanta süresinin büyük bölümünü hiç bloke olmadan kullanıyorsa bu tür thread'lere "CPU yoğun (CPU bound)" thread'ler 
+    denilmektedir. Genellikle matematiksel hesaplar yapan thread'ler CPU yoğun olma eğilimindedir. Sistemde çok sayıda 
+    CPU yoğun thread'in bulunması ciddi yavaşlıklara yol açabilmektedir. Örneğin:
+
+    long long count = 0;
+    /* ... */
+
+    for (long long i = 0; i < 100000000000; ++i)
+        if (i % 7 == 0)
+            ++count;
+    printf("%lld\n", count);
+
+    Buradaki thread CPU yoğundur. Çünkü kendisine verilen quanta sürsini hiç bloke olmadan sonuna kadar kullanmaktadır. 
+    Programınızın thread'lerinin CPU kullanımını çeşitli utility programlarla gözlemleyebilirisniz. Örneğin "htop" 
+    programı "top" programının biraz daha gelişmiş bir versiyonudur. "perf" programı da genel bir profiler programıdır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdek programcılarının bu konuyla ilgili şu süreçleri bbiliyor olması gerekir:
+
+    - Bekleme kyurukları nasıl oluşturulup nasıl yok edilmektedir?
+    - Çalışma kuruklarından bekleme kuyruklarına transfer (yani bloke işlemi) nasıl yapılmaktadır?
+    - Bekleme kuyruklarından çalışma kuyruklarına transfer (yani blokenin çözülmesi) nasıl yapılmaktadır?
+    - Bekleme kuyruklarının veri yapısı nasıldır?
+    - Bekleme kuyrukları üzeirnde işlem yapan fonkssiyonlarbu işlemleri nasıl yapmaktadır?
+
+    Tabii Linux'un ilk versiyonlarında bu süreçler oldukça basit kodlarla gerçekleştirilmişti. Ancak zaman içerisinde 
+    sinekten yağ çıkarmak için bu süreçte düzeltmeler yapıldı ve kodlar biraz daha karmaşık hale geldi. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+				                        63. Ders 14/03/2026 - Cumartesi			
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeklerinde bekleme kuyruklarının genel yapısı zaman içerisinde pek değişmemiştir. Biz burada doğrudan 
+    çekirdeğin güncel versiyonlarını temel alacağız. Çekirdeğin güncel versiyonlarında bekleme kuyrukları bir bağlı 
+    liste biçiminde organize edilmiştir. Bu bağlı liste "include/linux/wait.h"  dosyasındaki wait_queue_head isimli bir 
+    yapıda tutulmaktadır. Bu yapı aynı zamanda wait_queue_head_t ismiyle de typedef edilmiştir:
+
+    struct wait_queue_head {
+        spinlock_t       lock;          /* listeyi koruyan spinlock kilidi  */
+        struct list_head head;          /* bağlı listenin kök düğümü */
+    };
+    typedef struct wait_queue_head wait_queue_head_t;
+
+    Buradaki lock elemanı bağlı bağlı liste işlemleri yapılırken kilitleme görevini görmektedir. head elemanı ise 
+    ilk düğümün yerini tutmaktadır. 
+
+    Buradaki bağlı listenin elemanları wait_queue_entry yapısıyla temsil edilmektedir. Yani wait_queue_head yapısı 
+    aslında wait_queue_entry nesnelerini tutan bir bağlı listedir:
+
+    struct wait_queue_entry {
+        unsigned int		flags;
+        void			    *private;
+        wait_queue_func_t	func;
+        struct list_head	entry;
+    };
+
+    Yapıdaki flags elemanı bit bit anlamlı bayrakları tutmaktadır. Bu bayraklar bekleme kuyruğnu işleten algoritmalar
+    tarafından set edilip kullanılmaktadır. İzleyen paragraflarda bu bayraklar hakkında bilgi vereceğiz. Yapıdaki private 
+    elemanı her ne kadar void bir göstericiyse de aslında bekleme kuyruğundaki thread'in task_struct nesne adresini 
+    tutmaktadır. (Veri yapısı genel tasarlanmıştır. Bazı durumlarda bu eleman başka veri yapılarını turabilmektedir.)
+    Yapının func elemanı thread uyandırılacağı zaman çağrılacak uyandırma fonksiyonun adresini tutmaktadır. Veri yapısı 
+    genel olduğu için çokbiçimli etki yaratmak amacıyla fonksiyon göstericisi kullanılmıştır. Yapının entry elemanı 
+    sonraki düğümün yerini göstermektedir. 
+
+    ┌─────────────────┐         ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
+    │ wait_queue_head │ ──────► │ wait_queue_entry │ ──────► │ wait_queue_entry │ ──────► │ wait_queue_entry │ ──────► ···
+    │                 │ ◄────── │                  │ ◄────── │                  │ ◄────── │                  │ ◄────── ...
+    └─────────────────┘         └──────────────────┘         └──────────────────┘         └──────────────────┘
+
+    Çekirdek içeisinde thread'i bekleme kuyruklarına bir düğüm olarak yerleştiren ve oradan çıkartarak yine çalışma 
+    kuyruklarına yerleştiren daha yüksek seviyeli fonksiyonlar oluşturulmuştur. Bu yüksek seviyeli fonksiyonar export
+    edildikleri için çekirdek modülleri ve aygıt sürücüler tarafından kullanılabilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Bir bekleme kuyruğunu boş bir biçimde oluşturmak için DECLARE_WAIT_QUEUE_HEAD makrosu kullanılmaktadır. Bu makro 
+    "include/linux/wait.h" dosyası içerisinde bildirilmiştir. Makroya wait_queue_head yapısı türünden tanımlanacak olan 
+    değişkenin ismi verilmektedir. Örneğin:
+
+    static DECLARE_WAIT_QUEUE_HEAD(g_wq);
+
+    Burada bizim bekleme kuyruğumuzun ismi g_wq biçimindedir. Tabii bekleme kuyrukları genellikle static ömürlü olur. 
+    Yani tipik olarak global bir değişken olarak oluşturulmaktadır. Bu makro şöyle tanımlanmıştır:
+
+     #define __WAIT_QUEUE_HEAD_INITIALIZER(name) {					\
+    	.lock		= __SPIN_LOCK_UNLOCKED(name.lock),			    \
+	    .head		= LIST_HEAD_INIT(name.head) }
+
+    #define DECLARE_WAIT_QUEUE_HEAD(name)                           \
+	    struct wait_queue_head name = __WAIT_QUEUE_HEAD_INITIALIZER(name)
+
+    Buradan görüldüğü gibi DECLARE_WAIT_QUEUE_HEAD makrosu açık bir kilitle boş bir bağlı liste oluşturmaktadır. 
+    DECLARE_WAIT_QUEUE_HEAD makrosu stattik biçimde ilkdeğer vermek için kullanılmaktadır. Dinamik olarak tahsis 
+    edilmiş bekleme kuyruklarına da ilk değerlerin verilebilmesi için  "include/linux/wait.h" dosyasındakii 
+    init_waitqueue_head makrosu kullanılmaktadır. Bu nakro güncel çekirdeklerde şöyle yazılmıştır:
+
+    #define init_waitqueue_head(wq_head)						    \
+        do {									                    \
+            static struct lock_class_key __key;				        \   
+                                                                    \
+            __init_waitqueue_head((wq_head), #wq_head, &__key);		\
+        } while (0)
+
+    Buradaki __init_waitqueue_head fonksiyonu "kernel/sched/wait.h" dosyası içerisinde aşağıdaki gibi tanımlanmıştır:
+
+    void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name, struct lock_class_key *key)
+    {
+        spin_lock_init(&wq_head->lock);
+        lockdep_set_class_and_name(&wq_head->lock, key, name);
+        INIT_LIST_HEAD(&wq_head->head);
+    }
+
+    Görüldüğü gibi burada da spinlock ve bağlı liste ilk durumuna getirilmiştir. Buradaki lockdep_set_class_and_name
+    fonksiyonu debug amaçlı çağrılmaktadır. Normal bir çekirdek derlemesinde CONFIG_LOCKDEP konfigürasyon parametresi 
+    'y' yapılmadığı için zaten önişlemci tarafından bu çağrı koddan çıkartılmaktadır. Örneğin aygıt sürücüler içerisinde
+    kullanım şöyle olabilir:
+
+    static wait_queue_head_t g_wq;
+    /* ... */
+
+    init_waitqueue_head(&g_wq);s
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bir thread çalışırken kendisini bekleme kuyruğuna yerleştirmektedir. Yani çekirdek tasarımında bir thread'in başka
+    bir thread'i bekleme kuyruklarına yerleştirmesi gibi bir durum uygun olmadığı gerekçesiyle doğrudan mümkün hale 
+    getirilmemiştir. Yani bir thread "tamam şimdi artık benim uyumam gerekir" diyerek kendini uyutmaktadır. Thread'in 
+    uyandırılması ise tek bir thread'in uynadırılması biçiminde değil bekleme kuyruğundaki tüm thread'lerin uyandırılması 
+    biçiminde yapılmaktadır. Yani uyandırma aslında thread temelinde değil bekleme kuyruğu temelinde yapılmaktadır. Bu 
+    duruma işletim sistemleri terminolojisinde İngilizce "thundering herd" denilmektedir. Bu terim bir sürünün ahır 
+    kapısı açıldığında onların gürültülü bir biçimde hep beraber dışarı çıkması çağrışımından hareketle uydurulmuştur. 
+    İzleyen paragraflarda görüleceği gibi "exclusive uyandırma" da vardır. Bu uyandırmada nispeten daha az sayıda thread 
+    uyandırılmaktadır. 
+
+    Bir thread'in bekleme kuyrğuna yerleştirilip uuykuya daldırılması aşağıdaki çekirdek makroları tarafından 
+    yapılmaktadır:
+
+    wait_event(wq_head, condition);
+    wait_event_interruptible(wq_head, condition);
+    wait_event_killable(wq_head, condition);
+    wait_event_timeout(wq_head, condition, timeout);
+    wait_event_interruptible_timeout(wq_head, condition, timeout);
+    wait_event_interruptible_exclusive(wq_head, condition);
+
+    Bu makroların birinci paranetreleri bekleme kuyruğunu temsil eden wait_queue_head türünden yapı nesnsini almaktadır. 
+    (Makroya nesnenin adresinin değil kendisinin parametre olarak geçirildiğini vurgulamak istiyoruz. Zaten makro 
+    gerektiğinde kendisi adres alma işlemini yapmaktadır.) Makroların ikinci parametreleri "uyandırma koşulunu" belirtmektedir. 
+    Yukarıda da belirttiğimiz gibi aslında exlusive özelliğini göz ardı edersek bekleme kuyruğundaki tüm thread'ler 
+    uyandırılmaktadır. Ancak bu uyandırma sonrasında koşulu sağlamayanlar yeniden uykuya yatırılmaktadır. Dolayısıyla 
+    yalnızca koşulu sağlayanlar gerçek anlamda uyanmış olmaktadır. Buradaki koşul tipik olarak global değişkenlere 
+    dayalı olarak oluşturulmaktadır. Örneğin g_flag isminde bir global değişkenimiz olabilir. Biz de koşulu g_flag != 0
+    biçimnde verebiliriz. Bu durumda g_flag değişkeni 0 ise biz uyandırma işlemini uygulasak bile thread'ler önce uyandırılacak
+    koşul sağlanmadığı için yeniden uykuya dalacaktır. Makroların timeout parametresine sahip versiyonları en kötü olasılıkla 
+    koşul sağlanmasa bile belli bir süre sonra uyandırılma işlemini yapmaktadır. Bekleme kuyruğuna yerleştirilen thread'lerin 
+    bir sinyal geldiğinde uyandırılabilmesi için beklemenin "interruptible" biçimde yapılması gerekir. killable olan 
+    bekleme fonksiyonu ise yalnızca SIGKILL sinyaline yanıt vermektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    wait_event makrosu güncel çekirdeklerde "include/linuc/wait.h" dosyası içerisinde aşağıdaki gibi yazılmıştır:
+
+    #define wait_event(wq_head, condition)						\
+    do {										                \
+        might_sleep();								            \
+        if (condition)								            \
+            break;								                \
+        __wait_event(wq_head, condition);					    \
+    } while (0)
+
+    Buradaki might_sleep makrosu debug amaçlı bulundurulmuştur. Eğer CONFIG_DEBUG_ATOMIC_SLEEP konfigürasyon parametresi 
+    açık değilse bu makro hemen hemen boş gibidir. Burada daha uykıya dalmadan koşulun kontrol edildiğine dikkat ediniz. 
+    Yani aslında koşul zaten sağlanıyorsa uyuma gerçekleşmemektir. Burada asıl uykuya daldırma işlemi __wait_event 
+    makrosuyla yapılmaktadır. Bu makro da güncel çekirdeklerde üç alt tireli başka bir makroyu çalıştırmaktadır:
+
+    #define __wait_event(wq_head, condition)					                \
+	    (void)___wait_event(wq_head, condition, TASK_UNINTERRUPTIBLE, 0, 0,	    \
+			    schedule())
+    
+    İşte thread'i bekleme kuyruğuna yerleştiren asıl makro budur:
+
+    #define ___wait_event(wq_head, condition, state, exclusive, ret, cmd)		\
+    ({										                                    \
+        __label__ __out;							                            \
+        struct wait_queue_entry __wq_entry;					                    \
+        long __ret = ret;	/* explicit shadow */				                \
+                                                                                \
+        init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);	    \
+        for (;;) {								                                \
+            long __int = prepare_to_wait_event(&wq_head, &__wq_entry, state);   \
+                                                                                \
+            if (condition)							                            \
+                break;							                                \
+                                                                                \
+            if (___wait_is_interruptible(state) && __int) {			            \
+                __ret = __int;						                            \
+                goto __out;						                                \
+            }								                                    \
+                                                                                \
+            cmd;								                                \
+                                                                                \
+            if (condition)							                            \
+                break;							                                \
+        }									                                    \
+        finish_wait(&wq_head, &__wq_entry);					                    \
+    __out:	__ret;									                            \
+    })
+
+    Bekleme işleminin nasıl gerçekleştiğini ve uyanmanın nasıl yapıldığını anlayabilmek için bu makronun üzerinde 
+    biraz durmamız gerekiyor. Makroda bekleme kuyruğunun elemanı olan wait_queue_entry nesnesinin yerel bir biçimde 
+    tanımlandığına dikkat ediniz. Bekleme kuyrukları genellikle global düzeyde oluşturulsa da onun düğümleri olan 
+    nesneler yerel biçimde stack'te oluşturulmaktadır. Bunun bir sakıncası yoktur. Çünkü uyanma durumunda zaten bu 
+    stack'tek nesne otomatik biçimde boşaltılacaktır. Böylece gereksiz bi rheap tahsisatı yapılmamaktadır. Stack'te
+    yaratılan yerel wait_queuentry nesnesine ilkdeğeri aşağıdaki gibi verilmiştir:
+    
+    init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);
+
+    Burada "exclusive bekleme" kontrol edilmiş ve duruma göre yapının flags elemanına WQ_FLAG_EXCLUSIVE baurağı 
+    yerleştirilmiştir. Bu fonksiyon da "kernel/sched/wait.c" dosyası içerisinde şöyle tanımlanmıştır:
+
+    void init_wait_entry(struct wait_queue_entry *wq_entry, int flags)
+    {
+        wq_entry->flags = flags;
+        wq_entry->private = current;
+        wq_entry->func = autoremove_wake_function;
+        INIT_LIST_HEAD(&wq_entry->entry);
+    }
+    EXPORT_SYMBOL(init_wait_entry);
+
+    Oluşturulan ve ilkdeğer verilen wait_queue_entry nesnesinin bekleme kuyruğuna yerleştirilmesi "kernel/sched/wait.c" 
+    dosyasındaki prepare_to_wait_event fonksiyobu tarafından yapılmaktadır:
+
+    long prepare_to_wait_event(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_entry, int state)
+    {
+        unsigned long flags;
+        long ret = 0;
+
+        spin_lock_irqsave(&wq_head->lock, flags);
+        if (signal_pending_state(state, current)) {
+            /*
+            * Exclusive waiter must not fail if it was selected by wakeup,
+            * it should "consume" the condition we were waiting for.
+            *
+            * The caller will recheck the condition and return success if
+            * we were already woken up, we can not miss the event because
+            * wakeup locks/unlocks the same wq_head->lock.
+            *
+            * But we need to ensure that set-condition + wakeup after that
+            * can't see us, it should wake up another exclusive waiter if
+            * we fail.
+            */
+            list_del_init(&wq_entry->entry);
+            ret = -ERESTARTSYS;
+        } else {
+            if (list_empty(&wq_entry->entry)) {
+                if (wq_entry->flags & WQ_FLAG_EXCLUSIVE)
+                    __add_wait_queue_entry_tail(wq_head, wq_entry);
+                else
+                    __add_wait_queue(wq_head, wq_entry);
+            }
+            set_current_state(state);
+        }
+        spin_unlock_irqrestore(&wq_head->lock, flags);
+
+        return ret;
+    }
+    EXPORT_SYMBOL(prepare_to_wait_event)
+
+    Bu fonksiyonun thread'i çalışma kuyruğundan (run queue) çıkartmadığına yalnızca ilgili bekleme kuyruğuna eklediğine 
+    dikkat ediniz. __wait_event makrosunda bundan sonra yeniden koşul kontrol edilmiştir. Çünkü bu arada koşul sağlanmış 
+    da olabilir:
+
+    /* ... */
+      if (condition)							                            \
+         break;
+   
+    /* ... */
+
+    Buradaki break akışı döngünün dışına çıkartmaktadır. Bekleme kuyruundan thread'in silinmesi döngünün sonundaki 
+    finish_wait fonksiyonu tarafından yapılmaktadır. Daha sonra __wait_event makrosunda ___wait_is_interruptible 
+    makrosu çağrılıp prepare_to_wait_event foksiyonun geri dönüş değeri kontrol edilmiştir. 
+
+    /* ... */                                                                         \
+    if (___wait_is_interruptible(state) && __int) {			            \
+        __ret = __int;						                            \
+        goto __out;						                                \
+    }	
+    /* ... */
+
+    Şimdi artık thread bekleme kuyruğuna eklenmiştir, ancak henüz çalışma kuyruğundan çıkartılmamıştır ve thread hala 
+    CPU'da çalışmaktadır. İşte son darbe schedule fonksiyonu tarafından vurulmaktadır. schedule çağrısı __wait_event 
+    makrosuna cmd parametresi olarak geçilmiştir. Dolayısıyla __wait_event makrosunun içerisindeki aşağıdaki çağrı 
+    aslında schedule fonksiyonun çağrılmasını sağlamaktadır:
+
+    /* ... */
+    cmd; 
+    /* ... */
+
+    schedule fonksiyonunu çizelgeleyici alt sistemini incelerken ele alacağız. Ancak bu fonksiyon kabaca şunları 
+    yapmaktadır:
+
+    - Çalışmakta olan thread'in yazmaç bilgilerini task_struct alanına aktarmaktadır.
+    - Gerekiyorsa thread'i çalışma kuyruğundan çıkartmaktadır. 
+
+    İşte thread'in konumunun saklanması schedule fonksiyonu içeriisnde yapılmaktdır. Dolayısıyla aslında thread 
+    uykudan uyandığında schedule fonksiyonun içerisinden uyanacaktır. Yani uyandırma gerçekleştiğinde çalışma aslında 
+    aşağıdaki noktadan devam edecektir:
+
+    #define ___wait_event(wq_head, condition, state, exclusive, ret, cmd)		\
+    ({										                                    \
+        __label__ __out;							                            \
+        struct wait_queue_entry __wq_entry;					                    \
+        long __ret = ret;	/* explicit shadow */				                \
+                                                                                \
+        init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);	    \
+        for (;;) {								                                \
+            long __int = prepare_to_wait_event(&wq_head, &__wq_entry, state);   \
+                                                                                \
+            if (condition)							                            \
+                break;							                                \
+                                                                                \
+            if (___wait_is_interruptible(state) && __int) {			            \
+                __ret = __int;						                            \
+                goto __out;						                                \
+            }								                                    \
+                                                                                \
+            cmd;								                                \
+
+            ---------> uyandrılan thread çalışmasına buradan devam edecek!
+                                                                                \
+            if (condition)							                            \
+                break;							                                \
+        }									                                    \
+        finish_wait(&wq_head, &__wq_entry);					                    \
+    __out:	__ret;									                            \
+    })
+
+    Thread uyandırıldığında akış yukarda okla gösterdiğimiz noktadan devam edecektir. Burada koşulun sağlanıp 
+    sağlanmadığına bakılmıştır. Eğer koşul sağlanıyorsa döngüden çıkılmıştır. Ancak koşul sağlanmıyorsa döngü yine 
+    başa saracak ve thread yeniden uyuyacaktır. Döngüden çıkıldığında finish_wait fonksiyonun çağrıldığını görüyorsunuz:
+
+    finish_wait(&wq_head, &__wq_entry);				
+    
+    Bu fonksiyon thread'i bekleme kuyruğundan çıkarmaktadır. Burada bir noktaya dikkat ediniz. Thread'i uyandıran 
+    izleyen paragraflarda ele alacak olduğumuz wakeup fonksiyonları thread'i bekleme kuyruğundan da çıkarmaktadır. 
+    Dolayısıyla yukarıda ok ile gösterdiğimiz yerden akış devam ettiğinde thread bekleme kuyruğunda değildir. Tabii 
+    koşul sağlanıyorsa zaten bekleme kuyruğunda olmayan thread'in kuyruktan çıkartılmaması gerekir. finish_wait içeisinde 
+    bu kontrol uygulanmıştır:
+
+    void finish_wait(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_entry)
+    {
+        unsigned long flags;
+
+        __set_current_state(TASK_RUNNING);
+        /*
+        * We can check for list emptiness outside the lock
+        * IFF:
+        *  - we use the "careful" check that verifies both
+        *    the next and prev pointers, so that there cannot
+        *    be any half-pending updates in progress on other
+        *    CPU's that we haven't seen yet (and that might
+        *    still change the stack area.
+        * and
+        *  - all other users take the lock (ie we can only
+        *    have _one_ other CPU that looks at or modifies
+        *    the list).
+        */
+        if (!list_empty_careful(&wq_entry->entry)) {        -------> burada kontrol uygulanmış
+            spin_lock_irqsave(&wq_head->lock, flags);
+            list_del_init(&wq_entry->entry);
+            spin_unlock_irqrestore(&wq_head->lock, flags);
+        }
+    }
+    EXPORT_SYMBOL(finish_wait);
+
+    O halde özetlersek wait_event fonksiyonu çağrıldığında şunlar gerçekleşmektedir:
+
+    1) Daha uykuya dalma girişiminden önce hemen koşul kontrol edilmekteir. 
+    2) Thread yeni bir düğüm yaratılarak bekleme kuyruğuna eklenmektedir. Ancak henüz bağlamsal geçiş yapılmadan 
+    koşul yeniden kontrol edilmekte ve sinyal durumu dikkate alınmaktadır.
+    3) Thread uyandırıldığında zaten uyandıran taraf onu bekleme kuyruğundan çıkarmaktadır.
+    4) Thread uyandırıldığında koşul sağlanıyorsa artık kesin kesin uyandırılmıştır, sağlanmıyorsa yeniden uykuya
+    yatırılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+				                        64. Ders 15/03/2026 - Pazar			
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	wait_event_interruptible ve wait_event_killable makroları aslında taban ___wait_event makrosunu çağırmaktadır. 
+    Bunlar thread'in durumunu da uygun biçimde ayartlamaktadır. wait_event_interruptible makrosu "include/linux/wait.h" 
+    dosyası içeisinde şöyle yazılmıştır:
+
+    #define wait_event_interruptible(wq_head, condition)				\
+    ({										                            \
+        int __ret = 0;								                    \
+        might_sleep();								                    \
+        if (!(condition))							                    \
+            __ret = __wait_event_interruptible(wq_head, condition);		\
+        __ret;									                        \
+    })
+
+    Burada __wait_event_interruptible makrosunun çağrıldığnı görüyorsunuz:
+
+    #define __wait_event_interruptible(wq_head, condition)				\
+        ___wait_event(wq_head, condition, TASK_INTERRUPTIBLE, 0, 0,		\
+                schedule())
+
+    Görüldüğü gibi burada thread'in durumu TASK_INTERRUPTIBLE yapılmaktadır. 
+    
+    wait_event_killable makrosu da benzer biçimde yazılmıştır:
+
+    #define wait_event_killable(wq_head, condition)					\
+    ({										\
+        int __ret = 0;								\
+        might_sleep();								\
+        if (!(condition))							\
+            __ret = __wait_event_killable(wq_head, condition);		\
+        __ret;									\
+    })
+
+    Burada __wait_event_killable makrosunun çağrıldığını görüyorsunuz:
+
+    #define __wait_event_killable(wq, condition)					\
+	    ___wait_event(wq, condition, TASK_KILLABLE, 0, 0, schedule())
+
+    Tek farklı olan yer thread'in durumunun TASK_KILLABLE olarak set edilmesidir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	wait_event_timeout ve wait_event_interruptible_timeout makroları zaman aşımlı (timeout) bekleme yapmaktadır. Zaman 
+    aşımlı bekleme demek en kötü olsılıkla bloke çözülmese bile belli süre geçtiğinde beklemenin sonlanması demektir. 
+    Bu makroların ayrıca jiffy türünden bir zaman aşımı parametresine de sahip olduğunu anımsayınız:
+
+    wait_event_timeout(wq_head, condition, timeout);
+    wait_event_interruptible_timeout(wq_head, condition, timeout);
+
+    wait_event_timeout makrosu "include/linux/wait.h" dosyası içerisinde şöyle yazılmıştır:
+
+    #define wait_event_timeout(wq_head, condition, timeout)				\
+    ({										                            \
+        long __ret = timeout;							                \
+        might_sleep();								                    \
+        if (!___wait_cond_timeout(condition))					        \
+            __ret = __wait_event_timeout(wq_head, condition, timeout);	\
+        __ret;									                        \
+    })
+
+    Burada da önce koşulun sağlanıp sağlanmadığına bakılmış, koşul zaten sağlanıyorsa doğrudan çıkılmıştır. Buradaki
+    ___wait_cond_timeout makrosu da şöyle yazılmıştır:
+
+    #define ___wait_cond_timeout(condition)						        \
+    ({										                            \
+        bool __cond = (condition);						                \
+        if (__cond && !__ret)							                \
+            __ret = 1;							                        \
+        __cond || !__ret;							                    \
+    })
+
+    Burada koşul sağlanıyorsa ya da zaman aşımı sıfırsa makro 1 değerini ğretmektedir. wait_event_timeout makrosunda 
+    koşul sağlanmıyorsa __wait_event_timeout makrosu çağrılmaktadır. Bu makro da şöyle yazılmıştır:
+
+    #define __wait_event_timeout(wq_head, condition, timeout)		    \
+        ___wait_event(wq_head, ___wait_cond_timeout(condition),			\
+                TASK_UNINTERRUPTIBLE, 0, timeout,				        \
+                __ret = schedule_timeout(__ret))
+
+    Bu makro da yukarıda inceledeğimiz __wait_event makrosunu çağırmaktadır. Burada __wait_event makrosunun 
+    parametrelerinin daha değişik geçildiğine dikkat ediniz. Örneğin artık schedule fonksiyonu yerine schedule_timeout 
+    fonksiyonu çağrılmaktadır. Ayrıca makroda koşulun ___wait_cond_timeout(condition) biçimine oluşturulduğuna da 
+    dikkat ediniz. Böylece aslında uyandırılan thread koşul sağlanıyorsa ya da koşul sağlanmıyorsa fakat zaman aşımı 
+    dolmuşsa yeniden uykuya dalmayacak akışına devam edecekir. Burada kritik önemdeki fonksiyon schedule_timeout 
+    fonksiyonudur. Bu fonksiyon "/kernel/time/sleep_timeout.c" dosyasında şöyle yaızlmıştır:
+
+    signed long __sched schedule_timeout(signed long timeout)
+    {
+        struct process_timer timer;
+        unsigned long expire;
+
+        switch (timeout) {
+        case MAX_SCHEDULE_TIMEOUT:
+            /*
+            * These two special cases are useful to be comfortable
+            * in the caller. Nothing more. We could take
+            * MAX_SCHEDULE_TIMEOUT from one of the negative value
+            * but I' d like to return a valid offset (>=0) to allow
+            * the caller to do everything it want with the retval.
+            */
+            schedule();
+            goto out;
+        default:
+            /*
+            * Another bit of PARANOID. Note that the retval will be
+            * 0 since no piece of kernel is supposed to do a check
+            * for a negative retval of schedule_timeout() (since it
+            * should never happens anyway). You just have the printk()
+            * that will tell you if something is gone wrong and where.
+            */
+            if (timeout < 0) {
+                pr_err("%s: wrong timeout value %lx\n", __func__, timeout);
+                dump_stack();
+                __set_current_state(TASK_RUNNING);
+                goto out;
+            }
+        }
+
+        expire = timeout + jiffies;
+
+        timer.task = current;
+        timer_setup_on_stack(&timer.timer, process_timeout, 0);
+        timer.timer.expires = expire;
+        add_timer(&timer.timer);
+        schedule();
+        timer_delete_sync(&timer.timer);
+
+        /* Remove the timer from the object tracker */
+        timer_destroy_on_stack(&timer.timer);
+
+        timeout = expire - jiffies;
+
+    out:
+        return timeout < 0 ? 0 : timeout;
+    }
+    EXPORT_SYMBOL(schedule_timeout);
+
+    Burada neler yapılmaktadır? Aslında fonksiyonun ana noktası şudur: Fonksiyon schedule fonksiyonu ile bağlamsal 
+    geçişi oluşturmadan önce bir zamanlayıcı kurar. Bu zamanlayıcının süresi dolduğunda thread uyandırılır. Yani 
+    sonuçta wait_event_timeout makrosu ile uykuya yatırılan thread başka bir akış tarafından uyandırılmasa bile 
+    bu timer mekanizması yoluyla uyandırılmaktadır. 
+
+    wait_event_timeout makrosu kalan jiffy süresine geri dönmektedir. Jiffy konusu ileride ele alınaacaktır. 
+
+    wait_event_timeout fonksiyonu özetle aşağıdaki gibi çalışmaktadır:
+
+    1) Uyuma girişiminden önce koşul ve zaman aşımı kontrol edilmektedir. Koşul sağlanıyorsa ya da zaman aşımı zaten 
+    dolmuş durumdaysa (yani zaman aşımı parametresi 0 girilmişse) hiç uyuma girişiminde bulunulmaz.
+
+    2) Thread bekleme kuyruğuna yazılır ancak bekleme bitr timer kurularak sağlanır. Dolayısıyla blokenin çözülmesi 
+    için zaman aşımının dolması ya da uyandırıldığında koşulun sağlanması gerekmektedir. 
+
+    3) Eğer thread uyandırılırsa yine koşula ve zaman aşımına bakılır. Koşul sağlanıyorsa ya da zaman aşımı dolmuşsa 
+    thread bekleme kuyruğundan çıkartılarak bloke çözülür. 
+
+    wait_event_interruptible_timeout makrosunun wait_event_timeout makrosundan farkı bir sinyal oluşturunda da blokenin 
+    çözülmesidir. Makro şöyle yazılmıştır:
+
+    #define wait_event_interruptible_timeout(wq_head, condition, timeout)		\
+    ({										                                    \
+        long __ret = timeout;							                        \
+        might_sleep();								                            \
+        if (!___wait_cond_timeout(condition))					                \
+            __ret = __wait_event_interruptible_timeout(wq_head,		            \
+                            condition, timeout);		                        \
+        __ret;									                                \
+    })
+
+    __wait_event_interruptible_timeout makrosu da şöyle yazılmıştır:
+
+    #define __wait_event_interruptible_timeout(wq_head, condition, timeout)		\
+        ___wait_event(wq_head, ___wait_cond_timeout(condition),			        \
+                TASK_INTERRUPTIBLE, 0, timeout,				                    \
+                __ret = schedule_timeout(__ret))
+
+    Buradaki tek farkın thread'inin durumunun TASK_INTERRUPTIBLE olarak set edilmesi olduğuna dikkat ediniz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda yalnızca wait_event_interruptible_exclusive makrosunu ele almadık. Şimdi de bu makroyu ele alalım. 
+    exclusive uyuma ve uyandırma izleyen paragraflarda ele alınacaktır. Buradaki wait_event_interruptible_exclusive 
+    makrosu bekleme kuyruğuna yerleştirilen wait_queue_entry nesnesinin flags elemanını exclusive durumu belirtmek 
+    amacıyla WQ_FLAG_EXCLUSIVE biçiminde set etmektedir. Makrou "include/linux/wait.h" dosyası içerisinde şöyle 
+    yazılmıştır:
+
+    #define wait_event_interruptible_exclusive(wq, condition)			    \
+    ({										                                \
+        int __ret = 0;								                        \
+        might_sleep();								                        \
+        if (!(condition))							                        \
+            __ret = __wait_event_interruptible_exclusive(wq, condition);	\
+        __ret;									                            \
+    })
+
+    Buradaki __wait_event_interruptible_exclusive makrosu da şöyle yazılmıştır:
+
+    #define __wait_event_interruptible_exclusive(wq, condition)			    \
+        ___wait_event(wq, condition, TASK_INTERRUPTIBLE, 1, 0,			    \
+                schedule())
+
+    Burada __wait_event makronun dördüncü parametresinin 1 geçildiğine dikkat ediniz. Bu parametre makroda kontrol 
+    edilmekte ve bu parametreye dayalı oalrak exclusive bekleme için wait_queue_entry nesnesinin flags elemanı 
+    WQ_FLAG_EXCLUSIVE biçiminde set edilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Örneğin bir aygıt sürücü içerisinde biz bir tampondan bilgi okuyacak olalım. Ancak tamponda henüz bilgi yoksa 
+    okuma yapan thread bilgi tampona gelene kadar bekletilsin. Bu durumda aygıt sürücümüzün read fonksiyonu şöyle 
+    yazılabilir:
+
+    static wait_queue_head_t g_wq;
+    static char g_buf[1024];
+    atomic_t g_len = ATOMIC_INIT(0);
+    /* ... */
+
+    static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        size_t esize;
+
+        wait_event_interruptible(g_wq, atomic_read(&g_len) > 0);       
+
+        esize = size < atomic_read(&g_len) ? size : atomic_read(&g_len);
+        if (copy_to_user(buf, g_buf, esize) != 0)
+            return -EFAULT;
+
+        return esize;
+    }
+
+    Buradaki koşula dikkat ediniz: atomic_read(&g_len) > 0. Tampona yazma yapan taraf yazma yaptıktan sonra yazılan 
+    karakter sayısını g_len değişkenine yerleştirdikten sonra uyandırma işlemini yapmalıdır. Böylece uyamdırılan thread 
+    koşulun sağlandığını görecek ve bloke çözülecektir. Bloke çözülünce de tampondaki bilgi kullanıcı alanına copy_to_user
+    fonksiyonu ile kopyalanmaktadır. Ancak burada dikkat edilmesi gereken bir nokta vardır. Birden fazla thread read 
+    fonksiyonunu çağırıp bloke olduğunda bunların hepsi uyanacak ve aynı tamponu okuyacaktır. Eğer bu tamponun tek 
+    bir thread tarafından okunup tüketilmesini istiyorsanız ek bir kilitle ve bir döngü içerisinde bu işlemi yapmalısınız. 
+    Kodda koşulun atomic bir biçimde oluşturulduğuna dikkat ediniz. Aslında pek çok durumda atomic_read yerine READ_ONCE
+    gibi olatile erişim yeterli olmaktadır. Ancak en güvenli durum eğer birden fazla thread uyandırılıyorsa koşulun 
+    atomik bir biçimde oluşturulmasıdır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de thread'lerin bekleme kuyruğundan nasıl uyandırıldığı üzerinde duralım. Bunun için Linux çekirdeklerinde 
+    bir grup "include/linux/wait.h" dosyası içerisinde wake_up makroları bulundurulmuştur:
+
+    #define wake_up(x)			                __wake_up(x, TASK_NORMAL, 1, NULL)
+    #define wake_up_nr(x, nr)		            __wake_up(x, TASK_NORMAL, nr, NULL)
+    #define wake_up_all(x)			            __wake_up(x, TASK_NORMAL, 0, NULL)
+    #define wake_up_locked(x)		            __wake_up_locked((x), TASK_NORMAL, 1)
+    #define wake_up_all_locked(x)		        __wake_up_locked((x), TASK_NORMAL, 0)
+    #define wake_up_sync(x)			            __wake_up_sync(x, TASK_NORMAL)
+
+    #define wake_up_interruptible(x)	        __wake_up(x, TASK_INTERRUPTIBLE, 1, NULL)
+    #define wake_up_interruptible_nr(x, nr)	    __wake_up(x, TASK_INTERRUPTIBLE, nr, NULL)
+    #define wake_up_interruptible_all(x)	    __wake_up(x, TASK_INTERRUPTIBLE, 0, NULL)
+
+    Bu makroların hepsinin birinci parametrelerinin wait_queue_head yapısı türünden bekleme kuyruğunu nesnesini aldığına
+    dikkat ediniz. Bunların _nr'li versiyonları da vardır. 
+
+    wake_up makrolarının çoğunun ortak bir biçimde aslında __wake_up fonksiyonunu çağırdığına dikkat ediniz. __wake_up 
+    fonksiyonu "kernel/sched/wait.c" dosyası içerisinde şöyle yazılmıştır:
+
+    int __wake_up(struct wait_queue_head *wq_head, unsigned int mode, int nr_exclusive, void *key)
+    {
+        return __wake_up_common_lock(wq_head, mode, nr_exclusive, 0, key);
+    }
+    EXPORT_SYMBOL(__wake_up);
+
+    Bu fonksiyonun da ortak bir biçimde __wake_up_common_lock isimli fonksiyonu çağırdığını görüyorsuznu. Bu fonksiyon 
+    da şöyle yazılmıştır:
+
+    static int __wake_up_common_lock(struct wait_queue_head *wq_head, unsigned int mode,
+			int nr_exclusive, int wake_flags, void *key)
+    {
+        unsigned long flags;
+        int remaining;
+
+        spin_lock_irqsave(&wq_head->lock, flags);
+        remaining = __wake_up_common(wq_head, mode, nr_exclusive, wake_flags,
+                key);
+        spin_unlock_irqrestore(&wq_head->lock, flags);
+
+        return nr_exclusive - remaining;
+    }
+
+    Bu fonksiyon da __wake_up_common fonksiyonunu çağırmaktadır. İşte asıl işlemler bu __wake_up_common fonksiyonu 
+    içerisinde yapılmaktadır:
+
+    static int __wake_up_common(struct wait_queue_head *wq_head, unsigned int mode,
+			int nr_exclusive, int wake_flags, void *key)
+    {
+        wait_queue_entry_t *curr, *next;
+
+        lockdep_assert_held(&wq_head->lock);
+
+        curr = list_first_entry(&wq_head->head, wait_queue_entry_t, entry);
+
+        if (&curr->entry == &wq_head->head)
+            return nr_exclusive;
+
+        list_for_each_entry_safe_from(curr, next, &wq_head->head, entry) {
+            unsigned flags = curr->flags;
+            int ret;
+
+            ret = curr->func(curr, mode, wake_flags, key);
+            if (ret < 0)
+                break;
+            if (ret && (flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive)
+                break;
+        }
+
+        return nr_exclusive;
+    }
+
+    Bu fonksiyonda şunlar yapılmaktadır:
+
+    - Önce bekleme kuyruğuna ilişkin bağlı listenin ilk düğümü elde edilmiştir:
+
+    curr = list_first_entry(&wq_head->head, wait_queue_entry_t, entry);
+
+    Eğer kuyruk boşsa yapacak bir şey yoktur ve hemen geri dönülmüştür:
+
+    if (&curr->entry == &wq_head->head)
+            return nr_exclusive;
+
+    - Eğer kuyruk boş değilse kuyruk dolaşılmış ve wait_queue_entry yapısı içeirisndeki uyandırma yapan func isimi 
+    elemandaki callback fonksiyon çağrılmıştır:
+
+    list_for_each_entry_safe_from(curr, next, &wq_head->head, entry) {
+        unsigned flags = curr->flags;
+        int ret;
+
+        ret = curr->func(curr, mode, wake_flags, key);
+        if (ret < 0)
+            break;
+        if (ret && (flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive)
+            break;
+    }
+
+    Yani burada bağlı listedeki thread'ler uyamdırılmaktadır. Ancak exlusive beklemeye ilişkin bir ayrıntı da ele 
+    alınmıştır. Burada öncelikle exclusive bekleme ve uyandırma mekanizması üzerinde açıklamalar yapmak istiyoruz. 
+    Bekleme kuyruklarında bazı thread'ler wait_event fonksiyonlarının exclusive versyonlarıla kuyruğa yerleştirilmiş 
+    olabilir:
+    
+    T1 ---> T2 ---> T3 ---> T4(E) ---> T5 ---> T6(E) ---> T7 ---> T8(E) ---> NULL
+
+    Burada exclusive bekleyen thread'ler (E) ile belirtilmiştir. Bir thread'in exclusive bekleyip beklemediği yukarıda 
+    da belirttiğimiz gibi wait_queue_entry yapısının flags elemanından anlaşılmaktadır. İşte wake_up makrolarının 
+    nr'li biçimleri (yani wake_up_nr ve wake_up_interruptible_nr) belli sayıda exclusive thread'i uyandırmak için 
+    kullanılmaktadır. Örneğin biz uyandırmayı wake_up_exclusive_nr(g_wq, 2) çağırısı ile yapalım. Bu durumda bu 
+    makro çağrısı 2 tane exclusive thread'i uyandırmak amacındadır. Ancak bu nr'i makrolar bağlı listenin başından 
+    itibaren 2 tane exclusive uyandırma yapana kadar exclusive bekleme yapmayanları da uyandırmaktadır. Yukarıdaki 
+    kuyrukta biz wake_up_exclusive_nr(g_wq, 2) çağrısını yaptığımızda yalnızca T4 ve T6 thread'leri uyandırılmayacaktır. 
+    T1, T2, T3, T4, t5, T6 thread'leir uyandırılacaktır. Yani n tane exclusive thread'in uyandırılması şöyle yapılmaktadır:
+    "listenin başından ilerle iki tane exclusive uyandırma yapana kadar hepsini uyandırarak ilerle".
+
+    Bu bilgi eşliğinde yukarıdaki bağlı listenin dolaşılması kodu size daha anlamlı gelecektir. Dolaşım yapan döngünün 
+    içerisindeki if deyimine dikkat ediniz:
+
+    if (ret && (flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive)
+        break;
+
+    Burada aslında yukarıda açıkladığımız işlem yapılmaktadır. Yani her exclusive thread uyandırıldığında nr_exclusive 
+    değişkeni 1 eksililmekte ve bu değişken 0'a geldiğinde döngüden çıkılmaktadır. 
+
+    Thread'i bekleme kuyruğundan çıkartarak uyandıran curr->func(curr, mode, wake_flags, key) çağrısındaki callback 
+    fonksiyon şöyle "kernel/sched/wait.c" dosyası içerisinde şöyle tanımlanmıştır:
+
+    int autoremove_wake_function(struct wait_queue_entry *wq_entry, unsigned mode, int sync, void *key)
+    {
+        int ret = default_wake_function(wq_entry, mode, sync, key);
+
+        if (ret)
+            list_del_init_careful(&wq_entry->entry);
+
+        return ret;
+    }
+    EXPORT_SYMBOL(autoremove_wake_function);
+
+    Burada önce default_wake_function isimli fonksiyon çağrılmış sonra da thread'e ilişkin wait_queue_entry nesnesi 
+    bağlı listeden silinmiştir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
