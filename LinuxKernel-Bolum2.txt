@@ -5216,7 +5216,7 @@ module_exit(rcu_list_demo_exit);
     wait_event_interruptible_timeout(wq_head, condition, timeout);
     wait_event_interruptible_exclusive(wq_head, condition);
 
-    Bu makroların birinci paranetreleri bekleme kuyruğunu temsil eden wait_queue_head türünden yapı nesnsini almaktadır. 
+    Bu makroların birinci parametreleri bekleme kuyruğunu temsil eden wait_queue_head türünden yapı nesnsini almaktadır. 
     (Makroya nesnenin adresinin değil kendisinin parametre olarak geçirildiğini vurgulamak istiyoruz. Zaten makro 
     gerektiğinde kendisi adres alma işlemini yapmaktadır.) Makroların ikinci parametreleri "uyandırma koşulunu" belirtmektedir. 
     Yukarıda da belirttiğimiz gibi aslında exlusive özelliğini göz ardı edersek bekleme kuyruğundaki tüm thread'ler 
@@ -5719,9 +5719,11 @@ module_exit(rcu_list_demo_exit);
     #define wake_up_interruptible(x)	        __wake_up(x, TASK_INTERRUPTIBLE, 1, NULL)
     #define wake_up_interruptible_nr(x, nr)	    __wake_up(x, TASK_INTERRUPTIBLE, nr, NULL)
     #define wake_up_interruptible_all(x)	    __wake_up(x, TASK_INTERRUPTIBLE, 0, NULL)
+    #define wake_up_interruptible_sync(x)	    __wake_up_sync((x), TASK_INTERRUPTIBLE)
 
-    Bu makroların hepsinin birinci parametrelerinin wait_queue_head türünden bekleme kuyruğunu nesnesini aldığına dikkat 
-    ediniz. Bunların _nr'li versiyonlarının da olduğunu görüyorsunuz. 
+    Bu makroların hepsinin birinci parametrelerinin wait_queue_head türünden bekleme kuyruğu nesnesinin adresini 
+    almaktadır. (wait_event makrolarında adres alma işlemi makro tarafından yapılmaktadır. Ancak wake_up makroları adres 
+    istemektedir.) Bunların _nr'li versiyonlarının da olduğunu görüyorsunuz. 
 
     wake_up makrolarının çoğunun ortak bir biçimde aslında __wake_up fonksiyonunu çağırdığına dikkat ediniz. __wake_up 
     fonksiyonu "kernel/sched/wait.c" dosyası içerisinde şöyle yazılmıştır:
@@ -5849,40 +5851,763 @@ module_exit(rcu_list_demo_exit);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+                                        65. Ders 28/03/2026 - Cumartesi								
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    wake_up makrosuyla wake_up_nr makrosu aeasındaki farka dikkat ediniz:
+
+
+    #define wake_up(x)			    __wake_up(x, TASK_NORMAL, 1, NULL)
+    #define wake_up_nr(x, nr)		__wake_up(x, TASK_NORMAL, nr, NULL)
+
+    Bunlar aynı fonksiyonu çağırmaktadır. Ancak __wake_up fonksiyonunun nr_exclusive parametresine wake_up fonksiyonu 
+    1 değerini geçirirken wake_up_nr fonksiyonu nr değerini geçirmektedir. nr_exclusive parametresinin "en az kaç exclusive
+    bekleyen thread'i uyandırana kadar kuyruktakileri uyandırmaya devam edeyim?" anlamına geldiğini yukarıda açıklamıştık. 
+    O halde wake_up makrosu işlemini ilk exclusive bekleyen thread'i uyandırdığında sonlandırmaktadır. wake_up_nr makrosu 
+    ise nr tane exclusive thread'i uyandırdığında işlemini sonlandırmaktadır. İşte wake_up_all makrosu da "kuruktaki 
+    bütün thread'leri uyandır"anlamına gelmektedir. Bu makro __wake_up fonksiyonunu şöyle çapırmaktadır:
+
+     #define wake_up_all(x)		    __wake_up(x, TASK_NORMAL, 0, NULL)
+
+     Burada fonksiyonun nr_exclusive parametresine 0 geçildiğine dikkat ediniz. Fonksiyonun kodunu dşkkatle incelerseniz
+     bu parametre 0 geçildiğinde tüm thread'lerin uyandrırıldığını görebilirsiniz:
+
+    /* ... */
+
+    if (ret && (flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive)
+        break;
+
+    /* ... */
+
+    Burada nr_exclusive değeri 0 ise eksiltimle en büyük pozitif değer haline gelecek ve döngü çalışmaya devam edecektir. 
+
+    Eğer kuyrukta hiç exclusive bekleme yapan thread yoksa wake_up, wake_up_nr ve wake_up_all çağrıları arasında 
+    işlevsel bir fark kalmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	wake_up makrolarının "locked" ekli iki biçimi de vardır:
+
+    #define wake_up_locked(x)		            __wake_up_locked((x), TASK_NORMAL, 1)
+    #define wake_up_all_locked(x)		        __wake_up_locked((x), TASK_NORMAL, 0)
+
+    Bu locked ekli biçimler bekleme kuyruğundaki spinlock nesnesinin kilidini almadan uyandırma işlemini yapmaktadır. 
+    Çünkğ bazı durumlarda kilit zaten alınmış olabilir. Bu durumda kilidin alınmadan işleme devam edilmesi gerekir. 
+    (Aksi takdşrde "kilitlenme (deadlock)" durumu oluşabilecektir.)	wake_up_locked fonksiyonu nr_exclusive parametresine
+    1 geçilereki wake_up_all_locked fonksiyonu ise 0 geçilerek çağrılmaktadır. Dolayısıyla wake_up_locked tek bir exclusive
+    bekleme yapan thread'i uyandırdıktan sonra wake_up_all_locked ise tüm tüm thread'leri uyandırdıktan sonra işlemini 
+    sonlandırmaktadır.
+
+    wake_up_sync makrosu uyandırma işlemi sırasında uyandırılnan thread'in bu uyandırmayı yapan thread'i preemption 
+    ile kesmemesini sağlamakatdır. Uyandırılan thread'ler eğer yüksek bir önceliğe sahipse hemen premption'a yol açıp
+    CPU'ya atanabilmektedir. Bu makro bunu engellemektedir.  Makro şöyle yazılmıştır: 
+
+    #define wake_up_sync(x)			__wake_up_sync(x, TASK_NORMAL)
+
+    Buradaki __wake_up_sync fonksiyonu da şöyle yazılmıştır:
+
+    void __wake_up_sync(struct wait_queue_head *wq_head, unsigned int mode)
+    {
+        __wake_up_sync_key(wq_head, mode, NULL);
+    }
+    EXPORT_SYMBOL_GPL(__wake_up_sync);	/* For internal use only */
+
+    Bu fonksiyon da ortak wake_up_comon_lock fonksiyonu çağırmaktadır:
+
+
+    void __wake_up_sync_key(struct wait_queue_head *wq_head, unsigned int mode,
+			void *key)
+    {
+        if (unlikely(!wq_head))
+            return;
+
+        __wake_up_common_lock(wq_head, mode, 1, WF_SYNC, key);
+    }
+    EXPORT_SYMBOL_GPL(__wake_up_sync_key);
+
+    Tabii lock'suz uyandırmalarda zaten spinlock kilidi alındığı için ve bu spinlock da preemption mekanizmasını 
+    kapattığı için uyandırma işlemi zaten kesilmeyecektir. Ancak uyandırılan thread başak bir CPU'nun kuyruğunda da 
+    olabilir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    wake_up makrlarının da interruptible biçimleri vardır:
+
+    #define wake_up_interruptible(x)	        __wake_up(x, TASK_INTERRUPTIBLE, 1, NULL)
+    #define wake_up_interruptible_nr(x, nr)	    __wake_up(x, TASK_INTERRUPTIBLE, nr, NULL)
+    #define wake_up_interruptible_all(x)	    __wake_up(x, TASK_INTERRUPTIBLE, 0, NULL)
+    #define wake_up_interruptible_sync(x)	    __wake_up_sync((x), TASK_INTERRUPTIBLE)
+
+    Bu makrolar aslında __wkae_up ve __wake_up_sync fonksiyonlarını TASK_INTERRUPTIBLE thread durum argümanuyla 
+    çağırmaktadır. Thread'in durumunu belirten TASK_XXX bayraklarını çizelgeleyiciyi anlattığımız bölümde ele alacağız. 
+    interruptible wake_up makrolarnın diğerlerinden tak farkı thread durum bilgisi yalnızca TASK_INTERRUPTIBLE olanları 
+    uyandırmasıdır. Kalbuki interruptible olmayan wake_up makroları hem TASK_UNINTERRUPTIBLE hem de TASK_INTERRUPTIBLE
+    durumuna ilişkin thread'leri uyandırmaktadır. Normal olarak bir thread uykuya interruptible olan wait_evemt makrolarıyla
+    yatırılmışsa uyandırılmasının da interruptible wake_up fonksiyonlarıyla yapılması uygun olur. Çünkü bu durumda 
+    eğer bekleme kuyruğunda TASK_UNINTERRUPTIBLE thread'ler varsa onlar uyandırılmayacaktır. interruptible olarak uyutalan 
+    thread'lerin interruptible olmayan wake_up makrolarıyla uyandırılmasında bir sorun oluşmaz ancak amaç dikkate 
+    alındığında gereksiz uyandırmalar da yapılacaktır .
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de thread'in uyutulması ve uyandırılması işlemine bir aygıt sürücü yoluyla basit bir örnek verelim. Aygıt 
+    dürücümüzde bir tampon olsun. Eğe rbu tampon boşsa read işlemini yapan thread uygukda bekletilsin. Bu tampona
+    write fonksiyonu ile yazma yapan thread uyuyan thread'leri uyandırsın. Buradaki aygıt sürücünün read fonksiyonu 
+    şöyle yazılabilir:
+
+    static wait_queue_head_t g_wq;
+    static char g_buf[TEXT_BUFFER_SIZE];
+    static atomic_t g_len = ATOMIC_INIT(0);
+    /* ... */
+
+    static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        size_t esize;
+
+        wait_event_interruptible(g_wq, atomic_read(&g_len) > 0);       
+        esize = size < atomic_read(&g_len) ? size : atomic_read(&g_len);
+        if (copy_to_user(buf, g_buf, esize) != 0)
+            return -EFAULT;
+        atomic_set(&g_len, 0);
+
+        return esize;
+    }
+
+    Burada interruptible biçimde bloke oluşturulmuştur. Blokenin çözülme koşulu g_len > 0 biçimindedir. İşin başında 
+    g_len = 0 olduğu için read fonksiyonunda bloke oluşacaktır. Bloke çözüldüğünde okunmak istenen miktarla tampondaki
+    miktar karşılaştırılmış bunlardan hangisi küçükse o miktarda okuma yapılmıştır. copy_to_user fonksiyonun çekirdek 
+    modundan prosesin bellek alanına kopyalama yaptığını anımsayınız. Aktarm sonrasında g_len değişkeni yine 0 değerine
+    çekilmiştir. Böylece sonraki read işleminde tampon tüketildiği için yeniden bloke oluşacaktır. Ancak bu kod birden
+    fazla read işleminin aynı anda yapıldığı durumda karasız bir duruma da yol açabilecektir. Birden fazla thread
+    uykudan uyandırıldığında birden fazlası tamponu okuyabilecektir. Eğer tamponun tek bir thread tarafından tüketilmesi 
+    fakat diğer thread'lerin bekletilmesi gerekiyorsa mutex gibi ek bir kilit mekanizmasının da sağlanması gerekir. 
+    İzleyen paragraflarda bu sorunun üzerinde duracağız. 
+
+    Aygıt sürücünün read fonksiyonunda bloke olan thread'lerin blokesi aygıt sürücücünün write fonksiyonunda çözülmektedir:
+
+    static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+    {
+        size_t esize;
+
+        esize = size < TEXT_BUFFER_SIZE ? size : TEXT_BUFFER_SIZE;
+
+        if (copy_from_user(g_buf, buf, esize) != 0)
+            return -EFAULT;
+    
+        atomic_set(&g_len, esize);
+        wake_up_interruptible(&g_wq);
+        
+        return esize;
+    } 
+
+    Burada önce tampona yazma yapılmış daha sonra tamponu bekleyen thread'ler wake_up_interruptible makrosuyla 
+    uyandırılmıştır. Uynadırma işlemindne önce koşulun sağlanması gerektiğine dikkat ediniz. Bu nedenle örneğimizde 
+    önce g_len değişkenine atama yapılıp sonra uyandırma işlemi yapılmıştır. 
+
+    Aygıt sürücünün kodlarını bütünsel biçimde aşağıda veriyoruz.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* wait-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/wait.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("Wait-Driver");
+
+static int generic_open(struct inode *inodep, struct file *filp);
+static int generic_release(struct inode *inodep, struct file *filp);
+static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+
+static dev_t g_dev;
+static struct cdev *g_cdev;
+static struct file_operations g_fops = {
+    .owner = THIS_MODULE,
+    .open = generic_open,
+    .read = generic_read,
+    .write = generic_write,
+    .release = generic_release
+};
+
+#define TEXT_BUFFER_SIZE    4096
+
+static wait_queue_head_t g_wq;
+static char g_buf[TEXT_BUFFER_SIZE];
+static atomic_t g_len = ATOMIC_INIT(0);
+
+static int __init generic_init(void)
+{
+    int result;
+
+    printk(KERN_INFO "wait-driver module initialization...\n");
+
+    if ((result = alloc_chrdev_region(&g_dev, 0, 1, "wait-driver")) < 0) {
+        printk(KERN_INFO "cannot alloc char driver!...\n");
+        return result;
+    }
+
+    if ((g_cdev = cdev_alloc()) == NULL) {
+        printk(KERN_INFO "cannot allocate cdev!...\n");
+        return -ENOMEM;
+    }
+
+    g_cdev->owner = THIS_MODULE;
+    g_cdev->ops = &g_fops;
+
+    if ((result = cdev_add(g_cdev, g_dev, 1)) < 0) {
+        unregister_chrdev_region(g_dev, 1);
+        printk(KERN_ERR "cannot add device!...\n");
+        return result;
+    }
+
+    init_waitqueue_head(&g_wq);
+
+    return 0;
+}
+
+static void __exit generic_exit(void)
+{
+    cdev_del(g_cdev);
+    unregister_chrdev_region(g_dev, 1);
+
+    printk(KERN_INFO "wait-driver module exit...\n");
+}
+
+static int generic_open(struct inode *inodep, struct file *filp)
+{
+    printk(KERN_INFO "wait-driver opened...\n");
+
+    return 0;
+}
+
+static int generic_release(struct inode *inodep, struct file *filp)
+{
+    printk(KERN_INFO "wait-driver closed...\n");
+
+    return 0;
+}
+
+static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+    size_t esize;
+
+    wait_event_interruptible(g_wq, atomic_read(&g_len) > 0);       
+    esize = size < atomic_read(&g_len) ? size : atomic_read(&g_len);
+    if (copy_to_user(buf, g_buf, esize) != 0)
+        return -EFAULT;
+    atomic_set(&g_len, 0);
+
+    return esize;
+}
+
+static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+    size_t esize;
+
+    esize = size < TEXT_BUFFER_SIZE ? size : TEXT_BUFFER_SIZE;
+
+    if (copy_from_user(g_buf, buf, esize) != 0)
+        return -EFAULT;
+   
+    atomic_set(&g_len, esize);
+    wake_up_interruptible(&g_wq);
+    
+    return esize;
+}
+
+module_init(generic_init);
+module_exit(generic_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* wait-driver-test-read.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char buf[4096];
+    ssize_t result;
+
+    if ((fd = open("wait-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    printf("Buffer empty, thread is sleeping...\n");
+
+    if ((result = read(fd, buf, 10)) == -1)
+        exit_sys("read");
+    buf[result] = '\0';
+
+    printf("%s\n", buf);
+
+    close(fd);  
+
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/* wait-driver-test-write.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#define TEXT_BUFFER_SIZE    4096
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char buf[TEXT_BUFFER_SIZE];
+    char *str;
+    ssize_t result;
+
+    if ((fd = open("wait-driver", O_WRONLY)) == -1)
+        exit_sys("open");
+
+    printf("Enter text:");
+    fgets(buf, TEXT_BUFFER_SIZE, stdin);
+    if ((str = strchr(buf, '\n')) != NULL)
+        *str = '\0';
+
+    if (write(fd, buf, strlen(buf)) == -1) 
+        exit_sys("write");
+
+    close(fd);  
+
+	return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+							            66. Ders 29/03/2026 - Pazar		
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeklerinde bekleme kuyrukları pek çok yerde açık ya da gizli bir biçimde karşımıza çıkmaktadır. Çekirdek 
+    kodlarındaki bekleme kuyruklarının bir bölümü burada görümüş olduğumuz veri yapısı (wait_queue_head_t) ve makrolarla 
+    (wait_event ve wake_up makroları) oluşturulmuştur. Ancak bazı bekleme kuyrukları performans kazancı sağlayabilmek 
+    için ilgili veri yapısının içerisinde manuel oluşturulmuştur. Örneğin eskiden semaphore, mutex gibi nesnelerin bekleme 
+    kuyrukları yukarıda ele almış olduğumuz wait_queue_head_t yapısını kullanıyordu, işlemler de  wait_event ile wake_up 
+    yapılıyordu. Ancak daha sonraları bu senkronizasyon nesnelerine ilişkin bekleme kuyrukları daha az maliyetle bu 
+    senktronizasyon nesneleri içerisinde manuel bir biçimde oluşturulmuştur. Örneğin çekirdeğin 2.4'lü versyonlarında 
+    semaphore yapısı şöyleydi:
+
+    struct semaphore {
+        atomic_t count;
+        int sleepers;
+        wait_queue_head_t wait;
+    #if WAITQUEUE_DEBUG
+        long __magic;
+    #endif
+    };
+
+    Görüldüğü gibi semaphore'u bekleyen thread'ler yapıdaki wait elemanına ilişkin bekleme kuyruğunu kullanıyordu. 
+    Ancak güncel çekirdeklerdeki semaphore yapısı şöyledir:
+
+    struct semaphore {
+        raw_spinlock_t		lock;
+        unsigned int		count;
+        struct list_head	wait_list;
+    #ifdef CONFIG_DETECT_HUNG_TASK_BLOCKER
+        unsigned long		last_holder;
+    #endif
+    };
+
+    Görüldüğü gibi bekleme kuyruğu için 2.6'lı çekirdeklerle birlikte manuel bir bağlı liste oluşturulmuştur. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Şimdi bekleme kuyruklarının kullanımına daha ayrıntılı bir örnek verelim. Bu örneğimizde isimli boru mekanizmasını 
+    gerçekleştiren bir aygıt sürücü oluşturacağız. Anımsanacağı gibi UNIX/Linux sistemlerinde isimli borular (named pipes)
+    prosesler arası haberleşmede kullanılan önemli bir mekanizmadır. Önce isimli boruların (named pipes) kullanıcı modundan 
+    kullanılmasını açıklayalım.
+
+    İsimli borular UNIX/Linux sistemlerinde mkfifo isimli POSIX fonksiyonuyla yaratılmaktadır:
+
+    include <sys/stat.h>
+    
+    int mkfifo(const char *pathname, mode_t mode);
+
+    Fonksiyonun birinci parametresi yaratılacak isimli borunun yol ifadesini, ikinci parametresi ise onun erişim haklarını 
+    belirtmektedir. Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri dönmektedir. Ancak 
+    uygulamacılar genellikle isimli boruları bu fonksiyonla değil bu fonksiyonu çağıran "mkfifo" isimli komutla (programla)
+    oluşturmaktadır. Örneğin:
+
+    $ mkfifo mypipe
+    $ ls -l mypipe
+    prw-r--r-- 1 kaan study 0 Mar 29 10:43 mypipe
+
+    İsimli boruların dosya sistemindeki dosya türünün "p" biçiminde olduğuna dikkat ediniz. Burada erişim hakları default 
+    biçimde verilmiştir. Ancak komutta -m seçeneği ile erişim hakları açıkça da belirtilebilir. Örneğin:
+
+    $ mkfifo -m 666 mypipe
+    $ ls -l mypipe
+    prw-rw-rw- 1 kaan study 0 Mar 29 10:45 mypipe
+
+    Tipik olarak isimli borular haberleşecek proseslerden biri tarafından open fonksiyonu read modda (O_RDONLY bayrağıyla) 
+    diğeri tarafından ise write modda (yani O_WRONLY bayrağı ile) açılmaktadır. Okuma amaçlı açan proses boruyu diğer 
+    taraf yazma amaçlı açana kadar open fonksiyonunda bloke olmaktadır. Benzer biçimde yazma amaçlı boruyu açan taraf da 
+    diğer taraf okuma amaçlı boruyu açana kadar bloke olmaktadır. 
+
+    UNIX/Linux sistemlerinde borular tek yönlüdür. Her iki proes de aynı boru üzerinde işlem yapmaktadır. Bu nedenle 
+    boru haberleşmesinde önce hangi tarafın okuma yapacağı hangi tarafın yazma yapacağı belirlenmelidir. Bundan sonra 
+    okuma ve yazma işlemleri read ve write POSIX fonksiyonlarıyla yapılmaktadır. Borular FIFO kuyruk sistemidir. Yani 
+    yazan tarafın yazdıklarını aynı sırada karşı taraf okumaktadır. Boruları kullaşlı kılan en önemli özellik 
+    senkronizasyonun bloke yoluyla otomatik sağlanmasıdır. Boruların belli bir büyüklüğü vardır. Yazna taraf henüz okuyan 
+    taraf okumamaışsa boruyu doldurduğunda write fonksiyonunda bloke olur ve bekler. Okuyan taraf borudan okuma yaptığında 
+    boruda yer açılır. Böylece yazan tarafın blokesi çözülür. Benzer biçimde eğer boru boşsa okuyan taraf bloke olmaktadır. 
+    Boş boruya yazma yapıldığında okuyan tarafından blokesi çözülmektedir. 
+
+    Borulara write fonksiyonu ile yazma yapılırken eğer boruda tüm byte'ların yazılması için gerekli olan boşluk yoksa 
+    write fonksiyonu tüm byte'lar yazılana kadar (yani talep edilen miktarın hepsi yazılana kadar) boruda yer açılmasını 
+    blokede beklemektedir. Yani borulara parçalı yazım yapılmamaktadır. Örneğin boruda 10 byte boş yer bulunuyor olsun. 
+    Biz de boruya 20 byte yazmak isteyelim. İşte bu durumda write fonksiyonu bloke olarak bekler. Yani 10 byte'ı yazıp 
+    geri dönmez. 20 byte'ın hepsi yazılana kadar bekler. Ancak borulardan okuma parçalı biçimde yapılabilmektedir. 
+    Borudan okuyan taraf n byte okumak istediğinde boruda n byte yoksa ama k < n olacak biçimde k byte varsa read 
+    fonksiyonu bu k byte'ı okur ve okuduğu byte sayısı il geri döner. Ancak boruda hiç bilgi yoksa read fonksiyonu 
+    bloke olmaktadır. Örneğin boş bir borudan 100 byte okumak isteyelim. Şimdi biz read içerisinde bloke oluruz. Şimdi 
+    boruya karşı tarafın 10 byte yazdığını düşünelim. İşte read fonksiyonu 100 byte'ın hepsini okumaya çalışmaz okuyabildiği 
+    bu 10 byte'ı okur ve geri döner. 
+
+    Bir boruya iki farklı proses aynı anda anda yazma yapsa bile iç içe geçme oluşmamaktadır. Bunlardan biri önce yazıp 
+    diğeri sonra yazmaktadır. Ancak yazılanlar birbirleriyle karışmamaktadır. Ancak burada bir istisna vardır. Eğer 
+    tek hamlede yazılacak byte sayısı PIPE_BUF sembolik sabitiyle belirtilen değerden büyükse iç içe geçmeme garantisi 
+    verilmemektedir. PIPE_BUF değeri mevcut Linux sistemlerinde 4096'dır. Mevcut çekirdeklerde bir boru için ayrılan 
+    alan 64K'dır (eskiden 4K idi). Ancak fcntl çağrısı ile bu büyüklük 1.048.576'ya (1 MB) yükseltilebilmektedir. 
+    
+    Boru haberleşmesinde önce kesinlikle yazan tarafın boruyu kapatması gerekir. Yazna taraf boruyu kapattıktan sonra 
+    okuyan taraf önce boruda kalanları okur. Boruda bir şey kalmayınca read fonksiyonu 0 ile geri döner. Bu özel 
+    durum "karşı tarafın boruyu kapattığını ve artık boruda okunacak bir şey de kalmadığını" belirtmektedir. İşte read 
+    fonksiyonu 0 ile geri döndüğünde okuyan taraf da işlemini sonlandırır ve boruyu kapatır. Eğer yanlışlıkla okuyan 
+    taraf boruyu önce kapatırsa yazan tarafta ilk write işleminde SIGPIPE sinyali oluşmaktadır. Bu sinyal ele alınmazsa
+    proses sonlandırılmaktadır. 
+
+    Birden fazla proses aynı boruya yazma yapabilir ve aynı borudan okuma yapabilir. Ancak uygulamada bu durumla seyrek 
+    karşılaşılmaktadır. Boru tabanlı client-server uygulamalarda aynı boruya istek iletmek için birden fazla client programın 
+    yazması durumuyla karşılaşılmaktadır. Ancak aynı borudan birden fazla prosesin okuma yapmasının bir anlamı yoktur. 
+
+    Borular open fonksiyonunda O_NONBLOCK açış bayrağı kullanılarak (örneğin O_READONLY|O_NONBLOCK gibi) blokesiz modda 
+    da kullanılabilmektedir. Ancak bu kullanım çok daha seyrektir. Blokesiz boru işlemlerinin default blokeli işlemlere 
+    göre şu farklılıkları vardır:
+
+    - open fonksiyonda bloke oluşmaz. 
+    - read fonksiyonu boruda hiç byte yoksa bloke olmaz, başarısızlıkla (-1 değeri ile) geri döner. Ancak errno değişkeni
+    EAGAIN özel değeri ile set edilmektedir. 
+    - write fonksiyonu boru doluysa bloke olmaz, bu durumda write fonksiyonu da başarısızlıkla (-1 değeri ile) geri döner 
+    ve errno EAGAIN özel değeri ile set edilir. 
+
+    Aşağıda kullanıcı modunda isimli boru haberleşmesine yönelik basit bir örnek verilmiştir. İki ayrı terminal açarak 
+    programları herhangi bir sırada çalıştırabilirsiniz. Örneğin terminallerin birinde okuyan programı çalıştırabilirsiniz:
+
+    # ./pipe-read
+
+    Diğerinde ise yazan programı çalıştırabilirsiniz:
+
+    # ./pipe-write
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* pipe-read.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    int val;
+    ssize_t result;
+
+    if ((fd = open("mypipe", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    for (;;) {
+        if ((result = read(fd, &val, sizeof(int)) == )
+            exit_sys("read");
+        if (result == 0)
+            break;
+        printf("%d\n", val);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/* pipe-write.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+
+    if ((fd = open("mypipe", O_WRONLY)) == -1)
+        exit_sys("open");
+
+    for (int i = 0; i < 1000000; ++i)
+        if (write(fd, &i, sizeof(int)) == -1)
+            exit_sys("wwite");
+
+    close(fd);
+    
+    return 0;
+
+}
+
+void exit_sys(const char *msg)
+{
+	perror(msg);
+
+	exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi yukarıdaki boru mekanizmasını yaklaşık oluşturan çekirdek aygıt sürücüsünün yazımına geçelim. Bu aygıt 
+    sürücüsünde okuyan taraf ve yazan taraf için (bunlar birden fazla olabilir) ayrı bekleme kuyrukları olması gerekir:
+
+    static wait_queue_head_t g_wqread;
+    static wait_queue_head_t g_wqwrite;
+
+    Ayrıca open fonksiyonunda bloke oluşturmak için de iki bekleme kuyruğu da bulundurulmalıdır:
+
+    static wait_queue_head_t g_wqwriteopen;
+    static wait_queue_head_t g_wqreadopen;
+
+    Boru işlemlerinde senkronizasyon sağlamak için de ayrı bir semaphore (mutex de olabilirdi) bulundurulmuştur:
+
+    static DEFINE_SEMAPHORE(g_sem, 1);
+
+    Aygıt sürücü yüklendiğinde bu bekleme kuyrukları yaratılmıştır:
+
+    static int __init pipe_driver_init(void)
+    {
+        int result;
+
+        printk(KERN_INFO "pipe-driver init...\n");
+
+        if ((result = alloc_chrdev_region(&g_dev, 0, 1, "pipe-driver")) < 0) {
+            printk(KERN_ERR "cannot register device!...\n");
+            return result;
+        }
+
+        cdev_init(&g_cdev, &g_fops);
+        if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+            unregister_chrdev_region(g_dev, 1);
+            printk(KERN_ERR "cannot add device!...\n");
+            return result;
+        }
+
+        init_waitqueue_head(&g_wqreadopen);
+        init_waitqueue_head(&g_wqwriteopen);
+        init_waitqueue_head(&g_wqread);
+        init_waitqueue_head(&g_wqwrite);
+
+        return 0;
+    }
+
+    Boruyu kullanan prosesler open fonksiyonunu çağırdığında aygıt sürücüdeki open fonksiyonu çalıştırılacaktır. İşte
+    maygıt sürücüdeki open fonksiyonu içerisinde "karşı taraf boruyu uygun bir biçimde açmış mı" kontrolü yapılıp 
+    duruma göre bloke uygulanmıştır:
+
+    static int pipe_driver_open(struct inode *inodep, struct file *filp)
+    {
+        int accmode = filp->f_flags & O_ACCMODE;
+
+        if (down_interruptible(&g_sem) != 0)
+            return -ERESTARTSYS;
+
+        if (accmode == O_RDONLY) {
+            ++g_nreaders;
+            wake_up_interruptible(&g_wqwriteopen);
+            while (g_nwriters == 0) {
+                up(&g_sem);
+                if (filp->f_flags & O_NONBLOCK)
+                    return 0;
+                if (wait_event_interruptible(g_wqreadopen, g_nwriters > 0))
+                    return -ERESTARTSYS;
+                if (down_interruptible(&g_sem))
+                    return -ERESTARTSYS;
+            }
+        }
+        else if (accmode == O_WRONLY) {
+            ++g_nwriters;
+            wake_up_interruptible(&g_wqreadopen);
+            while (g_nreaders == 0) {
+                if (filp->f_flags & O_NONBLOCK) {
+                    --g_nwriters;
+                    up(&g_sem);
+                    return -ENXIO;
+                }
+                up(&g_sem);
+                if (wait_event_interruptible(g_wqwriteopen, g_nreaders > 0))
+                    return -ERESTARTSYS;
+                if (down_interruptible(&g_sem))
+                    return -ERESTARTSYS;
+            }
+        }
+        else if (accmode == O_RDWR) {
+            ++g_nreaders;
+            ++g_nwriters;
+            wake_up_interruptible(&g_wqreadopen);
+            wake_up_interruptible(&g_wqwriteopen);
+        }
+        up(&g_sem);
+
+        return 0;
+    }
+
+    Burada zaten kodun en dıştan semaphore ile kilitlendiğini görüyorsunuz. Bu nedenle semapore içerisinde ayrıca 
+    atomik işlemlerin yapılmasına gerek kalmamıştır. open fonksiyonunda ilk olarak kullanıcı modundaki prosesin open 
+    aygıt dosyasını okuma modunda mı yazma modunda mı açtığına bakılmıştır. Eğer proses aygıt dosyasını okuma modunda 
+    açmışsa yazma modunda açanların uyandırılması gerekmeketdir. Ayrıca okuma modunda ve yazma modunda açanların 
+    sayısı da iki global değişkende tutulmuştur:
+    
+    if (accmode == O_RDONLY) {
+        ++g_nreaders;
+        wake_up_interruptible(&g_wqwriteopen);
+        while (g_nwriters == 0) {
+            up(&g_sem);
+            if (filp->f_flags & O_NONBLOCK)
+                return 0;
+            if (wait_event_interruptible(g_wqreadopen, g_nwriters > 0))
+                return -ERESTARTSYS;
+            if (down_interruptible(&g_sem))
+                return -ERESTARTSYS;
+        }
+    }
+
+    Burada eğer aygıt dosyası O_NONBLOCK bayrağıyla açılmışsa open hemen başarıyla sonlandırılmıştır. Aygıt 
+    dosyası O_NONBLOCK ile açılmamışsa ve yazan taraf da yoksa bu durumda thread g_wqreadopen bekleme kuyruğuna 
+    kendini yazarak bloke oluştur. Bunu oradan kurtaracak olan yazan taraftır. Koddaki semaphore'un kullanımına dikkat 
+    ediniz. Thread uykuya dalmadan önce semaphore sayacını artırarak semaphore'u serbest bırakmıştır. Uykudan uyandığında 
+    yeniden semaphore kilidini almıştır. Koddaki while döngüsü size biraz tuhaf gelebilir. Bu while döngüsünün amacı şudur:
+    Okuyan taraf eğer aygıt dpsyasını yazma modunda açmış olan bir proses yoksa bloke olmaktadır, ancak bir proses 
+    dosyayı write modd açıp hemen kapatırsa ve buradaki zamanlama kötü bir tesadüfe denk gelirse eğer while döngüsü 
+    kulalnılmadığında uyandırılmş olan thread yoluna devam edecektir.    
+    
+    Aygıt sürücünün open fonksiyonunda eğer aygıt dosyası write modda açılmışsa aşağıdaki kod parçası çalıştırılmaktadır:
+
+    else if (accmode == O_WRONLY) {
+        ++g_nwriters;
+        wake_up_interruptible(&g_wqreadopen);
+        while (g_nreaders == 0) {
+            if (filp->f_flags & O_NONBLOCK) {
+                --g_nwriters;
+                up(&g_sem);
+                return -ENXIO;
+            }
+            up(&g_sem);
+            if (wait_event_interruptible(g_wqwriteopen, g_nreaders > 0))
+                return -ERESTARTSYS;
+            if (down_interruptible(&g_sem))
+                return -ERESTARTSYS;
+        }
+    }
+
+    Burada da önce aygıt dosyasını modunda açıp da bloke olmuş olan thread'lerin blokesi çözülmüştür. Daha sonra 
+    benzer mantık uygulanmıştır. Boruların read/write modda açılmasını POSIX standartları "işletim sisteminin isteğine"
+    bırakmaktadır. Linux'ta isimli borular O_RDWR modunda açılabilmektedir. İşte agıt sürücünün open fonksiyonunda 
+    bu kontrol de yapılmıştır:
+
+    else if (accmode == O_RDWR) {
+        ++g_nreaders;
+        ++g_nwriters;
+        wake_up_interruptible(&g_wqreadopen);
+        wake_up_interruptible(&g_wqwriteopen);
+    }
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 									

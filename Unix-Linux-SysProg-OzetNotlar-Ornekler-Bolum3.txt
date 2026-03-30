@@ -4016,10 +4016,10 @@ void exit_sys(const char *msg)
 
     #include <linux/semaphore.h>
 
-    static DEFINE_SEMAPHORE(g_sem);
+    static DEFINE_SEMAPHORE(g_sem, 1);
 
     Bu biçimde yaratılan semaphore nesnesinin başlangıçta sayaç değeri 1'dir. Yeni çekirdeklerde (v6.4-rc1 ve sonrası) bu makro 
-    iki parametreli olarak da kullanılabilmektedir:
+    iki parametreli olarak lullanılamktadır:
 
     static DEFINE_SEMAPHORE(g_sem, 1);
 
@@ -4118,7 +4118,7 @@ static size_t g_head;
 static size_t g_tail;
 static size_t g_count;
 
-static DEFINE_SEMAPHORE(g_sem);
+static DEFINE_SEMAPHORE(g_sem, 1);
 
 static int __init generic_init(void)
 {
@@ -4425,13 +4425,14 @@ void exit_sys(const char *msg)
 
     spin_lock fonksiyonu klasik spin yapan fonksiyondur. Bu fonksiyon thread'ler arası geçişi (preemption mekanizmasını) 
     kapatır ancak kesmeleri kapatmamaktadır. Preemption işleminin kapatılması IRQ'ların (yani donnaım kesmelerinin) kapatıldığı 
-    anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemci ya da çekirdekteki IRQ'ları da (yani 
-    donanım kesmelerini de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana kadar 
-    donanım kesmeleri oluşmayacaktır. spin_lock_irqsave fonksiyonu kritik koda girerken donanım kesmelerini kapatmakla 
-    birlikte CPU'nun kesme öncesindeki bayrak yazmacını da saklamaktadır. Aslında bu fonksiyonların bazıları makro olarak 
-    yazılmıştır. Örneğin spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci parametresine nesne adresini 
-    geçmemiş olsak da bu bir makro olduğu için aslında ikinci parametrede verdiğimiz nesnenin içerisine IRQ durumları 
-    yazılmaktadır. spin_lock_bh fonksiyonu ise yalnızca yazılım kesmelerini kapatmaktadır.
+    anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemcideki IRQ'ları da (yani donanım kesmelerini 
+    de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana kadar donanım kesmeleri o işlemcide 
+    oluşmayacaktır. Ancak diğer işlemcilerde aynı IRQ oluşabilir ve kesme kodu aynı kilidi almaya çalışırsa spin işlemi yapılabilir. 
+    spin_lock_irqsave fonksiyonu ise hem  o anda çılışılan işlemcideki kesmeleri kapatır hem de işlemcinin bayrak yazmacını da 
+    saklamaktadır. Aslında bu fonksiyonların bazıları makro olarak yazılmıştır. Örneğin spin_lock_irqsave aslında bir makrodur. 
+    Biz bu fonksiyonun ikinci parametresine nesne adresini geçmemiş olsak da bu bir makro olduğu için aslında ikinci parametrede 
+    verdiğimiz nesnenin içerisine IRQ durumları yazılmaktadır. spin_lock_bh fonksiyonu ise yalnızca yazılım kesmelerini 
+    kapatmaktadır.
 
     3) Spinlock kilidini bırakmak için spin_unlock fonksiyonları kullanılmaktadır:
 
@@ -5124,27 +5125,27 @@ void exit_sys(const char *msg)
 
     Eski çekirdeklerde (yenilerinde de önemli değişiklik yoktur) wait_event makrosu şöyle yazılmıştır:
 
-   #define __wait_event(wq, condition)                 \
-    do {                                            \
-        wait_queue_t __wait;                        \
-        init_waitqueue_entry(&__wait, current);        \
-                                                    \
-        add_wait_queue(&wq, &__wait);                \
-        for (;;) {                                    \
-            set_current_state(TASK_UNINTERRUPTIBLE);        \
-            if (condition)                            \
-                break;                                \
-            schedule();                                \
-        }                                            \
-        current->state = TASK_RUNNING;                \
-        remove_wait_queue(&wq, &__wait);            \
+   #define __wait_event(wq, condition)                  \
+    do {                                                \
+        wait_queue_t __wait;                            \
+        init_waitqueue_entry(&__wait, current);         \
+                                                        \
+        add_wait_queue(&wq, &__wait);                   \
+        for (;;) {                                      \
+            set_current_state(TASK_UNINTERRUPTIBLE);    \
+            if (condition)                              \
+                break;                                  \
+            schedule();                                 \
+        }                                               \
+        current->state = TASK_RUNNING;                  \
+        remove_wait_queue(&wq, &__wait);                \
     } while (0)
 
-    #define wait_event(wq, condition)                 \
-    do {                                            \
-        if (condition)                                 \
-            break;                                    \
-        __wait_event(wq, condition);                \
+    #define wait_event(wq, condition)                   \
+    do {                                                \
+        if (condition)                                  \
+            break;                                      \
+        __wait_event(wq, condition);                    \
     } while (0)
 
     Burada uyandırılan thread aslında schedule fonksiyonunun içerisinde çalışmaya devam edecekir. Koddan da gördüğünüz gibi akış
@@ -5768,7 +5769,7 @@ void exit_sys(const char *msg)
     ve bekleme kuyruğunu aşağıdaki gibi yaratabiliriz:
 
     static wait_queue_head_t g_wq;
-    DEFINE_SEMAPHORE(g_sem);
+    DEFINE_SEMAPHORE(g_sem, 1);
 
     Okuyan taraf önce semaphore kilidini eline almalı ancak eğer uykuya dalacaksa onu serbest bırakıp uykuya dalmalıdır. Kuyruk 
     üzerinde aynı anda işlemler yapılabileceği için tüm işlemlerin kritik kod içerisinde ele alınması uygun olur. O halde read 
@@ -5878,7 +5879,7 @@ static wait_queue_head_t g_wqwrite;
 static int n_readers;
 static int n_writers;
 
-static DEFINE_SEMAPHORE(g_sem);
+static DEFINE_SEMAPHORE(g_sem, 1);
 
 static int __init pipe_driver_init(void)
 {
@@ -6358,7 +6359,7 @@ static wait_queue_head_t g_wqwrite;
 static int g_nreaders;
 static int g_nwriters;
 
-static DEFINE_SEMAPHORE(g_sem);
+static DEFINE_SEMAPHORE(g_sem, 1);
 
 static int __init pipe_driver_init(void)
 {
@@ -6860,34 +6861,34 @@ void exit_sys(const char *msg)
     Burada gcc'nin bileşik ifade de denilen bir eklentisi (extension) kullanılmıştır. Bu makro ayrıntılar göz ardı edilirse 
     __wait_event_interruptible makrosunu çağırmaktadır. Bu makro şöyle tanımlanmıştır:
 
-    #define __wait_event_interruptible(wq_head, condition)                \
+    #define __wait_event_interruptible(wq_head, condition)                 \
     ___wait_event(wq_head, condition, TASK_INTERRUPTIBLE, 0, 0,            \
               schedule())
 
     Burada ___wait_event makrosunun interruptible olan ve olmayan kodların ortak makrosu olduğu görülmektedir. Bu 
     makro da şöyle tanımlanmıştır:
 
-    #define ___wait_event(wq_head, condition, state, exclusive, ret, cmd)        \
-    ({                                                                            \
-        __label__ __out;                                                        \
-        struct wait_queue_entry __wq_entry;                                        \
-        long __ret = ret;    /* explicit shadow */                                \
-                                                                                \
-        init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);        \
-        for (;;) {                                                                \
-            long __int = prepare_to_wait_event(&wq_head, &__wq_entry, state);   \
-                                                                                \
-            if (condition)                                                        \
-                break;                                                            \
-                                                                                \
-            if (___wait_is_interruptible(state) && __int) {                        \
-                __ret = __int;                                                    \
-                goto __out;                                                        \
-            }                                                                    \
-                                                                                \
-            cmd;                                                                \
-        }                                                                        \
-        finish_wait(&wq_head, &__wq_entry);                                        \
+    #define ___wait_event(wq_head, condition, state, exclusive, ret, cmd)           \
+    ({                                                                              \
+        __label__ __out;                                                            \
+        struct wait_queue_entry __wq_entry;                                         \
+        long __ret = ret;    /* explicit shadow */                                  \
+                                                                                    \
+        init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);            \
+        for (;;) {                                                                  \
+            long __int = prepare_to_wait_event(&wq_head, &__wq_entry, state);       \
+                                                                                    \
+            if (condition)                                                          \
+                break;                                                              \
+                                                                                    \
+            if (___wait_is_interruptible(state) && __int) {                         \
+                __ret = __int;                                                      \
+                goto __out;                                                         \
+            }                                                                       \
+                                                                                    \
+            cmd;                                                                    \
+        }                                                                           \
+        finish_wait(&wq_head, &__wq_entry);                                         \
     __out:    __ret;                                                                \
     })
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -7021,7 +7022,7 @@ static wait_queue_head_t g_wqwrite;
 static int g_nreaders;
 static int g_nwriters;
 
-static DEFINE_SEMAPHORE(g_sem);
+static DEFINE_SEMAPHORE(g_sem, 1);
 
 static int __init pipe_driver_init(void)
 {
@@ -7593,7 +7594,7 @@ static wait_queue_head_t g_wqread;
 static wait_queue_head_t g_wqwrite;
 static int g_nreaders;
 static int g_nwriters;
-static DEFINE_SEMAPHORE(g_sem);
+static DEFINE_SEMAPHORE(g_sem, 1);
 static struct PIPE *g_pipe;
 
 static int __init pipe_driver_init(void)
@@ -8107,7 +8108,7 @@ static wait_queue_head_t g_wqread;
 static wait_queue_head_t g_wqwrite;
 static int g_nreaders;
 static int g_nwriters;
-static DEFINE_SEMAPHORE(g_sem);
+static DEFINE_SEMAPHORE(g_sem, 1);
 static struct kmem_cache *g_pipe_cachep;
 static struct PIPE *g_pipe;
 
@@ -14128,7 +14129,7 @@ clean:
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   Pek çok CPU ailesinde toplam oluşturulabilecek donanım kesmelerinin maksimum bir sayısı vardır. Örneğin Intel mimarisinde 
+    Pek çok CPU ailesinde toplam oluşturulabilecek donanım kesmelerinin maksimum bir sayısı vardır. Örneğin Intel mimarisinde 
     toplam kesme sayısı 256'yı geçememektedir. Yani bu mimaride en fazla 256 farklı kesme oluşturulabilmektedir. Bu mimaride 
     her kesmenin bir numarası vardır. (PC mimarisindeki IRQ numarası ile kesme numarasının bir ilgisi yoktur. IRQ numarası 
     kesmenin kesme denetleyicisinin hangi ucu uyarılarak oluşturulduğunu belirtmektedir. Biz örneğin PIC ya da IOAPIC'i 
