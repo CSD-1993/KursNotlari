@@ -15,7 +15,7 @@
                      (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                          (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                      Son Güncelleme: 27/03/2026 - Cuma
+                                      Son Güncelleme: 03/04/2026 - Cuma
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -3485,13 +3485,13 @@ void exit_sys(const char *msg)
 	Şimdi de çekirdekteki RCU (read-copy-update) mekanizması üzerinde duralım. Biz daha önce bu mekanizmanın farkına 
     varmıştık. Burada bu mekanizmann işleyişini ele alacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
-BURADA KALDIM>
+
 /*----------------------------------------------------------------------------------------------------------------------
-	RCU "kilitsiz (lock-free)" veri yapılarının gerçekleştirilmesi için kullanılan bir tekniktir. Bir veri yapısından 
-    okuma yapan ve na yazma yapan birtakım thread'lerin bulunduğunu düşünelim. Biz daha önce bu tür durumlarda 
-    "okuma-yazma kilitlerinin (readers-writer lock)" kullanıldığını görmüştük. Anımsayacağınız gibi okuma-yazma kilitleri 
-    Linux çekirdeklerinde spinlock kullanıyordu. Paylaşılan alana okuma yazma kilidyle erişen aşağıdaki örneğe dikkat 
-    ediniz:
+	RCU (Read-Copy-Update) kilitsiz (lock-free)"veri yapılarının gerçekleştirilmesi için kullanılan bir tekniktir. Bir 
+    veri yapısından okuma yapan ve ona yazma yapan birtakım thread'lerin bulunduğunu düşünelim. Biz daha önce bu tür 
+    durumlarda "okuma-yazma kilitlerinin (readers-writer lock)" kullanıldığını görmüştük. Anımsayacağınız gibi okuma-yazma 
+    kilitleri Linux çekirdeklerinde spinlock mekanizmasını kullanıyordu. Paylaşılan alana okuma yazma kilidyle erişen 
+    aşağıdaki örneğe dikkat ediniz:
 
     read()
     {
@@ -3511,33 +3511,38 @@ BURADA KALDIM>
         write_unlock(...);
     }
 
-    Buurada birden fazla okuyan thread beklemeden işlemlerini yapmaktadır. Ancak işin içerisine bir yazan thread 
-    girdiği zaman okuna thread'ler de yazan thread'lerde bekleme yapmaktadır. Okuma yazma kilitlerinin performans 
-    üzerinde etkisini şöyle özetleyebiliriz:
+    Burada birden fazla okuyan thread beklemeden işlemlerini yapmaktadır. Ancak işin içerisine bir yazan thread 
+    girdiği zaman okuma yapan thread'ler de yazma thread'ler de yazan thread'i bekleme yapmaktadır. Okuma yazma 
+    kilitlerinin performans üzerindeki etkisi için şunları söyleyebiliriz:
 
-    - Eğer çok sayıda yazan varsa beklemeler uzar
+    - Eğer çok sayıda yazan varsa beklemeler uzar.
     - Okuyan sayısı aşırı fazla ise, yazan sayısı az ise kilit hep okuyan thread'ler tarafından alındığı için yazan 
     thread'lerin yazması gecikebilmektedir. 
-    - Çok sayıda okuma durumunda yine bir kilit alındığı için küçük bir perfomans kaybı oluşmaktadır. 
+    - Çok sayıda okuma yapanın bulnması durumunda bloke olunmasa da yine kilit işlemi yapıldığı çin küçük bir perfomans 
+    kayıpları oluşabilmektedir. 
 
-    İşte RCU mekanizması okuma yazma kilitlerinin yukarıda belirttiğimiz sournlarını ortadan kaldırmak için düşünülmüştür.  
-    RUC mekanizması Linux çekirdeklerine 2.6 sürümü ile karalı biçimde eklenmiştir. Daha sonraki çekirdeklerde bu 
-    mekanizma geliştirilmiş ve yaygınlaştırılmıştır. 
+    İşte RCU mekanizması okuma-yazma kilitlerinin yukarıda belirttiğimiz sournlarını ortadan kaldırmak için düşünülmüştür.  
+    RCU mekanizması Linux çekirdeklerinde 2.6 sürümü ile stabil bir biçime getirilmiştir. Daha sonraki çekirdeklerde bu 
+    mekanizma ortaya atılmış ve yavaş yavaş çekirdeğe sokulmuştu.
+
+    Biz aşağıdaki paragraflarda thread terimi terine akış terimini kullanacağız. Çünkü RCU mekanizaması thread'lerin 
+    dışında örneğin kesme kodları tarafından da kullanılabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	RCU mekanizmasının dayandığı fikir basittir: Okuma yapan thread'ler hiç kilit almadan doğrudan okuma işlemini yaparlar. 
-    Ancak yazma yapan thread'ler paylaşılan veri yapısının bir kopyasını çıkartarak işlemleri onun üzerinde yaparlar. 
-    Sonra kopyayı asıl veri yapısı haline getirip onun kullanılmasını sağlarlar. Bu mekanizmada paylaşılan veri yapısı 
-    bir gösterici ile gösterilmektedir:
+	RCU mekanizmasının dayandığı fikir basittir: Okuma yapan akışlar hiç kilit almadan doğrudan okuma işlemini yaparlar. 
+    Ancak yazma yapan akışlar paylaşılan veri yapısının bir kopyasını çıkartarak işlemleri onun üzerinde yaparlar. 
+    Sonra oluşturdukları bu kopyayı asıl veri yapısı haline getirip sonraki işlemlerde onun kullanılmasını sağlarlar. 
+    
+    RCU mekanizmasında paylaşılan nesne yani veri yapısı bir gösterici ile gösterilmektedir:
 
       ptr
     ┌─────┐        ┌──────────────┐
     │  ●──┼───────►│  veri yapısı │
     └─────┘        └──────────────┘			
 
-    Okuyan thread'ler ptr göstericisinin gösterdiği yerdeki paylaşılan alana hiç kilit almadan erişirler. Ancak yazma 
-    yapan thread'ler bu veri yapısının bir kopyasını oluşturup yazmayı bu kopya üzerinde yapmaktadır:
+    Okuma yapan akıoşlar ptr göstericisinin gösterdiği yerdeki paylaşılan alana hiç kilit almadan erişirler. Ancak yazma 
+    yapan akışlar bu veri yapısının bir kopyasını oluşturup yazmayı bu kopya üzerinde yaparlar:
 
     ┌──────┐       ┌────────────────────────┐
     │  ptr │──────►│      veri yapısı       │
@@ -3549,8 +3554,8 @@ BURADA KALDIM>
                    │ veri yapısının kopyası │
                    └────────────────────────┘
 
-    Yazan thread'ler kopya üzerinde yazma işlemini yaptıktan sonra artık ptr göstericisinin değiştirilmiş veri yapısını
-    göstermesini sağlamalıdır:
+    Yazma yapan akışlar yazma işlemini kopya üzerinde yaptıktan sonra ptr göstericisini bu kopyayı gösterecek biçimde 
+    güncellerler:
 
     ┌──────┐        ┌───────────────────────┐
     │  ptr │        │   eski veri yapısı    │
@@ -3561,29 +3566,30 @@ BURADA KALDIM>
         └─────────► │ veri yapısının kopyası │
                     └────────────────────────┘
 
-    Burada önemli bir sorun eski veri yapısının ne zaman ve kim tarafından yok edileceğidir. En son okuyan tarafın 
-    işlemini bitrdiği zaman eski veri yapısını silmesi ilk akla gelen çözümdür. Ancak bu yöntemin işletilmesi gemnellikle
-    mümkn olmaz. 
+    Burada önemli bir sorun eski veri yapısının ne zaman, nasıl ve kim tarafından yok edileceğidir. İlk akla gelen 
+    yöntem en son okuma yapan akışın bu veri yapısını silmesisidir. Ancak bu yöntemin genel bir biçimde işletilmesi 
+    mümkün olamamaktadır.
           
     RCU mekanizmasını şuna benzetebiliriz: Önümüzde bir beyaz tahta var. Kişiler bu tahtadaki yazıyı okuyorlar. Bu 
     beyaz tahtada değişiklik yapacak kişi okuyanların dikkati dağılmasın diye beyaz tahtanın üzerindeki yazıların bir 
-    kopyasını arkadaki başka bir beyaz tahtada oluşturuyor. Sonra tahtayı görünür hale getiriyor. Ancak eski beyaz 
-    tahtadan okuyanlar okumayı bitirene kadar eski beyaz tahtayı da muhafaza ediyor. Sonra eski beyaz tahtayı çekiyor. 
+    kopyasını arkadaki başka bir beyaz tahtada oluşturuyor ve değişiklikleri bu arkadaki beyaz tahtada yapıyor. Sonra 
+    da tahtaları değiştirerek kendi tahtasının görünür hale gelmesini sağlıyor. Ancak eski beyaz tahtadan okuyanlar 
+    okumayı bitirene kadar eski tahtayı kullanmaya devam ediyor. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-		                                60. Ders 28/02/2026 - Cumartesi							
+		                                    60. Ders 28/02/2026 - Cumartesi							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     RCU mekanizmasının çekirdekte işletilebilmesi için bazı yardımcı fonksiyonlar oluşturulmuştur. RCU korumalı veri 
-    yapısından okuma yapacak akışlar bu işlemi thread'ler arası geçişi kapatıp (yani preemption'ı disable edip) yapmaktadır. 
-    İşlem bitince de thread'ler arası geçiş açılmaktadır. Bu işlemler rcu_read_lock ve rcu_read_unlock fonksiyonlarıyla
-    yapılmaktadır. Örneğin:
+    yapısından okuma yapacak akışlar bu işlemi thread'ler arası geçişi kapatıp (yani preemption'ı disable edip) 
+    yaparlar, işlem bitince de thread'ler arası geçişi açarlar. Thread'ler arası geçişin açılıp kapatılması rcu_read_lock 
+    ve rcu_read_unlock fonksiyonlarıyla yapılmaktadır. Örneğin:
 
-    rcu_read_lock();
+    rcu_read_lock()
     ...
-    ...     <OKUMA EYLEMİ>
+    ...     <OKUMA İŞLEMİ>
     ...
     rcu_read_unlock();
 
@@ -3594,14 +3600,41 @@ BURADA KALDIM>
     void rcu_read_lock(void);
     void rcu_read_unlock(void);
 
-    Buradaki rcu_read_lock aslında preeemt_disable ve preempt_enable işlemlerini yapmaktadır. 
+    Buradaki rcu_read_lock ve rcu_read_unlock fonksiyonları aslında preeemt_disable ve preempt_enable işlemlerini 
+    yapmaktadır. rcu_read_lock fonksiyonu güncel çekirdeklerde "include/linux/rcupdate.h" içerisinde aşağıdaki gibi 
+    tanımlanmıştır:
 
-    Paylaşılan veri yapısını gösteren gösterici içerisindeki adresi elde etmek için rcu_dereference fonksiyonu 
-    kullanılmaktadır. Bu fonksiyon "include/linux/rcupdate.h" dosyası içerisinde bir makro biçiminde yazılmıştır:
+    static __always_inline void rcu_read_lock(void)
+    {
+        __rcu_read_lock();
+        __acquire(RCU);
+        rcu_lock_acquire(&rcu_lock_map);
+        RCU_LOCKDEP_WARN(!rcu_is_watching(),
+                "rcu_read_lock() used illegally while idle");
+    }
+
+    Buradaki __rcu_read_lock fonksiyonu dışındaki çağrılar debug amaçlıdır, konfigürasyon parametrelerine bağlı olarak 
+    zaten koda yansıtılmayabilmektedir. __rcu_read_lock fonksiyonu da şöyle tanımlanmıştır:
+
+    static inline void __rcu_read_lock(void)
+    {
+        preempt_disable();
+    }
+
+    rcu_read_unlock fonksiyonu ise aynı dosyada şöyle tanımlanmıştır:
+
+    static inline void __rcu_read_lock(void)
+    {
+        preempt_disable();
+    }
+
+    Çekirdeğin RCU mekanizmasında paylaşılan veri yapısını gösteren gösterici içerisindeki adresi elde etmek için 
+    rcu_dereference fonksiyonu kullanılmaktadır. Bu fonksiyon "include/linux/rcupdate.h" dosyası içerisinde bir makro 
+    biçiminde yazılmıştır:
 
     #define rcu_dereference(p) rcu_dereference_check(p, 0)
 
-    Bu maronun akışı çağrı zinciri şöyledir:
+    Bu makronun çağrı zinciri şöyledir:
 
     #define rcu_dereference_check(p, c)                                 \
             __rcu_dereference_check((p), __UNIQUE_ID(rcu),              \
@@ -3609,7 +3642,6 @@ BURADA KALDIM>
         
     #define __rcu_dereference_check(p, local, c, space)                 \
     ({                                                                  \
-        /* Compiler derleyici uyarısı için type check */                \
         typeof(**(p)) *local = (typeof(**(p)) *__force)(p);             \
         RCU_LOCKDEP_WARN(!(c), "suspicious rcu_dereference_check()");   \
         rcu_dereference_raw(local);                                     \
@@ -3618,13 +3650,15 @@ BURADA KALDIM>
     #define rcu_dereference_raw(p)      \
         READ_ONCE(p)
 
-    Burada neden bu kadar çok kod vardır? Aslında buradaki kodlar bazı kontrolleri yapmaktadır. Bu kontroller çekirdek 
-    konfigürasyon parametreleriyle etkin hale egtirilmektedir. Bizim kullandığımız dağıtımların çekirdekleri derlenirken 
-    bu konfigürasyon parametreleri zaten kapatılmaktadır. Böylece aslında sonuçta yapılan asıl işlem READ_ONCE(p)
-    ile göstericinin içerisindeki adresin volatile erişimle alınmasıdır. 
+    Burada neden bu kadar çok kod vardır? Aslında buradaki kodlar debug amaçlı bazı kontrolleri yapmaktadır. Bu kontroller 
+    çekirdek konfigürasyon parametreleriyle etkin hale getirilmektedir. Bizim kullandığımız dağıtımların çekirdekleri 
+    derlenirken bu konfigürasyon parametreleri zaten kapatılmış durumdadır. Böylece aslında bu kod READ_ONCE(p) ile 
+    göstericinin içerisindeki adresi volatile erişimle elde etmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
 
-    Yazan akış yazma işlemini bitirdiği zaman göstericiyi rcu_assign_pointer fonksiyonu ile güncellemektedir. Bu 
-    fonksiyon da aslında "include/linux/rcupdate.h" dosyası içerisinde bir makro biçiminde yazılmıştır:
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek RCU mekanizmasında yazan akış yazma işlemini bitirdiği zaman göstericiyi rcu_assign_pointer fonksiyonu ile 
+    güncellemektedir. Bu fonksiyon da aslında "include/linux/rcupdate.h" dosyası içerisinde bir makro biçiminde yazılmıştır:
 
     #define rcu_assign_pointer(p, v)					                        \
     do {									                                    \
@@ -3637,38 +3671,47 @@ BURADA KALDIM>
             smp_store_release(&p, RCU_INITIALIZER((typeof(p))_r_a_p__v));       \
     } while (0)
 
-    Bu makro karışık olsa da özünde v değerini p göstericisine atomikbir biçimde atamaktadır. smp_store_release 
-    makrosunu görmüştük. Bu makro tek yönlü bariyer oluşturmaktaydı. Buradaki __builtin_constant_p fonksiyonu gcc
-    ve clang derleyicilerinin built-in bir fonksiyonudur. Makro parametresi olan v'nin bir sabit oluğp olmadığına 
-    bakmaktadır. Eğer v değeri NULL sabiti ise atama işlemi WRITE_ONCE makrosuyla yapılmıştır. rcu_check_sparse
-    fonksiyonu ise gcc ve clang derleyicilerinin __CHECKER__ öncedne tanımlanmış sembolik sabiti 1 ise birtakım 
+    Bu makro biraz karışık olsa da özünde v değerini p göstericisine atomik bir biçimde atamaktadır. smp_store_release 
+    makrosunu görmüştük. Bu makro tek yönlü bariyer oluşturmaktaydı. Buradaki __builtin_constant_p gcc ve clang 
+    derleyicilerinin built-in bir fonksiyonudur. Makro parametresi olan v'nin bir sabit olup olmadığına bakmaktadır.
+    Eğer v değeri NULL adres sabiti ise atama işlemi WRITE_ONCE makrosuyla yapılmıştır. rcu_check_sparse fonksiyonu ise 
+    gcc ve clang derleyicilerinin __CHECKER__ isimli öncedne tanımlanmış (predefined) sembolik sabiti 1 ise birtakım 
     kontrol işlemlerini yapmaktadır. Normal bir çekirdek derlemesinde aslında rcu_check_sparse fonksiyonu da debug 
-    amaçlı oldupu için koddan kaldırılacaktır. 
+    amaçlı olduğu için koddan kaldırılacaktır. 
+----------------------------------------------------------------------------------------------------------------------*/
 
-    RCU mekanizmasında yazan taraf (yani "update" işlemini yapan taraf) göstericinin gösterdiği yerdeki veri yapısının 
-    kopyasını çıkartır. Sonra da rcu_assign_pointer makrosuyla artık bu yeni kopyayı yayınlar. Okuyan tarafların 
-    işlemlerini bitirmesinden sonra eski veri yapısının silinmesi gerekir. Bu silme işlemi yazan taraf tarafından 
+/*----------------------------------------------------------------------------------------------------------------------
+    RCU mekanizmasında yazan akış (yani "update" işlemini yapan akış) göstericinin gösterdiği yerdeki veri yapısının 
+    kopyasını çıkartır. Sonra da rcu_assign_pointer makrosuyla artık bu yeni kopyayı yayınlar. Tabii okuyan tarafların 
+    işlemlerini bitirmesinden sonra eski veri yapısının da silinmesi gerekir. Bu silme işlemi yazan akış tarafından 
     yapılmaktadır. Eski veri yapısından okuma yapan tüm akışların işlemini bitirmesi için geçen süreye "grace period" 
     denilmektedir. Eski veri yapısının bu "grace period" bittikten sonra silinmesi gerekir. İşte bu işlem iki biçimde 
-    yapılabilmektedir. Birincisi synchronize_rcu fonksiyonu ile ikincisi de call_rcu fonksiyonu ile. synchronize_rcu 
-    fonksiyonu "grace period" bitene kadar yazan thread'i blokede beekletmektedir. Dolayısıyla bu fonksiyon yazan tarafı 
-    beklettiğinden dolayı yazan taraf için bir gecikme oluşturmaktadır. Tabii aslında RCU mekanizmasının asıl önemli 
-    noktası okuyan tarafların bekletilmemesidir. call_rcu fonksiyonu bir callback fonksiyonu parametre olarak alır. 
-    Bu fonksiyon blokeye yol açmaz. grace peridod bittiğinde çekirdek callback fonksiyonu çağırır ve eski veri yapısı 
-    bu callback fonksiyon tarafından silinir. Bu fonksiyonların parametrik yapıları şöyledir:
+    yapılabilmektedir. Birincisi synchronize_rcu fonksiyonu ile ikincisi de call_rcu fonksiyonu ile. 
+    
+    synchronize_rcu fonksiyonu "grace period" bitene kadar yazan akışı blokede bekletmektedir. RCU mekanizmasında yazan 
+    tarafın bloke olması size tuhaf gelebilir. Ancak RCU mekanizmasının ana amacı okuyan akışların bloke edilmeden 
+    çalışmasının sağlanmasıdır. 
+    
+    call_rcu fonksiyonu ise blokeye yol açmaz. Bu fonksiyon bir callback fonksiyonu parametre olarak alır. grace period 
+    bittiğinde çekirdek bu callback fonksiyonu çağırır ve eski veri yapısı bu callback fonksiyon tarafından silinir. 
+    Bu fonksiyonların parametrik yapıları şöyledir:
 
     #include <include/linux/rcupdate.h>
 
     void synchronize_rcu(void);
     void call_rcu(struct rcu_head *head, rcu_callback_t func);
 
+    rcu_callback_t türü de şöyle typedef edilmiştir:
+
+    typedef void (*rcu_callback_t)(struct rcu_head *head);
+
     Her ne kadar call_rcu fonksiyonu yazan tarafı bekletmiyorsa da bazı uygulamalarda yazan tarafın açıkça bekletilmesi 
-    gerekebilmektedir. call_rcu fonksiyonu hakkında daha ayrıntılı açıklamayı izeleyen paragraflarda yapacağız. 
+    de gerekebilmektedir. call_rcu fonksiyonu hakkında daha ayrıntılı açıklamayı izeleyen paragraflarda yapacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi daha fazla ilerlemeden RCU mekanizmasının Linux çekirdeğindeki kullanımı üzerinde birkaç örnek verelim. 
-    Örneğin paylaşılan veri yapısı aşağıdaki gibi olsun:
+    Şimdi daha fazla ilerlemeden RCU mekanizmasının kullanımı kullanımına birkaç örnek verelim. Örneğin paylaşılan veri 
+    yapısı aşağıdaki gibi olsun:
 
     #define MAX_NAME     32
 
@@ -3724,11 +3767,11 @@ BURADA KALDIM>
         rcu_assign_pointer(device_info, di_new);
         spin_unlock(&dev_lock);
 
-        /* Tüm okuyan thrad'ler bitene kadar bekle */
+        /* thread tüm okuyan thread'ler bitene kadar bekletliyor */
 
         synchronize_rcu();
 
-        /* eski veriyi yapısını serbest bırak */
+        /* eski veriyi yapısını serbest bırakılıyor */
 
         kfree(edi_old);
 
@@ -3745,18 +3788,18 @@ BURADA KALDIM>
     di_new->id = new_id;
     strscpy(di_new->name, new_name, MAX_NAME);
 
-    Artık yeni nesnenin adresi global göstericiye yerleştirilebilir:
+    Sonra da yeni nesnenin adresi global göstericiye yerleştirilmiştir:
 
     spin_lock(&dev_lock);
 	di_old = rcu_dereference(device_info);
 	rcu_assign_pointer(device_info, di_new);
 	spin_unlock(&dev_lock);
 
-    Burada bir noktaya dikkat ediniz. Global gösterici okunduktan sonra araya bir yazıcı girip eski alanı serbest bırakırsa 
-    tanımsız davranış oluşur. Bu nedenle eski değerin alınması ve yeni değerin yerleştirilmesi kısmının kritik kod içerisinde 
-    yapılması gerekir. Biz de burada bu işlemi bir spinlock içerisinde yaptık. 
+    Burada bir noktaya dikkat ediniz. Global gösterici okunduktan sonra araya bir yazıcı girip eski alanı serbest 
+    bırakırsa tanımsız davranış oluşur. Bu nedenle eski değerin alınması ve yeni değerin yerleştirilmesi kısmı spinlock 
+    ile kritik kod oluşturularak ele alınmıştır. 
 
-    Sonra da tüm okuyanlar okuma işlemini biterene kadar "grace period" süresinde beklenmiştir:
+    Sonra da tüm okuyanlar okuma işlemini biterene kadar "grace period" süresince beklenmiştir:
 
     synchronize_rcu();
 
@@ -3764,14 +3807,14 @@ BURADA KALDIM>
 
     kfree(eski);
 
-    rcu_dereference işlemi ile rcu_assign_pointer işlemini tek hamlede yapan rcu_replace_pointer isimli bir makro da 
-    bulunmaktadır:
+    Çekirdekte rcu_dereference işlemi ile rcu_assign_pointer işlemini tek hamlede yapan rcu_replace_pointer isimli bir 
+    makro da bulunmaktadır:
 
-    #define rcu_replace_pointer(rcu_ptr, ptr, c)				\
-    ({									\
+    #define rcu_replace_pointer(rcu_ptr, ptr, c)				        \
+    ({									                                \
         typeof(ptr) __tmp = rcu_dereference_protected((rcu_ptr), (c));	\
-        rcu_assign_pointer((rcu_ptr), (ptr));				\
-        __tmp;								\
+        rcu_assign_pointer((rcu_ptr), (ptr));				            \
+        __tmp;								                            \
     })
 
     Yukarıdaki kodda bu makroyu da kullanbilirdik. Örneğin:
@@ -3787,8 +3830,8 @@ BURADA KALDIM>
 
 /*----------------------------------------------------------------------------------------------------------------------
     Yukarıdaki örnek RCU uygulamasını bir aygıt sürücü yoluyla test edebiliriz. Tabii test için kullanıcı modundaki 
-    thread'lerin iç içe girmesi gerekir. Biz testi rastgele beklemelerle yüzeysel olarak yapacağız. Aşağıda bu aygıt 
-    sürücü kodları verilmiştir.
+    thread'lerin iç içe girmesini sağlamalıyız. Biz testi rastgele beklemelerle yüzeysel olarak yapacağız. Aşağıda bu 
+    aygıt sürücü kodları verilmiştir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* rcu-test-driver.h */
@@ -4092,15 +4135,16 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Yazan taraf taraflar synchronize_rcu fonksiyonunu çağırdığında "grace period" kadar bir bekleme zamanı boyunca 
-    bloke oluşabilmektedir. Bunun engellenmesi için call_rcu fonksiyonun kullanılabildiğini belirtmiştik. call_rcu 
-    fonksiyonu bir callback fonksiyonu parametre olarak alır. Çekirdek "grace period" bittiğinde bu callback fonksiyonu 
-    çağırmaktadır. call_rcu fonksiyonunun parametrik yapısını anımsatmak istiyoruz:
+	Yukarıda da belirttiğimiz gibi yazan taraflar synchronize_rcu fonksiyonunu çağırdığında "grace period" kadar bir 
+    bloke oluşabilmektedir. Bunun call_rcu fonksiyonu ile engellenebileceğini belirtmiştik. call_rcu fonksiyonu bir 
+    callback fonksiyonu parametre yoluyla alır ve bunu saklar. Çekirdek de "grace period" bittiğinde bu callback 
+    fonksiyonu çağırır. call_rcu fonksiyonunun parametrik yapısını anımsatmak istiyoruz:
 
     void call_rcu(struct rcu_head *head, rcu_callback_t func);
 
-    Buradaki rcu_head yapısı bu callback mekainizmasının işletilmesi için gerekmektedir. Sistem programcısı paylaşılan
-    nesneye ilişkin yapının içerisine bu elemandan yerleştirmelidir. Örneğin:
+    Buradaki rcu_head yapısı callback mekainizmasının işletilmesinde kullanılmaktadır. Sistem programcısı paylaşılan
+    nesneye ilişkin yapının içerisine rcu_head isimli yapı türünden bir eleman yerleştirmeli ve fonksiyonun birinci 
+    parametresine bu elemanın adresini vermelidir. Örneğin:
 
     struct DEVICE_INFO {
         int id;
@@ -4109,12 +4153,12 @@ void exit_sys(const char *msg)
     };
 
     İşte call_rcu fonksiyonunun birinci parametresine paylaşılan alana ilişkin yapının içerisindeki rcu_head türünden 
-    elemanın adresi geçirilmelidir. Fonksiyonun ikinci parametresindeki rcu_callback_t türü aşağıdaki gibi bir 
-    fonksiyon göstericisidir:
+    elemanın adresi (örneğimizde rcu elemanı), ikinci parametresine de callback fonksiyonun adresi geçirilmelidir. 
+    Fonksiyonun ikinci parametresindeki türün typedef bildirimine dikkat ediniz:
 
     typedef void (*rcu_callback_t)(struct rcu_head *head);
 
-    Bu durmda sistem programcısının call_rcu fonksiyonunun ikinci parametresine geri dönüş değeri void, parametresi 
+    Bu durumda sistem programcısının call_rcu fonksiyonunun ikinci parametresine geri dönüş değeri void, parametresi 
     struct rcu_head * türünden olan bir fonksiyonun adresini geçmesi gerekir. struct rcu_head yapısı çekirdeğin 
     callback mekanizmasının yönetebilmesi için gereken elemanları barındırmaktadır. Bu yapı şöyle bildirilmiştir:
 
@@ -4138,7 +4182,7 @@ void exit_sys(const char *msg)
 		call_rcu(&di_old->rcu, device_rcu_callback);
 	
     call_rcu fonksiyonun ikinci parametresine geçirdiğimiz callback fonksiyonun parametresi aslında kenfdi yapı nesnemizin
-    içerisindeki rcu_head elemaının adresidir. Biz de bu adresten hareketle asıl nesne adresini container_of makrosuyla 
+    içerisindeki rcu_head elemanının adresidir. Biz de bu adresten hareketle asıl nesne adresini container_of makrosuyla 
     elde edebiliriz. Örneğin:
     
     static void device_rcu_callback(struct rcu_head *hrcu)
@@ -4150,12 +4194,12 @@ void exit_sys(const char *msg)
     }
 
     Ayrıca Linux çekirdeğinde call_rcu işlemi ile kfree işlemini birlikte yapan kfree_rcu isimli bir çekirdek makrosu
-    da vardır. kfree bir makrosu iki parametre almaktadır:
+    da bulunmaktadır. kfree bir makrosu iki parametre almaktadır:
 
     kfree_rcu(ptr, rcu_head_fieldname);
 
-    Makronun birinci parametresi serbest bırakılacak nesnenin adresini, ikinci parametresi de nesneye ilişkin 
-    yapıdaki rcu_head elemanın ismini almaktadır. Örneğin:
+    Makronun birinci parametresi serbest bırakılacak nesnenin adresini, ikinci parametresi de nesneye ilişkin yapıdaki 
+    rcu_head elemanın ismini almaktadır. Örneğin:
 
     struct DEVICE_INFO *di_new, *di_old;
     /* ... */
@@ -4168,7 +4212,7 @@ void exit_sys(const char *msg)
    	if (di_old != NULL)
 		kfree_rcu(di_old, rcu);
 
-    Yukarıda yaptığımız örneği aşağıda call_rcu kullanarak yenşdne veriyoruz. 
+    Yukarıda yaptığımız örneği aşağıda call_rcu kullanarak yeniden veriyoruz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* rcu-test-driver.c */
@@ -4383,7 +4427,7 @@ module_exit(test_driver_exit);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-		                                62. Ders 08/03/2026 - Pazar							
+		                                    62. Ders 08/03/2026 - Pazar							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -6235,7 +6279,7 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-							            66. Ders 29/03/2026 - Pazar		
+							                66. Ders 29/03/2026 - Pazar		
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
