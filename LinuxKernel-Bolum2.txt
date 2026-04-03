@@ -4399,8 +4399,9 @@ module_init(test_driver_init);
 module_exit(test_driver_exit);
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Biz çekirdekteki veri yapılarını görürken bazı veri yapılarının RCU'lu biçimlerinin olduğunu da görmüştük. Örneğin 
-    bağlı liste işlemlerini yapan fonksiyonların RCU biçimleri de vardı. Bunların listesini anımsayınız:
+	Biz çekirdekteki veri yapılarını ele alırken bazı veri yapılarının RCU'lu biçimlerinin olduğunu da görmüştük. Örneğin 
+    bağlı liste işlemlerini yapan fonksiyonların RCU biçimleri de vardı. RCU'lı bağlı liste fonksiyonlarını anımsatmak 
+    istiyoruz:
 
     void list_add_rcu(struct list_head *new, struct list_head *head);
     void list_add_tail_rcu(struct list_head *new, struct list_head *head);
@@ -4408,9 +4409,7 @@ module_exit(test_driver_exit);
     void list_del_rcu(struct list_head *entry);
 
     void list_replace_rcu(struct list_head *old, struct list_head *new);    
-    void list_splice_init_rcu(struct list_head *list,
-                            struct list_head *head,
-                            synchronize_rcu_func wait);
+    void list_splice_init_rcu(struct list_head *list, struct list_head *head, synchronize_rcu_func wait);
 
     #define list_entry_rcu(ptr, type, member)
     #define list_first_entry_rcu(ptr, type, member)
@@ -4420,25 +4419,24 @@ module_exit(test_driver_exit);
     #define list_for_each_entry_from_rcu(pos, head, member)
     #define list_for_each_entry_continue_rcu(pos, head, member)
 
-    Şimdi bu RCU'lu bağlı listeler üzerinde konu bağlamında ek açıklamalar yapmak istiyoruz. Buradaki RCU'lu bağlı 
-    liste fonksiyonları ile bağlı liste üzerinde güncelleme yapılırken aynı bağlı listeden okuma yapan thread'ler 
-    bekletilmemektedir. Örneğin bağlı listeden bir düğüm silinecek olsun. Bu durumda okuma yapan thread'ler hiç bekleme 
-    yapmadan işlemlerine devam ederler ve ancak bu silme işlemi "grace period" bittiğinde görünür hale gelir.  
+    Şimdi bu RCU'lu bağlı listeler üzerinde ek açıklamalar yapmak istiyoruz. Buradaki RCU'lu bağlı iste fonksiyonları 
+    ile bağlı liste üzerinde güncelleme yapılırken aynı bağlı listeden okuma yapan akışlar bekletilmemektedir. Örneğin 
+    bağlı listeden bir düğüm silinecek olsun. Bu durumda okuma yapan akışlar hiç bloke olmadan işlemlerine devam 
+    ederler, silme işlemi ise "grace period" bittiğinde görünür hale gelir.  
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-		                                    62. Ders 08/03/2026 - Pazar							
+                                            62. Ders 08/03/2026 - Pazar							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Linux çekirdeğindeki RCU'lu bağlı lsteler yine aynı bağ yapılarını kullanmaktadır:
+    Linux çekirdeğindeki RCU'lu bağlı lstelerdeki düğümler de yine list_head yapısıyla temsil edilmektedir:
 
     struct list_head {
         struct list_head *next, *prev;
     };
 
-    Bu yapı bağlı listenin bir düğümünü temsil ediyordu. Kök düğüm de bu yapıyla temsil ediliyordu. Hash tablolarında 
-    kök düğümün tek bir gösterici içerdiğini anımsayınız:
+    Hash tablolarında kök düğümün tek bir gösterici içerdiğini anımsayınız:
 
     struct hlist_head {
         struct hlist_node *first;
@@ -4448,8 +4446,8 @@ module_exit(test_driver_exit);
         struct hlist_node *next, **pprev;
     };
 
-    Baplı listeden okuma yapan taraf (örneğin bağlı listeyei dolaşan taraf) yine rcu_read_lock ve rcu_read_unlock 
-    çağrıları arasında thread'ler arası geçişi kapatarak işlemlerini yapar: 
+    RCU'lu baplı listelerden oağlı listeden okuma yapan thread'ler (örneğin bağlı listeyi dolaşan taraf) yine rcu_read_lock 
+    ve rcu_read_unlock çağrıları arasında thread'ler arası geçişi kapatarak işlemlerini yapmaktadır: 
 
     struct SAMPLE {
         /* ... */
@@ -4470,11 +4468,11 @@ module_exit(test_driver_exit);
 
     rcu_read_unlock();
 
-    Burada struct SAMPLE nesneleri bir bağlı liste ile birbirine bağlı durumdadır. Bağlı listeyi dolaşmadan önce 
-    rcu_read_lock fonksiyonun çağrıldığına, dolaşım sonunda da rcu_read_unlock fonksiyonun çağrıldığına dikkat ediniz.
-    Dolaşım yapan makro list_for_each_entry_rcu ismindedir. RCU'suz baplı listelerde bu makronun list_for_each_enty
+    Burada struct SAMPLE nesneleri bir bağlı liste ile birbirine bağanmış durumdadır. Bağlı listeyi dolaşmadan önce 
+    rcu_read_lock fonksiyonun, dolaşım sonunda da rcu_read_unlock fonksiyonun çağrıldığına dikkat ediniz. Dolaşım 
+    yapan makro list_for_each_entry_rcu ismindedir. RCU'suz bağlı listelerde bu makronun isminin list_for_each_enty 
     biçiminde olduğunu anımsayınız. Aslında list_for_each_entry makrosuyla list_for_each_entry_rcu makrosu arasında 
-    çok küçük bir fark vardır. list_for_each_entry_rcu makroso "include/linux/rculist.h" içerisnde tanımlanmıştır:
+    çok küçük bir fark vardır. list_for_each_entry_rcu makrosu "include/linux/rculist.h" içerisnde şöyle tanımlanmıştır:
 
     #define list_for_each_entry_rcu(pos, head, member, cond...)		            \
         for (__list_check_rcu(dummy, ## cond, 0),			                    \
@@ -4487,23 +4485,23 @@ module_exit(test_driver_exit);
     #define list_entry_rcu(ptr, type, member)                                   \
 	    container_of(READ_ONCE(ptr), type, member)
 
-    Aslında iki makro arasındaki fark okumanın READ_ONCE ile yapılmasıdır. 
+    Aslında iki makro arasındaki fark yalnızca bağ oku masının READ_ONCE ile yapılmasıdır. 
 
-    RCU'lu bağlı listelerde liste üzerinde yazma işlemi (örneğin düüm ekleme, silme gibi) yaparken yine yazan tarafların 
-    bir spinlock ile senkronze edilmesi gerekmektedir. Bu spinlock nesnesini sistem programcısı kendisi oluşturmalıdır. 
-    Örneğin:
+    RCU'lu bağlı listelerde liste üzerinde yazma işlemleri (örneğin düüüm ekleme, silme gibi işlemler) yapılırken yine 
+    yazan tarafların bir spinlock ile senkronze edilmesi gerekmektedir. Bu spinlock nesnesini sistem programcısı kendisi 
+    oluşturmalıdır. Örneğin:
 
     spin_lock(&g_myspinlock);                            /* yazan tarafların seknronize edilmesi gerekiyor */
     list_add_rcu(&new_node->list, &g_mylist);
     spin_unlock(&g_myspinlock);
 
-    Burada list_add_rcu fonksiyonu ile bağlı listeye bir düğüm eklenmiştir. Ancak bu işlem sırasında bir spinlock 
+    Burada list_add_rcu fonksiyonu ile bağlı listenin başına bir düğüm eklenmiştir. Ancak bu işlem sırasında bir spinlock 
     ile yazan tarafların senkronize edilmesi sağlanmıştır. 
 
-    list_add_rcu fonksiyonu okuyan atarfları bekletmeden işlemini nasıl yapmaktadır? İşte tipik olarak bu fonksiyon 
-    önce eklenecek düğümün next ve prev göstericilerini ayarlar. Sonra eklmeyi yaparken rcu_assign_pointer makrosunu 
-    kullanır. Böylece grace period bittikten sonra artık yeni okuyucular bu düğümü görmeye başlar. list_add_rcu 
-    fonksiyonunun gerçekleştirimi şöyle yapılmıştır:
+    Peki list_add_rcu fonksiyonu okuyan tarafları bekletmeden işlemini nasıl yapmaktadır? İşte bu fonksiyon önce eklenecek 
+    düğümün next ve prev göstericilerini ayarlar, sonra da eklemeyi yaparken rcu_assign_pointer makrosunu kullanır. Böylece 
+    grace period bittikten sonra artık yeni okuyucular bu düğümü görmeye başlayacaktır. list_add_rcu fonksiyonunun 
+    gerçekleştirimi şöyle yapılmıştır:
 
     static inline void list_add_rcu(struct list_head *new,
                                 struct list_head *head)
@@ -4528,7 +4526,7 @@ module_exit(test_driver_exit);
     Buradaki list_add_rcu fonksiyonu bağlı listenin başına düğüm eklemektedir. Peki bu düğüm ekleme işlemi burada nasıl 
     yapılmıştır? Anımsayacağınız gibi bağlı listenin başına, sonuna ve arasında düğüm ekleme işlemi aynı ortak fonksiyonla 
     yapılmaktadır. Bu fonksiyon da örneğimizde __list_add_rcu fonksiyonudur. Yeni düğümün next ve prev göstericileri 
-    aşağıdkai gibi ayarlanmıştır:
+    aşağıdaki gibi ayarlanmıştır:
 
     new->next = next;
     new->prev = prev;
@@ -4538,13 +4536,13 @@ module_exit(test_driver_exit);
 
     rcu_assign_pointer(list_next_rcu(prev), new);  /* store-release */
 
-    Nihayetinde eski ilk düğümün yeni düğüm göstermesi de şöyle sağlanmıştır:
+    Nihayetinde eski ilk düğümün yeni düğümü göstermesi de şöyle sağlanmıştır:
 
     next->prev = new;
 
-    Burada kök gösterici yayınlandıktan sonra next->prev = new işleminin yapılması bir soruna yol açmaz mı? Yani 
+    Peki burada kök gösterici yayınlandıktan sonra next->prev = new işleminin yapılması bir soruna yol açmaz mı? Yani 
     tam o sırada geriye doğru listeyi okuyan bir thread varsa bir karasızlık oluşmaz mı? İşte Linux çekirdeğinin RCU'lu
-    bağlı listelerinden okuma yapan taraflar hiçbir zaman geri doğru okuma yamamaktadır. Sizin de bu kurala uymanız 
+    bağlı listelerinden okuma yapan taraflar hiçbir zaman geriye doğru okuma yapmamaktadır. Sizin de bu kurala uymanız 
     gerekir. 
 
     RCU'lu bağlı listelerden silme işlemi de yine benzer biçimde spinlock kilidi alınarak yapılmalıdır. Örneğin:
@@ -4581,29 +4579,28 @@ module_exit(test_driver_exit);
         WRITE_ONCE(prev->next, next);
     }
 
-    Burada ilk düğüm silindiğinde bundan kök düğüm etkileniyor olsa da bir bellek bariyerinin oluşturulması gerekmemektedir. 
-    Bu nedenle süğüm silme işleminin herhangi bir yerinde rcu_assign_pointer makrosu kullanılmamaktadır. 
+    Düğüm silme işleminin herhangi bir yerinde rcu_assign_pointer makrosunun kullanılmadığına dikkat ediniz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Aşağıda "claude.ai" LLM'ine uygun prompt'lar girilerek RCU bağlı liste işlemlerine yönelik çekirdek modülü oluşturulmuştur.
-    modülü her zamanki gibi şöyle derleyebilirsiniz:
+	Aşağıda Claude (Anthropic) büyük dil modeline uygun prompt'lar girilerek RCU'lu bağlı liste işlemlerine yönelik 
+    çekirdek modülü oluşturulmuştur. Modülü her zamanki gibi şöyle derleyebilirsiniz:
 
-    $ make file=rcu-list-module
+    $ make file=rcu-litst-module
 
     Modülü şöyle yükleyebilirsiniz:
 
     $ sudo insmod rcu-list-module.ko
 
-    Modülün oluşturğu mesajları şöyle görüntüleyebilirsiniz:
+    Modülün oluşturduğu mesajları şöyle görüntüleyebilirsiniz:
 
     $ dmesg
 
-    Nihayet modülü şöyle kaldırabilrisiniz:
+    Modülü şöyle kaldırabilrisiniz:
 
     $ sudo rmmod rcu-list-module.ko
 
-    Modülde bir RCU bağlı listesi oluşturulmuştur:
+    Şimdi oluşturulan çekirdek modülünün kodlarını açıklayalım. Modülde aşağıdaki gibi bir RCU'lu bağlı liste vardır:
 
     struct process_record {
         int id;
@@ -4653,9 +4650,10 @@ module_exit(test_driver_exit);
         return 0;
     }
 
-    Burada önce bağlı listeye çeşitli düğümler eklenmiştir. Sonra da bir çekirdek thread'i oluşturulmuştur. Biz henüz 
-    çekirdek thread'leri konusunu görmedik. Çekirdek thread'inin başlangıç fonksiyonu reader_fn isimli fonksiyondur. 
-    Bu fonksiyon sürekli olarak bağlı listeyi dolaşıp arama yapmaktadır:
+    Burada önce bağlı listeye çeşitli düğümler eklenmiş, sonra da bir çekirdek thread'i oluşturulmuştur. (Biz henüz 
+    çekirdek thread'leri konusunu görmedik.) Çekirdek thread'i yaratıldıktan sonra da bağlı listeye eklemeler ve 
+    bağlı listeden silmeler yapılmıştır. Oluşturulan çekirdek thread'inin başlangıç fonksiyonu reader_fn isimli 
+    fonksiyondur. Bu fonksiyon sürekli olarak bağlı listeyi dolaşıp arama yapmaktadır:
 
     static int reader_fn(void *data)
     {
@@ -4684,8 +4682,7 @@ module_exit(test_driver_exit);
         return 0;
     }
 
-    Bu çekirdek thread'i g_stop_reader atomic değişkeni 1 yapıldığında işlemini bitirmektedir. init fonksiyonunda 
-    çekirdek thread'i yaratıldıktan sonra bağlı listeye çeşitli eklemeler ve çıkartmalar yapılmıştır. Çekirdek thread'inin
+    Bu çekirdek thread'i g_stop_reader atomic değişkeni 1 yapıldığında işlemini bitirmektedir. Çekirdek thread'inin
     sonlandırılması modülün exit fonksiyonunda yapılmaktadır:
 
     static void __exit rcu_list_demo_exit(void)
@@ -4978,20 +4975,21 @@ module_init(rcu_list_demo_init);
 module_exit(rcu_list_demo_exit);
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Bu bölümde bekleme kuyruklarının (wait queues) genel yapısı thread'lerin çalışma kuyruğundan (run queue) bekleme 
-    kuyruklarına nasıl aktarıldığı (yani thread'lerin nasıl bloke edildiği) ve yeniden nasıl çalışır duruma geitirldiği 
-    (yani blokenin nasıl çözüldüğü) konuları üzerinde duracağız. Çizelgeleyici (scheduler) alt sistem başka bir bölümde 
-    ayrıntılarıyla ele alınacaktır. 
+	Bu bölümde önce bekleme kuyruklarının (wait queues) genel yapısını açıklayacağız. Sonra da thread'lerin çalışma 
+    kuyruğundan (run queue) bekleme kuyruklarına nasıl aktarıldığı (yani thread'lerin nasıl bloke edildiği) ve yeniden 
+    nasıl çalışır duruma getirldiği (yani blokenin nasıl çözüldüğü) konuları üzerinde duracağız. Çizelgeleyici (scheduler) 
+    alt sistem başka bir bölümde ayrıntılarıyla ele alınacaktır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Linux çekirdeklerinde çizelgeleyici (scheduler) alt sistem zaman içerisinde birkaç kere önemli ölçüde değiştirilmiştir. 
     Mevcut Linux çekirdeklerinde sistemdeki her işlemci ya da çekirdek için ayrı bir "çalışma kuyruğu (run queue)" 
     bulundurulmaktadır. Yani her işlemci ya da çekirdek kendi çalışma kuyruğundaki thread'leri çizelgelemektedir. Çalışma 
-    kabaca "zaman paylaşımlı (tme sharing)" biçimde yapılmaktadır. Yani sıradaki thread CPU'ya atanır. Belli bir süre 
-    çalıştırılır. Sonra thread'in çalışmasına ara verilir ve kuyruktaki yeni thread CPU'ya atanır. Bir thread'in parçalı 
-    çalışma süresine "quanta süresi (time quantum)" denilmektedir. Thread'lerin quanta süeleri aynı olmak zorunda değildir. 
-    Bu konunun ayrıntılarını çizelgeeyici alt sistemin ele alındaığı bölümde açıklayacağız. 
+    kabaca "zaman paylaşımlı (time sharing)" biçimde yapılmaktadır. Yani sıradaki thread CPU'ya atanır. Belli bir süre 
+    çalıştırılır, sonra thread'in çalışmasına ara verilir ve kuyruktaki yeni thread CPU'ya atanır. Bu işlem böyle devam
+    ettirilir. Bir thread'in parçalı çalışma süresine "quanta süresi (time quantum)" denilmektedir. Thread'lerin quanta 
+    süreleri aynı olmak zorunda değildir. Bu konunun ayrıntılarını çizelgeeyici alt sistemin ele alındaığı bölümde 
+    açıklayacağız. Aşağıda güncel çekirdeklerdeki çizelgeleme işlemlerini bir şekille betimliyoruz:
 
                     ┌─────────────────┐
                     │   Thread'ler    │
@@ -5029,45 +5027,47 @@ module_exit(rcu_list_demo_exit);
                         (Load Balancing)
         
 
-    Çalışma kuyruğundaki thread'e çalışma sırası geldiğinde o thread CPU'ya atanıp belli bir süre çalıştırılmaktadır. 
-    Bu süre dolduğunda bir sonraki turda kalınan yerden çalıştırılması için thread çalışma kuyruğuna geri bırakılır, 
-    Bir thread'in çalışmasına ara verilip çalışma kuyruğundaki diğer thread'in CPU'ya atanması sürecine işletim 
-    sistemleri terminolojisinde "bağlamsal geçiş (context switch)" denilmektedir. Bağlamsal geçiş terimi yerine 
-    "task switch" terimi de kullanılabilmektedir. Thread'in quanta süresi bittiğinde CPU'dan kopartılması işlemine 
-    "preemption" da denilmektedir. "Preemption" İngilizcede "zorla ele geçirmek, el koymak" gibi anlamlara gelmektedir. 
-    Bağlamsal geçiş donanım kesmeleriyle yapılmaktadır. Sistemlerde periyodik kesme üreten zamanlayıcı (timer) devreleri 
-    vardır. Zamanlayıcı kesmeleleri belli bir sayıya geldiğinde çizelgeleyici o anda çalışmakta olan kodu herhangi bir 
-    noktasında keserek çalışmaya ara vebilmektedir. Çalışmaya ara verme ve o çalılmayı kaldığı yerden devam ettirme 
-    aslında zor bir işlem değildir. Thread'in o andaki tüm konumu aslında CPU yazmaçlarının içerisinde saklanmaktadır. 
-    Bağlamsal geçiş sırasında CPU yazmaçlarının içerisindeki değerler thread'in task_struct alanına kaydedilmektedir. 
-    Thread CPU'ya atanırken de bu yazmaç bilgileri oradan alınarak yeniden CPU yazmaçlarına aktarılmaktadır. Tabii 
-    tüm bu işlemler bir zaman kaybına da yol açmaktadır. Eğer quanta süresi çok kısa tutulursa çok bağlamsal geçiş 
-    oluşur. Birim zamanda yapılan iş miktarı (throughput) düşer. Eğer bağlamsal geçiş çok uzun tutulursa interaktivite 
-    azalır. Bir thread işletim sistemi tarafından bir CPU'nun çalışma kuyruğuna atandığında hep onun hep o kuyrukta 
-    kalması garanti değildir. Zaman içerisinde tıpkı süper market kasa kuyruklarında olduğu gibi kuyruklar arasında 
-    dengesizlikler oluşabilmektedir. Bu durumda işletim sistemi bir denge sağalamk için thread'i daha boş olan bir 
-    CPU'nun çalışma kuyruğuna aktarabilmektedir. 
+    Çalışma kuyruğundaki bir thread'e çalışma sırası geldiğinde o thread CPU'ya atanıp belli bir süre çalıştırılır. 
+    Bu süre dolduğunda bir sonraki turda kalınan yerden çalışmaya devam edebilmesi için thread çalışma kuyruğuna geri 
+    bırakılır. Bir thread'in çalışmasına ara verilip çalışma kuyruğundaki diğer thread'in CPU'ya atanması sürecine işletim 
+    sistemleri terminolojisinde "bağlamsal geçiş (context switch)" denilmektedir. Bağlamsal geçiş terimi yerine "task 
+    switch" terimi de kullanılabilmektedir. Thread'in quanta süresi bittiğinde CPU'dan kopartılması işlemine "preemption" 
+    da denilmektedir. "Preemption" İngilizcede "zorla ele geçirmek, el koymak" gibi anlamlara gelmektedir. Bağlamsal 
+    geçiş donanım kesmeleriyle yapılmaktadır. Genel amaçlı bilgisayar donanımlarında periyodik kesme üreten zamanlayıcı 
+    (timer) devreleri vardır. Zamanlayıcı devreleri yoluyla oluşturulan kesmeler belli bir sayıya geldiğinde çizelgeleyici 
+    o anda çalışmakta olan kodu herhangi bir noktasında keserek çalışmaya ara vebilmektedir. 
+    
+    Thread'lerin çalışmasına ara verilmesi ve çalışmayı kaldığı yerden devam ettirilmesi aslında zor bir işlem değildir.
+    Thread'in o andaki tüm konumu aslında CPU yazmaçlarının içerisindeki değerlerden oluşmaktadır. Bağlamsal geçiş 
+    sırasında CPU yazmaçlarının içerisindeki değerler thread'in task_struct alanına kaydedilmektedir. Thread CPU'ya
+    atanırken de bu yazmaç bilgileri oradan alınarak yeniden CPU yazmaçlarına aktarılmaktadır. Tabii tüm bu işlemler 
+    bir zaman kaybına da yol açmaktadır. Eğer quanta süresi çok kısa tutulursa çok bağlamsal geçiş oluşur. Birim zamanda 
+    yapılan iş miktarı (throughput) düşer. Eğer bağlamsal geçiş çok uzun tutulursa bu durumda da interaktivite azalır.
+    Bir thread işletim sistemi tarafından bir CPU'nun çalışma kuyruğuna atandığında hep onun hep o CPU'nun kuyruğunda 
+    kalması garanti değildir. Zaman içerisinde (tıpkı süper marketlerdeki kasa kuyruklarında olduğu gibi) kuyruklar 
+    arasında dengesizlikler oluşabilmektedir. Bu durumda işletim sistemi denge sağalamk için thread'leri daha boş olan 
+    bir CPU'nun çalışma kuyruğuna taşıyabilmektedir.
 
-    Bir thread dışsal uzun zürebilecek dışsal bir olayı bekleyeceği zaman bunu CPU zamanı harcayarak beklemez. Bu tür 
-    durumlarda thrad CPU'nun çalışma kuyruğundan çıkartılarak bekleme kuyruklarında bekletilir. Bu sürece "thread'in 
-    bloke olması" denilmektedir. Örneğin read POSIX fonksiyonula bir dosyadan okuma yapılmak istensin. Anımsanacağı gibi 
-    read POSIX fonksiyonu sys_read sistem fonksiyonunu çağırmaktadır. Bu fonksiyon da önce okunacak yerin page cache 
-    içerisinde olup olmadığına bakmaktadır. Okunacak yer page cache içerisindeyse thread bloke olmadan okuma yapılır. 
+    Bir thread uzun sürebilecek dışsal bir olayı bekleyeceği zaman bunu CPU zamanı harcayarak beklemez. Bu tür durumlarda 
+    thrad CPU'nun çalışma kuyruğundan çıkartılarak "bekleme kuyrukları (wait queues)" denilen kuyruklarda bekletilir. Bu 
+    sürece "thread'in bloke olması" denilmektedir. Örneğin read POSIX fonksiyonuyla bir dosyadan okuma yapmak isteyelim.
+    Anımsanacağı gibi read fonksiyonu sys_read sistem fonksiyonunu çağırmaktadır. Bu fonksiyon da önce okunacak yerin page 
+    cache içerisinde olup olmadığına bakmaktadır. Okunacak yer page cache içerisindeyse thread bloke olmadan okuma yapılır. 
     Ancak okunacak yer page cache içerisinde değilse disk okumaları yavaş olduğu için thread bloke edilir, çalışma 
-    kuyruğundan çıkartılır ve bir bekleme kuyruğunda bekletilir. Disk okuması gerçekleştiğinde thread yeniden çalışma
+    kuyruğundan çıkartılarak bir bekleme kuyruğunda bekletilir. Disk okuması gerçekleştiğinde thread yeniden çalışma
     kıuruğuna yerleştirilmektedir. Spinlock ve readers/writer lock nesneleri dışındaki senkroniasyon nesnelerinde de 
-    eğer kilit kapalıysa lock işlemini yapmaya çalışan thread benzer biçimde bloke olmaktadır. sleep gibi fonksiyonlar 
-    da blokeye yol açmaktadır. Örneğin:
+    eğer kilit kapalıysa lock işlemini yapmaya çalışan thread'ler benzer biçimde bloke olmaktadır. sleep gibi fonksiyonlar 
+    da yine blokeye yol açmaktadır. Örneğin:
 
     sleep(10);
 
-    Burada thread'in 10 saniye bekletilme istenmiştir. İşte işletim sistem bu bekleme boşuna CPU zamanı harcamasın diye 
-    thread'i çalışma kuyruğundan çıakrtır ve bekleme kuyruğuna alır. 10 saniye süre geçince işletim sistemi thread'i 
-    yeniden çalışma kuyruğuna yerleştirir. Böylece thread hiç CPU zamanı harcamadan 10 saniye bakletilmiş olur. 
+    Burada thread'in 10 saniye bekletilmesi istenmiştir. İşte işletim sistemi bu bekleme sırasında CPU zamanı harcamasın diye 
+    thread'i çalışma kuyruğundan çıkartır ve bekleme kuyruğuna alır. 10 saniye süre geçince de onu yeniden çalışma kuyruğuna 
+    yerleştirir. Böylece thread hiç CPU zamanı harcamadan 10 saniye bekletilmiş olur. 
 
-    Bir thread'in yaşam döngüsü şöyle betimlenebilir:
+    Bir thread'in yaşam döngüsü yalın bir biçimde şöyle betimlenebilir:
 
-                           Quanta süresi bitti
+                            Quanta süresi bitti
                       ┌─────────────────────────────┐
                       │                             │
                       ▼                             │
@@ -5089,16 +5089,16 @@ module_exit(rcu_list_demo_exit);
                   │ Thread sonlanıyor
                   ▼
                   
-    Buradaki "Running" thread'in CPU'ya atanmış ve çalışmakta olduğu anlamına gelmektedir. "Ready" ise thread'in 
-    çalışma kuyruğunda sonraki quanta'yı beklediğini belirtmektedir. Thread dışsal bir olay nedeniyle bloka olduğunda 
-    bekleme kuyruklarına alınır. Şeklimizdeki "Waiting" bekleme thread'in bekleme kuyruğunda beklediğini belirtmektedir.  
+    Buradaki "Running" thread'in CPU'ya atanmış ve çalışmakta olduğu anlamına gelmektedir. "Ready" ise thread'in çalışma 
+    kuyruğunda bulunduğunu ve sonraki quanta'yı beklediğini belirtmektedir. Thread dışsal bir olay nedeniyle bloka 
+    olduğunda bekleme kuyruklarına alınır. Şeklimizdeki "Waiting" ise thread'in bekleme kuyruğunda beklediğini belirtmektedir.  
     Dışsal olay gerçekleştiğinde thread'in blokesi çözülüp yeniden çalışma kuyruğuna yerleştirilmektedir. Tabii buradaki
     şekil oldukça sadeleştirilmiş bir şekildir. Örneğin thread'in sonlanması başka biçimlerde de gerçekleşebilmektedir. 
 
-    Bir thread CPU'ya atandığında eğere quanta süresinin çok azını kullanıp hemen bloke olup uykuya dalıyorsa bu biçimdeki 
-    thread'lere "IO yoğun (IO bound) thread'ler" denilmektedir. Sistemde çok sayıda IO ypun thread'in bulunması CPU'yu 
-    meşgul etmeyeceği için ciddi bir yavaşlamaya da yol açmayacaktır. Uygulama programlarının büyük çoğunluğu IO yoğun 
-    biçimdedir. Örneğin:
+    Bir thread CPU'ya atandığında eğere quant süresinin çok azını kullanıp hemen bloke olarak uykuya dalıyorsa bu biçimdeki 
+    thread'lere "IO yoğun (IO bound) thread'ler" denilmektedir. Sistemde çok sayıda IO yoğun thread'in bulunması CPU'yu 
+    önemli ölçüde meşgul etmeyeceği için ciddi bir yavaşlamaya da yol açmayacaktır. Uygulama programlarının büyük 
+    çoğunluğundaki thread'ler IO yoğun biçimdedir. Örneğin:
 
     double val;
     /* ... */
@@ -5112,10 +5112,10 @@ module_exit(rcu_list_demo_exit);
         printf("%f\n", val);
     }
 
-    Buradaki thread'in CPU kullanım oranı çok düşüktür. Çünkü hemen bloke olmaktadır. Eğer bir thread CPU'ya atandığında 
-    quanta süresinin büyük bölümünü hiç bloke olmadan kullanıyorsa bu tür thread'lere "CPU yoğun (CPU bound)" thread'ler 
-    denilmektedir. Genellikle matematiksel hesaplar yapan thread'ler CPU yoğun olma eğilimindedir. Sistemde çok sayıda 
-    CPU yoğun thread'in bulunması ciddi yavaşlıklara yol açabilmektedir. Örneğin:
+    Buradaki thread'in CPU kullanım oranı çok düşüktür. Çünkü biraz çalışıp hemen bloke olmaktadır. Eğer bir thread CPU'ya 
+    atandığında quanta süresinin büyük bölümünü hiç bloke olmadan kullanıyorsa bu tür thread'lere "CPU yoğun (CPU bound)" 
+    thread'ler denilmektedir. Genellikle matematiksel hesaplar yapan thread'ler CPU yoğun olma eğilimindedir. Sistemde 
+    çok sayıda CPU yoğun thread'in bulunması ciddi yavaşlıklara yol açabilmektedir. Örneğin:
 
     long long count = 0;
     /* ... */
@@ -5123,24 +5123,27 @@ module_exit(rcu_list_demo_exit);
     for (long long i = 0; i < 100000000000; ++i)
         if (i % 7 == 0)
             ++count;
+
     printf("%lld\n", count);
 
     Buradaki thread CPU yoğundur. Çünkü kendisine verilen quanta sürsini hiç bloke olmadan sonuna kadar kullanmaktadır. 
-    Programınızın thread'lerinin CPU kullanımını çeşitli utility programlarla gözlemleyebilirisniz. Örneğin "htop" 
-    programı "top" programının biraz daha gelişmiş bir versiyonudur. "perf" programı da genel bir profiler programıdır. 
+    Programınızdaki thread'lerin CPU kullanım sürelerini çeşitli utility programlarla gözlemleyebilirisniz. Örneğin 
+    "htop" programı ("top" programının biraz daha gelişmiş bir versiyonudur) ve "perf" programı ile thread'lerinizin 
+    CPU kullanımlarını görebilirsiniz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Linux çekirdek programcılarının bu konuyla ilgili şu süreçleri bbiliyor olması gerekir:
+    Linux çekirdek programcılarının bloke işlemleri ile lgili olan şu süreçler hakkında bilgi sahibi olması gerekir:
 
     - Bekleme kyurukları nasıl oluşturulup nasıl yok edilmektedir?
     - Çalışma kuruklarından bekleme kuyruklarına transfer (yani bloke işlemi) nasıl yapılmaktadır?
     - Bekleme kuyruklarından çalışma kuyruklarına transfer (yani blokenin çözülmesi) nasıl yapılmaktadır?
     - Bekleme kuyruklarının veri yapısı nasıldır?
-    - Bekleme kuyrukları üzeirnde işlem yapan fonkssiyonlarbu işlemleri nasıl yapmaktadır?
+    - Bekleme kuyrukları üzeirnde işlem yapan fonkssiyonlar bu işlemleri nasıl yapmaktadır?
 
     Tabii Linux'un ilk versiyonlarında bu süreçler oldukça basit kodlarla gerçekleştirilmişti. Ancak zaman içerisinde 
-    sinekten yağ çıkarmak için bu süreçte düzeltmeler yapıldı ve kodlar biraz daha karmaşık hale geldi. 
+    sinekten yağ çıkartma noktasına gelindi ve bu işlemler de gittikçe iyileştirildi. Tabii bunun sonucu olarak da kodlar
+    biraz daha karmaşık hale geldi. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -6637,21 +6640,17 @@ void exit_sys(const char *msg)
 									
 ----------------------------------------------------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
 
-
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
-
-
-/*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
-
 
 /*----------------------------------------------------------------------------------------------------------------------
 									
