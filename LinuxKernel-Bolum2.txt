@@ -5153,8 +5153,8 @@ module_exit(rcu_list_demo_exit);
 /*----------------------------------------------------------------------------------------------------------------------
     Linux çekirdeklerinde bekleme kuyruklarının genel yapısı zaman içerisinde pek değişmemiştir. Biz burada doğrudan 
     çekirdeğin güncel versiyonlarını temel alacağız. Çekirdeğin güncel versiyonlarında bekleme kuyrukları bir bağlı 
-    liste biçiminde organize edilmiştir. Bu bağlı liste "include/linux/wait.h"  dosyasındaki wait_queue_head isimli bir 
-    yapıda tutulmaktadır. Bu yapı aynı zamanda wait_queue_head_t ismiyle de typedef edilmiştir:
+    liste biçiminde organize edilmiştir. Bu bağlı listenin kök düğümü "include/linux/wait.h"  dosyasındaki wait_queue_head 
+    isimli bir yapıda tutulmaktadır. Bu yapı aynı zamanda wait_queue_head_t ismiyle de typedef edilmiştir:
 
     struct wait_queue_head {
         spinlock_t       lock;          /* listeyi koruyan spinlock kilidi  */
@@ -5162,11 +5162,11 @@ module_exit(rcu_list_demo_exit);
     };
     typedef struct wait_queue_head wait_queue_head_t;
 
-    Buradaki lock elemanı bağlı bağlı liste işlemleri yapılırken kilitleme görevini görmektedir. head elemanı ise 
-    ilk düğümün yerini tutmaktadır. 
+    Buradaki lock elemanı bağlı bağlı liste işlemleri yapılırken eş zamanlı erişimlerde kuyruğu korumak için bulundurulmuştur. 
+    head elemanı ise kök düğümü belirtmektedir. 
 
-    Buradaki bağlı listenin elemanları wait_queue_entry yapısıyla temsil edilmektedir. Yani wait_queue_head yapısı 
-    aslında wait_queue_entry nesnelerini tutan bir bağlı listedir:
+    wait_queue_head yapısı elemanları wait_queue_entry türünden olan düğümleri tutmaktadır. Başka bir deyişlr wait_queue_head 
+    yapısı aslında wait_queue_entry nesnelerini tutan bir bağlı listedir. wait_queue_entry yapısı şöyle bildirilmiştir:
 
     struct wait_queue_entry {
         unsigned int		flags;
@@ -5175,13 +5175,13 @@ module_exit(rcu_list_demo_exit);
         struct list_head	entry;
     };
 
-    Yapıdaki flags elemanı bit bit anlamlı bayrakları tutmaktadır. Bu bayraklar bekleme kuyruğnu işleten algoritmalar
-    tarafından set edilip kullanılmaktadır. İzleyen paragraflarda bu bayraklar hakkında bilgi vereceğiz. Yapıdaki private 
-    elemanı her ne kadar void bir göstericiyse de aslında bekleme kuyruğundaki thread'in task_struct nesne adresini 
-    tutmaktadır. (Veri yapısı genel tasarlanmıştır. Bazı durumlarda bu eleman başka veri yapılarını turabilmektedir.)
-    Yapının func elemanı thread uyandırılacağı zaman çağrılacak uyandırma fonksiyonun adresini tutmaktadır. Veri yapısı 
-    genel olduğu için çokbiçimli etki yaratmak amacıyla fonksiyon göstericisi kullanılmıştır. Yapının entry elemanı 
-    sonraki düğümün yerini göstermektedir. 
+    Yapıdaki flags elemanı bitsel biçimde temsil edilen bayrakları tutmaktadır. Bu bayraklar bekleme kuyruğnu işleten 
+    algoritmalar tarafından set edilip kullanılmaktadır. İzleyen paragraflarda bu bayraklar hakkında bilgiler vereceğiz. 
+    Yapıdaki private elemanı her ne kadar void bir göstericiyse de aslında tipik olarak bekleme kuyruğundaki thread'in 
+    task_struct nesne adreslerini tutmaktadır. (Veri yapısı genel tasarlanmıştır. Bazı durumlarda bu eleman başka nesneleri 
+    de gösterebilmektedir). Yapının func elemanı thread uyandırılacağı zaman çağrılacak uyandırma fonksiyonun adresini 
+    tutmaktadır. Veri yapısı genel olduğu için çokbiçimli etki yaratmak amacıyla fonksiyon göstericisinden faydalanılmıştır. 
+    Yapının entry elemanı sonraki düğümün yerini göstermektedir. 
 
     ┌─────────────────┐         ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
     │ wait_queue_head │ ──────► │ wait_queue_entry │ ──────► │ wait_queue_entry │ ──────► │ wait_queue_entry │ ──────► ···
@@ -5189,19 +5189,19 @@ module_exit(rcu_list_demo_exit);
     └─────────────────┘         └──────────────────┘         └──────────────────┘         └──────────────────┘
 
     Çekirdek içeisinde thread'i bekleme kuyruklarına bir düğüm olarak yerleştiren ve oradan çıkartarak yine çalışma 
-    kuyruklarına yerleştiren daha yüksek seviyeli fonksiyonlar oluşturulmuştur. Bu yüksek seviyeli fonksiyonar export
-    edildikleri için çekirdek modülleri ve aygıt sürücüler tarafından kullanılabilmektedir. 
+    kuyruklarına yerleştiren daha yüksek seviyeli çekirdek fonksiyonları oluşturulmuştur. Bu yüksek seviyeli fonksiyonar 
+    export edildikleri için çekirdek modülleri ve aygıt sürücüler tarafından kullanılabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Bir bekleme kuyruğunu boş bir biçimde oluşturmak için DECLARE_WAIT_QUEUE_HEAD makrosu kullanılmaktadır. Bu makro 
-    "include/linux/wait.h" dosyası içerisinde bildirilmiştir. Makroya wait_queue_head yapısı türünden tanımlanacak olan 
+    "include/linux/wait.h" dosyası içerisinde bildirilmiştir. Makroya tanımlanacak olan wait_queue_head yapısı türünden 
     değişkenin ismi verilmektedir. Örneğin:
 
     static DECLARE_WAIT_QUEUE_HEAD(g_wq);
 
-    Burada bizim bekleme kuyruğumuzun ismi g_wq biçimindedir. Tabii bekleme kuyrukları genellikle static ömürlü olur. 
-    Yani tipik olarak global bir değişken olarak oluşturulmaktadır. Bu makro şöyle tanımlanmıştır:
+    Bu örnekte bizim bekleme kuyruğumuzun ismi g_wq biçimindedir. Tabii bekleme kuyrukları genellikle static ömürlü olmaktadır.
+    Yani tipik olarak global bir değişken olarak oluşturulmaktadır. DECLARE_WAIT_QUEUE_HEAD makrosu şöyle tanımlanmıştır:
 
      #define __WAIT_QUEUE_HEAD_INITIALIZER(name) {					\
     	.lock		= __SPIN_LOCK_UNLOCKED(name.lock),			    \
@@ -5211,9 +5211,9 @@ module_exit(rcu_list_demo_exit);
 	    struct wait_queue_head name = __WAIT_QUEUE_HEAD_INITIALIZER(name)
 
     Buradan görüldüğü gibi DECLARE_WAIT_QUEUE_HEAD makrosu açık bir kilitle boş bir bağlı liste oluşturmaktadır. 
-    DECLARE_WAIT_QUEUE_HEAD makrosu stattik biçimde ilkdeğer vermek için kullanılmaktadır. Dinamik olarak tahsis 
-    edilmiş bekleme kuyruklarına da ilk değerlerin verilebilmesi için  "include/linux/wait.h" dosyasındakii 
-    init_waitqueue_head makrosu kullanılmaktadır. Bu nakro güncel çekirdeklerde şöyle yazılmıştır:
+    DECLARE_WAIT_QUEUE_HEAD makrosu değişkeneilkdeğer vermek için kullanılmaktadır. Dinamik olarak tahsis edilmiş bekleme 
+    kuyruklarına ilk değerlerin verilebilmesi için  "include/linux/wait.h" dosyasındaki init_waitqueue_head makrosu 
+    kullanılmaktadır. Bu nakro güncel çekirdeklerde şöyle yazılmıştır:
 
     #define init_waitqueue_head(wq_head)						    \
         do {									                    \
@@ -5233,13 +5233,13 @@ module_exit(rcu_list_demo_exit);
 
     Görüldüğü gibi burada da spinlock ve bağlı liste ilk durumuna getirilmiştir. Buradaki lockdep_set_class_and_name
     fonksiyonu debug amaçlı çağrılmaktadır. Normal bir çekirdek derlemesinde CONFIG_LOCKDEP konfigürasyon parametresi 
-    'y' yapılmadığı için zaten önişlemci tarafından bu çağrı koddan çıkartılmaktadır. Örneğin aygıt sürücüler içerisinde
-    kullanım şöyle olabilir:
+    'y' yapılmadığı için zaten önişlemci tarafından bu çağrı koddan çıkartılmaktadır. Fonksiyon aygıt sürücüler içerisinde 
+    şöyle kullanılabilir:
 
     static wait_queue_head_t g_wq;
     /* ... */
 
-    init_waitqueue_head(&g_wq);s
+    init_waitqueue_head(&g_wq);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -5247,13 +5247,13 @@ module_exit(rcu_list_demo_exit);
     bir thread'i bekleme kuyruklarına yerleştirmesi gibi bir durum uygun olmadığı gerekçesiyle doğrudan mümkün hale 
     getirilmemiştir. Yani bir thread "tamam şimdi artık benim uyumam gerekir" diyerek kendini uyutmaktadır. Thread'in 
     uyandırılması ise tek bir thread'in uynadırılması biçiminde değil bekleme kuyruğundaki tüm thread'lerin uyandırılması 
-    biçiminde yapılmaktadır. Yani uyandırma aslında thread temelinde değil bekleme kuyruğu temelinde yapılmaktadır. Bu 
-    duruma işletim sistemleri terminolojisinde İngilizce "thundering herd" denilmektedir. Bu terim bir sürünün ahır 
-    kapısı açıldığında onların gürültülü bir biçimde hep beraber dışarı çıkması çağrışımından hareketle uydurulmuştur. 
-    İzleyen paragraflarda görüleceği gibi "exclusive uyandırma" da vardır. Bu uyandırmada nispeten daha az sayıda thread 
-    uyandırılmaktadır. 
+    biçiminde yapılmaktadır. Yani uyandırma  işlemiaslında thread temelinde değil bekleme kuyruğu temelinde yapılmaktadır. 
+    Bu duruma işletim sistemleri terminolojisinde İngilizce "thundering herd (gürüldeyen sürü)" denilmektedir. Bu terim 
+    bir ahır kapısı açıldığında sürünün gürültülü bir biçimde hep beraber dışarı çıkması çağrışımından hareketle uydurulmuştur. 
+    İzleyen paragraflarda görüleceği gibi "exclusive uyandırma" denilen bir uyandırma biçimi de vardır. Bu uyandırmada 
+    biçiminde nispeten daha az sayıda thread uyandırılmaktadır. 
 
-    Bir thread'in bekleme kuyrğuna yerleştirilip uuykuya daldırılması aşağıdaki çekirdek makroları tarafından 
+    Bir thread'in bekleme kuyrğuna yerleştirilip uykuya daldırılması aşağıdaki çekirdek makroları tarafından 
     yapılmaktadır:
 
     wait_event(wq_head, condition);
@@ -5263,18 +5263,18 @@ module_exit(rcu_list_demo_exit);
     wait_event_interruptible_timeout(wq_head, condition, timeout);
     wait_event_interruptible_exclusive(wq_head, condition);
 
-    Bu makroların birinci parametreleri bekleme kuyruğunu temsil eden wait_queue_head türünden yapı nesnsini almaktadır. 
+    Bu makroların birinci parametreleri bekleme kuyruğunu temsil eden wait_queue_head türünden yapı nesnesini almaktadır. 
     (Makroya nesnenin adresinin değil kendisinin parametre olarak geçirildiğini vurgulamak istiyoruz. Zaten makro 
     gerektiğinde kendisi adres alma işlemini yapmaktadır.) Makroların ikinci parametreleri "uyandırma koşulunu" belirtmektedir. 
-    Yukarıda da belirttiğimiz gibi aslında exlusive özelliğini göz ardı edersek bekleme kuyruğundaki tüm thread'ler 
-    uyandırılmaktadır. Ancak bu uyandırma sonrasında koşulu sağlamayanlar yeniden uykuya yatırılmaktadır. Dolayısıyla 
-    yalnızca koşulu sağlayanlar gerçek anlamda uyanmış olmaktadır. Buradaki koşul tipik olarak global değişkenlere 
-    dayalı olarak oluşturulmaktadır. Örneğin g_flag isminde bir global değişkenimiz olabilir. Biz de koşulu g_flag != 0
-    biçimnde verebiliriz. Bu durumda g_flag değişkeni 0 ise biz uyandırma işlemini uygulasak bile thread'ler önce uyandırılacak
-    koşul sağlanmadığı için yeniden uykuya dalacaktır. Makroların timeout parametresine sahip versiyonları en kötü olasılıkla 
-    koşul sağlanmasa bile belli bir süre sonra uyandırılma işlemini yapmaktadır. Bekleme kuyruğuna yerleştirilen thread'lerin 
-    bir sinyal geldiğinde uyandırılabilmesi için beklemenin "interruptible" biçimde yapılması gerekir. killable olan 
-    bekleme fonksiyonu ise yalnızca SIGKILL sinyaline yanıt vermektedir. 
+    Yukarıda da belirttiğimiz gibi aslında -exlusive özelliğini göz ardı edersek- bekleme kuyruğundaki tüm thread'ler 
+    uyandırılmaktadır. Ancak bu uyandırma sonrasında koşul sağlanmıyorsa uyandırılan thread'ler yeniden uykuya yatırılmaktadır. 
+    Buradaki koşul tipik olarak global değişkenlere dayalı olarak oluşturulmaktadır. Örneğin g_flag isminde bir global 
+    değişkenimiz olsun. Biz de koşulu g_flag != 0 biçimnde oluşturabiliriz. Bu durumda g_flag değişkeni 0 ise biz uyandırma 
+    işlemini uygulasak bile thread'ler önce uyandırılacak koşul sağlanmadığı için yeniden uykuya dalacaktır. Makroların 
+    timeout parametresine sahip versiyonları koşul sağlanmasa bile en kötü olasılıkla belli bir süre sonra thread'lerin 
+    uyandırılmasını sağlamaktadır. Bekleme kuyruğuna yerleştirilen thread'lerin bir sinyal geldiğinde uyandırılabilmesi 
+    için beklemenin "interruptible" biçimde yapılması gerekir. killable olan bekleme fonksiyonu ise yalnızca SIGKILL 
+    sinyaline yanıt vermektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -5289,9 +5289,9 @@ module_exit(rcu_list_demo_exit);
     } while (0)
 
     Buradaki might_sleep makrosu debug amaçlı bulundurulmuştur. Eğer CONFIG_DEBUG_ATOMIC_SLEEP konfigürasyon parametresi 
-    açık değilse bu makro hemen hemen boş gibidir. Burada daha uykıya dalmadan koşulun kontrol edildiğine dikkat ediniz. 
-    Yani aslında koşul zaten sağlanıyorsa uyuma gerçekleşmemektir. Burada asıl uykuya daldırma işlemi __wait_event 
-    makrosuyla yapılmaktadır. Bu makro da güncel çekirdeklerde üç alt tireli başka bir makroyu çalıştırmaktadır:
+    açık değilse bu makro hemen hemen boş gibidir. Burada daha uykuya dalmadan koşulun kontrol edildiğine dikkat ediniz. 
+    Yani aslında koşul zaten sağlanıyorsa uyuma gerçekleşmemektir. Kodda asıl uykuya daldırma işlemini __wait_event 
+    makrosu yapmaktadır. Bu makro da güncel çekirdeklerde üç alt tireli başka bir makroyu çalıştırmaktadır:
 
     #define __wait_event(wq_head, condition)					                \
 	    (void)___wait_event(wq_head, condition, TASK_UNINTERRUPTIBLE, 0, 0,	    \
@@ -5328,10 +5328,10 @@ module_exit(rcu_list_demo_exit);
 
     Bekleme işleminin nasıl gerçekleştiğini ve uyanmanın nasıl yapıldığını anlayabilmek için bu makronun üzerinde 
     biraz durmamız gerekiyor. Makroda bekleme kuyruğunun elemanı olan wait_queue_entry nesnesinin yerel bir biçimde 
-    tanımlandığına dikkat ediniz. Bekleme kuyrukları genellikle global düzeyde oluşturulsa da onun düğümleri olan 
-    nesneler yerel biçimde stack'te oluşturulmaktadır. Bunun bir sakıncası yoktur. Çünkü uyanma durumunda zaten bu 
-    stack'tek nesne otomatik biçimde boşaltılacaktır. Böylece gereksiz bi rheap tahsisatı yapılmamaktadır. Stack'te
-    yaratılan yerel wait_queuentry nesnesine ilkdeğeri aşağıdaki gibi verilmiştir:
+    tanımlandığına dikkat ediniz. Bekleme kuyrukları genellikle global düzeyde oluşturuluyor olsa da onun düğümleri 
+    olan nesneler yerel biçimde stack'te oluşturulmaktadır. Bunun bir sakıncası yoktur. Çünkü uyanma durumunda zaten 
+    bu stack'teki nesne otomatik biçimde boşaltılacaktır. Böylece gereksiz bir heap tahsisatı yapılmamaktadır. Stack'te
+    yaratılan yerel wait_queuentry nesnesine ilkdeğer aşağıdaki gibi verilmiştir:
     
     init_wait_entry(&__wq_entry, exclusive ? WQ_FLAG_EXCLUSIVE : 0);
 
@@ -5387,8 +5387,8 @@ module_exit(rcu_list_demo_exit);
     EXPORT_SYMBOL(prepare_to_wait_event)
 
     Bu fonksiyonun thread'i çalışma kuyruğundan (run queue) çıkartmadığına yalnızca ilgili bekleme kuyruğuna eklediğine 
-    dikkat ediniz. __wait_event makrosunda prepare_to_wait_event çağrısından sonra yeniden koşul kontrol edilmiştir. Çünkü 
-    bu arada koşul sağlanmış da olabilir:
+    dikkat ediniz. __wait_event makrosunda prepare_to_wait_event çağrısından sonra yeniden koşul kontrol edilmiştir. 
+    Çünkü bu arada koşul sağlanmış da olabilir:
 
     /* ... */
 
@@ -5402,7 +5402,7 @@ module_exit(rcu_list_demo_exit);
     makrosu çağrılıp prepare_to_wait_event foksiyonun geri dönüş değeri kontrol edilmiştir. 
 
     /* ... */  
-                                                             \
+                                                                        \
     if (___wait_is_interruptible(state) && __int) {			            \
         __ret = __int;						                            \
         goto __out;						                                \
@@ -5412,8 +5412,8 @@ module_exit(rcu_list_demo_exit);
 
     Şimdi artık thread bekleme kuyruğuna eklenmiştir, ancak henüz çalışma kuyruğundan çıkartılmamıştır ve thread hala 
     CPU'da çalışmaktadır. İşte son darbe schedule fonksiyonu tarafından vurulmaktadır. schedule çağrısı __wait_event 
-    makrosuna cmd parametresi ile geçilmiştir. Dolayısıyla __wait_event makrosunun içerisindeki aşağıdaki çağrı 
-    aslında schedule fonksiyonun çağrılmasını sağlamaktadır:
+    makrosuna cmd parametresi yoluyla geçilmiştir. Dolayısıyla __wait_event makrosunun içerisinde bulunan aşağıdaki 
+    çağrı aslında schedule fonksiyonun çağrılmasını sağlamaktadır:
 
     /* ... */
 
@@ -5428,8 +5428,8 @@ module_exit(rcu_list_demo_exit);
     - Gerekiyorsa thread'i çalışma kuyruğundan çıkartmaktadır. 
 
     İşte thread'in konumunun saklanması schedule fonksiyonu içeriisnde yapılmaktdır. Dolayısıyla aslında thread uykudan 
-    schedule fonksiyonun içerisinden uyanacaktır. Yani uyandırma gerçekleştiğinde çalışma aslında aşağıdaki noktadan 
-    devam edecektir:
+    schedule fonksiyonun içerisinden uyanacaktır. Yani uyandırma gerçekleştiğinde çalışma aslında aşağıdaki ok ile 
+    gösterilen noktadan devam edecektir:
 
     #define ___wait_event(wq_head, condition, state, exclusive, ret, cmd)		\
     ({										                                    \
@@ -5460,16 +5460,16 @@ module_exit(rcu_list_demo_exit);
     __out:	__ret;									                            \
     })
 
-    Thread uyandırıldığında akış yukarda okla gösterdiğimiz noktadan devam edecektir. Burada koşulun sağlanıp 
-    sağlanmadığına bakılmıştır. Eğer koşul sağlanıyorsa döngüden çıkılmıştır. Ancak koşul sağlanmıyorsa döngü yine 
-    başa saracak ve thread yeniden uyuyacaktır. Döngüden çıkıldığında finish_wait fonksiyonun çağrıldığını görüyorsunuz:
+    Burada uyanma sonrasında koşulun sağlanıp sağlanmadığına bakılmıştır. Eğer koşul sağlanıyorsa döngüden çıkılmıştır. 
+    Ancak koşul sağlanmıyorsa döngü yine başa saracak ve thread yeniden uyuyacaktır. Döngüden çıkıldığında finish_wait 
+    fonksiyonun çağrıldığını görüyorsunuz:
 
     finish_wait(&wq_head, &__wq_entry);				
     
     Bu fonksiyon thread'i bekleme kuyruğundan çıkarmaktadır. Burada bir noktaya dikkat ediniz. İzleyen paragraflarda ele 
-    alacak olduğumuz therad'i uyandıran wakeup makroları thread'i bekleme kuyruğundan da çıkarmaktadır. Dolayısıyla 
+    alacak olduğumuz therad'i uyandıran wake_up makroları thread'i bekleme kuyruğundan da çıkarmaktadır. Dolayısıyla 
     yukarıda ok ile gösterdiğimiz yerden akış devam ettiğinde thread bekleme kuyruğunda değildir. Tabii koşul sağlanıyorsa 
-    zaten bekleme kuyruğunda olmayan thread'in kuyruktan çıkartılmaması gerekir. finish_wait içeisinde bu kontrol 
+    zaten bekleme kuyruğunda olmayan thread'in kuyruktan da çıkartılmaması gerekir. finish_wait içeisinde bu kontrol 
     uygulanmıştır. Yani finish_wait içerisinde eğer thread kuyruktan zaten çıkartılmışsa kuyruktan çıkartma işlemi 
     yapılamamaktadır.
 
@@ -5510,7 +5510,7 @@ module_exit(rcu_list_demo_exit);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-				                                64. Ders 15/03/2026 - Pazar			
+                                            64. Ders 15/03/2026 - Pazar			
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
