@@ -13075,6 +13075,10 @@ void exit_sys(const char *msg)
     | Format   | BPP |   Red     |   Green   |   Blue    |   Alpha   | Notlar                 |
     +----------+-----+-----------+-----------+-----------+-----------+------------------------+
     | ARGB8888 | 32  | [23:16] 8b| [15:8] 8b | [7:0] 8b  | [31:24] 8b| Desktop Linux yaygin   |
+
+    Ancak maalesef framebuffer aygıt sürücüleri Alpha kanalını hiç kullanmayabilmektedir. Bu durumda fb.vinfo.transp.offset
+    değeri 0 olarak verilebilmektedir. Sizin sürücünüz de böyleyse alpha değerini hiç kullanmamanız orayı boş bırakmanız 
+    gerekebilir. Ya da fb.vinfo.transp.offset değeri yerine doğurdan 24 kullanabilirsiniz. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
@@ -13324,278 +13328,1326 @@ void exit_sys(const char *msg)
     Şimdi artık ekranın belli bir koordinatına pixel basan fonksiyonı yazalım. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-void foo(struct const color_t *color);
-
-color_t color = {255, 0, 0};
-foo(&(color_t){255, 0, 0});
-
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                        171. Ders 02/04/2026 - Perşembe
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Framebuffer kullanarak ekranın belli bir koordinatına belli renkte pixel basan fonksiyon şöyle yazılabilir:
 
+    void fb_put_pixel(framebuffer_t *fb, int x, int y, color_t color) 
+    {
+        long pos;
+        uint32_t pixel; 
+        
+        pos = (x + fb->vinfo.xoffset) * (fb->vinfo.bits_per_pixel / 8) +
+                        (y + fb->vinfo.yoffset) * fb->finfo.line_length;
+        pixel = fb_color_to_pixel(fb, color);
+        
+        if (fb->vinfo.bits_per_pixel == 32) 
+            *((uint32_t*)(fb->fbp + pos)) = pixel;
+        else if (fb->vinfo.bits_per_pixel == 16) 
+            *((uint16_t*)(fb->fbp + pos)) = (uint16_t)pixel;
+        else if (fb->vinfo.bits_per_pixel == 24) {
+            *(fb->fbp + pos) = color.b;
+            *(fb->fbp + pos + 1) = color.g;
+            *(fb->fbp + pos + 2) = color.r;
+        }
+        else if (fb->vinfo.bits_per_pixel == 8) 
+            *(fb->fbp + pos) = pixel;
+    }
+
+    Fonksiyonda önce ilgili (x, y) koordşnatının framebuffer içerisindeki başlangıç adresi elde edilmiştir. Daha sonra pixel
+    formatı da kabaca göz önüne alınarak pixel basılmıştır. (Her defasında aynı kontrolün yapılması işlemleri göreli 
+    olarak yavaşlatabilir. Bunun işin başında pixel formatına bakılıp farklı fonksiyonlar çağrılabilir.) Kodda renklerin 
+    color_t isimli bir yapıyla temsil edildiğine dikkat ediniz. color_t yapısı şöyle bildirilmiştir:
+
+    typedef struct {
+        uint8_t r, g, b, a;
+    } color_t;
+
+    Bu yapının pixel verisine dönüştürülmesi de fb_color_to_pixel fonksiyonuyla yapılmaktadır:
+
+    uint32_t fb_color_to_pixel(framebuffer_t *fb, color_t color) 
+    {
+        uint32_t pixel = 0;
+        
+        if (fb->vinfo.bits_per_pixel == 32) {
+            pixel = ((uint32_t)color.b << 0) |
+                ((uint32_t)color.g << 8) |
+                ((uint32_t)color.r << 16) |
+                ((uint32_t)color.a << 24);
+        } 
+        else if (fb->vinfo.bits_per_pixel == 16) {
+            // RGB565
+            pixel = (((color.r >> 3) << 11) |
+                    ((color.g >> 2) << 5) |
+                    (color.b >> 3));
+        } 
+        else if (fb->vinfo.bits_per_pixel == 24) {
+            pixel = ((uint32_t)color.r << 16) |
+                    ((uint32_t)color.g << 8) |
+                    color.b;
+        }
+        else if (fb->vinfo.bits_per_pixel == 8) 
+            pixel = (299u * color.r + 587u * color.g + 114u * color.b) / 1000u;
+        
+        return pixel;
+    }
+
+    Test işlemi de şöyle yapılabilir:
+
+    int main(void)
+    {
+        framebuffer_t fb;
+
+        if (fb_init("/dev/fb0", &fb) == -1)
+            exit_sys("fb_init");
+
+        
+        fb_put_pixel(&fb, 500, 500, (color_t){255, 255, 255, 255});
+
+        getchar();
+
+        if (fb_close(&fb) == -1)
+            exit_sys("fb_close");
+
+        return 0;
+    }
+
+    Burada ekranın x=500, y=500 pixel'ine beyaz renkte bir pixel basılmıştır. Burada color_t oluşturmak için biz C99 ile
+    C'ye eklenen "bileşik sabit (compound literal)" kullandık. Bileşik sabitler bir yapı (ya da dizi) türünden değeri 
+    o anda oluşturup kullanmak amacıyla dile eklenmiştir. Örneğin (color_t){255, 255, 255, 255} bu ifadede biz aslında 
+    color_t türünden sol tarafı değeri belirten bir nesne oluşturmaktayız. Ancak yine de color_t türünden nesneleri daha 
+    kolay oluşturmak için yardımcı fonksiyonlar da yazılabilir. Örneğin:
+
+    color_t fb_from_rgb(int red, int green, int blue)
+    {
+        color_t color = {red, green, blue, 255};
+
+        return color;
+    }
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de fb_put_pixel fonksiyonunu kullanarak doğru çizen bir fonksiyon yazalım. Doğru çizmek için 60'lı yıllarda geliştirilen 
+    ve ismine Bresenham algoritması denilen klasik bir allgoritma kullanılmaktadır. Biz bu algoritmanın nasıl çalıştığı
+    üzerinde durmayacağız. Bresenham algoritmasını kullanarak doğru çizen fonksiyon şöyle yazılabilir:
 
+    void fb_draw_line(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color)
+    {
+        int dx =  abs(x1 - x0);
+        int dy = -abs(y1 - y0);
+        int sx = (x0 < x1) ? 1 : -1;   
+        int sy = (y0 < y1) ? 1 : -1;   
+        int err = dx + dy;             
+
+        for (;;) {
+            fb_put_pixel(fb, x0, y0, color);
+
+            if (x0 == x1 && y0 == y1)
+                break;
+
+            int e2 = 2 * err;
+
+            if (e2 >= dy) {             
+                err += dy;
+                x0  += sx;
+            }
+            if (e2 <= dx) {             
+                err += dx;
+                y0  += sy;
+            }
+        }
+    }
+
+    Merkez koordinatları ve yarı çapı verilmiş olan çemberi çizen fonksiyon da şöyle yazılabilir:
+
+    static void circle_points(framebuffer_t *fb, int cx, int cy, int x,  int y, color_t color)
+    {
+        
+        fb_put_pixel(fb, cx + x, cy + y, color);
+        fb_put_pixel(fb, cx - x, cy + y, color);
+        fb_put_pixel(fb, cx + x, cy - y, color);
+        fb_put_pixel(fb, cx - x, cy - y, color);
+        fb_put_pixel(fb, cx + y, cy + x, color);
+        fb_put_pixel(fb, cx - y, cy + x, color);
+        fb_put_pixel(fb, cx + y, cy - x, color);
+        fb_put_pixel(fb, cx - y, cy - x, color);
+    }
+
+    void fb_draw_circle(framebuffer_t *fb, int cx, int cy, int r, color_t color)
+    {
+        int x   = 0;
+        int y   = r;
+        int err = 3 - 2 * r;   
+
+        while (x <= y) {
+            circle_points(fb, cx, cy, x, y, color);
+
+            if (err < 0) {
+                err += 4 * x + 6;       /* yatay adım */
+            } else {
+                err += 4 * (x - y) + 10; /* diagonal adım — y azalır */
+                y--;
+            }
+            x++;
+        }
+    }
+
+    Dikdörtgen çizmek oldukça kolaydır. Aslında ypılacak tek şey dört tane doğru çizmektir. Aşağıda sol-üst ve sağ-alt 
+    koordinatlarını parametre oolarak alıp dikdörtgeni çizen bir fonksiyon örneği verilmiştir:
+
+    void fb_draw_rect(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color)
+    {
+        fb_draw_line(fb, x0, y0, x1, y0, color);   /* üst kenar   */
+        fb_draw_line(fb, x0, y1, x1, y1, color);   /* alt kenar   */
+        fb_draw_line(fb, x0, y0, x0, y1, color);   /* sol kenar   */
+        fb_draw_line(fb, x1, y0, x1, y1, color);   /* sağ kenar   */
+    }
+
+    Tabii iyi bir grafik kütüphanesi için daha pek çok fonksiyona gereksinim vardır. Bugünkü oyun programlarının bir bölümünde 
+    çok yüksek düzeyde grafiksel operasyonlar uygulanmaktadır. Dolayısıyla bu operasyonlar etkin bir biçimde ancak grafik 
+    kartlarındaki özel grafik işlemcilerin yardımıyla yapılabilmektedir. İşte daha önceden de belirttiğimiz gibi zaman 
+    içerisinde grafijk kartları bu tür yüksek düzeyli animasyonları etkin bir biçimde yapabilecek hale getirilmiştir. Son 
+    yıllarda ise grafik kartları başlangıçtaki amacının dışında makine öğrenmesi alanında da önemli bir kullanıma sahip olmuştur.
+    Bugün artık GPU denildiğinde bazı kesimlerin aklına makine öğrenmesi için gereken donanım birimi gelmektedir. 
+
+    Yukarıda oluşturğumuz fonksiyonları bir bütün olarak aşağıda veriyoruz.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
+/* fb-test.c */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/fb.h>
-#include <sys/ioctl.h>
 
-int main() {
-    int fbfd = open("/dev/fb0", O_RDWR);
-    if (fbfd == -1) {
-        perror("Error opening framebuffer device");
-        return 1;
-    }
+typedef struct {
+    int fd;                              
+    unsigned char *fbp;                           
+    struct fb_var_screeninfo vinfo;      
+    struct fb_fix_screeninfo finfo;      
+    long screensize;                     
+} framebuffer_t;
 
-    struct fb_var_screeninfo vinfo;
-    struct fb_fix_screeninfo finfo;
+typedef struct {
+    uint8_t r, g, b, a;
+} color_t;
 
-    // Ekran bilgilerini al
-    ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
-    ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo);
+int fb_init(const char *device_path, framebuffer_t *fb);
+int fb_close(framebuffer_t *fb);
+void exit_sys(const char *msg);
+uint32_t fb_color_to_pixel(framebuffer_t *fb, color_t color);
+void fb_put_pixel(framebuffer_t *fb, int x, int y, color_t color);
+color_t fb_from_rgb(int red, int green, int blue);
+void fb_draw_line(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color);
+void fb_draw_circle(framebuffer_t *fb, int cx, int cy, int r, color_t color);
+void fb_draw_rect(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color);
 
-    int width = vinfo.xres;
-    int height = vinfo.yres;
-    int bpp = vinfo.bits_per_pixel;
+int main(void)
+{
+    framebuffer_t fb;
 
-    printf("Resolution: %dx%d, %d bpp\n", width, height, bpp);
+    if (fb_init("/dev/fb0", &fb) == -1)
+        exit_sys("fb_init");
 
-    long screensize = width * height * bpp / 8;
+    fb_draw_line(&fb, 100, 100, 200, 200, (color_t){255, 255, 0, 255});
+    fb_draw_circle(&fb, 500, 500, 100, (color_t){255, 255, 255, 255});
+    fb_draw_rect(&fb, 300, 300, 600, 400, (color_t){255, 255, 0, 255});
 
-    // Framebuffer'ı memory'e map et
-    char *fbp = (char *)mmap(0, screensize,
-                            PROT_READ | PROT_WRITE,
-                            MAP_SHARED, fbfd, 0);
+    getchar();
 
-    if ((int)fbp == -1) {
-        perror("Error mapping framebuffer");
-        return 1;
-    }
-
-    // 🔴 Tüm ekranı kırmızıya boya
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-
-            long location = (x + vinfo.xoffset) * (bpp / 8) +
-                            (y + vinfo.yoffset) * finfo.line_length;
-
-            if (bpp == 32) {
-                *(fbp + location) = 0;       // Blue
-                *(fbp + location + 1) = 0;   // Green
-                *(fbp + location + 2) = 255; // Red
-                *(fbp + location + 3) = 0;   // Alpha
-            }
-        }
-    }
-
-    sleep(5);
-
-    munmap(fbp, screensize);
-    close(fbfd);
+    if (fb_close(&fb) == -1)
+        exit_sys("fb_close");
 
     return 0;
 }
 
-sudo systemctl stop getty@tty1.service
- sudo openvt -s -c 1 -- ./benim_fb_programim
+int fb_init(const char *device_path, framebuffer_t *fb) 
+{
+    if ((fb->fd = open(device_path, O_RDWR)) == -1)
+        return -1;
 
- sudo ./programin > /dev/tty1 2>&1
+    if (ioctl(fb->fd, FBIOGET_VSCREENINFO, &fb->vinfo) < 0) {
+        close(fb->fd);
+        return -1;
+    }   
+    if (ioctl(fb->fd, FBIOGET_FSCREENINFO, &fb->finfo) < 0) {
+        close(fb->fd);
+        return -1;
+    }   
+    fb->screensize = fb->vinfo.yres_virtual * fb->finfo.line_length;
+          
+    if ((fb->fbp = (unsigned char *)mmap(NULL, fb->screensize, 
+            PROT_READ|PROT_WRITE, MAP_SHARED, fb->fd, 0)) == MAP_FAILED) {
+        close(fb->fd);
+        return -1;
+    }
+    
+    return 0;
+}
 
-----------------------
+int fb_close(framebuffer_t *fb)
+{
+    int saved_errno = 0;
 
-# 1. Fontu kopyala ve zipten çıkar
-cp /usr/share/consolefonts/UniTerm-8x16.psf.gz .
-gunzip UniTerm-8x16.psf.gz
+    if (munmap(fb->fbp, fb->screensize) == -1)
+        saved_errno = errno;
+    
+    if (close(fb->fd) == -1 && saved_errno == 0)
+        saved_errno = errno;
+    
+    if (saved_errno) {
+        errno = saved_errno;
+        return -1;
+    }
 
-# 2. PSF dosyasının ilk 4 byte'ı başlıktır (PSF1 için). 
-# Biz sadece 256 karakter x 16 byte = 4096 byte'lık ham veriyi alalım.
-# (Not: PSF versiyonuna göre header boyutu değişebilir, genellikle UniTerm PSF1'dir)
-dd if=UniTerm-8x16.psf of=font.raw bs=1 skip=4 count=4096
+    return 0;
+}
 
-#include <linux/fb.h>
-#include <linux/kd.h>
-#include <sys/ioctl.h>
-#include <sys/mmap.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <stdint.h>
+uint32_t fb_color_to_pixel(framebuffer_t *fb, color_t color) 
+{
+    uint32_t pixel = 0;
+    
+    if (fb->vinfo.bits_per_pixel == 32) {
+        pixel = ((uint32_t)color.b << 0) |
+            ((uint32_t)color.g << 8) |
+            ((uint32_t)color.r << 16) |
+            ((uint32_t)color.a << 24);
+    } 
+    else if (fb->vinfo.bits_per_pixel == 16) {
+        // RGB565
+        pixel = (((color.r >> 3) << 11) |
+                 ((color.g >> 2) << 5) |
+                 (color.b >> 3));
+    } 
+    else if (fb->vinfo.bits_per_pixel == 24) {
+        pixel = ((uint32_t)color.r << 16) |
+                ((uint32_t)color.g << 8) |
+                color.b;
+    }
+    else if (fb->vinfo.bits_per_pixel == 8) 
+        pixel = (299u * color.r + 587u * color.g + 114u * color.b) / 1000u;
+    
+    return pixel;
+}
+
+color_t fb_from_rgb(int red, int green, int blue)
+{
+    color_t color = {red, green, blue, 255};
+
+    return color;
+}
+
+void fb_put_pixel(framebuffer_t *fb, int x, int y, color_t color) 
+{
+    long pos;
+    uint32_t pixel; 
+    
+    pos = (x + fb->vinfo.xoffset) * (fb->vinfo.bits_per_pixel / 8) +
+                    (y + fb->vinfo.yoffset) * fb->finfo.line_length;
+    pixel = fb_color_to_pixel(fb, color);
+    
+    if (fb->vinfo.bits_per_pixel == 32) 
+        *((uint32_t*)(fb->fbp + pos)) = pixel;
+    else if (fb->vinfo.bits_per_pixel == 16) 
+        *((uint16_t*)(fb->fbp + pos)) = (uint16_t)pixel;
+    else if (fb->vinfo.bits_per_pixel == 24) {
+        *(fb->fbp + pos) = color.b;
+        *(fb->fbp + pos + 1) = color.g;
+        *(fb->fbp + pos + 2) = color.r;
+    }
+    else if (fb->vinfo.bits_per_pixel == 8) 
+        *(fb->fbp + pos) = pixel;
+}
+
+void fb_draw_line(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color)
+{
+    int dx =  abs(x1 - x0);
+    int dy = -abs(y1 - y0);
+    int sx = (x0 < x1) ? 1 : -1;   
+    int sy = (y0 < y1) ? 1 : -1;   
+    int err = dx + dy;             
+
+    for (;;) {
+        fb_put_pixel(fb, x0, y0, color);
+
+        if (x0 == x1 && y0 == y1)
+            break;
+
+        int e2 = 2 * err;
+
+        if (e2 >= dy) {             
+            err += dy;
+            x0  += sx;
+        }
+        if (e2 <= dx) {             
+            err += dx;
+            y0  += sy;
+        }
+    }
+}
+
+static void circle_points(framebuffer_t *fb, int cx, int cy, int x,  int y, color_t color)
+{
+    
+    fb_put_pixel(fb, cx + x, cy + y, color);
+    fb_put_pixel(fb, cx - x, cy + y, color);
+    fb_put_pixel(fb, cx + x, cy - y, color);
+    fb_put_pixel(fb, cx - x, cy - y, color);
+    fb_put_pixel(fb, cx + y, cy + x, color);
+    fb_put_pixel(fb, cx - y, cy + x, color);
+    fb_put_pixel(fb, cx + y, cy - x, color);
+    fb_put_pixel(fb, cx - y, cy - x, color);
+}
+
+void fb_draw_circle(framebuffer_t *fb, int cx, int cy, int r, color_t color)
+{
+    int x   = 0;
+    int y   = r;
+    int err = 3 - 2 * r;   
+
+    while (x <= y) {
+        circle_points(fb, cx, cy, x, y, color);
+
+        if (err < 0) {
+            err += 4 * x + 6;       /* yatay adım */
+        } else {
+            err += 4 * (x - y) + 10; /* diagonal adım — y azalır */
+            y--;
+        }
+        x++;
+    }
+}
+
+void fb_draw_rect(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color)
+{
+    fb_draw_line(fb, x0, y0, x1, y0, color);   
+    fb_draw_line(fb, x0, y1, x1, y1, color);   
+    fb_draw_line(fb, x0, y0, x0, y1, color);   
+    fb_draw_line(fb, x1, y0, x1, y1, color);   
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda önce ekrana pixel basan bir fonksiyon yazdık. Sonra onu kullanarak bazı geometrik şekilleri çizdirdik. Peki 
+    yazılar nasıl ekrana basılmaktadır? Aslında grafik ekranlarda yazıların karakterleri de pixel'lerden oluşmaktadır. Dolayısıyla 
+    bir karakteri ekrana yazdırmak bir çizim işlemi gibidir. Yazılar söz konusu olduğunda "font" kavramı da devreye girmektedir. 
+    Font yazıdaki karakterler hakkında bilgileri barındıran bir kavramdır. Bir font tipik olarak şu bilgileri içermektedir:
+
+    - Karakterlerin pixel'lerle nasıl basılacağı bilgisi
+    - Karakterlerin büyüklüğü (bunun genellikle punto (point) denilen bir birim kullanılmaktadır.)
+    - Karakterlerin genel görünüşü. Zaman içerisinde pek çok "font aileleri (font families)" oluşturulmuştur. Örneğin "Times 
+    New Roman", "Calibri" gibi font aileleri yaygın kullanılmaktadır. 
+    - Karakterlerin ikinci bazı özellikleri. Örneğin bold olamsı italik olması gibi. 
+
+    Renk bilgisi font'a dahil olan bir bilgi değildir. Bir font'ta her karakterin genişliği aynıysa bu tür font'lara "sabit 
+    genişlikli (fixed width)" font'lar denilmektedir. Konsol ekranlarında ve programlama editörlerinde hemen her zaman sabit 
+    genişlikli font'lar kullanılmaktadır. Ancak sabit genişlikli font'lar düz metinlerde ve kitaplarda kötü bir görüntü vermektedir. 
+    Örneğin "Consolas", "Courier New", "Mono" sabit genişlikli font'lardır. 
+
+    İşte font'u oluşturan karakterlerin nasıl çizileceği bilgisi iki biçimde oluşturulmaktadır:
+
+    1) Pixeller biçiminde. Yani o karakter görüntüsünü oluşturabilmek için hangi pixel'lerin basılması gerektiği bilgisi. Bu tür 
+    fontlara "raster" ya da "bitmap" fontlar denilmektedir.
+
+    2) Doğrusal çizimler biçiminde. Bu tür font'lara vektör font'lar da denilmektedir. 
+
+    Raster font'ların büyütülüp küçültülmesi bozulmaya yol açabilmektedir. Bu nedenle bunlar her boyut için ayrı ayrı oluşturulmaktadır. 
+    Halbuki vektörel font'lar istenilen oranda kolaylıkla büyütülüp küçültülebilmektedir. 
+
+    Konsol ekranlarında ve LCD'lerde genel olarak raster font'lar kullanılmaktadır. Sabit genişlikli raster font'lar oldukça 
+    basit bir biçimde bir bit matrisiyle ifade edilebilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            172. Ders 07/04/2026 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Linux dağıtımlarında genellikle konsol fontları "/usr/share/consolefonts" hazır bir biçimde bulundurulmaktadır. Buradaki 
+    dosyalar "gz" formatıyla zip'lenmiş durumdadır. Kondole fontları için "PSF (PC Secreen Font)" formatı yaygın kullanılmaktadır. 
+    PSF formatının PSF1 ve PSF2 olmak üzere iki verisyonu vardır. Modern Linux sistemlerinde artık PSF formatı kullanılmaktadır. 
+    Hem PSF1 formatına hem de PSF2 formatına ilişkin dosya uzantıları ".psf" biçimindedir. 
+
+    Her dosya formatında olduğu PSF dosya formatnda da dosyanın başına bir "başlık (header)" kısmı vardır. Başlık kısmının 
+    hemen başında formatın versiyon numarasını belirten bir "sihirli sayı (magic number)" bulunmaktadır. PSF1 ve PSF2 formatı 
+    arasındaki farklılıkları aşağıdaki tabloyla özetleyebiliriz:
+
+    ┌─────────────────────────┬──────────────────────────┬─────────────────────────┐
+    │         Özellik         │          PSF1            │          PSF2           │
+    ├─────────────────────────┼──────────────────────────┼─────────────────────────┤
+    │ Magic byte              │ 0x36 0x04                │ 0x72 0xB5 0xA4 0x86     │
+    ├─────────────────────────┼──────────────────────────┼─────────────────────────┤
+    │ Glyph boyutu            │ Sadece 8 piksel genişlik │ Değişken genişlik       │
+    ├─────────────────────────┼──────────────────────────┼─────────────────────────┤
+    │ Unicode tablo           │ İsteğe bağlı             │ İsteğe bağlı            │
+    ├─────────────────────────┼──────────────────────────┼─────────────────────────┤
+    │ Yaygınlık               │ Eski sistemler           │ Modern sistemler        │
+    └─────────────────────────┴──────────────────────────┴─────────────────────────┘
+
+    Biz de deneme amaçlı "Uni1-VGA28x16.psf.gz" fontunu aşağıdaki kopyalayıp açtık:
+
+    $ cp /usr/share/consolefonts/Uni1-VGA28x16.psf.gz .
+    $ gunzip Uni1-VGA28x16.psf.gz
+
+    Dosyanın ilk bayte'larına baktığımızda onun 0x72 0xB5 0xA4 0x86 biçiminde başladığı görülmektedir. Yani dosya PSF2 
+    formatıba ilişkindir. PSF2 dosyasının başlık kısmının formatı şöyledir:
+
+    ┌────────────────────────────────────────────────────────────────────┐
+    │                        PSF2 Başlık Yapısı                          │
+    ├────────┬──────────┬────────┬───────────────────────────────────────┤
+    │ Offset │  Alan    │ Boyut  │           Açıklama                    │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x00  │ magic    │ 4 byte │ Sihirli sayı: 0x72 0xB5 0x4A 0x86     │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x04  │ version  │ 4 byte │ Sürüm numarası (0 = PSF2)             │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x08  │ hdrsize  │ 4 byte │ Başlık boyutu (genellikle 32 byte)    │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x0C  │ flags    │ 4 byte │ Bit 0: Unicode tablo var mı?          │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x10  │ numglyph │ 4 byte │ Toplam glyph sayısı                   │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x14  │ bytesper │ 4 byte │ Glyph başına byte sayısı              │
+    │        │ glyph    │        │ (= height × [width/8])                │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x18  │ height   │ 4 byte │ Glyph yüksekliği (piksel)             │
+    ├────────┼──────────┼────────┼───────────────────────────────────────┤
+    │  0x1C  │ width    │ 4 byte │ Glyph genişliği (piksel)              │
+    └────────┴──────────┴────────┴───────────────────────────────────────┘
+
+    Bu başlığı bir yapı biçiminde ifade edebiliriz:
+
+    #define PSF2_MAGIC 0x864AB572  /* little-endian: 72 B5 4A 86 */
+
+    typedef struct {
+        uint8_t  magic[4];
+        uint32_t version;
+        uint32_t headersize;
+        uint32_t flags;
+        uint32_t numglyph;
+        uint32_t bytesperglyph;
+        uint32_t height;
+        uint32_t width;
+    } psf2_header_t;
+
+    Bu tür dosya formatları üzerinde çalışırken dosyayı açtıktan sonra mmap fonksiyonu ile belleğe map etmek kullanımı 
+    kolalaştırır. Bu işlemi bit fonksiyona yaptırabiliriz. Fonksiyon PSF dosyasının başlık kısmını okuyup elde ettiği bilgileri 
+    daha kullanışlı bir yapı nesnesinin içerisine yerleştirebilir. Örneğin bunun için psf_font_t gibi bir yapı oluşturabiliriz:
+
+    typedef struct {
+        psf2_header_t *header;    
+        uint8_t *glyphs; 
+        size_t map_size;
+    } psf_font_t;
+        
+    Burada yapının header elemanı PSF dosyasının başlık kısmını, glyphs elemanı ise bitmap karakterlerinin başlangıcını göstermektedir. 
+    map_size elemanına fonksiyon yapılan mapping'in uzunluğunu yerleştirmektedir. Fonksiyonu şöyle yazabiliriz:
+
+    int psf_load(const char *path, psf_font_t *font) 
+    {
+        int fd;
+        struct stat finfo;
+        size_t file_size;
+        void *mapaddr;
+        const psf2_header_t *header;
+            
+        if ((fd = open(path, O_RDONLY)) == -1) {
+            perror("psf_load: open");
+            return -1;
+        }
+        
+        if (fstat(fd, &finfo) < 0) {
+            perror("psf_load: fstat");
+            close(fd);
+            return -1;
+        }
+        file_size = (size_t)finfo.st_size;
+        if ((mapaddr = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED) {
+            perror("psf_load: mmap");
+            close(fd);
+            return -1;
+        }
+        close(fd);
+
+        if (file_size < sizeof(psf2_header_t)) {
+            fprintf(stderr, "file is too small!..\n");
+            munmap(mapaddr, file_size);
+            return -1;
+        }
+
+        header = (const psf2_header_t *)mapaddr;
+
+        if (*(uint32_t *)header->magic != PSF2_MAGIC) {
+            fprintf(stderr, "psf_load: invalid PSF2 magic: 0x%08X\n", *(uint32_t *)header->magic);
+            munmap(mapaddr, file_size);
+            return -1;
+        }
+
+        font->header = (psf2_header_t *)mapaddr;
+        font->glyphs = (uint8_t *)mapaddr + font->header->headersize;
+        font->map_size = file_size;
+
+        return 0;
+    }
+
+    Biz burada pratiklik olsun diye hata mesajlarını fonksiyonun içerisinde stderr dosyasına yazdırdık. Aslında bu teknk 
+    genel olarak iyi değildir. Bu fonksiyon -1 ile geri döndüğünde bunun nedeni sistem hataları (yani errno değişkenini 
+    set eden hatalar) olabileceği gibi mantıksal hatalar da olabilmektedir. Eğer hata mesajını dışarıda yazdıracaksanız
+    oluşan hatanın errno değerini set edip etmediğini bir biçimde fonksiyonun içerisinde belirlemelisiniz.    
+
+    psf_load fonksiyonuyla tahsis edilen mapping alanı psf_free fonksiyonula serbest bırakılabilir. psf_free fonksiyonu 
+    aslında yalnızca munmap işlemini yapmaktadır:
+
+    void psf_free(psf_font_t *font) 
+    {
+        munmap(font->header, font->map_size);
+    }
+-------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            173. Ders 09/04/2026 - Perşembe
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi artık font bilgilerini de bellekte oluştrmuş durumdayız. Artık bu fonkt bilgilerini kullanarak belli bir pixel'i 
+    referabs alıp bir karakteri grafik ekrana bastıran bir fonksiyon yazabliriz:
+
+    void fb_putchar(framebuffer_t *fb, const psf_font_t *font, uint32_t x, uint32_t y, uint32_t codepoint, color_t color)
+    {
+        const uint8_t *glyph;
+        uint32_t bytes_per_row;
+        const uint8_t *row_data;
+        uint32_t px, py;
+        uint32_t byte_idx;
+        uint8_t mask;
+        
+        glyph = psf_glyph(font, codepoint);
+        bytes_per_row = (font->header->width + 7) / 8;
+
+        for (uint32_t row = 0; row < font->header->height; ++row) {
+            row_data = glyph + row * bytes_per_row;
+            for (uint32_t col = 0; col < font->header->width; ++col) {
+                byte_idx = col / 8;
+                mask = 0x80 >> (col % 8);  /* MSB = sol piksel */
+
+                px = x + col;
+                py = y + row;
+                if (row_data[byte_idx] & mask) 
+                    fb_put_pixel(fb, px, py, color);
+            }
+        }
+    }
+
+    Burada karakter bitmap'i iç içe iki döngüyle dolaşılmış ve bitmap'teki bitler 1 ise ilgili yere pixel basılmıitır. Buradaki
+    koordinat fonksiyonun x ve y parametresiyle belirtilmektedir. Bu (x, y) koordinatı karakterin basılacağı yerin sol-üst
+    köşe koordinatını belirtmektedir. ps_glyph fonksiyonu bitmap dizisi içerisindeki ilgili karakterin bitmap bilgilerinin 
+    başlangıç adresini vermektedir:
+
+    const uint8_t *psf_glyph(const psf_font_t *font, uint32_t codepoint)
+    {
+        if (codepoint >= font->header->numglyph)
+            codepoint = 0;  
+        return font->glyphs + codepoint * font->header->bytesperglyph;
+    }
+
+    Yukarıdaki fb_putchar fonksiyonunda ASCII dışı karakterler basılmak istendiğinde yanlış karakterler basılabilektedir. 
+    Aslında PSF2 formatında karakterler Unicode codepoint'lere göre sıralı gitmek zorunda değildir. Bir karakterin bitmap'inin 
+    başlangıç adresi aslında format içerisindeki bir diziye başvurularak tespit edilmektedir. Burada ayrıntılara girmeden 
+    psf_glyph fonksiyonunun düzeltilmiş halini vermek istiyoruz:
+
+    const uint8_t *psf_glyph(const psf_font_t *font, uint32_t codepoint)
+    {
+        uint32_t glyph_index = 0;   /* fallback: glyph 0 (usually blank) */
+
+        /* Check if Unicode map is present */
+        if (!(font->header->flags & PSF2_FLAG_UNICODE_MAP))
+        {
+            /* No map — direct index (ASCII-only fonts) */
+            if (codepoint < font->header->numglyph)
+                glyph_index = codepoint;
+            goto done;
+        }
+
+        /* Unicode map starts right after glyph bitmap data */
+        const uint8_t *map     = font->glyphs + 
+                                font->header->numglyph * font->header->bytesperglyph;
+        const uint8_t *map_end = (const uint8_t *)font->header + font->map_size;
+
+        uint32_t current_glyph = 0;
+        const uint8_t *p       = map;
+
+        while (p < map_end && current_glyph < font->header->numglyph) {
+            /* Each glyph's unicode entries end with 0xFF */
+            if (*p == 0xFF) {
+                current_glyph++;
+                p++;
+                continue;
+            }
+            /* Skip 0xFE sequences (multi-codepoint clusters) */
+            if (*p == 0xFE) {
+                while (p < map_end && *p != 0xFF)
+                    p++;
+                continue;
+            }
+
+            /* Decode one UTF-8 codepoint from the map */
+            uint32_t cp;
+            uint8_t b = *p;
+
+            if (b < 0x80) {
+                cp = b;
+                p += 1;
+            } else if (b < 0xE0) {
+                cp = ((b & 0x1F) << 6) | (p[1] & 0x3F);
+                p += 2;
+            } else if (b < 0xF0) {
+                cp = ((b & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+                p += 3;
+            } else {
+                cp = ((b & 0x07) << 18) | ((p[1] & 0x3F) << 12) |
+                    ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+                p += 4;
+            }
+
+            if (cp == codepoint) {
+                glyph_index = current_glyph;
+                goto done;
+            }
+        }
+
+    done:
+        return font->glyphs + glyph_index * font->header->bytesperglyph;
+    }
+
+    Artık belli bir koordinattan itibaren bir yazının yazdırılması da kolay bir biçimde sağlanabilir. Örneğin:
+
+    void fb_putstr(framebuffer_t *fb, const psf_font_t *font, uint32_t x, uint32_t y, uint32_t *text, color_t color)
+    {
+        uint32_t cur_x, cur_y;
+
+        cur_x = x;
+        cur_y = y;
+        while (*text != '\0') {
+            if (*text == '\n') {
+                cur_y += font->header->height;
+                cur_x = 0;
+                ++text;
+                continue;
+            }
+            fb_putchar(fb, font, cur_x, cur_y, *text, color);
+            cur_x += font->header->width;
+            ++text;
+        }
+    }
+
+    Ancak burada fonksiyona geçirilecek yazının Unicode code point'lerden oluşması (başka bir deyişle UTF-32 kodlamasıyla
+    kodlanmış olması) gerekmektedir. Editörlerimiz yazıları UTF-8 kodladığı için bizim UTF-8 yazıları UTF-32'ye dönüştürmemiz
+    gerekir. Böyle bir dönüştürme aşağıdaki fonksiyonla yapılabilir:
+
+    ize_t utf8_to_utf32(const char *utf8_src, char32_t *out_buf, size_t buf_size)
+    {
+        mbstate_t state;
+        memset(&state, 0, sizeof(state));   /* initialize shift state to initial state */
+
+        const char *p = utf8_src;
+        size_t count = 0;
+
+        while (*p != '\0' && count < buf_size) {
+            size_t rc = mbrtoc32(&out_buf[count], p, MB_LEN_MAX, &state);
+
+            switch (rc) {
+            case (size_t)-3:    /* codepoint from previous surrogate — shouldn't happen in UTF-32 */
+                count++;
+                break;
+            case (size_t)-2:    /* incomplete multibyte sequence — input truncated */
+                return (size_t)-1;
+            case (size_t)-1:    /* encoding error */
+                return (size_t)-1;
+            case 0:             /* null byte consumed */
+                return count;
+            default:            /* rc = number of bytes consumed */
+                p += rc;
+                count++;
+                break;
+            }
+        }
+
+        return count;
+    }
+
+    C'ye C11 ilke birlikte zaten UTF-32 string'ler de eklenmiştir. Böyle string'leri oluşturmak için iki tırnağın solunda ona 
+    yapışık U karakterinin bulundurulması gerekir. (UTF-16 kodlaması için de u öneki kullanılmaktadır.)
+
+    Aşağıda şu ana kadar yapmış olduğumuz örrneğin tüm kodlarını veriyoruz.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/* fb-test.c */
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <stdint.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <linux/fb.h>
 
-uint8_t *font_data;
+#define PSF2_MAGIC                  0x864AB572  
+#define PSF2_FLAG_UNICODE_MAP       0x01
 
-void put_pixel(uint8_t *fbp, struct fb_var_screeninfo *vinfo, int line_len, int x, int y, uint32_t color) {
-    long location = (x + vinfo->xoffset) * (vinfo->bits_per_pixel / 8) + (y + vinfo->yoffset) * line_len;
-    *((uint32_t *)(fbp + location)) = color;
+typedef struct {
+    int fd;                              
+    unsigned char *fbp;                           
+    struct fb_var_screeninfo vinfo;      
+    struct fb_fix_screeninfo finfo;      
+    long screensize;                     
+} framebuffer_t;
+
+typedef struct {
+    uint8_t r, g, b, a;
+} color_t;
+
+typedef struct {
+    uint8_t  magic[4];
+    uint32_t version;
+    uint32_t headersize;
+    uint32_t flags;
+    uint32_t numglyph;
+    uint32_t bytesperglyph;
+    uint32_t height;
+    uint32_t width;
+} psf2_header_t;
+
+typedef struct {
+    psf2_header_t *header;    
+    uint8_t *glyphs; 
+    size_t map_size;
+} psf_font_t;
+
+int fb_init(const char *device_path, framebuffer_t *fb);
+int fb_close(framebuffer_t *fb);
+uint32_t fb_color_to_pixel(framebuffer_t *fb, color_t color);
+void fb_put_pixel(framebuffer_t *fb, int x, int y, color_t color);
+color_t fb_from_rgb(int red, int green, int blue);
+void fb_draw_line(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color);
+void fb_draw_circle(framebuffer_t *fb, int cx, int cy, int r, color_t color);
+void fb_draw_rect(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color);
+int psf_load(const char *path, psf_font_t *font);
+void psf_free(psf_font_t *font);
+void fb_putchar(framebuffer_t *fb, const psf_font_t *font, uint32_t x, uint32_t y, uint32_t codepoint, color_t color);
+const uint8_t *psf_glyph(const psf_font_t *font, uint32_t codepoint);
+void fb_putstr(framebuffer_t *fb, const psf_font_t *font, uint32_t x, uint32_t y, uint32_t *text, color_t color);
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    framebuffer_t fb;
+    psf_font_t font;
+
+    if (fb_init("/dev/fb0", &fb) == -1)
+        exit_sys("fb_init");
+
+    if (psf_load("Uni1-VGA28x16.psf", &font) == -1)
+        exit(EXIT_FAILURE);
+
+    fb_draw_line(&fb, 100, 100, 200, 200, (color_t){255, 255, 0, 255});
+    fb_draw_circle(&fb, 500, 500, 100, (color_t){255, 255, 255, 255});
+    fb_draw_rect(&fb, 300, 300, 600, 400, (color_t){255, 255, 0, 255});
+
+    fb_putstr(&fb, &font, 0, 400, (uint32_t *)U"Ankara\nİstanbul\nAğrı", (color_t){255, 0, 0, 255});
+    
+    getchar();
+
+    psf_free(&font);
+
+    if (fb_close(&fb) == -1)
+        exit_sys("fb_close");
+
+    return 0;
 }
 
-void draw_text(uint8_t *fbp, struct fb_var_screeninfo *vinfo, int line_len, int x, int y, char *text, uint32_t color) {
-    while (*text) {
-        int char_offset = (*text) * 16; // Her karakter 16 byte
-        for (int i = 0; i < 16; i++) {
-            for (int j = 0; j < 8; j++) {
-                if (font_data[char_offset + i] & (0x80 >> j)) {
-                    put_pixel(fbp, vinfo, line_len, x + j, y + i, color);
-                }
-            }
+int fb_init(const char *device_path, framebuffer_t *fb) 
+{
+    if ((fb->fd = open(device_path, O_RDWR)) == -1)
+        return -1;
+
+    if (ioctl(fb->fd, FBIOGET_VSCREENINFO, &fb->vinfo) < 0) {
+        close(fb->fd);
+        return -1;
+    }   
+    if (ioctl(fb->fd, FBIOGET_FSCREENINFO, &fb->finfo) < 0) {
+        close(fb->fd);
+        return -1;
+    }   
+    fb->screensize = fb->vinfo.yres_virtual * fb->finfo.line_length;
+          
+    if ((fb->fbp = (unsigned char *)mmap(NULL, fb->screensize, 
+            PROT_READ|PROT_WRITE, MAP_SHARED, fb->fd, 0)) == MAP_FAILED) {
+        close(fb->fd);
+        return -1;
+    }
+    
+    return 0;
+}
+
+int fb_close(framebuffer_t *fb)
+{
+    int saved_errno = 0;
+
+    if (munmap(fb->fbp, fb->screensize) == -1)
+        saved_errno = errno;
+    
+    if (close(fb->fd) == -1 && saved_errno == 0)
+        saved_errno = errno;
+    
+    if (saved_errno) {
+        errno = saved_errno;
+        return -1;
+    }
+
+    return 0;
+}
+
+uint32_t fb_color_to_pixel(framebuffer_t *fb, color_t color) 
+{
+    uint32_t pixel = 0;
+    
+    if (fb->vinfo.bits_per_pixel == 32) {
+        pixel = ((uint32_t)color.b << 0) |
+            ((uint32_t)color.g << 8) |
+            ((uint32_t)color.r << 16) |
+            ((uint32_t)color.a << 24);
+    } 
+    else if (fb->vinfo.bits_per_pixel == 16) {
+        // RGB565
+        pixel = (((color.r >> 3) << 11) |
+                 ((color.g >> 2) << 5) |
+                 (color.b >> 3));
+    } 
+    else if (fb->vinfo.bits_per_pixel == 24) {
+        pixel = ((uint32_t)color.r << 16) |
+                ((uint32_t)color.g << 8) |
+                color.b;
+    }
+    else if (fb->vinfo.bits_per_pixel == 8) 
+        pixel = (299u * color.r + 587u * color.g + 114u * color.b) / 1000u;
+    
+    return pixel;
+}
+
+color_t fb_from_rgb(int red, int green, int blue)
+{
+    color_t color = {red, green, blue, 255};
+
+    return color;
+}
+
+void fb_put_pixel(framebuffer_t *fb, int x, int y, color_t color) 
+{
+    long pos;
+    uint32_t pixel; 
+    
+    pos = (x + fb->vinfo.xoffset) * (fb->vinfo.bits_per_pixel / 8) +
+                    (y + fb->vinfo.yoffset) * fb->finfo.line_length;
+    pixel = fb_color_to_pixel(fb, color);
+    
+    if (fb->vinfo.bits_per_pixel == 32) 
+        *((uint32_t*)(fb->fbp + pos)) = pixel;
+    else if (fb->vinfo.bits_per_pixel == 16) 
+        *((uint16_t*)(fb->fbp + pos)) = (uint16_t)pixel;
+    else if (fb->vinfo.bits_per_pixel == 24) {
+        *(fb->fbp + pos) = color.b;
+        *(fb->fbp + pos + 1) = color.g;
+        *(fb->fbp + pos + 2) = color.r;
+    }
+    else if (fb->vinfo.bits_per_pixel == 8) 
+        *(fb->fbp + pos) = pixel;
+}
+
+void fb_draw_line(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color)
+{
+    int dx =  abs(x1 - x0);
+    int dy = -abs(y1 - y0);
+    int sx = (x0 < x1) ? 1 : -1;   
+    int sy = (y0 < y1) ? 1 : -1;   
+    int err = dx + dy;             
+
+    for (;;) {
+        fb_put_pixel(fb, x0, y0, color);
+
+        if (x0 == x1 && y0 == y1)
+            break;
+
+        int e2 = 2 * err;
+
+        if (e2 >= dy) {             
+            err += dy;
+            x0  += sx;
         }
-        x += 8; // Bir sonraki karakter için 8 piksel sağa kay
-        text++;
+        if (e2 <= dx) {             
+            err += dx;
+            y0  += sy;
+        }
     }
 }
 
-int main() {
-    // 1. Fontu Yükle
-    FILE *f = fopen("font.raw", "rb");
-    font_data = malloc(4096);
-    fread(font_data, 1, 4096, f);
-    fclose(f);
+static void circle_points(framebuffer_t *fb, int cx, int cy, int x,  int y, color_t color)
+{ 
+    fb_put_pixel(fb, cx + x, cy + y, color);
+    fb_put_pixel(fb, cx - x, cy + y, color);
+    fb_put_pixel(fb, cx + x, cy - y, color);
+    fb_put_pixel(fb, cx - x, cy - y, color);
+    fb_put_pixel(fb, cx + y, cy + x, color);
+    fb_put_pixel(fb, cx - y, cy + x, color);
+    fb_put_pixel(fb, cx + y, cy - x, color);
+    fb_put_pixel(fb, cx - y, cy - x, color);
+}
 
-    // 2. Framebuffer Hazırlığı
-    int fb_fd = open("/dev/fb0", O_RDWR);
-    int tty_fd = open("/dev/tty1", O_RDWR);
-    ioctl(tty_fd, KDSETMODE, KD_GRAPHICS);
+void fb_draw_circle(framebuffer_t *fb, int cx, int cy, int r, color_t color)
+{
+    int x = 0;
+    int y = r;
+    int err = 3 - 2 * r;   
 
-    struct fb_var_screeninfo vinfo;
-    struct fb_fix_screeninfo finfo;
-    ioctl(fb_fd, FBIOGET_VSCREENINFO, &vinfo);
-    ioctl(fb_fd, FBIOGET_FSCREENINFO, &finfo);
+    while (x <= y) {
+        circle_points(fb, cx, cy, x, y, color);
 
-    uint8_t *fbp = (uint8_t *)mmap(0, vinfo.yres_virtual * finfo.line_length, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
+        if (err < 0) {
+            err += 4 * x + 6;       /* yatay adım */
+        } else {
+            err += 4 * (x - y) + 10; /* diagonal adım — y azalır */
+            y--;
+        }
+        x++;
+    }
+}
 
-    // 3. Ekrana Yazı Yaz
-    draw_text(fbp, &vinfo, finfo.line_length, 200, 200, "Sistem Programlama Dersi - Framebuffer", 0xFFFFFF); // Beyaz
-    draw_text(fbp, &vinfo, finfo.line_length, 200, 220, "Hazir Font Dosyasi Kullanildi.", 0x00FF00); // Yesil
+void fb_draw_rect(framebuffer_t *fb, int x0, int y0, int x1, int y1, color_t color)
+{
+    fb_draw_line(fb, x0, y0, x1, y0, color);   
+    fb_draw_line(fb, x0, y1, x1, y1, color);   
+    fb_draw_line(fb, x0, y0, x0, y1, color);   
+    fb_draw_line(fb, x1, y0, x1, y1, color);   
+}
 
-    sleep(7);
+int psf_load(const char *path, psf_font_t *font) 
+{
+    int fd;
+    struct stat finfo;
+    size_t file_size;
+    void *mapaddr;
+    const psf2_header_t *header;
+        
+    if ((fd = open(path, O_RDONLY)) == -1) {
+        perror("psf_load: open");
+        return -1;
+    }
+    
+    if (fstat(fd, &finfo) < 0) {
+        perror("psf_load: fstat");
+        close(fd);
+        return -1;
+    }
+    file_size = (size_t)finfo.st_size;
+    if ((mapaddr = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED) {
+        perror("psf_load: mmap");
+        close(fd);
+        return -1;
+    }
+    close(fd);
 
-    // 4. Temizlik
-    ioctl(tty_fd, KDSETMODE, KD_TEXT);
-    munmap(fbp, vinfo.yres_virtual * finfo.line_length);
-    close(fb_fd);
-    close(tty_fd);
-    free(font_data);
+    if (file_size < sizeof(psf2_header_t)) {
+        fprintf(stderr, "file is too small!..\n");
+        munmap(mapaddr, file_size);
+        return -1;
+    }
+
+    header = (const psf2_header_t *)mapaddr;
+
+    if (*(uint32_t *)header->magic != PSF2_MAGIC) {
+        fprintf(stderr, "psf_load: invalid PSF2 magic: 0x%08X\n", *(uint32_t *)header->magic);
+        munmap(mapaddr, file_size);
+        return -1;
+    }
+
+    font->header = (psf2_header_t *)mapaddr;
+    font->glyphs = (uint8_t *)mapaddr + font->header->headersize;
+    font->map_size = file_size;
+
     return 0;
 }
+
+void psf_free(psf_font_t *font) 
+{
+    munmap(font->header, font->map_size);
+}
+
+void fb_putchar(framebuffer_t *fb, const psf_font_t *font, uint32_t x, uint32_t y, uint32_t codepoint, color_t color)
+{
+    const uint8_t *glyph;
+    uint32_t bytes_per_row;
+    const uint8_t *row_data;
+    uint32_t px, py;
+    uint32_t byte_idx;
+    uint8_t mask;
+    
+    glyph = psf_glyph(font, codepoint);
+    bytes_per_row = (font->header->width + 7) / 8;
+
+    for (uint32_t row = 0; row < font->header->height; ++row) {
+        row_data = glyph + row * bytes_per_row;
+        for (uint32_t col = 0; col < font->header->width; ++col) {
+            byte_idx = col / 8;
+            mask = 0x80 >> (col % 8);  /* MSB = sol piksel */
+
+            px = x + col;
+            py = y + row;
+            if (row_data[byte_idx] & mask) 
+                fb_put_pixel(fb, px, py, color);
+        }
+    }
+}
+
+const uint8_t *psf_glyph(const psf_font_t *font, uint32_t codepoint)
+{
+    uint32_t glyph_index = 0;   /* fallback: glyph 0 (usually blank) */
+
+    /* Check if Unicode map is present */
+    if (!(font->header->flags & PSF2_FLAG_UNICODE_MAP))
+    {
+        /* No map — direct index (ASCII-only fonts) */
+        if (codepoint < font->header->numglyph)
+            glyph_index = codepoint;
+        goto done;
+    }
+
+    /* Unicode map starts right after glyph bitmap data */
+    const uint8_t *map     = font->glyphs + 
+                             font->header->numglyph * font->header->bytesperglyph;
+    const uint8_t *map_end = (const uint8_t *)font->header + font->map_size;
+
+    uint32_t current_glyph = 0;
+    const uint8_t *p       = map;
+
+    while (p < map_end && current_glyph < font->header->numglyph) {
+        /* Each glyph's unicode entries end with 0xFF */
+        if (*p == 0xFF) {
+            current_glyph++;
+            p++;
+            continue;
+        }
+        /* Skip 0xFE sequences (multi-codepoint clusters) */
+        if (*p == 0xFE) {
+            while (p < map_end && *p != 0xFF)
+                p++;
+            continue;
+        }
+
+        /* Decode one UTF-8 codepoint from the map */
+        uint32_t cp;
+        uint8_t b = *p;
+
+        if (b < 0x80) {
+            cp = b;
+            p += 1;
+        } else if (b < 0xE0) {
+            cp = ((b & 0x1F) << 6) | (p[1] & 0x3F);
+            p += 2;
+        } else if (b < 0xF0) {
+            cp = ((b & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+            p += 3;
+        } else {
+            cp = ((b & 0x07) << 18) | ((p[1] & 0x3F) << 12) |
+                 ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+            p += 4;
+        }
+
+        if (cp == codepoint) {
+            glyph_index = current_glyph;
+            goto done;
+        }
+    }
+
+done:
+    return font->glyphs + glyph_index * font->header->bytesperglyph;
+}
+
+void fb_putstr(framebuffer_t *fb, const psf_font_t *font, uint32_t x, uint32_t y, uint32_t *text, color_t color)
+{
+    uint32_t cur_x, cur_y;
+
+    cur_x = x;
+    cur_y = y;
+    while (*text != '\0') {
+        if (*text == '\n') {
+            cur_y += font->header->height;
+            cur_x = 0;
+            ++text;
+            continue;
+        }
+        fb_putchar(fb, font, cur_x, cur_y, *text, color);
+        cur_x += font->header->width;
+        ++text;
+    }
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki programı masaüstü sistemlerde daha önce de belirttiğimiz gibi "Ctrl+Alt+F1" (ya da FN) ile sanal terminal 
+    açarak çalıtırmalısınız. Çünkü Wayland grafik alt sistemi framebuffer sistemini (aslında DRM/KMS sistemini) kullandığı için 
+    GUI arayüzünde sorunlar ortaya çıkabilmektedir. (Bu sanal terminalden grafik arayüze dönmek için "Ctrl+Alt+F7" tuşlarına 
+    basabilirsiniz.) Ancak denemelerinizi sanal terminallerde yaparken o terminalde "getty" programları çalıştığı için 
+    grafik çıktılarınız kabuk ile aynı ekranda görünecektir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi de framebuffer alternatifi olan modern "DRM/KMS (Direcet Rendering Manager / Kernel Mode Settings)" sistemi hakkında 
+    bazı temel bilgiler vereceğiz. DRM/KMS sistemi framebuffer sisteminin bazı kusurlarını ortadan kaldımak için Linux çekirdeklerine
+    eklenmiştir. Ancak bu sistemin tasarlanmasının ana motivasyonu GPU'lardan daha iyi faydalanmak içindir. Gömülü sistemlerde 
+    GPU kullanımı ya yoktur ya da oldukça geri plandadır. Zaten gömülü sistemlerde görüntü birimi olarak LCD modüller yoğun 
+    bir biçimde kullanılmaktadır. Bu nedenle gömülü sistemlerde DRM/KMS kullanımı genellikle söz konusu olmaz. Fakat HDMI 
+    kullanan ve GPU'su bulunan gömülü sistem donanımlarında framebuffer yerine daha modern DRM/KMS tercih edilebilmektedir. 
+    Masaüstü sistemlerde artık framebuffer yerini tamamen DRM/KMS sistemine bırakmıştır. X11 gibi Wayland gibi grafik 
+    alt sistemler DRM/KMS kullanmaktadır. Aşağıdaki tabloda framebuffer ve DRM/KMS sistemlerinin tarihsel evrimi verilmektedir.
+
+    ┌───────────────┬──────────────────────┬─────────────────────────────────────────────────────────────────────┐
+    │   Dönem       │     Teknoloji        │                         Açıklama                                    │
+    ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │ 1991-1995     │ VGA / VESA           │ Doğrudan I/O port erişimi, BIOS çağrıları ile mod ayarı.            │
+    │               │                      │ Kullanıcı alanından doğrudan donanım erişimi.                       │
+    ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │ 1995-2004     │ fbdev (Framebuffer)  │ Kernel tarafından soyutlanan bellek eşlemeli grafik. /dev/fb0       │
+    │               │                      │ üzerinden basit piksel yazma. KMS desteği yok.                      │
+    ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │ 1999-2004     │ DRI1 + XFree86       │ Direct Rendering Infrastructure v1. X Server ile GPU arasındaki     │
+    │               │                      │ ilk köprü. Eşzamanlılık sorunları mevcuttu.                         │
+    ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │ 2004-2008     │ DRI2                 │ Kernel tarafında kaynak yönetimi başlangıcı. GEM protokolü ile      │
+    │               │                      │ buffer paylaşımı. Mesa ile entegrasyon.                             │
+    ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │ 2008-günümüz  │ DRM/KMS              │ Kernel Mode Setting ile mod değişikliği kernel'a taşındı.           │
+    │               │                      │ Atomik modesetting, multi-plane, HDR desteği.                       │
+    ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │ 2012-günümüz  │ Wayland + DRM        │ Compositor doğrudan DRM/KMS kullanıyor. X11 bağımlılığı             │
+    │               │                      │ ortadan kalktı. Modern masaüstü mimarisi.                           │
+    └───────────────┴──────────────────────┴─────────────────────────────────────────────────────────────────────┘
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+
+# 1. Önce tty1'i tamamen sustur:
+sudo systemctl stop getty@tty1.service 2>/dev/null
+sudo systemctl mask getty@tty1.service
+sudo systemctl mask autovt@tty1.service
+
+# 2. VT'yi temizle:
+sudo sh -c "printf '\033[?25l\033[2J\033[H' > /dev/tty1"
+
+# 3. Programı çalıştır (-w ile bekle):
+sudo openvt -f -s -w -c 1 -- ./fb-test

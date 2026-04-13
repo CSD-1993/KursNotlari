@@ -14939,6 +14939,208 @@ fn main() {
     Ancak biz kurusumuzda "ham gösterici (raw pointer)" terimi yerine yalnızca "gösterici (pointer)" terimini kullanacağız.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bilindiği gibi C++, Java C#, Python gibi programlama dillerinde fonksiyonların ve metotların parametrelerine default 
+    değerler verilebilmektedir. Örneğin:
+
+    class Complex {
+    public:
+        Complex(double real = 0, double imag = 0)
+        {
+            m_real = real;
+            m_imag = imag;
+        }
+        //...
+    private:
+        double m_real;
+        double m_imag;
+    };
+
+    Burada biz Complex türünden nesneyi aşağıdaki yapıcı fonksiyon çağırmalarıyla yaratabiliriz:
+
+    Complex x;              // real = 0, imag = 0
+    Complex y(10);          // real = 10, imag = 0
+    Complex z(10, 20);      // real = 10, imag = 20
+
+    Rust'ta default argüman özelliği (yani parametre değişkenlerine default değerlerin verilebilmesi özelliği) olmadığına 
+    göre bu tür işlemler nasıl yapılmaktadır?
+
+    Rust geleneğinde default argüman etkisi iki biçimde oluşturulmaktadır:
+
+    1) Birden fazla new ilişkili fonksiyonlarıyla
+    2) new ilişkili fonksiyonundan sonra metot çağrı zincirleriyle.
+
+    Birinci yöntemde biz birden fazla new ilişkili fonksiyonu yazarak default değerleri bunlarla oluşturabiliriz. Örneğin:
+
+    struct Complex {
+        real: f64,
+        imag: f64,
+    }
+
+    impl Complex {
+        fn new(real: f64, imag: f64) -> Self {
+            Complex { real, imag }
+        }
+        
+        fn zero() -> Self {
+            Complex { real: 0.0, imag: 0.0 }
+        }
+
+        fn from_real(real: f64) -> Self {
+            Complex { real, imag: 0.0 }
+        }
+
+        fn disp(&self) {
+            println!("real: {}, imag: {}", self.real, self.imag);
+        }
+    }
+
+    Kullanım şöyle olabilir:
+
+    let x = Complex::zero();
+    x.disp();       // real: 0, imag: 0
+
+    let mut y = Complex::from_real(10.);
+    y.disp();       // real: 10, imag: 0
+
+    let mut z = Complex::new(10., 20.);
+    z.disp();       // real: 10, imag: 20
+
+    İkinci yöntemde new ilişkili fonksiyonunda yapının gerekli görülen alanlarına default değerleri verilebilir, sonra set 
+    edici (settet) metotlarla yapının ilgili alanlarına arzu edilen değerler yerleştirilebilir. Örneğin:
+
+    struct Complex {
+        real: f64,
+        imag: f64,
+    }
+
+    impl Complex {
+        fn new() -> Self {
+            Complex { real: 0., imag: 0.}
+        }
+
+        fn real(mut self, real: f64) -> Self {
+            self.real = real;
+            self
+        }
+
+        fn imag(mut self, imag: f64) -> Self {
+            self.imag = imag;
+            self
+        }
+
+        fn disp(&self) {
+            println!("real: {}, imag: {}", self.real, self.imag);
+        }
+    }
+
+    Burada new ilişkili fonksiyonu Complex değerini default değerlerle yaratmıştır. real metodu yapının real alanına, 
+    imag metodu ise imag alanına değer yerleştirmektedir. Ayrıca real ve imag metotlarının self parametresinin referans 
+    içermediğine ve mut olduğuna dikkat ediniz. Yani her defasında sahiplik devri yapılmaktadır. Bu mekanizmayı şöyle 
+    kullanabiliriz:
+
+    fn main() {
+        let mut x = Complex::new();
+        x.disp();
+
+        let mut y = Complex::new().real(10.);
+        y.disp();
+
+        let mut z = Complex::new().real(10.).imag(20.);
+        z.disp();
+    }
+
+    Çağrı zincirleri uzunsa (iki ya da üç çağrıdan fazlaysa) Rust programcıları ("rustfmt" de böyle yapmaktadır) bunları 
+    satır satır yazmayı tercih etmektedir. Bu durumda satırlar bir tab içerisinden yazılır ve nokta operatöryle başlatılır. 
+    Örneğin:
+
+    let mut z = Complex::new()
+        .real(10.)
+        .imag(20.);
+
+    Bu yazımda metot çağrılarının bir TAB içeriden yazıldığına, erişimi sağlayan nokta operatörünün de satırın başında 
+    bulundurulduğuna dikkat ediniz. 
+
+    Rust'ta bu tür durumlarda default değerleri değiştiren metotların isimlendirmesinde with_xxx kalıbının kullanılması da 
+    yaygındır. Örneğin:
+
+    let mut z = Complex::new()
+        .with_real(10.)
+        .with_imag(20.);
+
+    Bazen yapılar türünden değer oluşturmak için XXXBuilder ya da XXXConfig biçiminde isimlendirilen yapılar da bulundurulmaktadır. 
+    Değer bu XXXBuilder ya da XXXConfig yapılarının metotları zincir yapılarak yaratılır, zincirin sonunda da asıl yapı türünden 
+    değeri yaratan build isimli bir metot bulundurulur. Örneğin şöyle bir yapımızın bulunduğunu varsayalım:
+
+    struct Server {
+        host: String,
+        port: u16,
+        max_connections: usize,
+        timeout_secs: u64,
+    }
+
+    Amacımız bu yapı türünden değerler oluşturmak olsun. Bunun için şöyle bir ServerBuilder yapısı oluşturabiliriz:
+
+    struct ServerBuilder {
+        host: String,
+        port: u16,
+        max_connections: usize,
+        timeout_secs: u64,
+    }
+
+    impl ServerBuilder {
+        fn new() -> Self {
+            ServerBuilder {
+                host: "127.0.0.1".to_string(),
+                port: 8080,
+                max_connections: 100,
+                timeout_secs: 30,
+            }
+        }
+
+        fn host(mut self, val: &str) -> Self {
+            self.host = val.to_string(); self
+        }
+        fn port(mut self, val: u16) -> Self {
+            self.port = val; self
+        }
+        fn max_connections(mut self, val: usize) -> Self {
+            self.max_connections = val; self
+        }
+        fn timeout_secs(mut self, val: u64) -> Self {
+            self.timeout_secs = val; self
+        }
+
+        fn build(self) -> Server {
+            Server {
+                host: self.host,
+                port: self.port,
+                max_connections: self.max_connections,
+                timeout_secs: self.timeout_secs,
+            }
+        }
+    }
+
+    ServerBuilder yapısının build dışındaki metotlarının StringBuilder geri döndüğüne dikkat ediniz. En sonunda build 
+    metodu eldeki bilgilerden hareketle Server türünden değer oluşturmaktadır. Örneğin bu mekanizmayla default değerlere 
+    sahip Server türünden değer şöyle oluşturulabilir:
+
+    let server: Server = ServerBuilder::new().build();
+
+    Ya da örneğin default değerler yerinbe kendiistediğimiz değerlerle şöyle Server oluşturabiliriz:
+
+    let server: Server = ServerBuilder::new()
+        .host("0.0.0.0")
+        .port(443)
+        .max_connections(1000)
+        .build();
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Rust'ta göstericiler (ham göstericiler) konusunu ele alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
 /*---------------------------------------------------------------------------------------------------------------------------
     Rust'ta göstericiler (ham göstericiler) *const T ya da *mut T türleriyle temsil edilmektedir. Örneğin:
 
@@ -15468,7 +15670,7 @@ unsafe fn foo(pi32: *mut i32) {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Yapılar ve enum türlerine ilişkin göstericiler de bildirilebrilir. Örneğin:
+    Yapılar ve enum türlerine ilişkin göstericiler de bildirilebilir. Örneğin:
    
     struct Sample {
         a: i32,
@@ -15907,6 +16109,10 @@ fn main() {
     let pi32: *const i32;
 
     pi32 = &raw const 10;       // error!
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Buraya NonNUll tütünü ekleyeceğiz.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -17179,199 +17385,7 @@ impl Drop for Sample {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bilindiği gibi C++, Java C#, Python gibi programlama dillerinde fonksiyonların ve metotların parametrelerine default 
-    değerler verilebilmektedir. Örneğin:
-
-    class Complex {
-    public:
-        Complex(double real = 0, double imag = 0)
-        {
-            m_real = real;
-            m_imag = imag;
-        }
-        //...
-    private:
-        double m_real;
-        double m_imag;
-    };
-
-    Burada biz Complex türünden nesneyi aşağıdaki yapıcı fonksiyon çağırmalarıyla yaratabiliriz:
-
-    Complex x;              // real = 0, imag = 0
-    Complex y(10);          // real = 10, imag = 0
-    Complex z(10, 20);      // real = 10, imag = 20
-
-    Rust'ta default argüman özelliği (yani parametre değişkenlerine default değerlerin verilebilmesi özelliği) olmadığına 
-    göre bu tür işlemler nasıl yapılmaktadır?
-
-    Rust geleneğinde default argüman etkisi iki biçimde oluşturulmaktadır:
-
-    1) Birden fazla new ilişkili fonksiyonlarıyla
-    2) new ilişkili fonksiyonundan sonra metot çağrı zincirleriyle.
-
-    Birinci yöntemde biz birden fazla new ilişkili fonksiyonu yazarak default değerleri bunlarla oluşturabiliriz. Örneğin:
-
-    struct Complex {
-        real: f64,
-        imag: f64,
-    }
-
-    impl Complex {
-        fn zero() -> Self {
-            Complex { real: 0.0, imag: 0.0 }
-        }
-
-        fn from_real(real: f64) -> Self {
-            Complex { real, imag: 0.0 }
-        }
-
-        fn new(real: f64, imag: f64) -> Self {
-            Complex { real, imag }
-        }
-
-        fn disp(&self) {
-            println!("real: {}, imag: {}", self.real, self.imag);
-        }
-    }
-
-    Kullanım şöyle olabilir:
-
-    let x = Complex::zero();
-    x.disp();       // real: 0, imag: 0
-
-    let mut y = Complex::from_real(10.);
-    y.disp();       // real: 10, imag: 0
-
-    let mut z = Complex::new(10., 20.);
-    z.disp();       // real: 10, imag: 20
-
-    İkinci yöntemde new ilişkili fonksiyonunda yapının gerekli görülen alanlarında default değerleri verilebilir. Sonra metotlarla
-    yapının ilgili alanlarına arzu edilen değerler yerleştirilebilir. Örneğin:
-
-    struct Complex {
-        real: f64,
-        imag: f64,
-    }
-
-    impl Complex {
-        fn new() -> Self {
-            Complex { real: 0., imag: 0.}
-        }
-
-        fn real(mut self, real: f64) -> Self {
-            self.real = real;
-            self
-        }
-
-        fn imag(mut self, imag: f64) -> Self {
-            self.imag = imag;
-            self
-        }
-
-        fn disp(&self) {
-            println!("real: {}, imag: {}", self.real, self.imag);
-        }
-    }
-
-    Burada new ilişkili fonksiyonunun Complex değerini default değerlerle yaratmıştırç real metodu yapının real alanına, 
-    imag metodu ise imag alanına değer yerleştirmektedir. Ayrıca real ve imag metotlarının self parametresinin referans 
-    içermediğine ve mut olduğuna dikkat ediniz. Yani her defasında sahiplik devri yapılmaktadır. Bu mekanizmayı şöyle 
-    kullanabiliriz:
-
-    fn main() {
-        let mut x = Complex::new();
-        x.disp();
-
-        let mut y = Complex::new().real(10.);
-        y.disp();
-
-        let mut z = Complex::new().real(10.).imag(20.);
-        z.disp();
-    }
-
-    Çağrı zincirleri uzunsa Rust programcıları ("rustfmt" de böyle yapmaktadır) bunları satır satır yazmayı tercih etmektedir. 
-    Bu durumda satırlar bir tab içerisinden yazılır ve nokta operatöryle başlatılır. Örneğin:
-
-    let mut z = Complex::new()
-        .real(10.)
-        .imag(20.);
-
-    Bu default değerleriş değiştiren metotların isimlendirmesinde with_xxx kalıbının kullanılması da yaygındır. Örneğin:
-
-    let mut z = Complex::new()
-        .with_real(10.)
-        .with_imag(20.);
-
-    Bazen yapılar türünden değer oluşturmak için XXXBuilder ya da XXXConfig biçiminde isimlendirilen yapılar da bulundurulmaktadır. 
-    Değer bu XXXBuilder ya da XXXConfig yapısının metotları zincir yapılarak yaratılır, zincirin sonunda da asıl yapı türünden 
-    değeri yaratan build isimli bir metot bulundurulur. Örneğin şöyle bir yapımızın bulunduğunu varsayalım:
-
-    struct Server {
-        host: String,
-        port: u16,
-        max_connections: usize,
-        timeout_secs: u64,
-    }
-
-    Amacımız bu yapı türünden değerler oluşturmak olsun. Bunun için şöyle bir ServerBuilder yapısı oluşturabiliriz:
-
-    struct ServerBuilder {
-        host: String,
-        port: u16,
-        max_connections: usize,
-        timeout_secs: u64,
-    }
-
-    impl ServerBuilder {
-        fn new() -> Self {
-            ServerBuilder {
-                host: "127.0.0.1".to_string(),
-                port: 8080,
-                max_connections: 100,
-                timeout_secs: 30,
-            }
-        }
-
-        fn host(mut self, val: &str) -> Self {
-            self.host = val.to_string(); self
-        }
-        fn port(mut self, val: u16) -> Self {
-            self.port = val; self
-        }
-        fn max_connections(mut self, val: usize) -> Self {
-            self.max_connections = val; self
-        }
-        fn timeout_secs(mut self, val: u64) -> Self {
-            self.timeout_secs = val; self
-        }
-
-        fn build(self) -> Server {
-            Server {
-                host: self.host,
-                port: self.port,
-                max_connections: self.max_connections,
-                timeout_secs: self.timeout_secs,
-            }
-        }
-    }
-
-    StringBuilder yapısının build dışındaki metotlarının StringBuilder iler geri döndüğüne dikkat ediniz. En sonunda build 
-    metodu eldeki bilgilerden hareketle Server türünden değer oluşturmaktadır. Örneğin bu mekanizmayla default değerlere sahip Server
-    türünden değeri şöyle oluşturabiliriz:
-
-    let server: Server = ServerBuilder::new().build();
-
-    Ya da örneğin default değerler yerinbe kendiistediğimiz değerlerle şöyle Server oluşturabiliriz:
-
-    let server: Server = ServerBuilder::new()
-        .host("0.0.0.0")
-        .port(443)
-        .max_connections(1000)
-        .build();
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-                                            50. Ders 17/09/2025 - Çarşamba
+                                        50. Ders 17/09/2025 - Çarşamba
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -17420,7 +17434,7 @@ impl Drop for Sample {
         }
     }
 
-    Görüldüğü gibi göstericiler söz konsuu olduğunda yukarıda belrttiğimiz referanslara ilişkin iki kurala uygunluk derleyici 
+    Görüldüğü gibi göstericiler söz konusu olduğunda yukarıda belrttiğimiz referanslara ilişkin iki kurala uygunluk derleyici 
     tarafından denetlenmemektedir. Bu örnekteki göstericiler yerine referanslar kullanılmış olsaydı derleme sırasında error 
     oluşurdu. Ancak yukarıda belirttiğimiz üçüncü kural göstericiler söz konusu oldupunda da uygulanmaktadır. Örneğin:
 
