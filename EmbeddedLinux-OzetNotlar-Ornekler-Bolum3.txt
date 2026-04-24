@@ -17,7 +17,7 @@
                             (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                                     (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 20/08/2025 - Çarşamba
+                                            Son Güncelleme: 24/04/2026 - Cuma
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
@@ -12871,7 +12871,9 @@ void exit_sys(const char *msg)
     Bizim framebuffer ile ekrana pixel'ler basabilmemiz için öncelikle grafik kartının ve ekranın kullandığı video mod 
     hakkında bilgi sahibi olmamız gerekir. Örneğin o anda kullanılan ekranın çözünürlüğü nedir, pixel formatı nasıldır gibi.
     Biz aşağıdaki paragraflarda "ekran" terimini kullanacağız. Ancak ekran aslında pasif bir birimdir. Ekrana gönderimden, 
-    ekran belleğinin organizasyonundan grafik kartı sorumludur. 
+    ekran belleğinin organizasyonundan grafik kartı sorumludur. Tabii dokunmatik ekranlar da söz konusu olabilmektedir. 
+    Dokunmatik ekranlar dokunma bilgilerini dış dünyaya iletebilmektedir. İşletim sistemleri bu dokunma bilgilerini fare 
+    işlemlelerine (mesajlarına) dönüştürmektedir. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
@@ -14522,16 +14524,16 @@ void exit_sys(const char *msg)
     grafik çıktılarınız kabuk ile aynı ekranda görünecektir. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-
 /*-----------------------------------------------------------------------------------------------------------------------------
     Şimdi de framebuffer alternatifi olan modern "DRM/KMS (Direcet Rendering Manager / Kernel Mode Settings)" sistemi hakkında 
-    bazı temel bilgiler vereceğiz. DRM/KMS sistemi framebuffer sisteminin bazı kusurlarını ortadan kaldımak için Linux çekirdeklerine
-    eklenmiştir. Ancak bu sistemin tasarlanmasının ana motivasyonu GPU'lardan daha iyi faydalanmak içindir. Gömülü sistemlerde 
-    GPU kullanımı ya yoktur ya da oldukça geri plandadır. Zaten gömülü sistemlerde görüntü birimi olarak LCD modüller yoğun 
-    bir biçimde kullanılmaktadır. Bu nedenle gömülü sistemlerde DRM/KMS kullanımı genellikle söz konusu olmaz. Fakat HDMI 
-    kullanan ve GPU'su bulunan gömülü sistem donanımlarında framebuffer yerine daha modern DRM/KMS tercih edilebilmektedir. 
-    Masaüstü sistemlerde artık framebuffer yerini tamamen DRM/KMS sistemine bırakmıştır. X11 gibi Wayland gibi grafik 
-    alt sistemler DRM/KMS kullanmaktadır. Aşağıdaki tabloda framebuffer ve DRM/KMS sistemlerinin tarihsel evrimi verilmektedir.
+    bazı temel bilgiler vereceğiz. DRM/KMS sistemi framebuffer sisteminin bazı kusurlarını ortadan kaldımak için Linux 
+    çekirdeklerine eklenmiştir. Ancak bu sistemin tasarlanmasının ana motivasyonu GPU'lardan daha iyi faydalanmak içindir. 
+    Gömülü sistemlerde GPU kullanımı ya yoktur ya da oldukça geri plandadır. Zaten gömülü sistemlerde görüntü birimi olarak 
+    LCD modüller yoğun bir biçimde kullanılmaktadır. Bu nedenle gömülü sistemlerde gerçek anlamda DRM/KMS kullanımı genellikle 
+    söz konusu olmaz. Fakat HDMI kullanan ve GPU'su bulunan gömülü sistem donanımlarında framebuffer yerine daha modern DRM/KMS 
+    tercih edilebilmektedir. Masaüstü sistemlerde artık framebuffer yerini tamamen DRM/KMS sistemine bırakmıştır. X11 gibi 
+    Wayland gibi grafik alt sistemler belli bir süredir doğrudan DRM/KMS kullanmaktadır. Aşağıdaki tabloda framebuffer ve 
+    DRM/KMS sistemlerinin tarihsel evrimi verilmektedir.
 
     ┌───────────────┬──────────────────────┬─────────────────────────────────────────────────────────────────────┐
     │   Dönem       │     Teknoloji        │                         Açıklama                                    │
@@ -14551,49 +14553,801 @@ void exit_sys(const char *msg)
     │ 2008-günümüz  │ DRM/KMS              │ Kernel Mode Setting ile mod değişikliği kernel'a taşındı.           │
     │               │                      │ Atomik modesetting, multi-plane, HDR desteği.                       │
     ├───────────────┼──────────────────────┼─────────────────────────────────────────────────────────────────────┤
-    │ 2012-günümüz  │ Wayland + DRM        │ Compositor doğrudan DRM/KMS kullanıyor. X11 bağımlılığı             │
+    │ 2012-günümüz  │ DRM/KMS              │ Compositor doğrudan DRM/KMS kullanıyor. X11 bağımlılığı             │
     │               │                      │ ortadan kalktı. Modern masaüstü mimarisi.                           │
     └───────────────┴──────────────────────┴─────────────────────────────────────────────────────────────────────┘
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                            174. Ders 14/04/2026 - Salı
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Bir Linux sisteminde DRM/KMS sürücülerinin yüklü olmadığı birkaç biçimde anlaşılabilmektedir. Aşağıdaki komutla 
+    bir dizin yapısı görülüyorsa ve "card0" dizin girişi bulunuyorsa sisteminizde DRM/KMS sürücüleri yüklü durumdadır:
 
+    $ ls /sys/class/drm/
+
+    Örneğin masaüstü sistemimizde şöyle çıktı elde edilmiştir:
+
+    $ ls /sys/class/drm/
+    card0            card0-Virtual-2  card0-Virtual-4  card0-Virtual-6  card0-Virtual-8  version
+    card0-Virtual-1  card0-Virtual-3  card0-Virtual-5  card0-Virtual-7  renderD128
+
+    Burada DRM/KMS aygıt sürücüsünün yüklü olduğu anlaşılmaktadır. Eğer bu komutla ilgili dizinde yalnızca "version" isimli 
+    bir dosya görüyorsanız bu durum DRM/KMS sisteminin çekirdekte bulunduğu ancak bunu yönten aygıt sürücülerin yüklü olmadığı
+    anlamına gelmektedir. Örneğin BBB'de aynı komutu uyguladığımızda şu çıktıyı elde etmekteyiz:
+
+    $ ls /sys/class/drm/
+    version
+
+    Raspberry PI 5'teki Linux'ta (Raspberry Pi OS) aynı komutu verdiğimizde şu çıktıyı elde etmekteyiz:
+
+    $ ls /sys/class/drm/
+    card0  card1  card1-HDMI-A-1  card1-HDMI-A-2  card1-Writeback-1  card1-Writeback-2  renderD128  version
+
+    DRM/KMS aygıt sürücüsünün yüklü olup olmadığını "lsmod" komutuyla da anlayabiliriz:
+
+    $ lsmod | grep drm 
+
+    Bu komut eğer bazı yazıları ekrana basıyorsa sürücü var demektir. DRM/KMS aygıt sürücüsünün yüklenip yüklenmediğini 
+    anlamanın diğer bir yolu da "/dev/dri/" dizinine bakmaktır. Bu sisteme ilişkin aygıt dosyaları bu dizinde oluşturulmaktadır. 
+
+    Aslında DRM/KMS aygıt sürücüsünün yüklü olduğu durumda framebuffer mekanizması da bu aygıt sürücüyü kullanarak adreta 
+    bir emülasyonla sağlanmaktadır. Yani bu aygıt sürücünün yüklü olduğu sistemlerde aslında framebuffer mekanizması DRM/KMS 
+    sisteminin sağladığı olanaklarla kullanılmaktadır. Bu duruma "FBDEV emülasyonu" denilmektedir. Bu durumu aşağıdaki 
+    şekille özetleyebiliriz (şekil "Claude AI" tarafından çizilmiştir):
+
+    ┌─────────────────────────────────────────────────────┐
+    │            Kullanıcı Alanı (User Space)             │
+    │    /dev/fb0 kullanan eski uygulamalar               │
+    └────────────────────┬────────────────────────────────┘
+                         │ /dev/fb0
+    ┌────────────────────▼────────────────────────────────┐
+    │           simplefb / simpledrm  ya da               │
+    │         CONFIG_DRM_FBDEV_EMULATION                  │
+    │     (DRM üstünde sanal bir /dev/fb0 üretir)         │
+    └────────────────────┬────────────────────────────────┘
+                         │
+    ┌────────────────────▼────────────────────────────────┐
+    │            DRM/KMS Alt Sistemi                      │
+    │         (drm, drm_kms_helper)                       │
+    └────────────────────┬────────────────────────────────┘
+                         │
+    ┌────────────────────▼────────────────────────────────┐
+    │        Platforma Özgü DRM Sürücüsü                  │
+    │    (vc4, etnaviv, tidss, imx-drm, vb.)              │
+    └────────────────────┬────────────────────────────────┘
+                         │
+    ┌────────────────────▼────────────────────────────────┐
+    │            Fiziksel Donanım                         │
+    │         (Display Controller, GPU)                   │
+    └─────────────────────────────────────────────────────┘
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    DRM/KMS sisteminin klasik framebuffer mekanizmasıdan farklılıkları (yani üstünlükleri) şöyle özetlenebilir:
 
+    ┌─────────────────────────┬──────────────────────────────────────┬──────────────────────────────────────┐
+    │      Özellik            │     Klasik Framebuffer (fbdev)       │            DRM/KMS                   │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Çözünürlük değişimi     │ Uygulama kapatılıp açılmalı,         │ Hot-swap: çalışırken anlık değişim,  │
+    │                         │ genellikle ekran titrer              │ titreme yok                          │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Çoklu monitör           │ Desteklenmez, her fb aygıtı          │ Yerleşik destek: clone, extend,      │
+    │                         │ bağımsız ve ilişkisizdir             │ rotate modları                       │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Donanım katmanları      │ Yok, tüm içerik tek bir              │ Plane'ler: primary, overlay, cursor  │
+    │ (planes)                │ düz bellek tamponuna yazılır         │ donanım tarafından birleştirilir     │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ V-Sync / Tearing        │ Kontrol mekanizması yok,             │ Page-flip ile tam v-sync desteği,    │
+    │                         │ ekran yırtılması yaygın              │ tearing önlenir                      │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ GPU hızlandırma         │ Yok, tüm çizim CPU tarafından        │ GEM/TTM bellek yöneticisi ile        │
+    │                         │ yapılır                              │ GPU render entegrasyonu              │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Piksel formatları       │ Çok sınırlı (RGB565, RGB888),        │ Zengin format desteği: ARGB, XRGB,   │
+    │                         │ sürücüye göre değişir                │ NV12, YUV420 vb.                     │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Kullanıcı alanı API     │ ioctl + mmap, çok basit              │ libdrm üzerinden zengin API,         │
+    │                         │ ama yetersiz                         │ Wayland/Weston doğrudan kullanır     │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Wayland desteği         │ Yok, Wayland compositor              │ Wayland'ın temel gereksinimidir,     │
+    │                         │ fbdev üstünde çalışamaz              │ doğrudan KMS/GBM kullanır            │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Kernel içi mimari       │ Monolitik, her sürücü her şeyi       │ Katmanlı: core + helper + platform   │
+    │                         │ kendisi halleder                     │ sürücüsü, kod tekrarı az             │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Gömülü sistemlerde      │ Basit ama yetersiz,                  │ simplefb / simpledrm ile minimal     │
+    │ kullanım                │ modern SoC'larda terkediliyor        │ ayak iziyle kullanılabilir           │
+    ├─────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Bakım / Geliştirme      │ Dondurulmuş: kernel ekibi yeni       │ Aktif geliştirme, yeni SoC           │
+    │ durumu                  │ özellik eklemiyor                    │ sürücüleri DRM/KMS olarak yazılıyor  │
+    └─────────────────────────┴──────────────────────────────────────┴──────────────────────────────────────┘
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    BBB'lerinizde Linux çekirdeğinin sürümü 3.8'den büyükse HDMI kontrolü tamamen DRM/KMS sistemi ile sağlanmaktadır. Yani 
+    bu sistemlerde eğer konfigürasyonda bir sorun yoksa "/dev/fb0" aygıt sürücüsü aslında masaüstü sistemlerde olduğu gibi 
+    DRM/KMS sistemi üzerinden emülasyon yoluyla sağlanmaktadır. Tabii BBB'ye GPIO uçlarından LCD bağlarsanız buradaki 
+    framebuffer aygıt sürücüsü DRM/KMS kullanmayacaktır. (BBB'yi HDMI protundan monitöre bağlanacaksa beslemenin USB'den 
+    verilmemesi gerekir. Aksi takdirde HDMI kontolünü yapan donanımsal birim yeterli gücü alamadığı için çalışmayacak, 
+    bunun sonucu olarak DRM/KMS aygıt sürücüsü ve framebuffer emülasyonu sağlanamayacak ve monitörde de görüntü oluşmayacaktır.)
 
+    Bir noktayı vurgulamak istiyoruz. Eğer BBB'de olduğu gibi gömülü sisteminizin HDMI desteği varsa muhtemelen görüntü 
+    işlemleri DRM/KMS sistemi üzerinden gerçekleşecektir. Ancak siz gömülü aygıtınıza GPIO uçlarından (tipik olark SPI arayüzü 
+    ile) LCD bağlarsanız artık bu LCD'ye erişme işleminde DRM/KMS sisteminin hiçbir ilgisi olmayacaktır. Bu durumda LCD'nin 
+    kendi framebuffer aygıt sürücüsü ile framebuffer işlemleri yapılacaktır. 
+
+    DRM/KMS sistemi her ne kadar asıl faydayı GPU'ların etkin kullanımı konusunda sağlıyorsa da aslında bu sistem GPU'su 
+    olmayan donanımlarda da kullanılabilmektedir. Çünkü DRM/KMS aslında kabaca iki katmandan oluşmaktadır: KMS katmanı ve 
+    DRM katmanı. Sistemde GPU yoksa DRM katmanı kullanılamaz ama KMS katmanını kullanılabilir:
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                     DRM/KMS Katmanları                          │
+    ├─────────────────────────────────────────────────────────────────┤
+    │  KMS (Kernel Mode Setting)                                      │
+    │  → Çözünürlük, refresh rate, connector yönetimi                 │
+    │  → GPU OLMADAN çalışır                                          │
+    ├─────────────────────────────────────────────────────────────────┤
+    │  DRM (Direct Rendering Manager)                                 │
+    │  → 3D render, GPU bellek yönetimi                               │
+    │  → GPU GEREKTİRİR                                               │
+    └─────────────────────────────────────────────────────────────────┘
+
+    GPU olmadan kullanabileceğimiz DRM/KMS özellikleri şunlardır:
+
+    ┌──────────────────────────────┬─────────────────────────────────────────┐
+    │          Özellik             │              Açıklama                   │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ Display modu ayarlama        │ Çözünürlük, refresh rate, timing        │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ Connector yönetimi           │ HDMI hotplug algılama, EDID okuma       │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ Framebuffer (dumb buffer)    │ CPU ile piksel yazma, 2D görüntü        │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ Page flipping                │ Ekran yırtılmasız (tearing-free) geçiş  │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ Plane yönetimi               │ Donanım overlay (varsa)                 │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ VSync                        │ Dikey senkronizasyon sinyali            │
+    └──────────────────────────────┴─────────────────────────────────────────┘
+
+    GPU olmadan kullanamayacağımız özellikler de şunlardır:
+
+    ┌──────────────────────────────┬─────────────────────────────────────────┐
+    │         Özellik              │            Açıklama                     │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ OpenGL/Vulkan                │ 3D render GPU gerektirir                │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ Hardware acceleration        │ GPU üzerinde texture, shader işlemleri  │
+    ├──────────────────────────────┼─────────────────────────────────────────┤
+    │ GEM bellek yönetimi          │ GPU VRAM yönetimi                       │
+    └──────────────────────────────┴─────────────────────────────────────────┘   
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    KMS (Kernel Mode Setting), ekran modunun kullanıcı alanında değil, çekirdek alanında ayarlanması anlamına gelir. "Mode" 
+    burada yalnızca çözünürlüğü değil; çözünürlük, yenileme hızı, piksel formatı, zamanlama parametreleri ve bağlantı türü gibi 
+    birden fazla parametrenin bütününü ifade ifade etmektedir..
 
+    Geleneksel User Mode Setting (UMS) yaklaşımının (yani eski framebuffer mekanizmasının) sorunları şunlardır:
+
+    - VT geçişlerinde GPU durumu kaybolabilir
+    - Uyku/uyanma döngüsünde ekran bozulmaları yaşanabilir.
+    - Birden fazla uygulama aynı donanıma erişirse çakışmalar oluşabilmektedir. 
+    - Boot sürecindeki grafik geçişleri parlama/siyah ekran oluşturabilmektedir. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    DRM'in en önemli kavramlarından biri CRTC → Encoder → Connector zinciridir. Bu zincir, bellekte tamponda bulunan piksel 
+    verilerinin fiziksel ekrana ulaşma yolunu tanımlar.
 
+        Framebuffer (Bellek)                                      Fiziksel Ekran
+        │                                                          ▲
+        ▼                                                          │
+    ┌──────────┐     ┌──────────┐    ┌──────────┐    ┌─────────────────────┐
+    │  Plane   │───> │  CRTC    │───>│ Encoder  │───>│     Connector       │
+    │(Primary) │     │          │    │          │    │                     │
+    └──────────┘     │ Timing   │    │ TMDS sig │    │ HDMI-A-1            │
+    ┌──────────┐     │ Engine   │    │ (HDMI)   │    │ (veya LVDS-1 vb.)   │
+    │  Plane   │───> │          │    │          │    │                     │
+    │(Overlay) │     │ Vsync    │    └──────────┘    └─────────────────────┘
+    └──────────┘     │ Hsync    │
+    ┌──────────┐     └──────────┘
+    │  Plane   │
+    │(Cursor)  │
+    └──────────┘
+
+    Burada Plane'ler farklı işlemler için kullanılan tabpon bellekleri belirtmektedir. Buradaki CRTC (CRT eski monitörler 
+    için kullanılan bir terimdir). Şekilden görüldüğü gibi CRTC birimi farklı plane'lerden gelen verileri alır ve bunu Encoder
+    birimine yollar. Encoder birimi de bunu HDMI arayüzüne uygun biçimde HDMI uçlarına iletmektedir. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi 2008'den itibaren artık Linux çekirdeklerindeki görüntü oluşturmaya yönelik asıl sistem 
+    DRM/KMS sistemi halinegelmiştir. Eski framebuffer mekanizması ise bu DRM/KMS sisteminin sağladığı ortamdan faydalanılarak 
+    oluşturulmaktadır. (Tabii biz burada HDMI tabanlı sistemleri kastediyoruz. GPIO tabanlı LCD'lerin DRM/KMS sistemini 
+    kullanmadığını bunların eski framebuffer mekanizmasını kullandığını belirtmiştik.)   
 
+    Linux'ta "libdrm" kütüphanesini kullanabilmek için ilgili C kütüphanesinin sisteminize yüklü olması gerekir. Pek çok 
+    dağıtımda bu kütüphane zaten sisteminizde yüklü durumdadır. Ancak eğer kütüphane sisteminizde yüklü değilse onu şöyle 
+    yükleyebilirsiniz:
+
+    $ sudo apt install libdrm-dev
+
+    Kütüphanenin baık dosyaları "/usr/include" dizinine değil "/usr/include/libdrm" dizinine kopyalanmaktadır. Önişlemcinin 
+    bu dizine bakması için komut satırında "-Iusr/include/libdrm" seçeneğini ekleyebilirsiniz. Aynı zamanda bağlama aşamsında 
+    da bağlayının bu kütüphaneye başvurabilmesi için "-ldrm" seçeneğinin de eklenmesi geekmektedir. Örneğin:
+
+    $ gcc -Wall -I/usr/include/libdrm -o drmkms-test drmkms-test.c -ldrm
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    DRM/KMS sisteminin çalışma mekanizması ayrıntılara inildiğinde biraz karmaşık düzeydedir. Biz burada temel çalışma biçimini 
+    ekrana bir pizel basan program eşliğinde özet biçiminde tanıtmak istiyoruz. 
 
+    DRM/KMS sisteminde ekrana bir pixel bastırmak için aşağıdaki adımları izlemek gerekir:
+
+    open("/dev/dri/card0")
+            │
+            ▼
+    drmModeGetResources        → connector / encoder / CRTC listesi
+            │
+            ▼
+    drmModeGetConnector        → bağlı mı? hangi modlar destekleniyor?
+            │
+            ▼
+    mod seç (modes[0] veya PREFERRED)
+            │
+            ▼
+    drmModeGetEncoder          → encoder_id → crtc_id
+            │
+            ▼
+    DRM_IOCTL_MODE_CREATE_DUMB → ham bellek bloğu (handle, pitch, size)
+            │
+            ▼
+    drmModeAddFB               → DRM framebuffer nesnesi (fb_id)
+            │
+            ▼
+    DRM_IOCTL_MODE_MAP_DUMB    → mmap offset
+            │
+            ▼
+    mmap()                     → pixels[] — CPU'dan doğrudan yazılabilir
+            │
+            ▼
+    pixels[y * stride_px + x] = renk
+            │
+            ▼
+    drmModeSetCrtc             → display pipeline başlar, ekranda görünür
+            │
+            ▼
+    temizlik (munmap, RmFB, DESTROY_DUMB, close)
+
+    Görüldüğü gibi birinci adımda genellikle "/dev/dri/card0" isminde olan DRM/KMS aygıt sürücüsü open fonksiyonuyla açılır:
+
+    int fd;
+
+    if ((fd = open("/dev/dri/card0", O_RDWR|O_CLOEXEC)) == -1)
+        exit_sys("open");
+
+    Close-on-exec bayrağının set edilmesi mutlak anlamda gerekli değildir. Ancak exec işleminde bu betimleyicinin otomatik 
+    kapatılması iyi bir tekniktir. 
+
+    Aygıt dosyası açıldıktan sonra kullanılabilecek kaynakların neler olduğunun elde edilmesi gerekmektedir. Bu işlem 
+    drmModeGetResources fonksiyonu ile yapılmaktadır. 
+ -----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            175. Ders 16/04/2026 - Perşembe
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Aygıt dosyası açıldıktan sonra "bağlayıcı (connector)" ve "mod" araması yapılmalıdır. Bu işlem drmModeGetResources fonksiyonyla
+    yapılmaktadır. Fonksiyonun prototipi şöyledir:
 
+    #include <xf86drmMode.h>
+
+    drmModeResPtr drmModeGetResources(int fd);
+    
+    Fonksiyon aygıt dosyasına ilişkin dosya betimleyicisini parametre olarak alır ve KMS nesnelerini temsil 
+    drmModeRes türünden bir yapı adresine geri dönmektedir. Bu yapı şöyle bildirilmiştir:
+
+    typedef struct _drmModeRes {
+        int count_fbs;
+        uint32_t *fbs;
+
+        int count_crtcs;
+        uint32_t *crtcs;
+
+        int count_connectors;
+        uint32_t *connectors;
+
+        int count_encoders;
+        uint32_t *encoders;
+
+        uint32_t min_width, max_width;
+        uint32_t min_height, max_height;
+    } drmModeRes, *drmModeResPtr;
+
+    Yapıdan da görüldüğü gibi bu fonksiyon bize dört farklı dizinin adresini ve uzunluğunu vermektedir. fbs dizisi framebuffer 
+    id'lerini, crtcs dizisi CRTC (Cathode Ray Tube Controller) id'lerini, connectors bağlayıcıların id'lerini ve encoders 
+    dizisi de kodlayıcıların id'lerini vermektedir. Görüntünün oluşması için dört aşamalı bir işlem uygulanmaktadır:
+
+    Framebuffer (fbs)
+        │
+        ▼
+    CRTC (crtcs)
+        │  tarama zamanlaması
+        ▼
+    Encoder (encoders)
+        │  sinyal dönüşümü
+        ▼
+    Connector (connectors)
+        │
+        ▼
+    Monitör
+
+    drmModeGetResources fonksiyonu başarısızlık durumunda NULL adrese geri dönmektedir. 
+
+    Bundan sonra bir bağlayıcının (connector) ve modun elde edilmesi gerekir. Bağlayıcıyının belirlenmesi drmModeGetConnector
+    fonksiyonuyla yapılmaktadır. 
+
+    drmModeGetConnector fonksiyonu belli bir id'ye ilişkin bağlayıcı nesnesinin adresini geri döndürmektedir. Fonksiyonun 
+    prototipi şöyledir:
+
+    #include <xf86drmMode.h>
+
+    drmModeConnectorPtr drmModeGetConnector(int fd, uint32_t connectorId);
+
+    Fonksiyon aygıt dosyasının betimleyicisini ve bağlayıcı id'sini parametre olarak alıp başarı durumunda bağlayıcı nesnesinin 
+    adresine, balarısızlık durumunda ise NULL adrese geri dönmektedir. 
+    
+    Programcı tüm bağlayıcı id'lerini dolaşarak bir döngü içerisinde drmModeConnectorPtr uygun bir bağlayıcıyı elde etmeye 
+    çalışır. Elde edilen bağlayıcının "connected" durumda olması gerekmektedir. Bu işlem aşağıdaki gibi bir döngü ile 
+    yapılabilir:
+
+    drmModeConnector *conn;
+    int found;
+    /* ... */
+
+    found = 0;
+    for (int i = 0; i < res->count_connectors && !found; i++) {
+        if ((conn = drmModeGetConnector(fd, res->connectors[i])) == NULL) 
+            continue;
+        if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
+            /* ... */
+            found = 1;
+        }
+    }
+
+    Bağlayıcı nesne elde edildikten sonra bizim bir mod elde etmemiz gerekir. Bağlayıcı nesnesi drmModeConnector isimli yapıyla 
+    temsil edilmiştir. Bu yapı şöyle bildirilmiştir:
+
+    typedef struct _drmModeConnector {
+        uint32_t connector_id;
+        uint32_t encoder_id;        /* Encoder currently connected to */
+        uint32_t connector_type;
+        uint32_t connector_type_id;
+        drmModeConnection  connection;
+        uint32_t mmWidth, mmHeight; /* HxW in millimeters */
+        drmModeSubPixel    subpixel;
+
+        int                count_modes;
+        drmModeModeInfoPtr modes;
+
+        int        count_props;
+        uint32_t  *props;           /* List of property ids */
+        uint64_t  *prop_values;     /* List of property values */
+
+        int        count_encoders;
+        uint32_t  *encoders;        /* List of encoder ids */
+    } drmModeConnector, *drmModeConnectorPtr;
+
+    Yapının modes elemanı mod'ları count_modes elemanı ise bunların sayısını tutmaktadır. Uygulamacı bu modlardan arama 
+    yaparak istediği bir modu buradan seçebilir. 
+
+    drmModeConnector *conn, *c;
+    int found;
+    drmModeModeInfo *selected_mode;
+    /* ... */
+
+    found = 0;
+    for (int i = 0; i < res->count_connectors && !found; i++) {
+        if ((c = drmModeGetConnector(fd, res->connectors[i])) == NULL) 
+            continue;
+
+        if (c->connection == DRM_MODE_CONNECTED && c->count_modes > 0) {
+            for (int m = 0; m < c->count_modes; ++m) {
+                if (c->modes[m].type & DRM_MODE_TYPE_PREFERRED) {
+                    selected_mode = &c->modes[m];
+                    found = 1;
+                    break;
+                }
+            }
+           
+            if (found) {
+                conn = c;   /* keep this connector, free others */
+                break;
+            }
+        }
+        drmModeFreeConnector(c);
+    }
+
+    printf("[Mod] %dx%d @ %d Hz  seçildi\n", selected_mode->hdisplay, selected_mode->vdisplay,selected_mode->vrefresh);
+
+    Artık biz bağlayıcı nesne yoluyla modu elde etmiş olduk. 
+
+    Artık bizim bir kodlayıcı (encoder) elde etmemiz gerekir. Kodlayıcılar bağlayıcı nesnesinin içerisindeki diziden elde 
+    edilebilir. Ancak bunlar biri o anda zateb kullanılmakta olan kodlayıcı olabilir. O anda kullanılmaka olan kodlayıcının 
+    id'si bağlayıcıya ilişkin drmModeConnector yapısının encoder_id elemanında bulunmaktadır. Eğer bu elemandaki değer 0'dan 
+    büyükse bu kodlayıcı seçilebilir. Kodlayıcı id'sini parametre olarak alıp kodlayıcı nesnesinin adresine geri dönen 
+    drmModeGetEncoder isimli bir fonksiyon vardır. Fonksiyonun prototipi şöyledir:
+
+    #include <xf86drmMode.h>
+
+    drmModeEncoderPtr drmModeGetEncoder(int fd, uint32_t encoder_id);
+
+    Fonksiyon başarı durumunda drmModeEncoder isimli bir yapı nesnesinin adresine başarısızlık durumunda NULL adrese geri 
+    dönmektedir. Kodlayıcıyı temsil eden drmModeEncoder yapısı şöyle bildirilmiştir:
+
+    typedef struct _drmModeEncoder {
+        uint32_t encoder_id;
+        uint32_t encoder_type;
+        uint32_t crtc_id;           /* CRTC currently connected to    */
+        uint32_t possible_crtcs;    /* Bitmask of usable CRTCs        */
+        uint32_t possible_clones;   /* Bitmask of cloneable encoders  */
+    } drmModeEncoder, *drmModeEncoderPtr;
+
+    Kodlayıcı elde edildikten sonra kodlayıcının içerisinden bizim nihai oılarak hedeflediğimiz CRTC id'si alınır. 
+
+    uint32_t crtc_id;
+    /* ... */
+
+    crtc_id = 0;
+    if (conn->encoder_id) {
+        if ((enc = drmModeGetEncoder(fd, conn->encoder_id)) != NULL) {
+            crtc_id = enc->crtc_id;
+            drmModeFreeEncoder(enc);
+        }
+    }
+    else {
+        for (int i = 0; i < conn->count_encoders; i++) {
+            enc = drmModeGetEncoder(fd, conn->encoders[i]);
+            if (enc == NULL) 
+                continue;
+            for (int j = 0; j < res->count_crtcs; ++j) {
+                if (enc->possible_crtcs & (1 << j)) {
+                    crtc_id = res->crtcs[j];
+                    drmModeFreeEncoder(enc);
+                    goto CRTC_FOUND;
+                }
+            }
+            drmModeFreeEncoder(enc);
+            break;
+        }
+    }
+    CRTC_FOUND:
+    
+    if (crtc_id  == 0)
+        goto EXIT2;
+
+    Artık sıra framebuffer bellek alanının oluşturulmasına gelmiştir. Bu işlem DRM_IOCTL_MODE_CREATE_DUMB ioctl kodu ile 
+    yapılmaktadır:
+
+    struct drm_mode_create_dumb create = {
+        .width  = selected_mode->hdisplay,
+        .height = selected_mode->vdisplay,
+        .bpp    = 32,
+    };
+    if (drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
+        perror("drmIoctl CREATE_DUMB");
+        goto EXIT2;
+    }
+
+    Buradaki drmIoctl fonksiyonu <xf86drm.h> başlık dosyası içerisinde şöyle tanımlanmıştır:
+
+    int drmIoctl(int fd, unsigned long request, void *arg)
+    {
+        int ret;
+
+        do {
+            ret = ioctl(fd, request, arg);
+        } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
+
+        return ret;
+    }
+  
+    Yani aslında bu fonksiyon ioctl fonksiyonunu sarmalamaktadır. Fonksiyonun üçüncü parametresine drm_mode_create_dumb 
+    türünden yapı nesnesini adresi geçirilmektedir. 
+
+    Bu işlemden sonra yukarıda çizdiğimiz akışa göre drmModeAddFB fonksiyonun çağrılması gerekir. (Aslında yukarıdaki akışta
+    bazı öğeler sıra değiştirebilir. Ancak biz yukarıdaki akışı temel alıyourz.) drmModeAddFB  fonksiyonunun prototipi şöyledir:
+
+    #include <xf86drmMode.h>    
+
+    int drmModeAddFB(int fd, uint32_t width, uint32_t height, uint8_t  depth, uint8_t  bpp, uint32_t pitch,
+            uint32_t bo_handle, uint32_t *buf_id);
+    
+    Burada mod kavramı pixel ve renk çözünürlüğünü belirtmektedir. Fonksiyonun parametrelerinin anlamları şöyledir:
+
+    ┌─────────────┬──────────────┬──────────────────────────────────────────────────┐
+    │ Parametre   │    Tür       │                  Açıklama                        │
+    ├─────────────┼──────────────┼──────────────────────────────────────────────────┤
+    │ fd          │ int          │ DRM cihazının file descriptor'ı (/dev/dri/card0) │
+    │ width       │ uint32_t     │ Framebuffer genişliği (piksel)                   │
+    │ height      │ uint32_t     │ Framebuffer yüksekliği (piksel)                  │
+    │ depth       │ uint8_t      │ Renk derinliği (ör: 24 bit)                      │
+    │ bpp         │ uint8_t      │ Piksel başına bit sayısı (ör: 32 bit)            │
+    │ pitch       │ uint32_t     │ Bir satırın byte cinsinden uzunluğu (stride)     │
+    │ bo_handle   │ uint32_t     │ GEM buffer object handle'ı                       │
+    │ buf_id      │ uint32_t *   │ [ÇIKIŞ] Oluşturulan FB'ye atanan ID              │
+    └─────────────┴──────────────┴──────────────────────────────────────────────────┘
+    
+    Bundan sonra DRM_IOCTL_MODE_MAP_DUMB kodu ile ayrılan framebuffer 
+    bilgileri elde edilir. 
+
+    struct drm_mode_map_dumb maparg = { .handle =  create.handle };
+    if (drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &maparg) < 0) {
+        perror("drmIoctl MAP_DUMB");
+        goto EXIT3;
+    }
+
+    Framebuffer için ayrılan offset'i drm_mode_map_dumb yapısının offset elemanıa yerleştirilmektedir. Biz de mmap fonksiyonu 
+    ile aygıt dosyasını bu adresten itibaren map edebiliriz. 
+
+    Nihayet artık framebuffer belleği oluşturulmuştur onu mmap fonksiyonu ile sanal belleğe map edebiliriz:
+
+    if ((fb_mem = mmap(NULL, create.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, maparg.offset)) == MAP_FAILED) {
+        perror("mmap");
+        goto EXIT3;
+    }
+
+    Bu işlemden sonra nihayet çizim yapılıp görüntünün oluşması için drmModeSetCrtc fonksiyonu çağrılır. Ekrana aşağıdaki 
+    fonksiyonla pixel basabiliriz:
+
+    void putpixel(uint8_t *fb_mem, uint32_t pitch, int x, int y, uint32_t color)
+    {
+        uint32_t *pixel = (uint32_t *)(fb_mem + y * pitch + x * 4);
+        *pixel = color;
+    }
+
+    Örneğin:
+
+    putpixel(fb_mem, create.pitch, 100, 200, 0x00FF0000);  
+    
+    drmModeSetCrtc fonksiyonunun protoipi şöyledir:
+
+    int drmModeSetCrtc(int fd, uint32_t crtcId, uint32_t bufferId, uint32_t x, uint32_t y, uint32_t *connectors,
+            int count, drmModeModeInfoPtr mode);
+
+    Fonksiyonun parametrelerinin anlamları şöyledir:
+
+    ┌───────────────┬─────────────────┬────────────────────────────────────────────────────────┐
+    │  Parametre    │      Tür        │                      Açıklama                          │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ fd            │ int             │ open() ile açılan /dev/dri/card0 dosya tanımlayıcısı   │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ crtcId        │ uint32_t        │ Görüntü çıkışını yönetecek CRTC'nin ID'si              │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ bufferId      │ uint32_t        │ Ekrana taşınacak framebuffer'ın ID'si (fb_id)          │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ x             │ uint32_t        │ Framebuffer içinde tarama başlangıç x koordinatı       │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ y             │ uint32_t        │ Framebuffer içinde tarama başlangıç y koordinatı       │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ connectors    │ uint32_t *      │ CRTC'ye bağlanacak connector ID dizisinin adresi       │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ count         │ int             │ connectors dizisindeki eleman sayısı                   │
+    ├───────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │ mode          │ drmModeModeInfo │ Çözünürlük/yenileme hızı bilgisi; NULL ise CRTC        │
+    │               │ *               │ devre dışı bırakılır                                   │
+    └───────────────┴─────────────────┴────────────────────────────────────────────────────────┘    
+
+    Çağrıyı şöyle yapabiliriz:
+
+    saved_crtc = drmModeGetCrtc(fd, crtc_id); 
+    
+    if (drmModeSetCrtc(fd, crtc_id, fb_id, 0, 0, &conn->connector_id, 1, selected_mode) == -1) {
+        perror("drmModeSetCrtc"); 
+        goto EXIT4;
+    }
+
+    CRT'yi set etmeden önce eski denetleyivi nesnesinin saklandığına dikkat ediniz. Çıkışta yine biz drmModeSetCrtc fonksiyonu 
+    ile eski nesneyi yerleştirmeliyiz:
+
+    if (saved_crtc) {
+        drmModeSetCrtc(fd, saved_crtc->crtc_id, saved_crtc->buffer_id, saved_crtc->x, saved_crtc->y,
+                   &conn->connector_id, 1, &saved_crtc->mode);
+        drmModeFreeCrtc(saved_crtc);
+    }   
+
+    Bu işlemlerin sonrasında çizimlerin görünebilmesi için akışın bekletilmesi gerekir. Eğer program hemen sonlanırsa 
+    tüm mekanizma da sonlanacağı için bir şey göremeyiz. Boşaltımlar ters sırada aşağıdaki gibi yapılabilir:
+
+    EXIT4:
+        munmap(fb_mem, create.size);
+    EXIT3:
+        drmModeRmFB(fd, fb_id);
+        struct drm_mode_destroy_dumb destroy = { .handle = create.handle };
+        drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
+    EXIT2:
+        if (conn)
+            drmModeFreeConnector(conn);
+        drmModeFreeResources(res);
+    EXIT1:
+        close(fd);
+    
+    Tüm kodlar aşağıda bir bütüm olarak verilmektedir
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <stdint.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <xf86drmMode.h>
+#include <xf86drm.h> 
+
+void exit_sys(const char *msg);
+void putpixel(uint8_t *fb_mem, uint32_t pitch, int x, int y, uint32_t color);
+
+int main(void)
+{
+    int fd;
+    drmModeRes *res;
+    drmModeConnector *conn, *c;
+    int found;
+    drmModeModeInfo *selected_mode;
+    drmModeEncoder *enc;
+    uint32_t crtc_id, fb_id;
+    uint8_t *fb_mem;
+    drmModeCrtc *saved_crtc;
+
+    if ((fd = open("/dev/dri/card0", O_RDWR|O_CLOEXEC)) == -1)
+        exit_sys("open");
+
+    if ((res = drmModeGetResources(fd)) == NULL) {
+        fprintf(stderr, "cannot get resources!..\n");
+        goto EXIT1;
+    }
+
+    found = 0;
+    for (int i = 0; i < res->count_connectors && !found; i++) {
+        if ((c = drmModeGetConnector(fd, res->connectors[i])) == NULL) 
+            continue;
+
+        if (c->connection == DRM_MODE_CONNECTED && c->count_modes > 0) {
+            for (int m = 0; m < c->count_modes; ++m) {
+                if (c->modes[m].type & DRM_MODE_TYPE_PREFERRED) {
+                    selected_mode = &c->modes[m];
+                    found = 1;
+                    break;
+                }
+            }
+           
+            if (found) {
+                conn = c;   /* keep this connector, free others */
+                break;
+            }
+        }
+        drmModeFreeConnector(c);
+    }
+    printf("[Mod] %dx%d @ %d Hz  seçildi\n", selected_mode->hdisplay, selected_mode->vdisplay,selected_mode->vrefresh);
+
+    crtc_id = 0;
+    if (conn->encoder_id) {
+        if ((enc = drmModeGetEncoder(fd, conn->encoder_id)) != NULL) {
+            crtc_id = enc->crtc_id;
+            drmModeFreeEncoder(enc);
+        }
+    }
+    else {
+        for (int i = 0; i < conn->count_encoders; i++) {
+            enc = drmModeGetEncoder(fd, conn->encoders[i]);
+            if (enc == NULL) 
+                continue;
+            for (int j = 0; j < res->count_crtcs; ++j) {
+                if (enc->possible_crtcs & (1 << j)) {
+                    crtc_id = res->crtcs[j];
+                    drmModeFreeEncoder(enc);
+                    goto CRTC_FOUND;
+                }
+            }
+            drmModeFreeEncoder(enc);
+            break;
+        }
+    }
+    CRTC_FOUND:
+
+    if (crtc_id  == 0)
+        goto EXIT2;
+
+    struct drm_mode_create_dumb create = {
+        .width  = selected_mode->hdisplay,
+        .height = selected_mode->vdisplay,
+        .bpp    = 32,
+    };
+    if (drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
+        perror("drmIoctl CREATE_DUMB");
+        goto EXIT2;
+    }
+
+    if (drmModeAddFB(fd, selected_mode->hdisplay, selected_mode->vdisplay, 24, 32, create.pitch, 
+                create.handle, &fb_id) < 0)  {
+        perror("drmModeAddFB");
+        goto EXIT3;
+    }
+
+    struct drm_mode_map_dumb maparg = { .handle =  create.handle };
+    if (drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &maparg) < 0) {
+        perror("drmIoctl MAP_DUMB");
+        goto EXIT3;
+    }
+
+    if ((fb_mem = mmap(NULL, create.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, maparg.offset)) == MAP_FAILED) {
+        perror("mmap");
+        goto EXIT3;
+    }
+    putpixel(fb_mem, create.pitch, 100, 200, 0x00FF0000); 
+
+    saved_crtc = drmModeGetCrtc(fd, crtc_id);
+
+    if (drmModeSetCrtc(fd, crtc_id, fb_id, 0, 0, &conn->connector_id, 1, selected_mode) == -1) {
+        perror("drmModeSetCrtc"); 
+        goto EXIT4;
+    }
+
+    getchar();
+    
+    if (saved_crtc) {
+        drmModeSetCrtc(fd, saved_crtc->crtc_id, saved_crtc->buffer_id, saved_crtc->x, saved_crtc->y,
+                   &conn->connector_id, 1, &saved_crtc->mode);
+        drmModeFreeCrtc(saved_crtc);
+    }   
+
+EXIT4:
+    munmap(fb_mem, create.size);
+EXIT3:
+    drmModeRmFB(fd, fb_id);
+    struct drm_mode_destroy_dumb destroy = { .handle = create.handle };
+    drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
+EXIT2:
+    if (conn)
+        drmModeFreeConnector(conn);
+    drmModeFreeResources(res);
+EXIT1:
+    close(fd);
+
+    return 0;
+}
+
+void putpixel(uint8_t *fb_mem, uint32_t pitch, int x, int y, uint32_t color)
+{
+    uint32_t *pixel = (uint32_t *)(fb_mem + y * pitch + x * 4);
+    *pixel = color;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+  
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            176. Ders 21/04/2026 - Salı
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+    Kursumuzun bu son bölümünde Linux dağıtımları oluşturmak için kullanılan BuildRoot projesine bir alternatif oluşturan 
+    Yocto projesini inceleyeceğiz. Yocto projesi oldukça geniş kapsamlı bir projedir. Esnek olmasının yanı sıra öğrenme süreci 
+    biraz zaman almaktadır. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
@@ -14651,3 +15405,22 @@ sudo sh -c "printf '\033[?25l\033[2J\033[H' > /dev/tty1"
 
 # 3. Programı çalıştır (-w ile bekle):
 sudo openvt -f -s -w -c 1 -- ./fb-test
+
+┌─────────────────────────────────────────────┐
+│             Yocto Projesi                   │
+│                                             │
+│  ┌───────────────────────────────────────┐  │
+│  │           Poky (Referans Distro)      │  │
+│  │                                       │  │
+│  │  ┌─────────────────────────────────┐  │  │
+│  │  │     OpenEmbedded-Core (meta)    │  │  │
+│  │  │                                 │  │  │
+│  │  │  ┌───────────────────────────┐  │  │  │
+│  │  │  │   BitBake (Build Engine)  │  │  │  │
+│  │  │  └───────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────┘  │  │
+│  └───────────────────────────────────────┘  │
+│                                             │
+│  + Dokümentasyon, Testler, Araçlar (toaster,│
+│    devtool, SDK), BSP Katmanları            │
+└─────────────────────────────────────────────┘

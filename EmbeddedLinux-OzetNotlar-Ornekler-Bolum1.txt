@@ -18,7 +18,7 @@
                             (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                                     (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 29/12/2025 - Pazartesi
+                                            Son Güncelleme: 24/04/2025 - Cuma
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
@@ -11834,17 +11834,18 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    Biz yukarıdaki çekirdek derlemesi sürecinde imzalama (signing) işlemlerini devre dışı bırakmıştık. Çekirdek kodları
+    Biz yukarıdaki çekirdek derlemesi sürecinde imzalama (signing) işlemlerini devre dışı bırakmıştık. Çekirdek kodları 
     ve özellikle de aygıt sürücüler belli imzalara sahip olacak biçimde derlenebilmektedir. Böylece onlar üzerinde birtakım 
-    istenmeyen değişikliklerin yapılarak değiştirilmiş çekirdek ya da aygıt sürücülerin yüklenmesi engellenmiş olur. 
-    Yukarıda  da gördüğünüz gibi çekirdek kodları ve aygıt sürücülerde bu imzalama işlemi devre dışı da bırakılabilmektedir. 
+    istenmeyen değişikliklerin yapılmış olduğu değiştirilmiş çekirdeklerib ya da aygıt sürücülerin yüklenmesi engellenmiş olur. 
+    Yukarıda da gördüğünüz gibi çekirdek kodları ve aygıt sürücülerde bu imzalama işlemi devre dışı da bırakılabilmektedir. 
     Ancak imzalama süreci sistem güvenliğini artırmaktadır. Bu tür imzalama işlemleri yalnızca Linux sistemlerinde değil 
-    diğer UNIX türevi sistemlerde, Windows ve macOS sistemlerinde de bulunmaktadır. 
-    
-    Çekirdeğin imza kontrolü temel olarak UEFI BIOS (eğer "secure boot seçeneği aktif ise) ve önyükleyiciler (örneğin GRUB) 
-    tarafından yapılmaktadır. Ancak Linux çekirdeği de aygıt sürücüler ve modüller yüklenirken imza kontrolü uygulayabilmektedir.
-    Biz burada çekirdek ve modül imzalamalarının nasıl yapılacağı üzerinde duracağız. 
-    
+    diğer UNIX türevi sistemlerde, Windows ve macOS sistemlerinde de bulunmaktadır.
+
+    Çekirdeğin imza kontrolü temel olarak UEFI BIOS (eğer "secure boot" seçeneği aktif ise) ve önyükleyiciler (örneğin GRUB 
+    gibi U-Boot gibi önyükleyiciler) tarafından yapılmaktadır. Ancak Linux çekirdeği de aygıt sürücüler ve modüller yüklenirken 
+    imza kontrolü uygulayabilmektedir. Biz burada önce modül imzalama işleminin ve sonra da çekirdek imzalama  işleminin 
+    nasıl yapılacağı üzerinde duracağız.
+
     İmzalama işlemi tipik olarak şu adımlardan geçilerek yapılmaktadır:
 
     1) İmzalama işlemi için öncelikle "openssl" kütüphanesinin yüklenmiş olması gerekir. Yükleme işlemi aşağıdaki gibi 
@@ -11854,14 +11855,18 @@ void exit_sys(const char *msg)
 
     Daha sonra "openssl" programı ile aşağıdaki gibi bir ".pem" dosyası üretilir:
 
-    openssl req -new -x509 -newkey rsa:2048 -sha256 \
+    $ openssl req -new -x509 -newkey rsa:2048 -sha256 \
     -keyout signing_key.key -out certs/signing_key.crt \
     -nodes -days 36500 -subj "/CN=Local Kernel Module Key/"
-
-    Üretilen ".pem" dosyası genellikle kaynak kod ağacında "certs" isimli bir dizine yerleştirilir:
-
-    $ mkdir -p certs
-    $ mv signing_key.pem /certs
+    
+    Buradaki Bu ".key" dosyası "özel anahtarı (private key)", ".crt" dosyası ise sertifika dosyasını belirtiyor. Buradaki
+    dosyaların uzantıları ".key", ".crt", ".pem" olsa da içeriği "PEM (Privacy Enhanced Mail)" formatındadır. Dolayısıyla 
+    aslında burada verdiğiniz dosyaların uzantısı herhangi bir biçimde olabilir. 
+    
+    Bu iki dosyanın kaynak kod ağacına aşağıdaki gibi kopyalanması gerekir: 
+    
+    $ cp signing_key.key certs/
+    $ cp signing_key.crt certs/
 
     Daha sonra konfigürasyon dosyasında imzalama için aşağıdaki değişiklikler yapılmalıdır:
 
@@ -11870,55 +11875,101 @@ void exit_sys(const char *msg)
     CONFIG_MODULE_SIG_SHA256=y
     CONFIG_SYSTEM_TRUSTED_KEYRING=y
     CONFIG_MODULE_SIG_KEY="certs/signing_key.pem"
+    CONFIG_SYSTEM_TRUSTED_KEYS="certs/signing_key.crt"
+
+    Aslında ".key" ve ".crt" dosyaları tel bir dosyada da birleştirilebilir. Bu işlemi şöyle yapabiliriz:
+
+    $ cat certs/signing_key.key certs/signing_key.crt > certs/signing_key.pem
+
+    Tabii artık ".config" dosyasındaki isimleri de şöyle değiştirmeliyiz:
+
+    CONFIG_MODULE_SIG=y
+    CONFIG_MODULE_SIG_ALL=y
+    CONFIG_MODULE_SIG_SHA256=y
+    CONFIG_SYSTEM_TRUSTED_KEYRING=y
+    CONFIG_MODULE_SIG_KEY="certs/signing_key.pem"
     CONFIG_SYSTEM_TRUSTED_KEYS="certs/signing_key.pem"
 
-    Biz yukarıdaki işlemleri yaptığımızda yalnızca aygıt sürücüleri imzalamış oluruz. Çekirdeğin kendisinin imzalanması
-    ayrıca yapılmalıdır. Yukarıda da belirttiğimiz gibi UEFI BIOS'lar ve GRUB gibi önyükleyiciler çekirdek imajını
-    yüklemeden önce ayarları uygun biçime getirildiyse çekirdek imzasına bakmaktadır. Eğer çekirdek imzası yanlışsa 
-    (çekirdek dışarıdan kasti ya da yanlışlıkla bozulmuş olabilir) çekirdeği hiç yüklememektedir.
------------------------------------------------------------------------------------------------------------------------------*/
+    Biz bu işlemlerle aygıt sürücüleri imzalamış olduk. Ancak eğer ".config" dosyasında CONFIG_MODULE_SIG_FORCE=n
+    ise (default durumda genellikle böyledir) bu durum çekirdek log amaçlı bir uyarı oluştursa da imzalanmamış modullüeri
+    yine de yükler. Eğer imzalanmamış modülleri yüklemek istemiyorsanız CONFIG_MODULE_SIG_FORCE=y yapmalısınız. (Bu işlem
+    "menuconfig" menüsünde "Enable loadable module support/Module signature verification/Require modules to be validly 
+    signed" seçeneğinden de yapılabilmektedir.) Bu durumda çekirdek kendi oluşturduğumuz imzayla imzalanmamış olan 
+    modülleri artık yüklemeyecektir.
 
-/*-----------------------------------------------------------------------------------------------------------------------------
-    Çekirdeğin imzalanaması şöyle yapılabilir:
+    Eğer biz başkalarının yazdığı bir aygıt sürücüyü yüklerken çekirdeğin uyarı vermesini ya da yüklemeyi reddetmesini 
+    istemiyorsak o aygıt sürücüyü de kendi ürettiğimiz anahtarla (ya da dağıtımın public anahtarıyla) imzalamalıyız. Bu 
+    işlem çekirdek kodlarındaki "scripts" dizini içerisinde bulunan "sign-file" betiği (script) yapılmaktadır. Bu betiğin 
+    tipik kullanımı şöyledir:
 
-    - Oluşturnuş olduğumuz "signing_key.pem" dosyasından private ve public key ayrıştırılır:
-
-    $ openssl x509 -in signing_key.pem -outform DER -out db.crt
-    # openssl rsa -in signing_key.pem -outform PEM -out db.key
-
-    - Sonra da çekirdek sbsign programı ile aşağıdaki gibi imzalanır:
-
-    sbsign --key db.key --cert db.crt --output vmlinuz.signed vmlinuz-6.9.2-custom
-
-    Genellikle bu biçimde bir çekirdek imzalaması seyrek olarak yapılmaktadır. Önceki paragrafta biz aygıt sürücü dosyalarının 
-    imzalandığını belirtmiştik. Aynı makinede aygıt sürücüyü derlerken (build ederken) oluşturulan imza bilgisi de kullanılmaktadır. 
-    Yani biz aynı makinede bir aygıt sürücü derlediğimizde aygıt sürücümüz de zaten imzalanmış olacaktır. 
-
-    Peki aygıt sürücüler yukarıdaki gibi imzalandıktan sonra ya biz başka bir makinede oluşturulmuş olan ya da başka bir 
-    uygulamanın oluşturmuş olduğu aygıt sürücüleri yüklemek istersek ne olacaktır? Normal olarak o aygıt sürücüler bizim ürettiğimiz 
-    imza ile imzalanmadığı için onların yüklenmemesini bekleriz. Ancak bu durum kullanıcıları ek bir çabaya sürükleyebilmektedir. 
-    İşte default durumda imzası uyuşmayan aygıt sürücüler sistem tarafından bir uyarı verilerek yine de yüklenmektedir. Ancak bu 
-    tür durumlarda daha katı bir kontrolün uygulanması isteniyorsa ".config" dosyasında aşağıdaki gibi ekstra bir üst düzey güvenlik 
-    belirtilebilir:
-
-    CONFIG_MODULE_SIG_FORCE=y
-
-    Bu işlem "menuconfig" menüsünde "Enable loadable module support/Module signature verification/Require modules to be validly signed" 
-    seçeneğinden de yapılabilir. Bu durumda çekirdek kendi oluşturduğumuz imzayla imzalanmamış olan modülleri yüklemeyecektir. 
-
-    Eğer biz başkalarının yazdığı bir aygıt sürücüyü yüklerken ama çekirdeğin uyarı vermesini ya da yüklemeyi reddetmesini istemiyorsak 
-    o aygıt sürücüyü de kendi ürettiğimiz anahtarla (ya da dağıtımın public anahtarıyla) imzalamalıyız. Bu işlem çekirdek kodlarındaki 
-    "scripts" dizini içerisinde bulunan "sign-file" betiği (script) yapılmaktadır. Bu betiğin tipik kullanımı şöyledir:
-
-    scripts/sign-file <hash_alg> <private_key.pem> <public_cert.pem> <module.ko>
+    $ scripts/sign-file <hash_alg> <private_key.pem> <public_cert.pem> <module.ko>
 
     Örneğin:
 
-    scripts/sign-file sha256 signing_key.pem.pem signing_key.pem mydriver.ko
+    $ scripts/sign-file sha256 signing_key.pem.pem signing_key.pem mydriver.ko
 
-    Peki Ubuntu, Mint gibi dağıtımlar çekirdek imzalaması uygulamakta mıdır? Evet genel olarak dağıtımlar kendi private 
-    anahtarlarıyla (private keys) çekirdeği ve aygıt sürücüleri imzalamaktadır. Ancak aygıt sürücülerin yüklenmesinde imza 
-    kontrolünü zorunlu hale getirmemektedir. İmzalama için kullanılacak public anahtarlar "/proc/keys" dosyasında belirtilmektedir.
+    Peki Ubuntu, Mint gibi dağıtımlar çekirdek imzalaması uygulamakta mıdır? Evet genel olarak dağıtımlar kendi 
+    özel anahtarlarıyla (private keys) çekirdeği ve aygıt sürücüleri imzalamaktadır. Ancak aygıt sürücülerin yüklenmesinde 
+    imza kontrolünü zorunlu hale getirmemektedir. İmzalama için kullanılacak public anahtarlar "/proc/keys" dosyasında 
+    belirtilmektedir.
+
+    Biz yukarıdaki işlemleri yaptığımızda yalnızca aygıt sürücüleri imzalamış oluruz. Çekirdeğin kendisinin imzalanması 
+    ayrıca yapılmalıdır. Yukarıda da belirttiğimiz gibi UEFI BIOS'lar ve GRUB gibi önyükleyiciler çekirdek imajını 
+    yüklemeden önce ayarlar uygun biçime getirildiyse çekirdek imzasına bakmaktadır. Eğer çekirdek imzası yanlışsa 
+    (çekirdek dışarıdan kasti ya da yanlışlıkla bozulmuş olabilir) çekirdeği hiç yüklememektedir.
+    
+    Çekirdeğin imzalanması için önce anahtar ve sertifikasyon dosyaları aşağıdaki gibi oluşturulur:
+
+    $ openssl req -new -x509 -newkey rsa:2048 -sha256 \
+        -keyout certs/sb-signing.key \
+        -out certs/sb-signing.crt \
+        -nodes -days 36500 \
+        -subj "/CN=Secure Boot Signing Key/"
+
+    Sonra da sbsign programı ile imzalama aşağıdaki gibi yapılır:
+
+    $ sbsign --key db.key --cert signing_key.pem --output bzImage.signed arch/x86/boot/bzImage
+
+    Eğer bu işlemden sonra "make install" yapacaksanız imzalanmış çekirdeği eski ismiyle bulundurmalısınız:
+
+    $ mv arch/x86/boot/bzImage.signed arch/x86/boot/bzImage
+
+    $ mv komutu hedef dosya varsa onu ezerek işlemini yapmaktadır.
+
+    Genellikle bu biçimde bir çekirdek imzalaması seyrek olarak yapılmaktadır. Önceki paragrafta biz aygıt sürücü 
+    dosyalarının imzalandığını belirtmiştik. Aynı makinede aygıt sürücüyü derlerken (build ederken) oluşturulan imza 
+    bilgisi de kullanılmaktadır. Yani biz aynı makinede bir aygıt sürücü derlediğimizde aygıt sürücümüz de zaten imzalanmış 
+    olacaktır.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıdaki işlemleri yaptığımızda yalnızca aygıt sürücüleri imzalamış oluruz. Çekirdeğin kendisinin imzalanması ayrıca 
+    yapılmalıdır. Yukarıda da belirttiğimiz gibi UEFI BIOS'lar ve GRUB gibi önyükleyiciler çekirdek imajını yüklemeden önce 
+    ayarlar uygun biçime getirildiyse çekirdek imzasına bakmaktadır. Eğer çekirdek imzası yanlışsa çekirdek dışarıdan kasti 
+    ya da yanlışlıkla bozulmuş olabilir) çekirdeği hiç yüklememektedir.
+    
+    Çekirdeğin imzalanması için önce anahtar ve sertifikasyon dosyaları aşağıdaki gibi oluşturulur:
+
+    $ openssl req -new -x509 -newkey rsa:2048 -sha256 \
+        -keyout certs/sb-signing.key \
+        -out certs/sb-signing.crt \
+        -nodes -days 36500 \
+        -subj "/CN=Secure Boot Signing Key/"
+
+    Sonra da sbsign programı ile imzalama aşağıdaki gibi yapılır:
+
+    $ sbsign --key db.key --cert signing_key.pem --output bzImage.signed arch/x86/boot/bzImage
+
+    Eğer bu işlemden sonra "make install" yapacaksanız imzalanmış çekirdeği eski ismiyle bulundurmalısınız:
+
+    $ mv arch/x86/boot/bzImage.signed arch/x86/boot/bzImage
+
+    $ mv komutu hedef dosya varsa onu ezerek işlemini yapmaktadır.
+
+    Genellikle bu biçimde bir çekirdek imzalaması seyrek olarak yapılmaktadır. Önceki paragrafta biz aygıt sürücü 
+    dosyalarının imzalandığını belirtmiştik. Aynı makinede aygıt sürücüyü derlerken (build ederken) oluşturulan imza 
+    bilgisi de kullanılmaktadır. Yani biz aynı makinede bir aygıt sürücü derlediğimizde aygıt sürücümüz de zaten imzalanmış 
+    olacaktır.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 
