@@ -15,7 +15,7 @@
                      (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                          (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                      Son Güncelleme: 24/04/2026 - Cuma
+                                      Son Güncelleme: 29/04/2026 - Çarşamba
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -8777,12 +8777,1226 @@ void exit_sys_errno(const char *msg, int eno)
     Tabii hangi işlemcinin hangi modunda çalışıyorsanız sayfa girişlerinin gerçek formatını ona göre yeniden incelemelisiniz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------------------------------------------------
+                                            72. Ders 25/04/2026 - Cumartesi		
+----------------------------------------------------------------------------------------------------------------------*/
 
-<BURADA KALDIK>
 /*----------------------------------------------------------------------------------------------------------------------
 	Biz yukarıda sayfa tablolarını tek kademeli bir biçimde resmettik. Aslında sayfa tabloları tek kademeli değildir. 
-    Önce sayfa tablolarının neden çok kademeli olduğunu açıklayalım. 32 bit bir sistem söz konusu olsun. Sayfa büyüklüğünün 
-    de 4K olduğunu varsayalım. Her sayfa tablosu girişi de 4 byte olsun. WT
+    Önce sayfa tablolarının neden çok kademeli olduğunu açıklayalım. Daha sonra da mekanizmanın ayrıntılarına değinelim.
+    
+    4K sayfa kullanan 32 bit bir sistem söz konusu olsun. Sayfa büyüklüğünün de 4K olduğunu varsayalım. Her sayfa tablosu 
+    girişi de 4  byte olsun. Bu durumda sayfa tabloları 2²⁰ * 2² = 2²⁴ = 4MB büyüklüğünde olurdu. Her proses için ayrı 
+    sayfa tabloları  oluşturulduğunu anımsayınız. Bu durumda işletim sistemi her proses için fiziksel RAM'de 4MB büyüklüğünde 
+    ayrı sayfa tabloları oluşturacaktır. Proseslerin sayfa tablolarının aslında pek çok yeri boştur. Ancak o boş yerlere 
+    erişildiğinde "page fault" oluşması için o boş yerlere ilişkin sayfaların da P bitinin 0 yapılması gerekmektedir. 
+    İşte çok kademeli sayfa tabloları bu sorunu ortadan kaldırmaktadır. Aynı zamanda çok kademeli sayfa tabloları sayfa 
+    tablolarının fiziksel bellekteki ardışıl olma zorunluluğunu ortadan kaldırmaktadır. 
+
+    Şimdi çok kademeli sayfa tablolarının organizasyonunu 32 bit Intel işlemcileri üzerinde örneklendirerek açıklayalım. 
+    Çok kademeli sayfa tablolarında sanal adres ikiden fazla parçaya ayrılmaktadır. Örneğin 32 bit Intel işlemcileri 
+    iki kademeli sayfa tablolarına sahiptir ve bu işlemcilerde sanal adresler üç parçaya ayrılmaktadır:
+
+    ┌───────────────────────────────────────────────────────────────────────┐
+    │              32-bit Intel — 2 Kademeli Sayfa Tablosu                  │
+    ├─────────────────────────┬─────────────────────────┬───────────────────┤
+    │      Page Directory     │       Page Table        │   Page Offset     │
+    │          (PGD)          │         (PTE)           │                   │
+    ├─────────────────────────┼─────────────────────────┼───────────────────┤
+    │  31                  22 │  21                  12 │  11             0 │
+    ├─────────────────────────┼─────────────────────────┼───────────────────┤
+    │         10 bit          │         10 bit          │      12 bit       │
+    └─────────────────────────┴─────────────────────────┴───────────────────┘
+    ◄─────────────────────────────── 32 bit ────────────────────────────────►
+
+    Görüldüğü gibi Intel işlemcilerinde sanal adres üç kısma ayrılmaktadır: 10 bitlik "PGD (Page Directory)" alanı,
+    10 bitlik "PTE (Page Table Entry)" alanı ve 12 bitlik "Page Offset" alanı. Bu sistemlerde "sayfa sizini (page directory)
+    denilen bir tablo bulunmaktadır. Bu tablonun da her elemanı 4 byte uzunluktadır. Dolayısıyla sayfa dizini tablosu 
+    toplamda 2¹⁰ * 2² = 2¹² = 4K yer kaplamaktadır. Sayfa Dizininin her girişi bir sayfa tablosununun fiziksel adresini 
+    göstermektedir. Yani sayfa tabloları bir tane değil aslında 4096 tanedir. Sayfa tabloları yukarıda da belirttiğimiz 
+    gibi sayfa tablosu girişlerinden oluşmaktadır. Bir sayfa tablosu girişi 4 byte olduğu için sayfa tablolarının 
+    uzunlukları da 2¹⁰ * 2² = 2¹² = 4K'dır. Nihayet sanal adresin "sayfa offset'i (page offset)" alanı o fiziksel 
+    sayfada gerçek fiziksel adresin yeerini belirtmektedir. 32 bit Intel işlemcilerinde sayfa dizinindeki girişler 
+    sayfa tablolarının fiziksel bellekteki yerini, sayfa tablosundaki girişler de sayfaların fiziksel bellekteki yerini 
+    göstermektedir. Sayfa dizininin yeri ise işlemci içerisindeki CR3 yazamacı tarafından gösterilmektedir. 
+
+    4K sayfa kullanan 32 bit Intel işlemcilerinde 4 byte'lık sayfa dizin girişlerinin formatı şöyledir:
+
+    31                                  12   11  9  8  7  6  5  4   3   2   1  0
+    ┌──────────────────────────────────────┬───┬──┬──┬──┬──┬──┬───┬───┬───┬───┬─┐
+    │    Page Table Base Address [31:12]   │AVL│  │  │PS│  │A │PCD│PWT│U/S│R/W│P│
+    │                                      │   │  │  │  │  │  │   │   │   │   │ │
+    └──────────────────────────────────────┴───┴──┴──┴──┴──┴──┴───┴───┴───┴───┴─┘
+       
+    Buradaki yüksek anlamlı 20 bit sayfa tablosunun fiziksel bellekteki adresini belirtmektedir. (Tabii sayfa tabloları 
+    4K olduğu için 20 bitin son 12 bitinin 0 olduğu kabul edilşmektedir.) Diğer bitlerin anlamları şöyledir:
+
+    ┌──────────┬────────────────────────┬─────────────────────────────────────────────────────────────────────┐
+    │ Bit(ler) │          Alan          │                              Açıklama                               │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │  31–12   │ Page Table Base Addr.  │ Alt sayfa tablosunun fiziksel taban adresi. 4 KB hizalı olduğundan  │
+    │          │                        │ alt 12 bit sıfırdır, yalnızca üst 20 bit saklanır.                  │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │  11–9    │ AVL                    │ Available — işletim sistemi tarafından serbestçe kullanılabilir,    │
+    │          │                        │ donanım bu bitleri yok sayar.                                       │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    8     │ —                      │ Ayrılmış, 0 olmalı.                                                 │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    7     │ PS                     │ Page Size — 0 ise alt tablo 4 KB sayfaları gösterir; 1 ise (PSE     │
+    │          │                        │ etkinse) bu giriş doğrudan 4 MB'lık büyük sayfayı gösterir.         │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    6     │ —                      │ Ayrılmış, 0 olmalı.                                                 │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    5     │ A                      │ Accessed — MMU bu girişe erişildiğinde 1 yapar; işletim sistemi     │
+    │          │                        │ LRU takibi için kullanır.                                           │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    4     │ PCD                    │ Page Cache Disable — 1 ise bu tablonun işaret ettiği sayfa          │
+    │          │                        │ önbelleklenmez.                                                     │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    3     │ PWT                    │ Page Write-Through — 1 ise write-through önbellek politikası        │
+    │          │                        │ uygulanır.                                                          │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    2     │ U/S                    │ User/Supervisor — 0 ise yalnızca kernel (CPL 0–2) erişebilir;       │
+    │          │                        │ 1 ise kullanıcı alanı da (CPL 3) erişebilir.                        │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    1     │ R/W                    │ Read/Write — 0 ise sayfa salt okunur; 1 ise yazılabilir.            │
+    ├──────────┼────────────────────────┼─────────────────────────────────────────────────────────────────────┤
+    │    0     │ P                      │ Present — 0 ise giriş geçersizdir ve MMU sayfa hatası (#PF) üretir; │
+    │          │                        │ 1 ise geçerlidir. Linux, P=0 girişlerde swap bilgisi saklar.        │
+    └──────────┴────────────────────────┴─────────────────────────────────────────────────────────────────────┘
+
+    Sayfa dizini girişlerinin formatının yukarıda ele almış olduğumuz dizini girişi formatına oldukça benzediğine
+    dikkat ediniz. Sayda dizini girişlerinin yine en düşük anlamlı biti P bitidir. Eğer bu bit 0 ise daha sayfa 
+    tablosuna erişim yapılmadan "page fault" oluşmaktadır. Yani işletim sisteminin o giriş için sayfa tablosu 
+    oluşturmasına gerek kalmamaktadır. Böylece sanal adres alanını az kullanan programların sayfa tabloları 
+    bellekte çok daha az yer kaplar duruma gelmektedir. Benzer biçimde sayfa dizininin R/W biti de sayfat tablosu
+    girişinde olduğu gibi sayfanın "read-only" olup olmadığını belirtmektedir. 
+
+    Sayfa dizininin her bir girişinin sanal adres alanında 4MB'lik bir bir alanı beelirttiğine dikkat ediniz. 
+    2¹⁰ * 2¹² = 4M'dir. 
+
+    Bu durumda 4K sayfa kullanan 32 bit Intel işlemcisi sanal adresi fiziksel adrese şöyle döüştürmektedir. Örneğin 
+    dönüştürülecek sanal adres 1F3243A4 olsun. Bu adresi bitlerine ayrıştıralım:
+
+    0001 1111 0011 0010 0100 0011 1010 0100
+
+    1) İşlemci önce sayfa dizininin yerini CR3 yazmacı yoluyla elde eder. 
+
+    2) Sanal adresin yüksek anlamlı 10 bitini bu tabloya indeks yaparak sayfa dizininin ilgili elemanına erişir. 
+    Örneğimizdeki sanal adresin yüksek anlamı 10 biti 0001111100 biçimindedir. Bu değer onluk sistemde 124'tür. O 
+    halde işlemci sayfa sayfa dizininin 124'üncü elemanına erişir. Sayfa dizininin 124'üncü elemanında 1024 girişlik 
+    bir sayfa tablosu bulunacaktır. İşlemci bu sayfa tablosuna erişir. 
+
+    3) İşlemci sanal adresin ikinci 10 bitini indeks yaparak eriştiği sayfa tablosunun ilgili girişin okur. Örneğimizde 
+    sanal adresin ikinci 10 bitlik kısmı 1100100100 biçimindedir. Bu da onluk sistemde 804 değerine karşılık gelmektedir. 
+    İşte işlemci sayfa tablosunun 804'üncü girişine erişerek oradan sayfanın fiziksel adresini elde eder. 
+
+    4) Nihayet işlemci elde ettiği fiziksel sayfa adresine sanal adresin düşük anlamlı 12 bitini toplayarak gerçek 
+    fiziksel adrese erişir. Örneğimizde sayfa offset'i belirten 12 bit 001110100100 biçimindedir. Bu değer de onluk 
+    sistemde 932 biçimindedir. 
+    
+    Biz yukarıda 4K sayfa kullanan 32 bit Intel işlemcileri üzerinde örnek verdik. Sayfa büyüklükleri değiştiğinde 
+    sanal adres dönüştürmesinin formatı da değişkemketdir. Örneğin 4MB'lık büyük sayfalar söz konusu olduğunda 32 
+    bit Intel işlemcileri sanal adresi 2 kısma ayırmaktadır:
+
+    31                  22 21                                      0
+    ┌──────────────────────┬────────────────────────────────────────┐
+    │    Page Directory    │            Page Offset                 │
+    │       Index          │                                        │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │  31               22 │  21                                  0 │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │        10 bit        │                 22 bit                 │
+    └──────────────────────┴────────────────────────────────────────┘
+    ◄────────────────────────── 32 bit ────────────────────────────►
+
+    Burada artık tek kademeli bir dönüştürmenin olduğuna dikkat ediniz. Bu durumda işlemci yüksek anlamlı 10 bitten 
+    sayfa dizininin indeksini elde edip sayfa dizininin o indeksine başvurarak 4MB'lik sayfanın yerini tespit etmektedir. 
+    Artık sanal adresin düşük anlamlı 22 bitinin (4MB) sayfa offset'i belirttiğine dikkat ediniz. 32 bit Intel işlemcilerinde
+    4K'lık sayfalarla 4MB'lik sayfalar bir arada kullanılabilmektedir. Sayfa dizini girişlerinin sanal bellekte 4MB'lik 
+    alan belirttiğini anımsayınız. Bu durumda bir sayfa dizini girişi 4MB'lik büyük sayfaya da ilişkin olabilir 4K'lık 
+    küçük sayfaya da ilişkin olabilir. Sayfa dizini girişlerindeki PS biti 0 ise bu giriş 4K'lık sayfa tablosunu 
+    gösteriyor durumdadır, PS biti 1 ise bu giriş 4MB'lik fiziksel sayfayı gösteriyor durumdadır. Linux işletim 
+    sistemi de 4K sayfaların dışında 4MB'lik sayfaları da desteklemektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    4K sayfalara ilişkin 32 bit ARM işlemcilerinde de yine iki kademeli sayfa tabloları kullanılmaktadır. Bu işlemcilerde 
+    sanal adres yine üç kısma ayrılmaktadır. Ancak bu üç kısmın isimleri ve kullanılan terminoloji Intel işlemcilerinden 
+    farklıdır:
+
+    31                   20 19         12 11                     0
+    ┌──────────────────────┬─────────────┬────────────────────────┐
+    │    L1 Table Index    │  L2 Table   │      Page Offset       │
+    │                      │   Index     │                        │
+    ├──────────────────────┼─────────────┼────────────────────────┤
+    │ 31                20 │ 19       12 │ 11                   0 │
+    ├──────────────────────┼─────────────┼────────────────────────┤
+    │        12 bit        │    8 bit    │         12 bit         │
+    └──────────────────────┴─────────────┴────────────────────────┘
+    ◄────────────────────────── 32 bit ───────────────────────────►
+
+    Buradaki sanal adresin parçalarının uzunluklarına dikkat ediniz. L1 tablosu denilen (Intel'deki sayfa dizini) tablo
+    indeksi 12 bittir. Yani bu tablo fiziksel bellekte  2¹² * 2² = 16K yer kaplamaktadır. Ancak L2 tabloları (yani 
+    Intel'deki sayfa tabloları) burada 2⁸ * 2² = 1K yer kaplamaktadır. Sayfalar 4K olduğu için sayfa offset'i yine 
+    12 bittir. 
+
+    Aşağıda 4K sayfa kullanan 32 bit Intel işlemcileri ile ARM işlemcilerinin organizasyon karşılaştırmasını bir 
+    tablo biçiminde veriyoruz:
+
+    ┌─────────────────────┬──────────────────┬──────────────────────────┐
+    │       Ölçüt         │  Intel 32-bit    │      ARM 32-bit          │
+    │                     │   (4 KB sayfa)   │      (4 KB sayfa)        │
+    ├─────────────────────┼──────────────────┼──────────────────────────┤
+    │ L1 giriş sayısı     │      1024        │          4096            │
+    ├─────────────────────┼──────────────────┼──────────────────────────┤
+    │ L1 tablo boyutu     │       4 KB       │          16 KB           │
+    ├─────────────────────┼──────────────────┼──────────────────────────┤
+    │ L2 giriş sayısı     │      1024        │           256            │
+    ├─────────────────────┼──────────────────┼──────────────────────────┤
+    │ Tek L2 tablo boyutu │       4 KB       │           1 KB           │
+    ├─────────────────────┼──────────────────┼──────────────────────────┤
+    │ Toplam L2 (max)     │       4 MB       │           4 MB           │
+    └─────────────────────┴──────────────────┴──────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	4K'lık sayfa kullanan 64 bit işlemcilerdeki sayfa tabloları genellikle 3 kademelidir. Çünkü 64 bitlik adresi alanı
+    16 exabyte gibi çok bir değerdedir. Örneğin 64 bitlik Intel işlemcilerindeki sanal adres aşağıdaki gibi 4 kısma 
+    ayrılmaktadır:
+
+     63        48 47        39 38        30 29        21 20        12 11         0
+    ┌───────────────┬────────────┬────────────┬────────────┬────────────┬───────────┐
+    │  Sign Ext.    │  PGD Index │  PUD Index │  PMD Index │  PTE Index │  Offset   │
+    │ (kullanılmaz) │            │            │            │            │
+    ├───────────────┼────────────┼────────────┼────────────┼────────────┼───────────┤
+    │ 63         48 │ 47      39 │ 38      30 │ 29      21 │ 20      12 │ 11      0 │
+    ├───────────────┼────────────┼────────────┼────────────┼────────────┼───────────┤
+    │   16 bit      │    9 bit   │    9 bit   │    9 bit   │    9 bit   │   12 bit  │
+    └───────────────┴────────────┴────────────┴────────────┴────────────┴───────────┘
+    ◄──────────────────────────────── 64 bit ──────────────────────────────────►
+
+    64 bit Intel işlemcileri aslında 48 bitlik adresler kullanmaktadır. Bu işlemcilerin adresleyebildiği teorik fiziksel 
+    bellek uzunluğu ise 2⁶⁴ (16 exebyte) değil daha azdır. Modellere göre 64 bit Intel işlemcilerinin kullanabildiği 
+    fiziksel RAM aşağıdaki tabloda verilmiştir:
+
+    ┌──────────────────────┬───────────────────┬────────────────────────┐
+    │       Kriter         │   Sanal Adres     │    Fiziksel Adres      │
+    ├──────────────────────┼───────────────────┼────────────────────────┤
+    │ 4 Kademeli (LA48)    │ 48 bit → 256 TB   │ 46–52 bit (nesle göre) │
+    ├──────────────────────┼───────────────────┼────────────────────────┤
+    │ 5 Kademeli (LA57)    │ 57 bit → 128 PB   │ 52 bit → 4 PB          │
+    ├──────────────────────┼───────────────────┼────────────────────────┤
+    │ Teorik maksimum      │ 57 bit → 128 PB   │ 52 bit → 4 PB          │
+    └──────────────────────┴───────────────────┴────────────────────────┘
+
+    Fiziksel RAM'in sanal adres alanından fazla olması bir sorun yaratmamaktadır. 
+
+    64 bit Intel işlemcilerinde sanal adresin dört parçaya ayrıldığına dikkat ediniz. Beşinci parça zaten kullanılmamaktadır,
+    her zaman 0'dır. Sanal adres dönüştürmesi yapılırken üç farklı tabloya başşvurulmaktadır:
+
+                            48-bit Sanal Adres
+    ┌─────────────┬─────────────┬─────────────┬─────────────┬─────────────┐
+    │  PGD Index  │  PUD Index  │  PMD Index  │  PTE Index  │   Offset    │
+    │    9 bit    │    9 bit    │    9 bit    │    9 bit    │   12 bit    │
+    └──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┘
+           │             │             │             │             │
+           │         ┌───┘         ┌───┘         ┌───┘             │
+           │         │             │             │                 │
+           ▼         │             │             │                 │
+       CR3 ──► PGD   │             │             │                 │
+           │         │             │             │                 │
+    ┌──────┴──────┐  │             │             │                 │
+    │   PGD[i]    ├──┘             │             │                 │
+    │  (512 giriş)│                │             │                 │
+    └─────────────┘                │             │                 │
+           │                       │             │                 │
+           ▼                       │             │                 │
+          PUD                      │             │                 │
+           │                       │             │                 │
+    ┌──────┴──────┐                │             │                 │
+    │   PUD[j]    ├────────────────┘             │                 │
+    │  (512 giriş)│                              │                 │
+    └─────────────┘                              │                 │
+           │                                     │                 │
+           ▼                                     │                 │
+          PMD                                    │                 │
+           │                                     │                 │
+    ┌──────┴──────┐                              │                 │
+    │   PMD[k]    ├──────────────────────────────┘                 │
+    │  (512 giriş)│                                                │
+    └─────────────┘                                                │
+           │                                                       │
+           ▼                                                       │
+          PTE                                                      │
+           │                                                       │
+    ┌──────┴──────┐                                                │
+    │   PTE[l]    │                                                │
+    │  (512 giriş)│                                                │
+    └──────┬──────┘                                                │
+           │                                                       │
+           │  Fiziksel Sayfa Taban Adresi                          │
+           │  [51:12]                                              │
+           ▼                                                       │
+    ┌─────────────────────────────────────────┬────────────────────┴──────┐
+    │       Fiziksel Sayfa (4 KB)             │     Offset (12 bit)       │
+    │                                         │                           │
+    └─────────────────────────────────────────┴───────────────────────────┘
+                                    │
+                                    ▼
+                          Fiziksel Adres (52 bit)
+
+    Burada toplamda üç akdeme tablo vardır:
+
+    PUD (Page Upper Directory) Tablosu
+    PMD (Page Middle Directory) Tablosu
+    PT (Page Table) Tablosu
+
+    Dönüştürme tukarıdaki şekilden de gördüğünüz gibi şöyle yapılmaktadır:
+
+    ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+    │       PGD       │     │       PUD       │     │       PMD       │     │       PTE       │
+    ├─────────────────┤     ├─────────────────┤     ├─────────────────┤     ├─────────────────┤
+    │                 │     │                 │     │                 │     │                 │
+    │     entry 0     │     │     entry 0     │     │     entry 0     │     │     entry 0     │
+    │     entry 1     │     │     entry 1     │     │     entry 1     │     │     entry 1     │
+    │       ...       ├────►│       ...       ├────►│       ...       ├────►│       ...       ├────► Fiziksel Sayfa
+    │     entry i     │     │     entry j     │     │     entry k     │     │     entry l     │     Taban Adresi
+    │       ...       │     │       ...       │     │       ...       │     │       ...       │          │
+    │     entry 511   │     │     entry 511   │     │     entry 511   │     │     entry 511   │          │
+    │                 │     │                 │     │                 │     │                 │          │
+    └─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘          │
+           ▲                                                                                             │
+           │                                                                                             ▼
+          CR3                                                                                   ┌─────────────────┐
+                                                                                                │  Fiziksel Adres │
+                                                                                                │                 │
+                                                                                                │  Sayfa Tabanı   │
+                                                                                                │  + Offset       │
+                                                                                                └─────────────────┘
+    
+    4K sayfalar kullanan 64 bit ARM işlemcilerinde de sanal adres aşağıdaki gibi dört parçaya ayrılmaktadır:
+
+        63        48 47        39 38        30 29        21 20        12 11         0
+    ┌────────────┬────────────┬────────────┬────────────┬────────────┬───────────┐
+    │  Sign Ext. │  L0 Index  │  L1 Index  │  L2 Index  │  L3 Index  │  Offset   │
+    │            │   (PGD)    │   (PUD)    │   (PMD)    │   (PTE)    │           │
+    ├────────────┼────────────┼────────────┼────────────┼────────────┼───────────┤
+    │ 63      48 │ 47      39 │ 38      30 │ 29      21 │ 20      12 │ 11      0 │
+    ├────────────┼────────────┼────────────┼────────────┼────────────┼───────────┤
+    │   16 bit   │    9 bit   │    9 bit   │    9 bit   │    9 bit   │   12 bit  │
+    └────────────┴────────────┴────────────┴────────────┴────────────┴───────────┘
+    ◄──────────────────────────────── 64 bit ──────────────────────────────────►
+
+    64 bit ARM işlemcilerinde de sanal adres alanı Intel'de olduğu gibi 64 bit değil 48 bittir. 64 bit Intel işlemcileri 
+    ile 64 bit ARM işlemcilerinin sayfalama aşamalarını aşağıdaki tabloyla karşılaştırıyoruz:
+
+    ┌──────────────────────┬───────────────────────┬───────────────────────┐
+    │       Kriter         │     x86-64 (LA48)     │    AArch64 (48-bit)   │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Kullanılan bit       │        48 bit         │        48 bit         │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Kademe sayısı        │           4           │           4           │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Her kademedeki giriş │          512          │          512          │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Tablo boyutu         │          4 KB         │          4 KB         │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Sayfa boyutu         │          4 KB         │          4 KB         │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Taban adresi yazmacı │          CR3          │  TTBR0 / TTBR1        │
+    ├──────────────────────┼───────────────────────┼───────────────────────┤
+    │ Kullanıcı/Çekirdek   │   Canonical bits      │  TTBR0 / TTBR1 ayrımı │
+    └──────────────────────┴───────────────────────┴───────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    İşlemcilerin bu kademelerle geçiş sırasında çok fazla bellek başvurusu yaptığını görüyorsunuz. Bu başvurular hızı 
+    göreli olarak yavaşlatmaktadır. İşte bu nedenle işlemciler kendi içerisinde son erişilen dizin ve sayfa tablosu 
+    içeriklerini bir önbellek (cache) içerisinde tutmaktadır. Bu önbellek sistemine İngilizce "Translation Lookaside 
+    Buffer (TLB)" denilmektedir. Bu önbellek sayesinde son zamanlarda kullanılan sayfa dizini ve sayfa tablosu girişlerine 
+    hiç bellek okuması yapmadan hızlı bir biçimde erişilmektedir. 
+
+    TLB, sanal adresten fiziksel adrese dönüşürme sonuçlarını önbelleğe alan, CPU çekirdeği içindeki özel bir donanım 
+    yapısıdır. Teknik olarak bir "assosiative cache (içerik adreslenebilir bellek, CAM)" biçiminde gerçekleştirilmektedir. 
+    Eğer dönüşürülecek sanal adrese ilişkin dönüştürme bilgisi TLB içerisinde varsa işlemci çok hızlı bir biçimde 
+    erişimi yapmaktadır. Aşağıda bir fikir verebilmek amacıyla 32 bit ve 64 bit Intel işlemcilerinin TLB önbelleğinin 
+    kaç girişi tutabildiğini gösteren bir tablo veriyoru:
+
+    ┌────────────────────┬──────────────────────────────────┬──────────────────────────────────┬──────────────────────────┐
+    │     Mimari         │         L1 ITLB                  │         L1 DTLB                  │      L2 TLB (STLB)       │
+    ├────────────────────┼──────────────────────────────────┼──────────────────────────────────┼──────────────────────────┤
+    │  Core 2 (32-bit)   │  128 giriş (4K), 4-yollu         │  16 giriş (yalnız load)          │  256 giriş               │
+    ├────────────────────┼──────────────────────────────────┼──────────────────────────────────┼──────────────────────────┤
+    │  Nehalem (64-bit)  │  128 giriş (4K), 7 giriş (2M/4M) │  64 giriş (4K), 32 giriş (2M/4M) │  512 giriş (4K), 4-yollu │
+    ├────────────────────┼──────────────────────────────────┼──────────────────────────────────┼──────────────────────────┤
+    │  Sandy Bridge      │  64 giriş/thread (4K), 4-yollu   │  64 giriş (4K), 4-yollu          │  1024 giriş, 4-yollu     │
+    └────────────────────┴──────────────────────────────────┴──────────────────────────────────┴──────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de 32 bit ve 64 bit Linux işletim sistemlerinde proseslerin sanal adres alanları üzerinde duralım. Biz yukarıda
+    her proses için sanki o proses fiziksel belleğe tek başına yükleniyormuş gibi bir sanal adres alanının oluşturulduğunu
+    belirtmiştik. Böylece örneğin 32 bit Linux sistemlerinde her bir proses sanki 4GB belleği tek başına kullanabiliyormuş
+    gibi bir çalışma sistemi oluşturulmuştur. Peki işletim sisteminin kendisi sanal belleğin neresindedir? Sistem fonksiyonları 
+    çağrıldığında sayfa tablosununda bir değişiklik yapılmamaktadır. Yani sayfa tablosu değiştirilmemektedir. Bir sistem 
+    fonksiyonu çağrıldığında thread'in çalışma modu kullanıcı modundan (user mode) çekirdek moduna (kernel mode) geçirilir 
+    ve sistem fonksiyonuna dallanılır. O halde işletim sisteminin kodlarının da her proses tarafından erişilebilir bir 
+    yerde bulundurulması gerekmektedir. İşte Linux sistemlerinde (Windows sistemlerinde de benzer) işletim sistemi sanal 
+    adres alanının belli bir yerine map edilmiştir. 32 bit Linux sistemlerindeki prosesin sanal bellek alanı şöyledir:
+
+    0x00000000  ┌─────────────────────────────────────┐
+                │                                     │
+                │                                     │
+                │           User Space                │  3 GB
+                │                                     │
+                │                                     │
+    0xC0000000  ├─────────────────────────────────────┤
+                │                                     │
+                │           Kernel Space              │  1 GB
+                │                                     │
+    0xFFFFFFFF  └─────────────────────────────────────┘
+
+
+    Buradan da görüldüğü gibi 32 bit Linux sistemlerinde kullanıcı alanı (yani prosesin sanal bellekte kapladığı maksimum 
+    alan) 3GB, çekirdek alanı da 1GB'dir. Her proseste çeekirdke alanı o prosesin sanal belleğinin aynı yerine yani 
+    0xC0000000'dan itibaren map edilmiştir. Sayfa tablolarının çok kademeli olması bu mapping işlemini kolaylaştırmaktadır. 
+    Buradaki alanların içeriklerini biraz daha ayrıntılandırabiliriz:
+
+    0x00000000  ┌─────────────────────────────────────┐
+                │           NULL guard                │
+                │     (unmapped, trap on access)      │
+    0x08048000  ├─────────────────────────────────────┤
+                │         Text segment                │
+                │   (read-only, executable, .text)    │
+                ├─────────────────────────────────────┤
+                │         Data segment                │
+                │   (initialized globals & statics)   │
+                ├─────────────────────────────────────┤
+                │           BSS segment               │
+                │  (zero-init globals & statics)      │
+                ├─────────────────────────────────────┤  ◄── program break
+                │              Heap                   │
+                │      (grows downward  ▼)            │
+                │                                     │
+                │    · · · free virtual space · · ·   │  U
+                │                                     │  S
+                │       mmap / shared libs            │  E
+                │  (libc.so, ld.so, anon mmap)        │  R
+                │                                     │
+                │    · · · free virtual space · · ·   │
+                │                                     │
+                │             Stack                   │
+                │      (grows upward  ▲)              │
+                │                                     │
+    0xBFFFFFFF  │    (argv, envp, local vars)         │
+                ├═════════════════════════════════════╡
+                ║   ──── Kernel / User boundary ────  ║  
+    0xC0000000  ╠═════════════════════════════════════╣  
+                ║      Physical memory map            ║  K
+                ║   (1:1 lowmem, up to ~896 MB)       ║  E
+                ╠─────────────────────────────────────╣  R
+                ║    Kernel stacks (8 KB/thread)      ║  N
+                ╠─────────────────────────────────────╣  E
+                ║   Page tables & fixed maps          ║  L
+                ║   (PGD/PTE, kmap, fixmap)           ║
+                ╠─────────────────────────────────────╣
+                ║    Modules & vmalloc area           ║
+                ║  (insmod, vmalloc(), ioremap())     ║
+                ╠─────────────────────────────────────╣
+                ║      Kernel code & data             ║
+                ║  (vmlinux image, BSS, init data)    ║
+    0xFFFFFFFF  ╚═════════════════════════════════════╝
+
+    64 bit Linux sistemlerinde prosesin sanal bellek alanı da şöyledir:
+
+    0x0000000000000000  ┌─────────────────────────────────────┐
+                        │                                     │
+                        │           User Space                │  128 TB
+                        │                                     │
+    0x00007FFFFFFFFFFF  ├─────────────────────────────────────┤
+                        │                                     │
+                        │       Non-canonical hole            │  ~16 million TB
+                        │         (invalid range)             │
+                        │                                     │
+    0xFFFF800000000000  ├─────────────────────────────────────┤
+                        │                                     │
+                        │           Kernel Space              │  128 TB
+                        │                                     │
+    0xFFFFFFFFFFFFFFFF  └─────────────────────────────────────┘
+
+    64 bit Linux sistemlerinde prosesin sanal bellek alanının 256 TB büyüklüğünde olduğuna dikkat ediniz. Bu sistemlerde 
+    sanal adreslerin 48 bit olduğunu anımsayınız. 64 Linux sistemlerinde kulalnıcı alan 128 TB ve çekirdek alanı da 
+    128 TB'dir. Bugün için bu büyüklük oldukça yeterlidir. Bellekte 128 TB yer kaplayabilecek programlar yok denilecek 
+    kadar azdır. Kullanıcı alanının sanal bellek alanının düşük adresinde çekirdek alanının da yüksekte bulunduğuna 
+    dikkat ediniz. Yine her proseste çekirdek alanı aynı yere map edilmiştir. Buradaki şekli biraz daha ayrıntılı 
+    biçimde aşağıdaki  çziebiliriz:
+
+    0x0000000000000000  ┌─────────────────────────────────────┐
+                        │           NULL guard                │
+                        │     (unmapped, trap on access)      │
+    0x0000000000400000  ├─────────────────────────────────────┤
+                        │         Text segment                │
+                        │   (read-only, executable, .text)    │
+                        ├─────────────────────────────────────┤
+                        │         Data segment                │
+                        │   (initialized globals & statics)   │
+                        ├─────────────────────────────────────┤
+                        │           BSS segment               │
+                        │  (zero-init globals & statics)      │
+                        ├─────────────────────────────────────┤  ◄── program break
+                        │              Heap                   │
+                        │      (grows downward  ▼)            │
+                        │                                     │
+                        │    · · · free virtual space · · ·   │  U
+                        │                                     │  S
+                        │       mmap / shared libs            │  E
+                        │  (libc.so, ld.so, anon mmap)        │  R
+                        │                                     │
+                        │    · · · free virtual space · · ·   │
+                        │                                     │
+                        │             Stack                   │
+                        │      (grows upward  ▲)              │
+                        │                                     │
+    0x00007FFFFFFFFFFF  │    (argv, envp, local vars)         │
+                        ├═════════════════════════════════════╡
+                        ║  · · · non-canonical hole · · ·     ║
+                        ║   (invalid, hardware rejects all    ║
+                        ║    refs into this range)            ║
+                        ╠═════════════════════════════════════╣
+                        ║   ──── Kernel / User boundary ────  ║  
+    0xFFFF800000000000  ╠═════════════════════════════════════╣  
+                        ║      Physical memory map            ║  
+                        ║   (1:1 lowmem, direct-map)          ║ K 
+                        ╠─────────────────────────────────────╣ E 
+                        ║    Kernel stacks (16 KB/thread)     ║ R
+                        ╠─────────────────────────────────────╣ N
+                        ║   Page tables (PML4/PUD/PMD/PTE)    ║ E
+                        ╠─────────────────────────────────────╣ L
+                        ║    Modules & vmalloc area           ║
+                        ║  (insmod, vmalloc(), ioremap())     ║
+                        ╠─────────────────────────────────────╣
+                        ║      Kernel code & data             ║
+                        ║  (vmlinux image, BSS, init data)    ║
+    0xFFFFFFFFFFFFFFFF  ╚═════════════════════════════════════╝
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+				                            73. Ders 26/04/2026 - Pazar					
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeğinin bellek yönetimine (memory management) ilişkin kaynak kodları kaynak kod ağacında "mm" dizini 
+    içerisinde bulunmaktadır. Buradaki dosyaların include ettiği başlık dosyaları da diğer alt sistemlerde olduğu gibi
+    "icnlude/linux" dizininde yer almaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Anımsanacağı gibi çok işlemcili ya da çekirdekli sistemlerde iki mimari kullanılıyordu: SMP ve NUMA. SMP (UMA de 
+    denilebilmektedir) mimarisinde her işlemci ya da çekirdek aynı fiziksel RAM'e erişiyordu. Erişim sırasında diğerlerini 
+    durduruyordu. NUMA mimarisinde ise her işlemci ya da çekirdeğin daha hızlı erişitği bir bank (buna düğüm ("node") 
+    da denilmektedir) bulunmaktaydı. İşlemciler ya da çekirdekler kendi bank'larına daha hızlı erişiyordu, diğer bank'lara 
+    göreli olarak daha yavaş erişiyordu. 
+
+    Linux'un bellek yönetimi hem SMP hem de NUMA mimarilerinde çalışacak biçimde taarlanmıştır. Bu nedenle daha genel 
+    veri yapıları oluşturulmuştur. Linux çekirdeklerinde NUMA düğümler (yani bank'ları) pglist_data isimli bir yapı ile
+    temsil edilmektedir. Bu yapı pg_data_t ismiyle de typedef edilmiştir. Güncel çekirdeklerde bu yapı "include/linux/mmzone.h" 
+    dosyası içerisinde şöyle bildirilmiştir:
+
+    typedef struct pglist_data {
+        /*
+        * node_zones contains just the zones for THIS node. Not all of the
+        * zones may be populated, but it is the full list. It is referenced by
+        * this node's node_zonelists as well as other node's node_zonelists.
+        */
+        struct zone node_zones[MAX_NR_ZONES];
+
+        /*
+        * node_zonelists contains references to all zones in all nodes.
+        * Generally the first zones will be references to this node's
+        * node_zones.
+        */
+        struct zonelist node_zonelists[MAX_ZONELISTS];
+
+        int nr_zones; /* number of populated zones in this node */
+    #ifdef CONFIG_FLATMEM	/* means !SPARSEMEM */
+        struct page *node_mem_map;
+    #ifdef CONFIG_PAGE_EXTENSION
+        struct page_ext *node_page_ext;
+    #endif
+    #endif
+    #if defined(CONFIG_MEMORY_HOTPLUG) || defined(CONFIG_DEFERRED_STRUCT_PAGE_INIT)
+        /*
+        * Must be held any time you expect node_start_pfn,
+        * node_present_pages, node_spanned_pages or nr_zones to stay constant.
+        * Also synchronizes pgdat->first_deferred_pfn during deferred page
+        * init.
+        *
+        * pgdat_resize_lock() and pgdat_resize_unlock() are provided to
+        * manipulate node_size_lock without checking for CONFIG_MEMORY_HOTPLUG
+        * or CONFIG_DEFERRED_STRUCT_PAGE_INIT.
+        *
+        * Nests above zone->lock and zone->span_seqlock
+        */
+        spinlock_t node_size_lock;
+    #endif
+        unsigned long node_start_pfn;
+        unsigned long node_present_pages; /* total number of physical pages */
+        unsigned long node_spanned_pages; /* total size of physical page
+                            range, including holes */
+        int node_id;
+        wait_queue_head_t kswapd_wait;
+        wait_queue_head_t pfmemalloc_wait;
+
+        /* workqueues for throttling reclaim for different reasons. */
+        wait_queue_head_t reclaim_wait[NR_VMSCAN_THROTTLE];
+
+        atomic_t nr_writeback_throttled;/* nr of writeback-throttled tasks */
+        unsigned long nr_reclaim_start;	/* nr pages written while throttled
+                        * when throttling started. */
+    #ifdef CONFIG_MEMORY_HOTPLUG
+        struct mutex kswapd_lock;
+    #endif
+        struct task_struct *kswapd;	/* Protected by kswapd_lock */
+        int kswapd_order;
+        enum zone_type kswapd_highest_zoneidx;
+
+        atomic_t kswapd_failures;	/* Number of 'reclaimed == 0' runs */
+
+    #ifdef CONFIG_COMPACTION
+        int kcompactd_max_order;
+        enum zone_type kcompactd_highest_zoneidx;
+        wait_queue_head_t kcompactd_wait;
+        struct task_struct *kcompactd;
+        bool proactive_compact_trigger;
+    #endif
+        /*
+        * This is a per-node reserve of pages that are not available
+        * to userspace allocations.
+        */
+        unsigned long		totalreserve_pages;
+
+    #ifdef CONFIG_NUMA
+        /*
+        * node reclaim becomes active if more unmapped pages exist.
+        */
+        unsigned long		min_unmapped_pages;
+        unsigned long		min_slab_pages;
+    #endif /* CONFIG_NUMA */
+
+        /* Write-intensive fields used by page reclaim */
+        CACHELINE_PADDING(_pad1_);
+
+    #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
+        /*
+        * If memory initialisation on large machines is deferred then this
+        * is the first PFN that needs to be initialised.
+        */
+        unsigned long first_deferred_pfn;
+    #endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */
+
+    #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+        struct deferred_split deferred_split_queue;
+    #endif
+
+    #ifdef CONFIG_NUMA_BALANCING
+        /* start time in ms of current promote rate limit period */
+        unsigned int nbp_rl_start;
+        /* number of promote candidate pages at start time of current rate limit period */
+        unsigned long nbp_rl_nr_cand;
+        /* promote threshold in ms */
+        unsigned int nbp_threshold;
+        /* start time in ms of current promote threshold adjustment period */
+        unsigned int nbp_th_start;
+        /*
+        * number of promote candidate pages at start time of current promote
+        * threshold adjustment period
+        */
+        unsigned long nbp_th_nr_cand;
+    #endif
+        /* Fields commonly accessed by the page reclaim scanner */
+
+        /*
+        * NOTE: THIS IS UNUSED IF MEMCG IS ENABLED.
+        *
+        * Use mem_cgroup_lruvec() to look up lruvecs.
+        */
+        struct lruvec		__lruvec;
+
+        unsigned long		flags;
+
+    #ifdef CONFIG_LRU_GEN
+        /* kswap mm walk data */
+        struct lru_gen_mm_walk mm_walk;
+        /* lru_gen_folio list */
+        struct lru_gen_memcg memcg_lru;
+    #endif
+
+        CACHELINE_PADDING(_pad2_);
+
+        /* Per-node vmstats */
+        struct per_cpu_nodestat __percpu *per_cpu_nodestats;
+        atomic_long_t		vm_stat[NR_VM_NODE_STAT_ITEMS];
+    #ifdef CONFIG_NUMA
+        struct memory_tier __rcu *memtier;
+    #endif
+    #ifdef CONFIG_MEMORY_FAILURE
+        struct memory_failure_stats mf_stats;
+    #endif
+    } pg_data_t;
+    
+    Yapının bazı elemanlarının çeşitli konfigürasyon parametreleri seçilmişse yapıya dahil edildiğine dikkat ediniz. 
+    Sistemdeki tüm NUMA düğümleri "mm/numa.c" dosyası içerisindeki node_data isimli global dizide saklanmaktadır:
+    
+    struct pglist_data *node_data[MAX_NUMNODES];
+    EXPORT_SYMBOL(node_data);
+
+    Buradaki MAX_NUMNODES bir üst sınır belirtmektedir. NUMA düğümlerinin sayısı masaüstü sistemlerde donanım tarafından 
+    ACPI protokolü ile belirlenip ACPI tablosununun SRAT (System Resource Affinity Table) kısmına yazılmaktadır. ACPI 
+    protokolü tipik olarak modern UEFI BIOS'ların bulunduğu sistemlerde işletilmektedir. (Ancak eski BIOS'larda (legacy
+    BIOS) ACPI protokolü sınırlamalarla işletilebilmektedir.) ACPI protokolünün kullanıldığı masaüstü sistemlerinde 
+    Linux çekirdeği NUMA bilgilerini bu ACPI tablosundan elde etmektedir. Pek çok gömülü sistemde bu biçimde bir donanım 
+    belirlemesi yapılamadığı ve bu sistemler de UEFI BIOS'lara sahip olmadığı için NUMA düğümleri hakkında bilgiler 
+    "aygıt ağacı (device tree)" denilen dosyalar yoluyla çekirdeğe iletilmektedir. İşte NUMA düğümlerinin gerçek sayısı 
+    yukarıda açıkladığımız biçimde çekirdek tarafından elde edilip nr_node_ids ve nr_online_nodes isimli global değişkenlere 
+    yazılmaktadır. nr_node_ids toplan NUMA düğümlerinin sayısını nr_online_nodes ise çekirdek tarafından kullanılabilecek 
+    NUMA düğümlerinin sayısını belirtmektedir. Çekirdek bellek önetiminde nr_online_nodes değerini dkkate almaktadır.
+        
+    Linux çekirdeği SMP ve NUMA sistemleri için ayrı kodlar buundurmamaktadır. SMP sistemleri sanki tek düğümden oluşan 
+    NUMA sistemiymiş gibi ele almaktadır. Örneğin nr_node_ids ve nr_online_nodes global değişkenleri SMP sistemleri 
+    söz konusu olduğunda "include/linux/nodemask.h" dosyasında birer makroya dönüştürülmektedir:   
+
+    #ifdef CONFIG_NUMA
+        ...
+        extern int nr_node_ids;
+        extern int nr_online_nodes;
+        ...
+    #else
+        ...    
+        #define nr_node_ids     1U
+        #define nr_online_nodes 1U
+        ...
+    #endif
+
+    Başka bir deyişle Linux çekirdeği sanki donanım her zaman NUMA mimarisine sahipmiş gibi çalışmaktadır. Tek düğüme 
+    sahip NUMA sistemi aslında SMP sistemidir. 
+    
+    Çekirdekte NUMA konfigürasyonunun CONFIG_NUMA konfigürasyon parametresi ile yapıldığında dikkat ediniz. Ancak 
+    dağıtımlardaki çekirdekler hem SMP hem de NUMA mimarisinde kullanılabilsin diye genel olarak CONFIG_NUMA=y 
+    konfigürasyon seçeneği ile çekirdek derlemesiniş yapmaktadır. Yani kullandığınız çekirdeğin konfigürasyon 
+    dosyasında CONFIG_NUMA konfügürasyonunun "y" olduğunu görürseniz şaşırmayınız. ACPI sistemi SMP için tek bir 
+    NUMA düğümü varmış gibi rapor oluşturmaktadır. 
+
+    Çekirdekte her NUMA düğümünün bir indeks numarası vardır. Bir NUMA düğümünün yukarıdaki dizi içerisindeki elemanına 
+    erişmek için NODE_DATA(index) makrosu kullanılmaktadır. Örneğin SMP sistemleri tek bir NUMA düğümü varmış gibi 
+    organize edildiği için SMP sistemlerinde biz bu bilgilere NODE_DATA(0) makrosuyla erişebiliriz. Aslında CONFIG_NUMA=n
+    yapıldığında çekirdek #ifdef komutlarıyla aşağıdaki bildirimleri devreye sokmaktadır:
+    
+    #ifndef CONFIG_NUMA
+    struct pglist_data __refdata contig_page_data;
+    EXPORT_SYMBOL(contig_page_data);
+    ...
+    define NODE_DATA(nid)	(node_data[nid])
+    #endif
+
+    CONFIG_NUMA=n durumunda bu makroya biz hangi indeksi verirsek verelim makro hep aynı nesnenin adresini döndürmektedir. 
+    CONFIG_NUMA=n durumunda zaten node_data gösterici dizisinin yalnızca bir elemanı vardır. Bu eleman da contig_page_data 
+    nesnesini göstermektedir. Tabii yukarıda belirttiğimiz gibi dağıtımlar çekirdeklerini CONFIG_NUMA=y parametresiyle 
+    derlemektedir. 
+
+    Sisteminizdeki NUMA bilgilerini sys dosya sistemi yoluyla "/sys/devices/system/node" dizininden elde edebilirsiniz. 
+    SMP sistemlerinde burada "node0" biçiminde telk bir NUMA düğüm dizini bulunacaktır. Bir düğümün bellek kullanımı 
+    hakkında genel bilgiler de "/sys/devices/system/node/nodeN/meminfo" dosyası yoluyla elde edilebilir. Örneğin:
+
+    $ cat /sys/devices/system/node/node0/meminfo
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeğinde aynı zamanda fiziksel bellek "bölgelere (zones)" ayrılmaktadır. NUMA sistemlerinde her düğüm
+    kendi içerisinde bölgelerden oluşmaktadır. SMP sistemlerinin Linux çerkirdeği tarafından tek düğümlü NUMA sistemleri 
+    gibi ele alındığını belirtmiştik. Fiziksel belleğin (ya da NUMA düğümlerinin) bölgelere ayrılmasının anlamı nedir? 
+    İşte fiziksel bellekteki bölgeler bazı işlemlerin yapılabilirliği ile ilgili olabilmektedir. Örneğin bazı sistemlerde 
+    DMA ile aktarım RAM'in her yerine yapılamamaktadır. Yalnızca özel bir bölgesine yapılabilmektedir. Linux çekirdeklerinde 
+    bu bölgeye ZONE_DMA denilmektedir. İşletim sistemlerinin çekirdeklerinin pek çok donanımda çalışacak biçimde genel 
+    tasarlandığına dikkatinizi çekmek istiyoruz. Linux çekirdeğinde her "bölge (zone)" bellek yönetimi tarafından ayrı 
+    bir içimde sayfa temelli yönetilmektedir. 
+
+    Linux çekirdeğinde kullanılan bölgeler şunlardır:
+
+    ZONE_DMA
+    ZONE_DMA32
+    ZONE_NORMAL
+    ZONE_HIGHMEM
+    ZONE_MOVABLE
+    ZONE_DEVICE
+
+    Bu bölgelerin hepsi her türlü donanımda bulunmak zorunda değildir. Bölge türleri "include/linux/mmzone.h" dosyası 
+    içerisinde aşağıdaki gibi bir enum türü ile sembolikler sabitler biçiminde bildirilmiştir:
+
+    enum zone_type {
+    #ifdef CONFIG_ZONE_DMA
+        ZONE_DMA,
+    #endif
+    #ifdef CONFIG_ZONE_DMA32
+        ZONE_DMA32,
+    #endif
+        ZONE_NORMAL,
+    #ifdef CONFIG_HIGHMEM
+        ZONE_HIGHMEM,
+    #endif
+        ZONE_MOVABLE,
+    #ifdef CONFIG_ZONE_DEVICE
+        ZONE_DEVICE,
+    #endif
+        __MAX_NR_ZONES
+    };
+
+    Görüldüğü gibi bazı bölgeler bazı konfigürasyonyaparemtreleri aktifse enum içerisinde yer almaktadır. Örneğin 
+    64 bit sistemlerde ZONE_HIGHMEM yoktur. Çünkü 64 bit sistemlerde sayfa tablosu değiştirilmeden fiziksel belleğin 
+    her yerine erişmek mümkündür. 32 bit Linux çekirdeklerinin derlenmesinde kullanılan CONFIG_HIGHMEM konfigürasyon 
+    parametresi "y" biçimnde 64 bit Linux çekirdeklerinin derlenmesinde kullanılan CONFIG_HIGHMEM konfigürasyon 
+    parametresi ise "n" biçimindedir. 
+
+    ZONE_DMA 24 bit fiziksel adres kullanabilen DMA'ların bulunduğu donanımlar için, ZONE_DMA32 ise 32 bit fiziksel 
+    adres kullanabilen DMA'ların bulunduğu donanımlar için tanımlı bölgelerdir. Genellikle konfigürasyon 
+    dosyalarında CONFIG_ZONE_DMA32=y ise aynı zamanda CONFIG_ZONE_DMA da "y" biçimindedir. 
+
+    ZONE_NORMAL bölgesi çekirdeğin doğrudan adresleme yapabildiği en geniş bölgedir. 32 bit Linux sistemlerinde ileride
+    açıklayacağımız gerekçeler nedeniyle ZONE_NORMAL bölgesi fiziksel belleğin 4GB alanının hesini değil yalnızca ilk 
+    896 MB'lık kısmını belirtmektedir. Ancak 64 bit sistelerde ZONE_NORMAL bütün fiziksel belleği temsil etmektedir. 
+
+    ZONE_HIGHMEM alanı 32 bit Linux sistemlerinde ileride açıklayacağımız gerekçeler nedeniyle doğrudan adreslenemeyen
+    ilk 896MB'lık alanın ötesini belirtmektedir. Çekirdek bu bölgeye sayfa tabosunda değişiklikler yaparak erişmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Yukarıda belirttiğimiz diziksel bellek bölgelerine ilişkin bilgiler güncel çekirdeklerede  "include/linux/mmzone.h"
+    dosyası içerisinde bildirilmiş olan zone yapısı içerisinde tutulmaktadır:
+
+    struct zone {
+        /* Read-mostly fields */
+
+        /* zone watermarks, access with *_wmark_pages(zone) macros */
+        unsigned long _watermark[NR_WMARK];
+        unsigned long watermark_boost;
+
+        unsigned long nr_reserved_highatomic;
+        unsigned long nr_free_highatomic;
+
+        /*
+        * We don't know if the memory that we're going to allocate will be
+        * freeable or/and it will be released eventually, so to avoid totally
+        * wasting several GB of ram we must reserve some of the lower zone
+        * memory (otherwise we risk to run OOM on the lower zones despite
+        * there being tons of freeable ram on the higher zones).  This array is
+        * recalculated at runtime if the sysctl_lowmem_reserve_ratio sysctl
+        * changes.
+        */
+        long lowmem_reserve[MAX_NR_ZONES];
+
+    #ifdef CONFIG_NUMA
+        int node;
+    #endif
+        struct pglist_data	*zone_pgdat;
+        struct per_cpu_pages	__percpu *per_cpu_pageset;
+        struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
+        /*
+        * the high and batch values are copied to individual pagesets for
+        * faster access
+        */
+        int pageset_high_min;
+        int pageset_high_max;
+        int pageset_batch;
+
+    #ifndef CONFIG_SPARSEMEM
+        /*
+        * Flags for a pageblock_nr_pages block. See pageblock-flags.h.
+        * In SPARSEMEM, this map is stored in struct mem_section
+        */
+        unsigned long		*pageblock_flags;
+    #endif /* CONFIG_SPARSEMEM */
+
+        /* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
+        unsigned long		zone_start_pfn;
+
+        /*
+        * spanned_pages is the total pages spanned by the zone, including
+        * holes, which is calculated as:
+        * 	spanned_pages = zone_end_pfn - zone_start_pfn;
+        *
+        * present_pages is physical pages existing within the zone, which
+        * is calculated as:
+        *	present_pages = spanned_pages - absent_pages(pages in holes);
+        *
+        * present_early_pages is present pages existing within the zone
+        * located on memory available since early boot, excluding hotplugged
+        * memory.
+        *
+        * managed_pages is present pages managed by the buddy system, which
+        * is calculated as (reserved_pages includes pages allocated by the
+        * bootmem allocator):
+        *	managed_pages = present_pages - reserved_pages;
+        *
+        * cma pages is present pages that are assigned for CMA use
+        * (MIGRATE_CMA).
+        *
+        * So present_pages may be used by memory hotplug or memory power
+        * management logic to figure out unmanaged pages by checking
+        * (present_pages - managed_pages). And managed_pages should be used
+        * by page allocator and vm scanner to calculate all kinds of watermarks
+        * and thresholds.
+        *
+        * Locking rules:
+        *
+        * zone_start_pfn and spanned_pages are protected by span_seqlock.
+        * It is a seqlock because it has to be read outside of zone->lock,
+        * and it is done in the main allocator path.  But, it is written
+        * quite infrequently.
+        *
+        * The span_seq lock is declared along with zone->lock because it is
+        * frequently read in proximity to zone->lock.  It's good to
+        * give them a chance of being in the same cacheline.
+        *
+        * Write access to present_pages at runtime should be protected by
+        * mem_hotplug_begin/done(). Any reader who can't tolerant drift of
+        * present_pages should use get_online_mems() to get a stable value.
+        */
+        atomic_long_t		managed_pages;
+        unsigned long		spanned_pages;
+        unsigned long		present_pages;
+    #if defined(CONFIG_MEMORY_HOTPLUG)
+        unsigned long		present_early_pages;
+    #endif
+    #ifdef CONFIG_CMA
+        unsigned long		cma_pages;
+    #endif
+
+        const char		*name;
+
+    #ifdef CONFIG_MEMORY_ISOLATION
+        /*
+        * Number of isolated pageblock. It is used to solve incorrect
+        * freepage counting problem due to racy retrieving migratetype
+        * of pageblock. Protected by zone->lock.
+        */
+        unsigned long		nr_isolate_pageblock;
+    #endif
+
+    #ifdef CONFIG_MEMORY_HOTPLUG
+        /* see spanned/present_pages for more description */
+        seqlock_t		span_seqlock;
+    #endif
+
+        int initialized;
+
+        /* Write-intensive fields used from the page allocator */
+        CACHELINE_PADDING(_pad1_);
+
+        /* free areas of different sizes */
+        struct free_area	free_area[NR_PAGE_ORDERS];
+
+    #ifdef CONFIG_UNACCEPTED_MEMORY
+        /* Pages to be accepted. All pages on the list are MAX_PAGE_ORDER */
+        struct list_head	unaccepted_pages;
+
+        /* To be called once the last page in the zone is accepted */
+        struct work_struct	unaccepted_cleanup;
+    #endif
+
+        /* zone flags, see below */
+        unsigned long		flags;
+
+        /* Primarily protects free_area */
+        spinlock_t		lock;
+
+        /* Pages to be freed when next trylock succeeds */
+        struct llist_head	trylock_free_pages;
+
+        /* Write-intensive fields used by compaction and vmstats. */
+        CACHELINE_PADDING(_pad2_);
+
+        /*
+        * When free pages are below this point, additional steps are taken
+        * when reading the number of free pages to avoid per-cpu counter
+        * drift allowing watermarks to be breached
+        */
+        unsigned long percpu_drift_mark;
+
+    #if defined CONFIG_COMPACTION || defined CONFIG_CMA
+        /* pfn where compaction free scanner should start */
+        unsigned long		compact_cached_free_pfn;
+        /* pfn where compaction migration scanner should start */
+        unsigned long		compact_cached_migrate_pfn[ASYNC_AND_SYNC];
+        unsigned long		compact_init_migrate_pfn;
+        unsigned long		compact_init_free_pfn;
+    #endif
+
+    #ifdef CONFIG_COMPACTION
+        /*
+        * On compaction failure, 1<<compact_defer_shift compactions
+        * are skipped before trying again. The number attempted since
+        * last failure is tracked with compact_considered.
+        * compact_order_failed is the minimum compaction failed order.
+        */
+        unsigned int		compact_considered;
+        unsigned int		compact_defer_shift;
+        int			compact_order_failed;
+    #endif
+
+    #if defined CONFIG_COMPACTION || defined CONFIG_CMA
+        /* Set to true when the PG_migrate_skip bits should be cleared */
+        bool			compact_blockskip_flush;
+    #endif
+
+        bool			contiguous;
+
+        CACHELINE_PADDING(_pad3_);
+        /* Zone statistics */
+        atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
+        atomic_long_t		vm_numa_event[NR_VM_NUMA_EVENT_ITEMS];
+    } ____cacheline_internodealigned_in_smp;
+
+    Görüldüğü gibi bir bölgeyi temsil eden pek çok bilgi bulunmaktadır. Bu yapı içerisinde bölgenin fiziksel belleğin 
+    neresinden başladığı ve ne kadar sürdüğü belirtilmektedir. 
+
+    Bir NUMA düğümündeki bölgeler düğümü temsil eden pglist_data yapısının node_zone elemanında tutulmaktadır. Bu eleman
+    MAX_NR_ZONES uzunlupunda bir dizi biçiminde bildirilmiştir. Ancak buradaki MAX_NR_ZONES değeri olabilecek en fazla 
+    bölge sayısını belirtmektedir. Bu dizinin dolu olan elemanlarının sayısı ise pglist_data yapısının nr_zones elemanında 
+    tutulmaktadır:
+
+    typedef struct pglist_data {
+	    /* ... */
+	    
+        struct zone node_zones[MAX_NR_ZONES];
+	    int nr_zones;           
+        
+        /* ... */
+    } pg_data_t;
+
+    Bölge bilgilerinin NUMA düğümlerinin içerisinde olduğuna bir kez daha dikkatinizi çekmek istiyoruz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Linux çekirdeğinde bellek yönetmi oldukça karmaşık bir yapıya sahiptir. Bu konu kendi içerisinde çeşitli alt konulara 
+    ayrılarak inceleenbilmektedir. Biz de kursumuzda bellek yönetimini aşağıdaki alt konulara ayırarak ele alacağız:
+
+    - Sayfa tahsisat sistemi (buddy allocator)
+    - Çekirdeğin kendi heap sistemi (slab allocator)							
+    - Proseslerin sanal bellek alanlarının yönetimi 
+    
+    Biz önce Linuz çekirdeğinde sayfa düzeyinde tahsisatların naısl yapıldığı üzerinde duracağız. Sonra çekrdeğin heap 
+    sistemini inceleyeceğiz. Sonra da proseslerin sanal bellek alanlarının yönetimi konusunu ele alacağız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek fiziksel belleği NUMA düğümlerinden, NUMA düğümlerini bellek bölgelerinden, bellek bölgelerini de sayfalardan
+    oluşuyormuş gibi ele almaktadır. Ancak çekirdek tüm fiziksel belleğin sayfalarını da ayrıca kayıt altında tutup 
+    izlemektedir. Linux çekirdeğinde bir fiziksel bellek sayafası page isimli bir yapıyla temsil edilmiştir. Güncel 
+    çekirdeklerde page yapısı "include/linux/mm_types.h" dosyası içerisinde aşağıdaki gibi bildirilmiştir:
+
+    struct page {
+        memdesc_flags_t flags;		/* Atomic flags, some possibly
+                        * updated asynchronously */
+        /*
+        * Five words (20/40 bytes) are available in this union.
+        * WARNING: bit 0 of the first word is used for PageTail(). That
+        * means the other users of this union MUST NOT use the bit to
+        * avoid collision and false-positive PageTail().
+        */
+        union {
+            struct {	/* Page cache and anonymous pages */
+                /**
+                * @lru: Pageout list, eg. active_list protected by
+                * lruvec->lru_lock.  Sometimes used as a generic list
+                * by the page owner.
+                */
+                union {
+                    struct list_head lru;
+
+                    /* Or, free page */
+                    struct list_head buddy_list;
+                    struct list_head pcp_list;
+                    struct llist_node pcp_llist;
+                };
+                struct address_space *mapping;
+                union {
+                    pgoff_t __folio_index;		/* Our offset within mapping. */
+                    unsigned long share;	/* share count for fsdax */
+                };
+                /**
+                * @private: Mapping-private opaque data.
+                * Usually used for buffer_heads if PagePrivate.
+                * Used for swp_entry_t if swapcache flag set.
+                * Indicates order in the buddy system if PageBuddy
+                * or on pcp_llist.
+                */
+                unsigned long private;
+            };
+            struct {	/* page_pool used by netstack */
+                /**
+                * @pp_magic: magic value to avoid recycling non
+                * page_pool allocated pages.
+                */
+                unsigned long pp_magic;
+                struct page_pool *pp;
+                unsigned long _pp_mapping_pad;
+                unsigned long dma_addr;
+                atomic_long_t pp_ref_count;
+            };
+            struct {	/* Tail pages of compound page */
+                unsigned long compound_head;	/* Bit zero is set */
+            };
+            struct {	/* ZONE_DEVICE pages */
+                /*
+                * The first word is used for compound_head or folio
+                * pgmap
+                */
+                void *_unused_pgmap_compound_head;
+                void *zone_device_data;
+                /*
+                * ZONE_DEVICE private pages are counted as being
+                * mapped so the next 3 words hold the mapping, index,
+                * and private fields from the source anonymous or
+                * page cache page while the page is migrated to device
+                * private memory.
+                * ZONE_DEVICE MEMORY_DEVICE_FS_DAX pages also
+                * use the mapping, index, and private fields when
+                * pmem backed DAX files are mapped.
+                */
+            };
+
+            /** @rcu_head: You can use this to free a page by RCU. */
+            struct rcu_head rcu_head;
+        };
+
+        union {		/* This union is 4 bytes in size. */
+            /*
+            * For head pages of typed folios, the value stored here
+            * allows for determining what this page is used for. The
+            * tail pages of typed folios will not store a type
+            * (page_type == _mapcount == -1).
+            *
+            * See page-flags.h for a list of page types which are currently
+            * stored here.
+            *
+            * Owners of typed folios may reuse the lower 16 bit of the
+            * head page page_type field after setting the page type,
+            * but must reset these 16 bit to -1 before clearing the
+            * page type.
+            */
+            unsigned int page_type;
+
+            /*
+            * For pages that are part of non-typed folios for which mappings
+            * are tracked via the RMAP, encodes the number of times this page
+            * is directly referenced by a page table.
+            *
+            * Note that the mapcount is always initialized to -1, so that
+            * transitions both from it and to it can be tracked, using
+            * atomic_inc_and_test() and atomic_add_negative(-1).
+            */
+            atomic_t _mapcount;
+        };
+
+        /* Usage count. *DO NOT USE DIRECTLY*. See page_ref.h */
+        atomic_t _refcount;
+
+    #ifdef CONFIG_MEMCG
+        unsigned long memcg_data;
+    #elif defined(CONFIG_SLAB_OBJ_EXT)
+        unsigned long _unused_slab_obj_exts;
+    #endif
+
+        /*
+        * On machines where all RAM is mapped into kernel address space,
+        * we can simply calculate the virtual address. On machines with
+        * highmem some memory is mapped into kernel virtual memory
+        * dynamically, so we need a place to store that address.
+        * Note that this field could be 16 bits on x86 ... ;)
+        *
+        * Architectures with slow multiplication can define
+        * WANT_PAGE_VIRTUAL in asm/page.h
+        */
+    #if defined(WANT_PAGE_VIRTUAL)
+        void *virtual;			/* Kernel virtual address (NULL if
+                        not kmapped, ie. highmem) */
+    #endif /* WANT_PAGE_VIRTUAL */
+
+    #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
+        int _last_cpupid;
+    #endif
+
+    #ifdef CONFIG_KMSAN
+        /*
+        * KMSAN metadata for this page:
+        *  - shadow page: every bit indicates whether the corresponding
+        *    bit of the original page is initialized (0) or not (1);
+        *  - origin page: every 4 bytes contain an id of the stack trace
+        *    where the uninitialized value was created.
+        */
+        struct page *kmsan_shadow;
+        struct page *kmsan_origin;
+    #endif
+    } _struct_page_alignment;
+
+    Tabii eskiden bu yapı bu kadar büyük değildi. Zaman içerisinde yapıya çeşitli konfigürasyon parametreleri eşliğinde 
+    çeşitli alanlar eklendi ve yapı büyüdü.Örneğin çekirdğein 2.2 versiyonunda page yapısı şöyleydi:
+
+    typedef struct page {
+        /* these must be first (free area handling) */
+        struct page *next;
+        struct page *prev;
+        struct inode *inode;
+        unsigned long offset;
+        struct page *next_hash;
+        atomic_t count;
+        unsigned long flags;	/* atomic flags, some possibly updated asynchronously */
+        struct wait_queue *wait;
+        struct page **pprev_hash;
+        struct buffer_head * buffers;
+    } mem_map_t;
+
+    2.4 çekirdeğinde yapı şu hale geldi:
+
+    typedef struct page {
+        struct list_head list;		/* ->mapping has some page lists. */
+        struct address_space *mapping;	/* The inode (or ...) we belong to. */
+        unsigned long index;		/* Our offset within mapping. */
+        struct page *next_hash;		/* Next page sharing our hash bucket in
+                        the pagecache hash table. */
+        atomic_t count;			/* Usage count, see below. */
+        unsigned long flags;		/* atomic flags, some possibly
+                        updated asynchronously */
+        struct list_head lru;		/* Pageout list, eg. active_list;
+                        protected by pagemap_lru_lock !! */
+        struct page **pprev_hash;	/* Complement to *next_hash. */
+        struct buffer_head * buffers;	/* Buffer maps us to a disk block. */
+
+        /*
+        * On machines where all RAM is mapped into kernel address space,
+        * we can simply calculate the virtual address. On machines with
+        * highmem some memory is mapped into kernel virtual memory
+        * dynamically, so we need a place to store that address.
+        * Note that this field could be 16 bits on x86 ... ;)
+        *
+        * Architectures with slow multiplication can define
+        * WANT_PAGE_VIRTUAL in asm/page.h
+        */
+    #if defined(CONFIG_HIGHMEM) || defined(WANT_PAGE_VIRTUAL)
+        void *virtual;			/* Kernel virtual address (NULL if
+                        not kmapped, ie. highmem) */
+    #endif /* CONFIG_HIGMEM || WANT_PAGE_VIRTUAL */
+    } mem_map_t;
+
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+									
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------

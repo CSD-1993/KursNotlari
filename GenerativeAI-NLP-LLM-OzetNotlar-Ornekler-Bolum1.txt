@@ -18,7 +18,7 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
                                                             
-                                  Son Güncelleme Tarihi: 17/04/2026 - Cuma
+                                  Son Güncelleme Tarihi: 29/04/2026 - Çarşamba
                                          
 #---------------------------------------------------------------------------------------------------------------------------
 
@@ -7148,10 +7148,10 @@ print(list(cv.vocabulary_))
     def __init__(self, vocab_size, end_of_word_symbol='</w>'):
         self.vocab_size = vocab_size
         self.end_of_word_symbol = end_of_word_symbol
-        self.word_freqs = {}       
-        self.vocab = {}           
+        self.word_freqs =defaultdict(int)  
+        self.vocab = defaultdict(int)
         self.splits = {}   
-        self.merge_rules = []      
+        self.merge_rules = []        
 
     Metodun vocab_size parametresi algoritmanın hangi sözcük hazinesi büyüklüğüne geldiğinde sonlandırılacağını belirtmektedir. 
     end_of_word_symbol parametresi ise sözcük sonlarının hangi atomla ifade edileceğini belirtmektedir. Bu parametrenin 
@@ -7203,7 +7203,6 @@ print(list(cv.vocabulary_))
     fonksiyon ve metotların mantıksal bakımdan "private" etkisi oluşturuğunu anımsayınız.) Metot şöyle yazılmıştır:
 
      def _build_word_freqs(self, tokens):
-        self.word_freqs = defaultdict(int)
         for word in tokens:
             self.word_freqs[word] += 1
 
@@ -7260,17 +7259,17 @@ print(list(cv.vocabulary_))
         #...
 
     Şimdi de train metodunda başlangıçtaki sözük hazinesini ve bu sözcük hazinesinin uzunluğunu elde edelim. Başlangıçtaki
-    sözlük hazinesi self.splits sözlüğünün değerleri olan listenin elemanalrından oluşturulacaktır. Tabii sözlük hainesi 
+    sözlük hazinesi self.splits sözlüğünün değerleri olan listenin elemanalarından oluşturulacaktır. Tabii sözlük hainesi 
     derlemdeki benzersiz atomların topluluğu kümesi anlamında geldiğine göre bizim de bunu Python'un kümeleriyle oluşturmamız
     uygun olur:
 
     def train(self, tokens):
         self._build_word_freqs(tokens)
         self._init_splits()
-        
+                
         initial_vocab = set()
-        for token in tokens:      
-            initial_vocab.update(token)
+        for word in self.splits:      
+            initial_vocab.update(word)
         current_vocab_size = len(initial_vocab)
 
     Artık initial_vocab içerisinde başlangıçtaki sözcük hazinesi, current_vocab_size içerisinde de sözcük hazinesinin 
@@ -7334,51 +7333,922 @@ print(list(cv.vocabulary_))
     de geri döndürülen demet değişecektir. Algoritmanın tanıtıldığı orijinal "Sennrich ve ark. (2016)" makalesinde 
     yukarıdaki lambda ifadesi kullanılmıştır. 
 
-    Peki aynı frekansa sahip çiftlerin bulunduğu durumda birleştirme sırası değişikliğe yol aöar mı? Yanit evet açar. 
-    Çünkü bir çifti birleştirdikten sonra yeniden çift frekansları hesaplandığında bu frekanslar artık farklılaşacaktır. 
-    Tabii derlem çok büyükse zaman içerisinde bunun etkisi de azalabilecektir. 
+    Peki aynı frekansa sahip çiftlerin bulunduğu durumda birleştirme sırası herhangi bir değişikliğe yol aaar mı? Yanit 
+    evet açar. Çünkü bir çifti birleştirdikten sonra yeniden çift frekansları hesaplandığında bu frekanslar artık 
+    farklılaşacaktır. Tabii derlem çok büyükse zaman içerisinde bunun etkisi de azalabilecektir. 
+    
+    Burada önemli bir nokta üzerinde de durmak istiyoruz. Eğer yan yana alt sözcüklerin en yüksek frekansı 1 ise bu durum 
+    Artık yan yana alt sözcük birleştişrmesinin sonuna gelindiği anlamına gelmektedir. Bu durumda döngüden çıklıması
+    gerekir. Çünkü yinelenmeyen yan yana alt sözcüklerin birleştirilmesinin bir anlamı yoktur. 
 
     Artık  train metodumuz şu durumdadır:
 
     def train(self, tokens):
         self._build_word_freqs(tokens)
         self._init_splits()
-        
+                
         initial_vocab = set()
-        for token in tokens:      
-            initial_vocab.update(token)
+        for word in self.splits:      
+            initial_vocab.update(word)
         current_vocab_size = len(initial_vocab)
         
         while current_vocab_size < self.vocab_size:
             freq_dict = self._get_pair_freqs()
             best_pair = self._get_best_pair(freq_dict)
+            best_freq = freq_dict[best_pair]
+            if best_freq < 2:
+                break
             #...
         #...
-
+#------------------------------------------------------------------------------------------------------------------------
+                                            26. Ders 25/04/2026 - Cumartesi
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
+    Şimdi kadığımız yerden devam edelim. en çok karşılaşılan yan yana alt sözcüğü elde ettikten sonra bizim tüm sözcükleri 
+    dolaşarak bunları birleştrmemiz gerekir. Tabii bu işlemi aşağıdaki gibi bir metoda yaptırabiliriz:
+     
+    def _merge_pair(self, pair):
+        merged = pair[0] + pair[1]
+        first, second = pair
+        for word in self.splits:
+            split = self.splits[word]
+            merged_list = []
+            i = 0
+            while i < len(split) - 1:
+                if split[i] == first and split[i + 1] == second:
+                    merged_list.append(merged)
+                    i += 2
+                else:
+                    merged_list.append(split[i])
+                    i += 1
+            if i == len(split) - 1:
+                merged_list.append(split[-1])
+            self.splits[word] = merged_list
 
+    Burada önce self.splits içeisindeki tüm anahtarlar (yani sözcükler) dolaşılmıştır. Sonra bu sözcüklere karşı gelen
+    alt sözcük listeleri elde edilmiştir. Birleştirmenin eski listeler üzerinde yapılması iyi bir teknik değildir. Yeni 
+    boş bir liste yaratılıp birleştirmenin yeni liste üzerinde yapılması uygun olur. while döngüsündeki koşula dikkat 
+    ediniz. Bu koşul listenin taşırılmaması için böyle oluşturulmuştur. Yan yana elemanlar birleştirildiğinde index'in 
+    2 artırıldığını, birleştirilmedğinde 1 artırıldığını görüyorsunuz. Döngüden çıkıldığında index son alt sözcükte 
+    kalabilmektedir. Bu durumda o alt sözcük de listeye eklenmiştir. 
+
+    Biz artık sözcükleri yan yana alt sözcükleri birleştirerek atomize ettik. Peki bir metni buradakai alt sözcükler 
+    yoluyla nasıl atomlarına ayrıştıştırabiliriz. İşte bizim self.splits sözlüğüne bakarak bunu yapmamız çok zor olur. 
+    Bunun iin en makul yöntem her birleştirme yapıldığında birleştirme kurallarının bir listede biriktirilmesidir. Böylece
+    bir metin aotomlarına ayrılacağı zaman tek tek bu kurallar uygulanabilir. while döngüsü her yinelendikçe sözcük hazinesi 
+    birleştirmeden dolayı bir fazlalaşmaktadır. Dolayısıyla current_vocab_size her defasında 1 artırılmalıdır. 
+    
+    Artık train metodumuz şu durumdadır:
+
+    def train(self, tokens):
+        self._build_word_freqs(tokens)
+        self._init_splits()
+               
+        initial_vocab = set()
+        for word in self.splits:      
+            initial_vocab.update(word)
+        current_vocab_size = len(initial_vocab)
+        
+        while current_vocab_size < self.vocab_size:
+            freq_dict = self._get_pair_freqs()
+            best_pair = self._get_best_pair(freq_dict)
+            best_freq = freq_dict[best_pair]
+            if best_freq < 2:
+                break
+            self._merge_pair(best_pair)
+            self.merge_rules.append(best_pair)
+            current_vocab_size += 1
+        #...
+
+    Artık while döngüsünde yapmamız gereken her şeyi yapmış durumdayız. Döngüden çıktığımızda nihai sözcük hazinesi 
+    oluşturabiliriz:
+
+    for word, freqs in self.word_freqs.items():
+            for subword in self.splits[word]:
+                self.vocab[subword] += freqs
+
+    Artık train metodumuz son haline gelmiştir:
+
+    def train(self, tokens):
+        self._build_word_freqs(tokens)
+        self._init_splits()
+        
+        initial_vocab = set()
+        for word in self.splits:      
+            initial_vocab.update(word)
+        current_vocab_size = len(initial_vocab)
+        
+        while current_vocab_size < self.vocab_size:
+            freq_dict = self._get_pair_freqs()
+            best_pair = self._get_best_pair(freq_dict)
+            best_freq = freq_dict[best_pair]
+            if best_freq < 2:
+                break
+            self._merge_pair(best_pair)
+            self.merge_rules.append(best_pair)
+            current_vocab_size += 1
+        
+        for word, freqs in self.word_freqs.items():
+            for subword in self.splits[word]:
+                self.vocab[subword] += freqs
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
+    Biz BPETokenizer sınıfında train işlemini yaptık. Ancak eğitim sonrasında yapmamız gereken başka işlemler de var. 
+    Örneğin bizim self.merge_rules birleştirme kurallarını izleyerek bir metni atomlarına ayırabilmemiz gerekir. Bizim 
+    zaten asıl amacımız metni atomlarına ayrıştırıp onlara bir sayı karşılık düşürmek. Bunun için BPETokenizer sınıfına 
+    tokenize isimli bir metot ekleyebiliriz:
 
+    def tokenize(self, tokens):
+        result = []
+        for token in tokens:
+            split = self._word_to_splits(token)
+            subwords = self._apply_merge_rules(split)
+            result.append((token, subwords))
+        return result
+
+    Bu metot parametre olarak yazıyı değil, yazının sözcüklere ayrılmış atomlarını almaktadır. Çünkü BPE yönteminde 
+    algoritmayı işletmeden önce metnin sözcük tabanlı atomlarına ayrılmış olması gerekir. Biz bu işlemi spaCy kütüphanesi 
+    ie yapmıştık. Metotts sözcükler tek tek dolaşılımış merge_rules kuralları _apply_merge_rules metoduna yaptırılmıştır. 
+    tokenize metodu ikili demetlerden oluşan bir isteye geri dönmektedir. Demetin ilk elemanı alt sözcüklere ayrıştırılacak 
+    sözcüğü, ikinci elemanı ise onun ayrıştırılması sonucunda elde edilen alt sözcük listesini belirtmektedir. _apply_merge_rules
+    metodu aslında daha önce yazmış olduğumuz _merge_pair algortimasına oldukça benzemektedir:
+
+    def _apply_merge_rules(self, split):     
+        for tok_left, tok_right in self.merge_rules:
+            merged = tok_left + tok_right
+            i = 0
+            merge_list = []
+            while i < len(split) - 1:
+                if split[i] == tok_left and split[i + 1] == tok_right:
+                    merge_list.append(merged)
+                    i += 2
+                else:
+                    merge_list.append(split[i])
+                    i += 1
+            if i == len(split) - 1:
+                merge_list.append(split[-1])
+            split = merge_list
+        return split
+
+    Burada birleştirme kuralları tek tek gözden geçirilmiş ve bu kurallar sırasıyla uygulanmaya çalışılmıştır. Böylece 
+    girgide kurallar uygulandıkça birleştirme son noktasına erişecektir. 
+    
+    Şimdi biz testimizi aşağıdaki gibi bir programla yapabiliriz:
+
+    all_tokens = (token.text for token in spacy_word_tokenizer(corpus))
+    bpe_tokenizer = BPETokenizer(300)
+    bpe_tokenizer.train(all_tokens)
+
+    text = ['Bugün puslu havada köpek havladı']
+    tokens = (token.text for token in spacy_word_tokenizer(text))
+    result_tokens = bpe_tokenizer.tokenize(tokens)
+    for word, subwords in result_tokens:
+        print(f'{word} --> {subwords}')                        
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
+    Yukarıda tokenize işleminin tersi de yapılabilir. Yani bizim elimizde BPE yöntemiyle alt sözcüklere ayrılmış bir 
+    atom listesi olabilir. Biz de onu birleştirerek yeniden yazıyı elde etmek isteyebiliriz. Bunun için decode isimli 
+    metodu şöyle yazabiliriz:
 
+    def decode(self, tokens):
+        raw = ''.join(tokens)
+        text = raw.replace(self.end_of_word_symbol, ' ').strip()
+        result = re.sub(r'\s+([,!.;:?])', r'\1', text)
+        return result
+
+    Burada önce alt sözcükler birleştirilmiş sonra da </w> öbeği yerine ' ' karakteri getirilmiştir. Ancak bu durumda 
+    noktalama işaretleri ayrı birer atom biçiminde ele alındığından dolayı noktalama işaretlerinin solundaki boşluklar 
+    da atılmıştır. decode metodunu aşağıdaki gibi bir kodla test edebilrisiniz:
+
+    corpus = [
+        "Bugün hava çok güzel. Parka gidelim mi?",
+        "Bugün lastiğin havası sönmüş, ben onu parkta şişirdim.",
+        "Alsancak'ta al bir bayrak gördüm. Prof. Dr. Ali Serçe de gelecek.",
+        ]
+
+    all_tokens = (token.text for token in spacy_word_tokenizer(corpus))
+    bpe_tokenizer = BPETokenizer(300)
+    bpe_tokenizer.train(all_tokens)
+
+    text = ['Bugün, puslu havada köpek havladı!']
+    tokens = (token.text for token in spacy_word_tokenizer(text))
+    result_tokens = bpe_tokenizer.tokenize(tokens)
+    for word, subwords in result_tokens:
+        print(f'{word} --> {subwords}')
+        
+    all_subwords = [] 
+    for _, subwords in result_tokens:
+        all_subwords.extend(subwords)
+
+    decoded_text = bpe_tokenizer.decode(all_subwords)
+    print(decoded_text)
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
-
+                                            27. Ders 26/04/2026 - Pazar
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
+    Şimdi son olarak BPETokenizer sınıfımıza birkaç yardımcı metot da ekleyelim. Biz sınıfımızda bir sözcük hazinesini
+    self.vocab sözlüğü biçiminde oluşturduk. Bu sözlük aşağıdaki gibi bir yapıdaydı:
 
+    efaultdict(int,
+            {'bugün</w>': 2,
+             'hav': 2,
+             'a</w>': 2,
+             'ç': 2,
+             'o': 3,
+             'k</w>': 3,
+             'gü': 1,
+             'z': 1,
+             'e': 5,
+             'l</w>': 2,
+             '.</w>': 6,
+             'park': 2,
+             'g': 3,
+             'i': 4,
+             'd': 3,
+             ...
+            })
+
+    Sözcüğün anahtarları alt sözcüklerden değerleri de onların frekanslarından oluşuyordu. Ancak sözcük hazinelerinin 
+    yüksek frekanstan düşük frekansa doğru sıraya dizilmiş bir biçimde bulundurulması daha kullanışlı bir temsil 
+    oluşturmaktadır. İşte bu işlemi biz get_vocab isimli bir metoda yaptırabiliriz:
+
+    def get_vocab(self, top_n=None):
+        sorted_vocab = sorted(self.vocab.items(), key=lambda x: x[1], reverse=True)
+        if top_n:
+            return sorted_vocab[:top_n]
+        return sorted_vocab
+
+    Burada metodun top_n parametresine bir değer girilirse metot tüm sözcük hazninesini değil en yüksek frekanslı ilk 
+    n tane alt sözcükten oluşan bir sözcük hazinesini geri döndürmektedir. 
+
+    Benzer biçimde ilk n tane birleştirme kuralını geri döndüren bir metot da yazılabilir:
+
+    def get_merge_rules(self, top_n=None):
+        if top_n:
+            return self.merge_rules[:top_n]
+        return self.merge_rules
+
+    Aşağıda tüm BPE gerçekleştirimini bütünsel olarak veriyoruz.
+#------------------------------------------------------------------------------------------------------------------------
+
+# bpe_charbased_tokenizer.py
+
+import normalizer
+import spacy
+import re
+
+def spacy_word_tokenizer(corpus):  
+    tn = normalizer.build_spacy_turkish_normalizer()
+    normalized_corpus = [tn(text) for text in corpus]
+        
+    nlp = spacy.load('tr_core_news_md')
+    for text in normalized_corpus:
+        doc = nlp(text)
+        for token in doc:
+            yield token
+            
+from collections import defaultdict
+
+class BPETokenizer:
+    def __init__(self, vocab_size, end_of_word_symbol='</w>'):
+        self.vocab_size = vocab_size
+        self.end_of_word_symbol = end_of_word_symbol
+        self.word_freqs = defaultdict(int)  
+        self.vocab = defaultdict(int)
+        self.splits = {}   
+        self.merge_rules = []     
+        
+    def _build_word_freqs(self, tokens):
+        for word in tokens:
+            self.word_freqs[word] += 1
+    
+    def _word_to_splits(self, word):
+        chars = list(word)
+        chars[-1] += self.end_of_word_symbol       
+        return chars
+    
+    def _init_splits(self):
+        self.splits = {}
+        for word in self.word_freqs:
+            self.splits[word] = self._word_to_splits(word)
+            
+    def _get_pair_freqs(self):
+        freqs_dict = defaultdict(int)
+        for word, subwords in self.splits.items():
+            if len(subwords) < 2:
+                continue
+            for i in range(len(subwords) - 1):
+                pair = subwords[i], subwords[i + 1]
+                freqs_dict[pair] += self.word_freqs[word]   
+        return freqs_dict
+    
+    def _merge_pair(self, pair):
+        merged = pair[0] + pair[1]
+        first, second = pair
+        for word in self.splits:
+            split = self.splits[word]
+            merged_list = []
+            i = 0
+            while i < len(split) - 1:
+                if split[i] == first and split[i + 1] == second:
+                    merged_list.append(merged)
+                    i += 2
+                else:
+                    merged_list.append(split[i])
+                    i += 1
+            if i == len(split) - 1:
+                merged_list.append(split[-1])
+            
+            self.splits[word] = merged_list
+    
+    def _get_best_pair(self, freqs_dict):
+        if not freqs_dict:
+            return None
+        max_pair = max(freqs_dict, key=lambda pair: (freqs_dict[pair], pair))
+        return max_pair               
+
+    def _apply_merge_rules(self, split):     
+        for tok_left, tok_right in self.merge_rules:
+            merged = tok_left + tok_right
+            i = 0
+            merge_list = []
+            while i < len(split) - 1:
+                if split[i] == tok_left and split[i + 1] == tok_right:
+                    merge_list.append(merged)
+                    i += 2
+                else:
+                    merge_list.append(split[i])
+                    i += 1
+            if i == len(split) - 1:
+                merge_list.append(split[-1])
+            split = merge_list
+        return split
+            
+    def train(self, tokens):
+        self._build_word_freqs(tokens)
+        self._init_splits()
+        
+        initial_vocab = set()
+        for word in self.splits:      
+            initial_vocab.update(word)
+        current_vocab_size = len(initial_vocab)
+        
+        while current_vocab_size < self.vocab_size:
+            freq_dict = self._get_pair_freqs()
+            best_pair = self._get_best_pair(freq_dict)
+            best_freq = freq_dict[best_pair]
+            if best_freq < 2:
+                break
+            self._merge_pair(best_pair)
+            self.merge_rules.append(best_pair)
+            current_vocab_size += 1
+        
+        for word, freqs in self.word_freqs.items():
+            for subword in self.splits[word]:
+                self.vocab[subword] += freqs
+    
+    def tokenize(self, tokens):
+        result = []
+        for token in tokens:
+            split = self._word_to_splits(token)
+            subwords = self._apply_merge_rules(split)
+            result.append((token, subwords))
+        return result
+    
+    def decode(self, tokens):
+        raw = ''.join(tokens)
+        text = raw.replace(self.end_of_word_symbol, ' ').strip()
+        result = re.sub(r'\s+([,!.;:?])', r'\1', text)
+        return result
+    
+    def get_vocab(self, top_n=None):
+        sorted_vocab = sorted(self.vocab.items(), key=lambda x: x[1], reverse=True)
+        if top_n:
+            return sorted_vocab[:top_n]
+        return sorted_vocab
+    
+    def get_merge_rules(self, top_n=None):
+        if top_n:
+            return self.merge_rules[:top_n]
+        return self.merge_rules
+                                          
+# test 
+
+corpus = [
+        "Bugün hava çok güzel. Parka gidelim mi?",
+        "Bugün lastiğin havası sönmüş, ben onu parkta şişirdim.",
+        "Alsancak'ta al bir bayrak gördüm. Prof. Dr. Ali Serçe de gelecek.",
+        ]
+
+all_tokens = (token.text for token in spacy_word_tokenizer(corpus))
+bpe_tokenizer = BPETokenizer(300)
+bpe_tokenizer.train(all_tokens)
+
+text = ['Bugün, puslu havada köpek havladı!']
+tokens = (token.text for token in spacy_word_tokenizer(text))
+result_tokens = bpe_tokenizer.tokenize(tokens)
+for word, subwords in result_tokens:
+    print(f'{word} --> {subwords}')
+    
+all_subwords = [] 
+for _, subwords in result_tokens:
+    all_subwords.extend(subwords)
+
+decoded_text = bpe_tokenizer.decode(all_subwords)
+print(decoded_text)
+
+#------------------------------------------------------------------------------------------------------------------------
+    Bu tür algoritmaların eitilmesi için zateb var olan text dosyalar kullanılabilir. Örneğin kursumuzda Kaggle sitesinden
+    elde edilen "turkish_news.txt" dosyaı kullanılmıştır. Biz bu dosya yoluyla yukarıda yazdığımız BPETokenizer sınıfını 
+    aşağıdaki gibi eğitebiliriz:
+   
+    import itertools
+
+    with open('../Data/turkish_news.txt', encoding='utf-8') as f:
+        all_tokens = (token.text for token in spacy_word_tokenizer(itertools.islice(f, 100)))
+        bpe_tokenizer = BPETokenizer(10000)
+        bpe_tokenizer.train(all_tokens)
+
+    Burada iterools.islice tüm dosyanın değil yalnızca ilk n satırın eğitime sokulması için kullanılmıştır. Bu çağrıyı 
+    kaldırabilirsiniz. 
 #------------------------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki BPETokenizer sınıfının uyguladığı algoritma nasıl hızlandırılabilir? Bir algoritmayı hızlandırmak istiyorsanız 
+    öncelikle yavaşlığın nereden kaynaklanabileceği hakkında hipotezler oluşturmanız gerekir. Sınıfın işleyişinde en 
+    önemli zaman kaybı train metodundaki eğitimde oluşmaktadır. train metodunu anımsayınız:
 
+     def train(self, tokens):
+        self._build_word_freqs(tokens)
+        self._init_splits()
+        
+        initial_vocab = set()
+        for word in self.splits:      
+            initial_vocab.update(word)
+        current_vocab_size = len(initial_vocab)
+        
+        while current_vocab_size < self.vocab_size:
+            freq_dict = self._get_pair_freqs()
+            best_pair = self._get_best_pair(freq_dict)
+            best_freq = freq_dict[best_pair]
+            if best_freq < 2:
+                break
+            self._merge_pair(best_pair)
+            self.merge_rules.append(best_pair)
+            current_vocab_size += 1
+        
+        for word, freqs in self.word_freqs.items():
+            for subword in self.splits[word]:
+                self.vocab[subword] += freqs
+
+    Burada _build_word_freqs metodu zaten etkin bir biçimde oluşturulmuştur. _init_splits metodu da Python Programalama
+    Dili dikkate aındığında makuldür. Buradaki asıl zaman kaybının döngüde oluştuğu anlaşılmaktadır. Burada ilk göze 
+    çarpan kusur döngünün her yinelenmesinde sıfırdan yeniden yan yana çiftlerin frekanslarının _get_pair_freqs 
+    metoduyla hesaplanması ve en iyi çiftin bulunmasıdır. En iyi çiftin birleştirilmesi mecburen yapılması gereken 
+    bir adımdır. Ancak mevcut algoritmada birleştirme her defasında tüm sözcükler dolaşıarak yaılmaktadır. Bu konuda 
+    daha hızlı yöntemler kullanılabilir. Döngü bittikten sonra yapılan sözcük hazninesi oluşturma işlemi de algoritmanın 
+    bu işleyişinde zorunludur. Bu analiz sonucunda algortimayı hızlandırmak için şu konuların üzerine odaklanılabilir:
+
+    - get_pair_freqs ile her defasında tüm al sözcüklerin frekanslarının hesaplanmasına gerek yoktur. Yalnızca birleştirmeden 
+    etkilenen sözücklerin frekansları yeniden hesaplanabilir. 
+
+    - _get_best_pair metodu da her defasında tüm frekans listesi dolaşılarak değil bir heap ağacı oluşturularak hızlandırılabilir. 
+
+    - _merge_pair metodunda birleştirme için sıfırdan tüm sözcüklerin gözden geçirilmesi yerine yalnızca ilgili çift 
+    bulunan sözcükler birleştirme işlemine sokulabilir. 
+    
+    BPETokenizer sınıfının yukarıda busattiğimiz performans azaltıcı unsurlarınını bertaraf ederek onun daha hızlı 
+    çalışmasını sağlayan düzelmeler Cluade AI'a yaptırılmıştır. Aşağıda kodun bu halini veriyoruz. 
+#------------------------------------------------------------------------------------------------------------------------
+
+# bpe_charbased_tokenizer-improved.py
+
+import re
+from collections import defaultdict
+import heapq
+
+import normalizer
+import spacy
+
+def spacy_word_tokenizer(corpus):  
+    tn = normalizer.build_spacy_turkish_normalizer()
+    normalized_corpus = [tn(text) for text in corpus]
+        
+    nlp = spacy.load('tr_core_news_md')
+    for text in normalized_corpus:
+        doc = nlp(text)
+        for token in doc:
+            yield token
+            
+class BPETokenizer:
+    def __init__(self, vocab_size, end_of_word_symbol='</w>'):
+        self.vocab_size = vocab_size
+        self.end_of_word_symbol = end_of_word_symbol
+        self.word_freqs = defaultdict(int)
+        self.vocab = defaultdict(int)
+        self.splits = {}
+        self.merge_rules = []
+
+    def _build_word_freqs(self, tokens):
+        for word in tokens:
+            self.word_freqs[word] += 1
+
+    def _word_to_splits(self, word):
+        chars = list(word)
+        chars[-1] += self.end_of_word_symbol
+        return chars
+
+    def _init_splits(self):
+        self.splits = {}
+        for word in self.word_freqs:
+            self.splits[word] = self._word_to_splits(word)
+
+    # Ters indeks: her çift için hangi sözcüklerin o çifti içerdiğini tutar.
+    # Birleştirme sonrası tüm korpus yerine yalnızca ilgili sözcükler işlenir.
+    def _build_pair_index(self):
+        pair_to_words = defaultdict(set)
+        for word, split in self.splits.items():
+            for i in range(len(split) - 1):
+                pair = (split[i], split[i + 1])
+                pair_to_words[pair].add(word)
+        return pair_to_words
+
+    # Başlangıçta bir kez hesaplanır; sonraki adımlarda delta ile güncellenir.
+    def _compute_pair_freqs(self):
+        pair_freqs = defaultdict(int)
+        for word, split in self.splits.items():
+            freq = self.word_freqs[word]
+            for i in range(len(split) - 1):
+                pair = (split[i], split[i + 1])
+                pair_freqs[pair] += freq
+        return pair_freqs
+
+    # heapq + lazy deletion: en iyi çift O(log P) ile alınır.
+    # Heap'teki stale girişler pair_freqs ile karşılaştırılarak atlanır.
+    def _build_heap(self, pair_freqs):
+        heap = []
+        for pair, freq in pair_freqs.items():
+            heapq.heappush(heap, (-freq, pair))
+        return heap
+
+    def _get_best_pair(self, heap, pair_freqs):
+        while heap:
+            neg_freq, pair = heapq.heappop(heap)
+            current_freq = pair_freqs.get(pair, 0)
+            # Lazy deletion: heap'teki frekans güncel değilse atla
+            if current_freq == -neg_freq and current_freq >= 2:
+                return pair, current_freq
+        return None, 0
+
+    def _update_freq(self, p, delta, word, pair_freqs, pair_to_words, heap):
+        pair_freqs[p] += delta
+        if delta > 0:
+            pair_to_words[p].add(word)
+            heapq.heappush(heap, (-pair_freqs[p], p))
+        else:
+            pair_to_words[p].discard(word)
+
+    # --- Delta güncellemesi ---
+    # Birleştirme sonrası tüm korpusu yeniden taramak yerine yalnızca
+    # bu çifti içeren sözcüklerin split'lerini günceller.
+    # Her birleştirme noktasında:
+    #   - Sol komşu çift (prev, first+second) ve sağ komşu çift (first+second, next)
+    #     oluşturulduğu için frekansları artırılır (+freq).
+    #   - Yerini alan eski (prev, first) ve (second, next) çiftlerinin
+    #     frekansları düşürülür (-freq).
+    #   - Birleştirilen (first, second) çifti zaten pair_to_words'ten
+    #     pop edildiği için ayrıca işleme gerek yok.
+    def _merge_pair(self, pair, pair_freqs, pair_to_words, heap):
+        first, second = pair
+        merged = first + second
+        affected_words = pair_to_words.pop(pair, set())
+
+        for word in affected_words:
+            split = self.splits[word]
+            freq = self.word_freqs[word]
+            new_split = []
+            i = 0
+            while i < len(split) - 1:
+                if split[i] == first and split[i + 1] == second:
+                    if i > 0:
+                        prev = split[i - 1]
+                        self._update_freq((prev, first),  -freq, word, pair_freqs, pair_to_words, heap)
+                        self._update_freq((prev, merged), +freq, word, pair_freqs, pair_to_words, heap)
+                    if i + 2 < len(split):
+                        nxt = split[i + 2]
+                        self._update_freq((second, nxt), -freq, word, pair_freqs, pair_to_words, heap)
+                        self._update_freq((merged, nxt), +freq, word, pair_freqs, pair_to_words, heap)
+                    new_split.append(merged)
+                    i += 2
+                else:
+                    new_split.append(split[i])
+                    i += 1
+            if i == len(split) - 1:
+                new_split.append(split[-1])
+
+            self.splits[word] = new_split
+
+    def _apply_merge_rules(self, split):
+        for tok_left, tok_right in self.merge_rules:
+            merged = tok_left + tok_right
+            i = 0
+            merge_list = []
+            while i < len(split) - 1:
+                if split[i] == tok_left and split[i + 1] == tok_right:
+                    merge_list.append(merged)
+                    i += 2
+                else:
+                    merge_list.append(split[i])
+                    i += 1
+            if i == len(split) - 1:
+                merge_list.append(split[-1])
+            split = merge_list
+        return split
+
+    def train(self, tokens):
+        self._build_word_freqs(tokens)
+        self._init_splits()
+
+        initial_vocab = set()
+        for word in self.splits:
+            initial_vocab.update(word)
+        current_vocab_size = len(initial_vocab)
+
+        # Başlangıçta bir kez hesapla; sonra delta ile güncelle
+        pair_freqs = self._compute_pair_freqs()
+        pair_to_words = self._build_pair_index()
+        heap = self._build_heap(pair_freqs)
+
+        while current_vocab_size < self.vocab_size:
+            best_pair, best_freq = self._get_best_pair(heap, pair_freqs)
+            if best_pair is None:
+                break
+            self._merge_pair(best_pair, pair_freqs, pair_to_words, heap)
+            self.merge_rules.append(best_pair)
+            current_vocab_size += 1
+
+        for word, freq in self.word_freqs.items():
+            for subword in self.splits[word]:
+                self.vocab[subword] += freq
+
+    def tokenize(self, tokens):
+        result = []
+        for token in tokens:
+            split = self._word_to_splits(token)
+            subwords = self._apply_merge_rules(split)
+            result.append((token, subwords))
+        return result
+
+    def decode(self, tokens):
+        raw = ''.join(tokens)
+        text = raw.replace(self.end_of_word_symbol, ' ').strip()
+        result = re.sub(r'\s+([,!.;:?])', r'\1', text)
+        return result
+
+    def get_vocab(self, top_n=None):
+        sorted_vocab = sorted(self.vocab.items(), key=lambda x: x[1], reverse=True)
+        if top_n:
+            return sorted_vocab[:top_n]
+        return sorted_vocab
+
+    def get_merge_rules(self, top_n=None):
+        if top_n:
+            return self.merge_rules[:top_n]
+        return self.merge_rules
+
+import time
+import itertools
+
+start = time.time()
+f = open('../Data/turkish_news.txt', encoding='utf-8')
+
+all_tokens = (token.text for token in spacy_word_tokenizer(itertools.islice(f, 1000)))
+bpe_tokenizer = BPETokenizer(10000)
+bpe_tokenizer.train(all_tokens)
+stop = time.time()
+
+print(stop - start)
+
+text = ['Bugün, puslu havada köpek havladı!']
+tokens = (token.text for token in spacy_word_tokenizer(text))
+result_tokens = bpe_tokenizer.tokenize(tokens)
+for word, subwords in result_tokens:
+    print(f'{word} --> {subwords}')
+    
+all_subwords = [] 
+for _, subwords in result_tokens:
+    all_subwords.extend(subwords)
+
+decoded_text = bpe_tokenizer.decode(all_subwords)
+print(decoded_text)
+
+f.close()
+
+#------------------------------------------------------------------------------------------------------------------------
+    Peki bir algoritma üzerinde çalışırken algoritmanın çalışması çok zaman alıyorsa hızlandırma için ne yapılmalı? İşte
+    bu tür durumlarda önce algortima analiz edilip tamamen algoritmik düzeyde hızlandırmaya yapılmaya çalışılmalıdır. 
+    Daha fazla algoritmik hızlandırma yapılamıyorsa kullanılan kütüphaneler ve araçlar gözden geçirilmelidir. Örneğin 
+    NumPy ve Pandas kütüphaneleri C'de yazıldığı için genel olarak daha hızlı çalışma eğilimindedir. Eğer hala hız 
+    yetmiyorsa bu durumda paralleştirme çalışması yapılabilir. Paralelleştirme "bir işin farklı kısımlarını makinedeki 
+    birden fazla işlemci ya da çekirdekte aynı anda çalıştırma" etkinliğidir. Yukarıda BPETokenizer sınıfı makinemiz 
+    kaç işlemci ya da çekirdeğe sahip olursa olsun onların yalnızca bir tanesini kullanmaktadır. Ancak her türlü 
+    algoritmanın paralleştirilmesi de mümkün olmayabilir. (Tabii parallel algoritmalar için belli bir setup zamanı da 
+    gerekmektedir. Dolayısıyla yapılacak paralleştirmenin oluşan kayıptan daha fazla akzanç sağlaması gerekir.) Eğer 
+    hala istenilen sonuç elde edilmiyorsa makinenin olanakları artırılabilir. Yani program daha güçlü bir makinede 
+    çalıştırılabilir. Eğer hala tatmin edici bir sonuç elde edilmiyorsa son olarak "dağıtık (distributed)" çalıştırma
+    yöntemi denenebilir. Aşağıda bu sürece ilişkin bir akış diyagramı veriyoruz:
+
+    1. ALGORİTMAYI İYİLEŞTİR (aynı dil, sıfır maliyet)
+    │
+    ├─ 1.1 Karmaşıklık analizi yap
+    │       O(n²) döngü var mı? Gereksiz tekrar var mı?
+    │       Veri yapısını değiştir (dict, heap, set vs.)
+    │
+    ├─ 1.2 Önbellekle (caching / memoization)
+    │       Aynı hesabı tekrar yapıyor musun?
+    │       @functools.lru_cache veya manuel dict cache
+    │
+    └─ 1.3 Erken çıkış & lazy evaluation
+            Gereksiz iterasyonları kes
+            Generator kullan, her şeyi belleğe yükleme
+
+    2. PYTHON'U DAHA VERİMLİ KULLAN
+    │
+    ├─ 2.1 Built-in'leri tercih et
+    │       collections.Counter, defaultdict, heapq
+    │       List comprehension > döngü
+    │
+    └─ 2.2 String & I/O optimizasyonu
+            join() kullan, += ile string birleştirme
+            Dosya okumada buffer boyutunu artır
+
+    3. VEKTÖRELLEŞTİR (NumPy / SciPy)
+    │
+    ├─ Python döngüsünü NumPy array operasyonuna çevir
+    └─ Frekans hesapları için np.unique, np.bincount
+
+    4. PARALELLEŞTİR
+    │
+    ├─ 4.1 CPU-bound → multiprocessing
+    │       ProcessPoolExecutor ile chunk'lara böl
+    │
+    └─ 4.2 I/O-bound → asyncio veya ThreadPoolExecutor
+
+    5. JIT / DERLEME
+    │
+    ├─ 5.1 Numba  →  @njit  (sayısal, döngü-ağır kod)
+    └─ 5.2 Cython →  .pyx dosyası (genel Python kodu)
+
+    6. C / C++ EKSTANSİYONU YAZ
+    │
+    ├─ ctypes / cffi ile mevcut C kütüphanesi sar
+    └─ Pybind11 ile C++ → Python binding
+
+    7. GPU'YA TAŞI
+    │
+    ├─ 7.1 CuPy  →  NumPy API'ı, GPU üzerinde
+    ├─ 7.2 RAPIDS / cuML
+    └─ 7.3 PyTorch / JAX (tensor operasyonları varsa)
+
+    8. DAĞITIK / CLUSTER HESAPLAMA
+    │
+    ├─ Ray  →  tek makinede çok çekirdek veya cluster
+    └─ Dask →  büyük veri, lazy computation
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Peki bu tür algoritmaların çalıştırılması sonucunda eğitilmiş veri ikinci belleklerde nasıl saklanabilir? Eğer hazır
+    kütüphaneleri ya da framework'leri kllanıyorsanız saklama işlemini onların sağladığı fonksiyonlarla ve metotlarla 
+    yapmalısınız. Ancak algpritmaları sıfırdan siz gerçekleştirmişseniz bu durumda onların saklanması da sizin sorumluluk 
+    alanınıza girecektir. Bu tür durumlarda en basit çözüm Python'un standart kütüphanesindeki "nesneleri seri hale 
+    getirme (object serialization)" mekanizmasını kullanmaktır. Örneğin:
+    
+    import itertools
+    import pickle 
+    
+    f = open('../Data/turkish_news.txt', encoding='utf-8')
+
+    all_tokens = (token.text for token in spacy_word_tokenizer(itertools.islice(f, 100)))
+    bpe_tokenizer = BPETokenizer(10000)
+    bpe_tokenizer.train(all_tokens)
+    
+    f.close()
+    
+    with open('test.dat', 'wb') as f:
+        pickle.dump(bpe_tokenizer, f)
+    
+    with open('test.dat', 'rb') as f:
+        saved_object = pickle.load(f)
+
+    Python'un pickle modülündeki nesne seri getirme mekanizması geneldir. Bu nedenle her durumda en uygun performansı 
+    sağlayamayabilmektedir. Uygulamacı verilerini kalıcı hale getirmek için verilerin formatına daha uygun daha etkin 
+    dosya formatlarını tercih edebilir. Örneğin bilimsel veriler ve sinir ağı parametreleri için Parquet formatı ve 
+    HDF (Hierarchical Data Format) formatı çokça tercih edilmektedir. Aşağıdaki tablo size bu konuda bir fikir verebilir:
+
+    ┌─────────────────────┬──────────────────────────────────┬───────────────────────────────┐
+    │      Veri Türü      │         Önerilen Format          │           Sebep               │
+    ├─────────────────────┼──────────────────────────────────┼───────────────────────────────┤
+    │ Sözcük vektörleri   │ NumPy .npy / .npz                │ Hızlı, kompakt, tip güvenli   │
+    │ (embeddings)        │                                  │                               │
+    ├─────────────────────┼──────────────────────────────────┼───────────────────────────────┤
+    │ Vocab / token→id    │ JSON veya SQLite                 │ İnsan okunabilir, taşınabilir │
+    │ eşlemeleri          │                                  │                               │
+    ├─────────────────────┼──────────────────────────────────┼───────────────────────────────┤
+    │ Büyük corpus /      │ Apache Parquet (pyarrow)         │ Sütun bazlı, sıkıştırılmış    │
+    │ metin veri setleri  │ veya HDF5                        │ verimli sorgulama             │
+    ├─────────────────────┼──────────────────────────────────┼───────────────────────────────┤
+    │ TF-IDF / sparse     │ scipy.sparse (.npz)              │ Seyrek matris desteği         │
+    │ matrisler           │                                  │                               │
+    ├─────────────────────┼──────────────────────────────────┼───────────────────────────────┤
+    │ Eğitim istatistik-  │ JSON / MessagePack               │ Hafif, hızlı ayrıştırma       │
+    │ leri, config        │                                  │                               │
+    └─────────────────────┴──────────────────────────────────┴───────────────────────────────┘
+---------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    Karakter tabanlı BPE algoritmasını uygulayan çeşitli hazır kütüphaneler vardır. Bunlardan biri yöntemi ilk kez 2016
+    yılında ortaya atan Rico Sennrich, Barry Haddow ve Alexandra Birch tarafından geliştirilmiş olan "subword-nmt" 
+    kütüphanesidir. Aslında bu araştırıcılar kütüphaneyi "Neural Machine Translation of Rare Words with Subword Units" 
+    isimli makale eşliğinde kullanıma sunmuşlardır. Orijinal makaleye aşağıdaki bağlantıdan erişebilirsiniz:
+
+    https://arxiv.org/abs/1508.07909
+
+    Kütüphaneyi şöyle yükleyebilirsiniz:
+
+    pip install subword-nmt
+    
+    Kütüphanenin kaynak kodlarına aşağıdaki github deposundan erişebilirsiniz:
+
+    https://github.com/rsennrich/subword-nmt
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+    subword-nmt kütüphanesi kurulduğunda yalnızca kütüphane değil aynı zamanda komut satırından çalıştırılabilecek temel 
+    BPE işlemleriniş yapan küçük prgramlar da yüklenmiş olmaktadır. 
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
+#------------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------------
+                  
 
 
 
@@ -7388,457 +8258,3 @@ print(list(cv.vocabulary_))
                   
 #------------------------------------------------------------------------------------------------------------------------
 
-from collections import defaultdict
-import re
-
-class BPETokenizer:
-
-    def __init__(self, vocab_size=300, end_of_word_symbol="</w>"):
-        self.vocab_size = vocab_size
-        self.end_of_word = end_of_word_symbol
-        self.merge_rules = []      
-        self.vocab = {}           
-        self.word_freqs = {}       
-        self.splits = {}          
-
-    def _build_word_freqs(self, corpus):
-        self.word_freqs = defaultdict(int)
-        for sentence in corpus:
-            for word in sentence.strip().split():
-                self.word_freqs[word] += 1
-
-    def _word_to_splits(self, word):
-        """
-        Bir kelimeyi karakter dizisine böler, son karaktere </w> ekler.
-        "merhaba" -> ["m","e","r","h","a","b","a","</w>"]
-        """
-        chars = list(word)
-        chars[-1] = chars[-1] + self.end_of_word   # son karakter + </w>
-        return chars
-
-    def _init_splits(self):
-        self.splits = {}
-        for word in self.word_freqs:
-            self.splits[word] = self._word_to_splits(word)
-
-    def _get_pair_freqs(self):
-        pair_freqs = defaultdict(int)
-        for word, freq in self.word_freqs.items():
-            split = self.splits[word]
-            if len(split) < 2:
-                continue
-            for i in range(len(split) - 1):
-                pair = (split[i], split[i + 1])
-                pair_freqs[pair] += freq
-        return pair_freqs
-
-    def _get_best_pair(self, pair_freqs):
-        if not pair_freqs:
-            return None
-        best_pair = max(pair_freqs, key=lambda p: (pair_freqs[p], p))
-        return best_pair
-
-    def _merge_pair(self, pair):
-        """
-        Verilen çifti tüm splits içinde birleştirir.
-        ("er", "h") -> "erh"  şeklinde her geçtiği yerde günceller.
-        """
-        token_a, token_b = pair
-        merged = token_a + token_b
-
-        for word in self.splits:
-            split = self.splits[word]
-            new_split = []
-            i = 0
-            while i < len(split):
-                if i < len(split) - 1 and split[i] == token_a and split[i + 1] == token_b:
-                    new_split.append(merged)
-                    i += 2
-                else:
-                    new_split.append(split[i])
-                    i += 1
-            self.splits[word] = new_split
-
-    def train(self, corpus, verbose=False):
-        self._build_word_freqs(corpus)
-        self._init_splits()
-
-        initial_vocab = set()
-        for split in self.splits.values():
-            initial_vocab.update(split)
-        current_vocab_size = len(initial_vocab)
-
-        step = 0
-        while current_vocab_size < self.vocab_size:
-            print(current_vocab_size)
-            pair_freqs = self._get_pair_freqs()
-            if not pair_freqs:
-                break
-
-            best_pair = self._get_best_pair(pair_freqs)
-            best_freq = pair_freqs[best_pair]
-       
-
-            # Frekansı 1 olan birleştirmeler bilgi sağlamaz, durdur
-            if best_freq < 2:
-                break
-
-            self.merge_rules.append(best_pair)
-            self._merge_pair(best_pair)
-        
-            current_vocab_size += 1
-            step += 1
-        # Final vocab: tüm splits içindeki token kümesi
-        self.vocab = defaultdict(int)
-        for word, freq in self.word_freqs.items():
-            for token in self.splits[word]:
-                self.vocab[token] += freq
-
-        if verbose:
-            print(f"\nEğitim tamamlandı. Toplam birleştirme kuralı: {len(self.merge_rules)}")
-            print(f"Final kelime dağarcığı boyutu: {len(self.vocab)}")
- 
-    # ------------------------------------------------------------------
-    # 3. ENCODE (yeni metin tokenize etme)
-    # ------------------------------------------------------------------
-
-    def _apply_merge_rules(self, split):
-        """
-        Öğrenilmiş birleştirme kurallarını, verilen bir split listesine sırayla uygular.
-        split: ["k","e","l","i","m","e","</w>"] gibi bir liste
-        """
-        for token_a, token_b in self.merge_rules:
-            merged = token_a + token_b
-            new_split = []
-            i = 0
-            while i < len(split):
-                if i < len(split) - 1 and split[i] == token_a and split[i + 1] == token_b:
-                    new_split.append(merged)
-                    i += 2
-                else:
-                    new_split.append(split[i])
-                    i += 1
-            split = new_split
-        return split
-
-    def encode(self, text):
-        """
-        Metni token listesine dönüştürür.
-        text: ham metin string'i
-        Döndürür: token listesi
-        """
-        tokens = []
-        for word in text.strip().split():
-            split = self._word_to_splits(word)
-            word_tokens = self._apply_merge_rules(split)
-            tokens.extend(word_tokens)
-        return tokens
-
-    def encode_with_words(self, text):
-        """
-        Her kelimenin tokenize sonucunu ayrı ayrı gösterir.
-        Eğitim/debug amacıyla kullanışlıdır.
-        Döndürür: [(kelime, [token, ...]), ...]
-        """
-        result = []
-        for word in text.strip().split():
-            split = self._word_to_splits(word)
-            word_tokens = self._apply_merge_rules(split)
-            result.append((word, word_tokens))
-        return result
-
-    # ------------------------------------------------------------------
-    # 4. DECODE
-    # ------------------------------------------------------------------
-
-    def decode(self, tokens):
-        """
-        Token listesini orijinal metne yakın bir string'e çevirir.
-        </w> sembollerini boşluğa dönüştürerek kelimeleri birleştirir.
-        """
-        raw = "".join(tokens)
-        text = raw.replace(self.end_of_word, " ").strip()
-        return text
-
-    # ------------------------------------------------------------------
-    # 5. BİLGİ METODLARI
-    # ------------------------------------------------------------------
-
-    def get_vocab(self, top_n=None):
-        """
-        Kelime dağarcığını frekansa göre sıralı döndürür.
-        top_n verilirse ilk N token döndürülür.
-        """
-        sorted_vocab = sorted(self.vocab.items(), key=lambda x: x[1], reverse=True)
-        if top_n:
-            return sorted_vocab[:top_n]
-        return sorted_vocab
-
-    def get_merge_rules(self, top_n=None):
-        """
-        Öğrenilen birleştirme kurallarını (sırasıyla) döndürür.
-        """
-        if top_n:
-            return self.merge_rules[:top_n]
-        return self.merge_rules
-
-    def __repr__(self):
-        return (
-            f"BPETokenizer("
-            f"vocab_size={self.vocab_size}, "
-            f"learned_merges={len(self.merge_rules)}, "
-            f"actual_vocab={len(self.vocab)})"
-        )
-    
-corpus = [
-    "düşük fiyatlı ürün, ",
-    "yüksek fiyatlı ürün",
-    "düşük kaliteli ürün",
-    "yüksek kaliteli hizmet",
-    "fiyat kalite dengesi",
-    "ürün fiyatı düşük",
-    "hizmet kalitesi yüksek",
-    "fiyat kalitenin göstergesi değildir",
-    "sülün ilginç bir hayvandır."
-]
-
-tokenizer = BPETokenizer(vocab_size=5000)
-tokenizer.train(corpus, verbose=False)
-
-text = "ürün yükselen fiyatlı"
-result = tokenizer.encode(text)
-print(result)
-print(tokenizer.decode(result))
-
-"""
-print("\n--- İlk 10 Birleştirme Kuralı ---")
-for i, rule in enumerate(tokenizer.get_merge_rules(top_n=10), 1):
-    print(f"  {i:2d}. {rule[0]} + {rule[1]} -> {rule[0]+rule[1]}")
-
-print("\n--- Encode Testi ---")
-test_text = "düşük fiyatlı hizmet çok değişik"
-tokens = tokenizer.encode(test_text)
-print(f"Giriş : {test_text}")
-print(f"Tokenlar: {tokens}")
-
-print("\n--- Kelime Bazlı Encode ---")
-for word, word_tokens in tokenizer.encode_with_words(test_text):
-    print(f"  {word:20s} -> {word_tokens}")
-
-print("\n--- Decode Testi ---")
-print(f"Decode : {tokenizer.decode(tokens)}")
-
-print(f"\n{tokenizer}")
-    
-"""
-
-#------------------------------------------------------------------------------------------------------------------------
-    Byte Based BPE Implementation
-#------------------------------------------------------------------------------------------------------------------------
-
-from collections import defaultdict
-import regex
-
-
-PRETOK_PATTERN = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-
-
-def _fmt(token_bytes):
-    try:
-        decoded = token_bytes.decode('utf-8')
-        if decoded.isprintable():
-            return repr(decoded)
-    except UnicodeDecodeError:
-        pass
-    return '0x' + token_bytes.hex()
-
-
-class ByteLevelBPETokenizer:
-    """
-    Sade byte-level BPE tokenizer.
-
-    Karakter tabanlı BPETokenizer ile birebir aynı yapı;
-    tek fark token türünün str yerine bytes olması ve
-    kelime sınırının </w> yerine önek boşlukla korunması.
-    """
-
-    BASE_VOCAB_SIZE = 256
-
-    def __init__(self, vocab_size=512, pattern=PRETOK_PATTERN):
-        assert vocab_size > self.BASE_VOCAB_SIZE, (
-            f'vocab_size {self.BASE_VOCAB_SIZE} baytlık başlangıç '
-            f"vocab'undan büyük olmalıdır."
-        )
-        self.vocab_size = vocab_size
-        self.pattern = pattern
-        self.merge_rules = []
-        self.vocab = set()
-        self.word_freqs = {}
-        self.splits = {}
-
-    # ------------------------------------------------------------------
-    # 1. YARDIMCI METODLAR
-    # ------------------------------------------------------------------
-
-    def _pretokenize(self, text):
-        return regex.findall(self.pattern, text)
-
-    def _build_word_freqs(self, corpus):
-        """
-        Karakter tabanlıdaki _build_word_freqs ile özdeş.
-        Fark: anahtar str değil bytes.
-
-        str  tabanlı:  word_freqs['düşük']               += 1
-        bytes tabanlı: word_freqs[b'd\xc3\xbc\xc5\x9f..'] += 1
-        """
-        self.word_freqs = defaultdict(int)
-        for line in corpus:
-            for chunk in self._pretokenize(line.strip()):
-                key = chunk.encode('utf-8')
-                if key:
-                    self.word_freqs[key] += 1
-
-    def _word_to_splits(self, word_bytes):
-        """
-        Karakter tabanlıdaki _word_to_splits ile özdeş.
-        Fark: karakterler yerine tek baytlık bytes nesneleri,
-        </w> yok — sınır bilgisi önek boşlukta kodlanmış.
-
-        str  tabanlı:  'düşük' → ['d','ü','ş','ü','k</w>']
-        bytes tabanlı: b'd\xc3\xbc..' → [b'd', b'\xc3', b'\xbc', ..]
-        """
-        return [bytes([b]) for b in word_bytes]
-
-    def _init_splits(self):
-        self.splits = {}
-        for word in self.word_freqs:
-            self.splits[word] = self._word_to_splits(word)
-
-    def _get_pair_freqs(self):
-        pair_freqs = defaultdict(int)
-        for word, freq in self.word_freqs.items():
-            split = self.splits[word]
-            if len(split) < 2:
-                continue
-            for i in range(len(split) - 1):
-                pair = (split[i], split[i + 1])
-                pair_freqs[pair] += freq
-        return pair_freqs
-
-    def _get_best_pair(self, pair_freqs):
-        if not pair_freqs:
-            return None
-        return max(pair_freqs, key=lambda p: (pair_freqs[p], p))
-
-    def _merge_pair(self, pair):
-        """
-        Karakter tabanlıdaki _merge_pair ile özdeş.
-        bytes + bytes → bytes birleştirmesi str + str ile aynı operatör.
-        """
-        token_a, token_b = pair
-        merged = token_a + token_b
-
-        for word in self.splits:
-            split = self.splits[word]
-            new_split = []
-            i = 0
-            while i < len(split):
-                if (i < len(split) - 1
-                        and split[i] == token_a
-                        and split[i + 1] == token_b):
-                    new_split.append(merged)
-                    i += 2
-                else:
-                    new_split.append(split[i])
-                    i += 1
-            self.splits[word] = new_split
-
-    # ------------------------------------------------------------------
-    # 2. EĞİTİM
-    # ------------------------------------------------------------------
-
-    def train(self, corpus, verbose=False):
-        self._build_word_freqs(corpus)
-        self._init_splits()
-
-        current_vocab_size = self.BASE_VOCAB_SIZE
-        step = 0
-
-        while current_vocab_size < self.vocab_size:
-            pair_freqs = self._get_pair_freqs()
-            if not pair_freqs:
-                break
-
-            best_pair = self._get_best_pair(pair_freqs)
-            best_freq = pair_freqs[best_pair]
-
-            if best_freq < 2:
-                break
-
-            self.merge_rules.append(best_pair)
-            self._merge_pair(best_pair)
-            current_vocab_size += 1
-            step += 1
-
-            if verbose:
-                a, b = best_pair
-                print(
-                    f'Adım {step:4d} | '
-                    f'{_fmt(a)} + {_fmt(b)} -> {_fmt(a + b)} | '
-                    f'Frekans: {best_freq}'
-                )
-
-        self.vocab = {bytes([b]) for b in range(256)}
-        for a, b in self.merge_rules:
-            self.vocab.add(a + b)
-
-        self.splits = {}
-
-        if verbose:
-            print(f'\nEğitim tamamlandı.')
-            print(f'Öğrenilen birleştirme kuralı : {len(self.merge_rules)}')
-            print(f'Toplam vocab boyutu          : {len(self.vocab)}')
-
-    # ------------------------------------------------------------------
-    # 3. ENCODE / DECODE
-    # ------------------------------------------------------------------
-
-    def encode(self, text):
-        all_tokens = []
-        for chunk in self._pretokenize(text):
-            split = [bytes([b]) for b in chunk.encode('utf-8')]
-            for token_a, token_b in self.merge_rules:
-                merged = token_a + token_b
-                new_split = []
-                i = 0
-                while i < len(split):
-                    if (i < len(split) - 1
-                            and split[i] == token_a
-                            and split[i + 1] == token_b):
-                        new_split.append(merged)
-                        i += 2
-                    else:
-                        new_split.append(split[i])
-                        i += 1
-                split = new_split
-            all_tokens.extend(split)
-        return all_tokens
-
-    def decode(self, tokens):
-        return b''.join(tokens).decode('utf-8', errors='replace')
-
-    # ------------------------------------------------------------------
-    # 4. BİLGİ METODLARI
-    # ------------------------------------------------------------------
-
-    def get_merge_rules(self, top_n=None):
-        rules = self.merge_rules[:top_n] if top_n else self.merge_rules
-        return [(_fmt(a), _fmt(b), _fmt(a + b)) for a, b in rules]
-
-    def __repr__(self):
-        return (
-            f'ByteLevelBPETokenizer('
-            f'vocab_size={self.vocab_size}, '
-            f'learned_merges={len(self.merge_rules)}, '
-            f'actual_vocab={len(self.vocab)})'
-        )

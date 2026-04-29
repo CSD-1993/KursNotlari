@@ -17,7 +17,7 @@
                             (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                                     (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 24/04/2026 - Cuma
+                                            Son Güncelleme: 29/04/2026 - Çarşamba
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
@@ -15177,8 +15177,13 @@ void exit_sys(const char *msg)
         drmModeFreeResources(res);
     EXIT1:
         close(fd);
-    
-    Tüm kodlar aşağıda bir bütüm olarak verilmektedir
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                            176. Ders 21/04/2026 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+ 
+ /*----------------------------------------------------------------------------------------------------------------------------- 
+    Uygulamanın tüm kodları aşağıda verilmiştir.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -15339,15 +15344,462 @@ void exit_sys(const char *msg)
 
     exit(EXIT_FAILURE);
 }
-  
+
 /*-----------------------------------------------------------------------------------------------------------------------------
-                                            176. Ders 21/04/2026 - Salı
+                                            177. Ders 28/04/2026 - Salı
+-----------------------------------------------------------------------------------------------------------------------------*/
+ 
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Kursumuzun bu son bölümünde özellikle gömülü sistemler Linux dağıtımları oluşturmak için kullanılan ve BuildRoot projesine 
+    bir alternatif oluşturan Yocto projesini inceleyeceğiz. Yocto projesi oldukça geniş kapsamlı bir projedir. Esnek olmasının 
+    yanı sıra öğrenme süreci biraz zaman almaktadır. Biz kurusumuzda önce Yocto projesinin temel kavramlarını ele alacağız. 
+    Sonra BBB üzerinde örnek bir dağıtımın hangi adımlardan geçilerek oluşturulacağını göreceğiz. Sonra da ayrıntılar üzerinde 
+    duracağız. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-    Kursumuzun bu son bölümünde Linux dağıtımları oluşturmak için kullanılan BuildRoot projesine bir alternatif oluşturan 
-    Yocto projesini inceleyeceğiz. Yocto projesi oldukça geniş kapsamlı bir projedir. Esnek olmasının yanı sıra öğrenme süreci 
-    biraz zaman almaktadır. 
+    Biz daha önce Linux dağıtımı oluşturmak için süreci otomatize eden BuildRoot ptojesini inceleyip onun nasıl kullanıldığını 
+    görmüştük. Peki BuildRoot kullanabiliyorken Yocto'yu öğrenmeye çalışmanın bir anlamı var mı? Yukarıda Yocto projesinin 
+    Buildroot'a göre ayrıntılı olduğunu ve öğrenme sürecinin de daha uzun olduğunu söylemiştik. İki projenin tasarım felsefesini
+    aşağıdaki tablo eşliğinde karşılaştırabiliriz:
+
+    ┌───────────────────────┬────────────────────────────┬────────────────────────────┐
+    │      Özellik          │        Buildroot           │      Yocto Project         │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Temel araç            │ GNU Make + Kconfig         │ BitBake (Python) + Kconfig │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Yapı birimi           │ Paket (.mk dosyası)        │ Tarif / Recipe (.bb)       │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Konfigürasyon         │ defconfig + menuconfig     │ local.conf + distro/machine│
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Çıktı                 │ Root FS + imaj (doğrudan)  │ Paketler + imaj            │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Önbellekleme          │ ccache (isteğe bağlı)      │ sstate-cache (yerleşik)    │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Kapsam                │ Minimal → Orta             │ Orta → Büyük ölçek         │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Genişletilebilirlik   │ br2-external mekanizması   │ Katman (layer) sistemi     │
+    ├───────────────────────┼────────────────────────────┼────────────────────────────┤
+    │ Yeniden kullanım      │ Sınırlı (upstream patches) │ Yüksek (.bbappend ile)     │
+    └───────────────────────┴────────────────────────────┴────────────────────────────┘
+
+    Bu karşılaştırma tablosundan da görülüğü gibi Yocto projesi özellikle orta ve büyük ölçekli dağırımların oluşturulmasında, 
+    onların zamanla genişletilmesinde ve yeniden kullanılmasında BuildRoot projesine üstünlük sağlamaktadır. Yocto daha ayrıntılı 
+    belirlemelerin yapılmasına olanak sağlamaktadır. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yocto projesi, gömülü Linux sistemleri için özelleştirilmiş Linux dağıtımları oluşturmaya yarayan açık kaynak kodlu bir 
+    işbirliği projesidir. "Linux Foundation" isimli kurumun bünyesinde geliştirilmektedir. Yocto Project, gömülü Linux sistemleri 
+    için özelleştirilmiş Linux dağıtımları oluşturmaya yarayan açık kaynaklı bir işbirliği projesidir. Linux Foundation bünyesinde 
+    geliştirilmektedir. Linux Foundation (LF), Linux sistemlerini geliştirmeyi ve açık kaynak kodlu yazılım projelerini 
+    desteklemek amacıyla 2000 yılında kurulmuş kar amacı gütmeyen bir kuruluştur. Yocto bize aşağıdaki unsurları sağlamaktadır:
+
+    ┌──────────────────────┬──────────────────────────────────────────────────┐
+    │      Kategori        │                  Ne Sağlar?                      │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ Derleme Sistemi      │ BitBake motoru ile tekrarlanabilir build         │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ Paket Yönetimi       │ RPM, DEB veya IPK tabanlı paket üretimi          │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ Donanım Soyutlama    │ BSP katmanları ile farklı donanım desteği        │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ Özelleştirme         │ Sadece ihtiyaç duyulan paketlerle minimal image  │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SDK Üretimi          │ Hedef platforma özel çapran derleyici ve araçlar │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ Lisans Yönetimi      │ Kullanılan tüm bileşenlerin lisans takibi        │
+    └──────────────────────┴──────────────────────────────────────────────────┘
+
+    Yocto projesi üç bileşenden oluşmaktadır: Metodoloji (yaklaşım), Araçlar ve Yazılımlar, Standartlar ve Ekosistem
+
+    Yocto Project
+    │
+    ├── 1. Bir metodoloji / yaklaşım
+    │       → Katman (layer) mimarisi, tarif (recipe) sistemi
+    │       → "Nasıl build edilmeli?" sorusuna verilen cevap
+    │
+    ├── 2. Araçlar ve yazılımlar
+    │       → BitBake, Devtool, CROPS, Toaster...
+    │
+    └── 3. Bir standart / ekosistem
+            → Farklı firmalar aynı katman yapısını kullanır
+            → Katmanlar birbirine uyumlu çalışır
+
+    Yocto'nun temel bileşenlerini uygulama bakış açısıyla şöyle de ifade edebiliriz:
+
+    Yocto Project Ekosistemi
+    │
+    ├── BitBake          → Derleme motoru (görev yöneticisi)
+    ├── OpenEmbedded     → Temel tarif (recipe) kütüphanesi
+    ├── Poky             → Referans dağıtım
+    ├── meta-katmanlar   → Donanım, uygulama, dağıtım katmanları
+    └── Devtool / SDK    → Geliştirici araçları
+
+    Yocto'nun build motoruna BitBake denilmektedir. BitBake katmanlardan oluşan "tarif (recipe)" dosyalarını okuyarak işletmektedir.
+    OpenEmbedded Yocto öncesinde de var olan bir projedir. Yocto bu projenin kazanımlarını da bünyesine katmıştır. Yocto her 
+    ne kadar mantıksal belirlemelerden oluşan bir yaklaşım belirtiyor olsa da kendi içerisinde temel bir gerçekleştirim de 
+    bulundurmaktadır. Buna da Poky denilmektedir. Yani Poky, Yocto prjesinin ete kemiğe büründürülmüş hali gibidir. Yocto 
+    yaklaşımında tarifler katmanlar biçiminde bir araya getirilmiştir. Katmanlar da düzey deüzeydir. Yocto yalnızca dağıtımı 
+    değil geliştirme araçlarını da oluşturmak için tasarlanmıştır. 
+
+    Yocto'nun avantajlarını ve dezavantajlarını şöyle özeteyebiliriz:
+
+    ┌─────────────────────────────────┬──────────────────────────────────┐
+    │          AVANTAJLARI            │         DEZAVANTAJLARI           │
+    ├─────────────────────────────────┼──────────────────────────────────┤
+    │ Özelleştirme özgürlüğü          │ Öğrenilmesi zor                  │
+    │ Tekrarlanabilir derlemeler      │ İlk derleme süresi çok uzun      │
+    │ Geniş donanım desteği           │ Disk ve RAM gereksinimi yüksek   │
+    │ Aktif topluluk ve LTS sürümler  │ Dokümantasyon kalabalık          │
+    │ Lisans uyumluluk araçları       │ Hata ayıklama karmaşık olabilir  │
+    └─────────────────────────────────┴──────────────────────────────────┘
+
+    Yotco "Open Embedded" denilen girişimin kullanıma soktuğu birikimlerden faydalanmaktadır. Yani Yocto, Open Embedded 
+    projesini de bünyesinde barındırmaktadır. OpenEmbedded (OE), gömülü Linux sistemleri için tarif (recipe) tabanlı çapraz 
+    derleme altyapısı sunan açık kaynak kodlu bir projedir. Yocto'dan daha eskidir ve Yocto'nun temelini oluşturmaktadır.
+    Bu bağlamda tarihsel süreci aşağıdaki gibi gösterbiliriz:
+
+    2003  → OpenEmbedded doğdu
+            │  Gömülü Linux sistemleri için tarif sistemi oluşturuldu
+            │  BitBake bu dönemde geliştirildi
+            │
+    2010  → Linux Foundation, Yocto Projesini başlattı
+            │  "OE çok güçlü ama endüstriyel kullanım için
+            │   standart ve yönetişim eksik" sorununu çözmek için
+            │
+    2011  → OE ve Yocto iş birliği anlaşması yapıldı
+            │  OE-Core ortak temel katman olarak benimsendi
+            │
+    Günümüz → İkisi ayrı projeler ama derin entegrasyon var
+
+    Görüldüğü gibi "tarif (recipe)" dosyaları, onları işleten BitBake sistemi tamamen OE'den alınmıştır.
+
+    OE'nin en temel tariflerinin bulunduğu katmanlara "OE-Core" denilmektedir. Ancak OE içerisinde projeye dahil olan pek 
+    çok katman da bulunmaktadır. Biz OE'nin bileşenlerini şöyle betimleyebiliriz:
+
+    OpenEmbedded
+    │
+    ├── OE-Core (meta/)
+    │       → Minimal, yalın temel katman
+    │       → Yocto ile ortaklaşa yönetilir
+    │       → Her Yocto projesinde mutlaka bulunur
+    │
+    └── meta-openembedded
+            → Binlerce ek tarif içeren geniş katman koleksiyonu
+            → OE topluluğu tarafından yönetilir
+            │
+            ├── meta-oe          → Genel amaçlı ek paketler
+            ├── meta-python      → Python kütüphaneleri
+            ├── meta-networking  → Ağ araçları
+            ├── meta-multimedia  → Ses/video kütüphaneleri
+            ├── meta-filesystems → Dosya sistemi araçları
+            └── meta-gnome       → GNOME masaüstü bileşenleri
+
+    Yocto'nun OE'nin alt yapısını (yani tariflerini ve BitBake aracını) kullandığını belirtmiştik. İki proje arasındaki 
+    farklılıkları aşağıda yine bir tablo biçiminde özetliyoruz:
+
+    ┌──────────────────┬─────────────────────────────┬─────────────────────────────┐
+    │    Özellik       │       OpenEmbedded          │       Yocto Project         │
+    ├──────────────────┼─────────────────────────────┼─────────────────────────────┤
+    │ Kuruluş          │ 2003, topluluk odaklı       │ 2010, Linux Foundation      │
+    ├──────────────────┼─────────────────────────────┼─────────────────────────────┤
+    │ Odak Noktası     │ Tarif kütüphanesi           │ Standart, araç, ekosistem   │
+    ├──────────────────┼─────────────────────────────┼─────────────────────────────┤
+    │ Referans Distro  │ Yok                         │ Poky                        │
+    ├──────────────────┼─────────────────────────────┼─────────────────────────────┤
+    │ Yönetişim        │ Topluluk kararları          │ Kurumsal + topluluk         │
+    ├──────────────────┼─────────────────────────────┼─────────────────────────────┤
+    │ Kapsam           │ Sadece tarif ekosistemi     │ Araç + standart + ekosistem │
+    ├──────────────────┼─────────────────────────────┼─────────────────────────────┤
+    │ Sertifikasyon    │ Yok                         │ Uyumluluk programı var      │
+    └──────────────────┴─────────────────────────────┴─────────────────────────────┘
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yocto projesinin kurum tarafından oluşturulan referans gerçekleitirimine Poky denilmektedir. Yani pratikte Yocto, Poky 
+    eşliğinde kullanılmaktadır. Poky Yocto ekosisteminin "örnek uygulaması" gibi düşünülebilir. Poky şunları içermektedir:
+
+    ┌─────────────────────┬───────────────────────────────────────────────────┐
+    │        Rol          │                   Açıklama                        │
+    ├─────────────────────┼───────────────────────────────────────────────────┤
+    │ Referans Dağıtım    │ Kendi dağıtımını oluştururken örnek alınan temel  │
+    ├─────────────────────┼───────────────────────────────────────────────────┤
+    │ Test Ortamı         │ Yocto özelliklerinin test edildiği resmi platform │
+    ├─────────────────────┼───────────────────────────────────────────────────┤
+    │ Başlangıç Noktası   │ Yeni projelerde poky klonlanarak işe başlanır     │
+    ├─────────────────────┼───────────────────────────────────────────────────┤
+    │ Araç Sağlayıcı      │ BitBake ve temel scriptleri bünyesinde taşır      │
+    └─────────────────────┴───────────────────────────────────────────────────┘
+
+    Poky yüklendiğinde aşağıdaki bileşenlere sahip olunmaktadır:
+
+    ┌──────────────────────┬────────────────────────────────────────┐
+    │     Bileşen          │               Ne Sağlar?               │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │ BitBake              │ Derleme motoru, hazır ve çalışır       │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │ OE-Core (meta/)      │ Binlerce temel tarif                   │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │ Dağıtım Politikası   │ Poky varsayılan yapılandırması         │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │ Referans BSP         │ QEMU ile hemen test imkânı             │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │ Geliştirici Araçları │ devtool, recipetool, runqemu           │
+    ├──────────────────────┼────────────────────────────────────────┤
+    │ Build Ortamı         │ source komutuyla anında hazır          │
+    └──────────────────────┴────────────────────────────────────────┘
+
+    OE projesinin sağladığı "tarif (recipe)" kavramını işleten araca BitBake denilmektedir. Buradaki kavramları bir benzetme
+    eşliğinde şöyle yerli yerine oturtabiliriz:
+
+    Yocto Projesi → Bir mimari standart
+    OpenEmbedded (OE-Core) → Bu standardın temel yapı taşları
+    Poky → Bu taşlarla inşa edilmiş örnek bir ev
+    BitBake → Bu evin içindeki derleme motoru
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yocto'da belli bir konuya ilişkin tariflerinm oluşturduğu topluluğa "katman (layer)" denilmektedir. Katmanlar dosya 
+    sisteminde bir dizin biçiminde konuşlandırılmaktadır. İsmi üstünde katmanlar seviye olarak birbirlerinin üzerinde olabilmktedir. 
+    Aşağıdaki tabloda çeşitli katman türleri listelenmiştir:
+
+    ┌──────────────────┬──────────────────────────────────┬────────────────────────┐
+    │   Katman Türü    │             Görevi               │        Örnek           │
+    ├──────────────────┼──────────────────────────────────┼────────────────────────┤
+    │ Temel Katman     │ OE-Core, tüm projelerin temeli   │ meta/                  │
+    ├──────────────────┼──────────────────────────────────┼────────────────────────┤
+    │ BSP Katmanı      │ Belirli donanım desteği          │ meta-raspberrypi       │
+    ├──────────────────┼──────────────────────────────────┼────────────────────────┤
+    │ Dağıtım Katmanı  │ Dağıtıma özel politikalar        │ meta-poky              │
+    ├──────────────────┼──────────────────────────────────┼────────────────────────┤
+    │ Uygulama Katmanı │ Belirli yazılım grubu            │ meta-openembedded      │
+    ├──────────────────┼──────────────────────────────────┼────────────────────────┤
+    │ Şirket Katmanı   │ Projeye özel özelleştirmeler     │ meta-mycompany         │
+    └──────────────────┴──────────────────────────────────┴────────────────────────┘
+
+    Peki neden tarif dosyaları (recipes) bir araya getirilip bunlardna katman yapılmıştır? İşte katman mimarisinin temel 
+    amacı ayrıştırma (separation of concerns) sağlamasıdır. Katmanlı yapının sağladığı avantajları şöyle betimleyebiliriz:
+
+    ❌ Katmansız Dünya
+    Tüm tarifler, yamalar, yapılandırmalar tek bir yerde
+    → Bakımı çok zor, yeniden kullanımı çok zor, çakışmalar yaygın
+
+    ✔ Katmanlı Dünya
+    Her şey kendi katmanında
+    → Farklı projelerde aynı katman tekrar kullanılabilir
+    → Bir katmanı güncellemek diğerlerini bozmaz
+    → Topluluk katmanları projeye daha kolay eklenmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yukarıda biz Yocto projesinin temel kavramlarını açıkladık. Şimdi Yocto ile bir dağıtımın hangi adımlardna geçilerek 
+    oluşturulduğunu göstermek istiyoruz. Örneğin BBB için bir Linux dağıtımı oluşturmak isteyelim. Biz bu işlemi kursumuzda önce
+    parça parça manuel olarak, sonra BuildRoot kullanarak otmatik olarak gerçekleştirdik. Şimdi de aynı işlemin Yocto ile nasıldır
+    yapıldığını göreceğiz. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Poky temel olarak Ubuntu dağıtımı referans alınarak oluşturulmuştur. Tabii Poky'yi diğer dağıtımlarda da kullanabilirsiniz. 
+    Örneğin biz kursunuzda bir bir Debian ve Ubuntu türevi olan Mint dağıtımını kullanıyoruz. Aşağıda Poky için tavsiye edilen 
+    dağıtımların versiyonlarını tablo biçiminde veriyoruz:
+
+    ┌───────────────────┬────────────────┬───────────────────────────────┐
+    │     Dağıtım       │       Sürüm    │            Not                │
+    ├───────────────────┼────────────────┼───────────────────────────────┤
+    │ Ubuntu            │  22.04 LTS     │ En iyi desteklenen, önerilen  │
+    │ Ubuntu            │  24.04 LTS     │ Çalışır, paket adları değişti │
+    │ Ubuntu            │  20.04 LTS     │ Çalışır, bazı paketler eski   │
+    │ Debian            │  12 (Bookworm) │ Desteklenir                   │
+    │ Fedora            │  38, 39        │ Desteklenir                   │
+    │ AlmaLinux / Rocky │  9             │ Desteklenir                   │
+    └───────────────────┴────────────────┴───────────────────────────────┘
+
+    Biz kursumuzda Mint dağıtımını kullanıyoruz. Mint dağıtımı Ubuntu'yu temel alsa da versiyon numaralandırması daha 
+    farklıdır. Aşağıda son yıllardaki Mint versionlarının Ubuntu karşılıkları tablo halinde verilmiştir:
+
+    ┌────────────┬───────────┬──────────────────┬──────────────┐
+    │ Linux Mint │   Kod Adı │   Ubuntu Tabanı  │  Destek Sonu │
+    ├────────────┼───────────┼──────────────────┼──────────────┤
+    │ 22.3       │ zENA      │ Ubuntu 24.04 LTS │ 2029         │
+    │ 22.2       │ Victoria  │ Ubuntu 24.04 LTS │ 2029         │
+    │ 22.1       │ Xia       │ Ubuntu 24.04 LTS │ 2029         │
+    │ 22         │ Wilma     │ Ubuntu 24.04 LTS │ 2029         │
+    ├────────────┼───────────┼──────────────────┼──────────────┤
+    │ 21.3       │ Virginia  │ Ubuntu 22.04 LTS │ 2027         │
+    │ 21.2       │ Victoria  │ Ubuntu 22.04 LTS │ 2027         │
+    │ 21.1       │ Vera      │ Ubuntu 22.04 LTS │ 2027         │
+    │ 21         │ Vanessa   │ Ubuntu 22.04 LTS │ 2027         │
+    ├────────────┼───────────┼──────────────────┼──────────────┤
+    │ 20.3       │ Una       │ Ubuntu 20.04 LTS │ 2025         │
+    │ 20.2       │ Uma       │ Ubuntu 20.04 LTS │ 2025         │
+    │ 20.1       │ Ulyssa    │ Ubuntu 20.04 LTS │ 2025         │
+    │ 20         │ Ulyana    │ Ubuntu 20.04 LTS │ 2025         │
+    └────────────┴───────────┴──────────────────┴──────────────┘
+
+    Hazırlık aşamasında izleyen paragraflarda göreceğimiz gibi çeşitli araçların ve kütüphanelerin indirilmesi gerekmektedir. 
+    Ancak bunların bazılarının isimleri Ubuntu 22'den sonra değiştirilmiştir. Biz burada Ubuntu 24.04 versiyonunu referans 
+    alacağız.
+
+    Yocto işlemlerinin yapıldığı makinenin de belli bir kapasitesinin olması gerekir. Aksi takdirde işlemler çok zaman 
+    bakımındam çok uzamaktadır. Makinenin Internete bağlı olması gerekmektedir. Çünkü tarifler işletilirken çeşitli paketler 
+    de kaynağından indirilmektedir. Tavsiye edilen minimum sistem kaynakları şöyledir:
+
+    ┌────────────────────┬──────────────────────────────────────────┐
+    │     Bileşen        │              Gereksinim                  │
+    ├────────────────────┼──────────────────────────────────────────┤
+    │ İşlemci            │ 64-bit, çok çekirdekli (min. 4 çekirdek) │
+    │ RAM                │ Minimum 8 GB (önerilen: 16 GB+)          │
+    │ Disk Alanı         │ Minimum 100 GB boş alan                  │
+    │ İnternet           │ Kaynak indirme için gerekli              │
+    └────────────────────┴──────────────────────────────────────────┘
+-------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yocto çalışması için işin başında makinemize bazı paketleri indirip kurmamız gerekmektedir. Yukarıda da belirttiğimiz gibi
+    Ubuntu 22'den Ubuntu 24 geçişi sırasında bazı paketlerin isimleri de değişmiştir. Ubuntu 22 için aşağıdaki paketleri 
+    doğrudankurabilirsiniz:
+
+    $sudo apt-get update
+
+    $ sudo apt-get install -y \
+    gawk wget git diffstat unzip texinfo gcc build-essential \
+    chrpath socat cpio python3 python3-pip python3-pexpect \
+    xz-utils debianutils iputils-ping python3-git python3-jinja2 \
+    python3-subunit zstd liblz4-tool file locales libacl1 \
+    libegl1-mesa libsdl1.2-dev pylint xterm
+
+    Ubuntu 24 için ise aşağıdak paketler kurulmalıdır. Burada biz ismi değişken değişen paketleri yeni isimleriyle yer 
+    değiştirdik:
+
+    $ sudo apt-get install -y \
+    gawk wget git unzip gcc build-essential cpio \
+    python3 python3-pexpect python3-jinja2 python3-subunit \
+    xz-utils debianutils iputils-ping \
+    zstd liblz4-tool file locales libacl1 \
+    diffstat texinfo chrpath socat python3-pip \
+    libegl1 libsdl2-dev python3-git pylint
+
+    İsmi değişmiş paketlerin listesini aşağıda veriyoruz:
+
+    ┌────────────────────┬─────────────────────────┬─────────────────────────────────┐
+    │   Ubuntu 22.04 adı │   Ubuntu 24.04 adı      │         Açıklama                │
+    ├────────────────────┼─────────────────────────┼─────────────────────────────────┤
+    │ libegl1-mesa       │ libegl1                 │ EGL kütüphanesi yeniden paket-  │
+    │                    │                         │ lendi, mesa öneki kalktı        │
+    ├────────────────────┼─────────────────────────┼─────────────────────────────────┤
+    │ libsdl1.2-dev      │ libsdl2-dev             │ SDL1 kaldırıldı, SDL2 geçerli   │
+    │                    │                         │ sürüm; Yocto SDL2'yi destekler  │
+    ├────────────────────┼─────────────────────────┼─────────────────────────────────┤
+    │ python3-git        │ python3-gitpython       │ Modül aynı, paket adı değişti   │
+    ├────────────────────┼─────────────────────────┼─────────────────────────────────┤
+    │ pylint             │ pylint (universe'de)    │ Aynı isim, farklı repo          │
+    ├────────────────────┼─────────────────────────┼─────────────────────────────────┤
+    │ xterm              │ Gerekli değil           │ Yocto Scarthgap zorunlu listede │
+    │                    │                         │ artık yer almıyor               │
+    └────────────────────┴─────────────────────────┴─────────────────────────────────┘
+
+
+    Burada bir noktaya d,ikkatini çekmek istiyoruz. Ubuntu'nun resmi depoları birkaç kategoriye ayrılmaktadır. Bunlardan birine
+    "universe" denilmektedir. Bazı Ubuntu sürümlerinde depo listelerinde bu "universe" eklenmemiş olabilir. Bu "universe" 
+    deposunu eğer dahil değilse aşağıdaki komutla dahil edebilirsiniz:
+
+    $ sudo add-apt-repository universe -y
+    $ sudo apt-get update
+
+    Mint'te zaten bu depo kategorisi listeye dahil edilmiştir. 
+
+    Sistemdeki ana Python kurulumunun bozlmasını engellemek için son zamanlarda CPython dağıtımı ana kurulumuna paket yüklemek 
+    için --break-system-packages seçeneğinin kulanılmasını zorunlu hale getirdi. Bu konuda sorun çıkmaması için aşağıdaki 
+    komutu da her ihtimale karşı uygulamanızı tavsiye ediyoruz:
+
+    $ sudo pip3 install --break-system-packages jinja2 GitPython
+
+    Bu komut uygulanmasa da genellikle sorun oluşmayacaktır.
+
+    Yocto için sistemde İngilizce locale'in de bulunuyor olması gerekir. Geçerli locale'in Türkçe olması bir sorun yaratmamaktadır. 
+    Ancak olarak İnlizce locale'in de yüklü olması gerekmektedir. Zaten hemen her zaman bu locale yüklü durumdadır. Ancak bu 
+    konuda bir sorun çıkarsa İngilizce locale yüklemesini aşağıdaki gibi yapabilirsiniz:
+
+    $ sudo locale-gen en_US.UTF-8
+    $ sudo update-locale LANG=en_US.UTF-8   
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki hazırlıklardan sonra artık Yocto Projesinin referans dağıtımı olan Poky'nin indirilip hazır hale getirilmesi 
+    gerekmektedir. Poky'nin de çeşitli versiyonları vardır. Aşağıdakiş tabloda Poky versiyonlarını listeliyoruz:
+
+    ┌────────┬────────────┬───────────────┬────────────┬─────────────┐
+    │ Sürüm  │ Kod Adı    │ Yayın Tarihi  │ EOL Tarihi │ Durum       │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 3.1    │ Dunfell    │ Nis 2020      │ Nis 2024   │ LTS (EOL)   │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 3.2    │ Gatesgarth │ Eki 2020      │ Nis 2021   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 3.3    │ HardKnott  │ Nis 2021      │ Eki 2021   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 3.4    │ Honister   │ Eki 2021      │ Nis 2022   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 4.0    │ Kirkstone  │ Nis 2022      │ Nis 2026   │ LTS (aktif) │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 4.1    │ Langdale   │ Eki 2022      │ Nis 2023   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 4.2    │ Mickledore │ Nis 2023      │ Eki 2023   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 4.3    │ Nanbield   │ Eki 2023      │ Nis 2024   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 5.0    │ Scarthgap  │ Nis 2024      │ Nis 2028   │ LTS (aktif) │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 5.1    │ Styhead    │ Eki 2024      │ Nis 2025   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 5.2    │ Walnascar  │ Nis 2025      │ Eki 2025   │ EOL         │
+    ├────────┼────────────┼───────────────┼────────────┼─────────────┤
+    │ 5.3    │ Whinlatter │ Eki 2025      │ Nis 2026   │ Aktif       │
+    └────────┴────────────┴───────────────┴────────────┴─────────────┘
+
+    LTS (Long Term Support) desteği olan sürümleri tercih edebilirsiniz. Biz de "Scarthgap" sürümünü indirip kullanacağız. 
+    Bunun için bir Yocto-BBB dizini yaratalım ve github'tan paketi indirelim:
+
+    $ mkdir Yocto-BBB 
+    $ git clone -b scarthgap git://git.yoctoproject.org/poky.git 
+-----------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+Yocto Project  →  Standart + Ekosistem  (şemsiye)
+    │
+    ├── BitBake          ← Bağımsız araç
+    ├── OE-Core          ← Bağımsız katman
+    └── Poky             ← Bunları bir araya getiren referans impl.
+
+OpenEmbedded (2003)  →  BitBake ayrıldı  →  OE-Core ayrıldı
+                                                    │
+                                         Yocto Project bunları
+                                         benimseyip standartlaştırdı (2010)
+                                                    │
+                                              Poky = referans impl.
+
+BitBake → Build engine (görev yürütücü)
+OpenEmbedded-Core (OE-Core) → Temel katman ve metadata
+Spesifikasyonlar / uyumluluk standartları → Katman yapısı, API'ler, test altyapısı
+
+build-bbb/
+└── conf/
+    ├── bblayers.conf   ← Katman listesi burada
+    └── local.conf      ← Makine, distro, paket ayarları burada
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
@@ -15374,53 +15826,4 @@ void exit_sys(const char *msg)
 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-/*-----------------------------------------------------------------------------------------------------------------------------
 
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-/*-----------------------------------------------------------------------------------------------------------------------------
-
------------------------------------------------------------------------------------------------------------------------------*/
-
-
-# 1. Önce tty1'i tamamen sustur:
-sudo systemctl stop getty@tty1.service 2>/dev/null
-sudo systemctl mask getty@tty1.service
-sudo systemctl mask autovt@tty1.service
-
-# 2. VT'yi temizle:
-sudo sh -c "printf '\033[?25l\033[2J\033[H' > /dev/tty1"
-
-# 3. Programı çalıştır (-w ile bekle):
-sudo openvt -f -s -w -c 1 -- ./fb-test
-
-┌─────────────────────────────────────────────┐
-│             Yocto Projesi                   │
-│                                             │
-│  ┌───────────────────────────────────────┐  │
-│  │           Poky (Referans Distro)      │  │
-│  │                                       │  │
-│  │  ┌─────────────────────────────────┐  │  │
-│  │  │     OpenEmbedded-Core (meta)    │  │  │
-│  │  │                                 │  │  │
-│  │  │  ┌───────────────────────────┐  │  │  │
-│  │  │  │   BitBake (Build Engine)  │  │  │  │
-│  │  │  └───────────────────────────┘  │  │  │
-│  │  └─────────────────────────────────┘  │  │
-│  └───────────────────────────────────────┘  │
-│                                             │
-│  + Dokümentasyon, Testler, Araçlar (toaster,│
-│    devtool, SDK), BSP Katmanları            │
-└─────────────────────────────────────────────┘
