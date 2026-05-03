@@ -15,7 +15,7 @@
                      (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                          (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                      Son Güncelleme: 29/04/2026 - Çarşamba
+                                      Son Güncelleme: 03/05/2026 - Pazar
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -9760,7 +9760,7 @@ void exit_sys_errno(const char *msg, int eno)
     neresinden başladığı ve ne kadar sürdüğü belirtilmektedir. 
 
     Bir NUMA düğümündeki bölgeler düğümü temsil eden pglist_data yapısının node_zone elemanında tutulmaktadır. Bu eleman
-    MAX_NR_ZONES uzunlupunda bir dizi biçiminde bildirilmiştir. Ancak buradaki MAX_NR_ZONES değeri olabilecek en fazla 
+    MAX_NR_ZONES uzunluğunda bir dizi biçiminde bildirilmiştir. Ancak buradaki MAX_NR_ZONES değeri olabilecek en fazla 
     bölge sayısını belirtmektedir. Bu dizinin dolu olan elemanlarının sayısı ise pglist_data yapısının nr_zones elemanında 
     tutulmaktadır:
 
@@ -9789,10 +9789,11 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Çekirdek fiziksel belleği NUMA düğümlerinden, NUMA düğümlerini bellek bölgelerinden, bellek bölgelerini de sayfalardan
-    oluşuyormuş gibi ele almaktadır. Ancak çekirdek tüm fiziksel belleğin sayfalarını da ayrıca kayıt altında tutup 
-    izlemektedir. Linux çekirdeğinde bir fiziksel bellek sayafası page isimli bir yapıyla temsil edilmiştir. Güncel 
-    çekirdeklerde page yapısı "include/linux/mm_types.h" dosyası içerisinde aşağıdaki gibi bildirilmiştir:
+    Çekirdek fiziksel belleği NUMA düğümlerinden, NUMA düğümlerini bellek bölgelerinden (zones), bellek bölgelerini 
+    de sayfalardan oluşuyormuş gibi ele almaktadır. İzleyen paragraflarda ele alacağımız "ikiz blok sayfa tahsisat sistemi 
+    (buddy allocator)" bölge temelinde oluşturulmuştur. Ancak çekirdek tüm fiziksel belleğin sayfalarını da ayrıca kayıt 
+    altında tutup izlemektedir. Linux çekirdeğinde bir fiziksel bellek sayafası page isimli bir yapıyla temsil edilmiştir. 
+    Güncel çekirdeklerde page yapısı "include/linux/mm_types.h" dosyası içerisinde aşağıdaki gibi bildirilmiştir:
 
     struct page {
         memdesc_flags_t flags;		/* Atomic flags, some possibly
@@ -9988,23 +9989,807 @@ void exit_sys_errno(const char *msg, int eno)
     #endif /* CONFIG_HIGMEM || WANT_PAGE_VIRTUAL */
     } mem_map_t;
 
-
+    Güncel çekirdeklerde page yapısının uzunluğu 64 byte'tır. Dolayısıyla bir fiziksel sayfaya bu page yapılarından 
+    64 tanesi sığabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+			                            74. Ders 02/05/2026 - Cumartesi						
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+	Linux çekirdeğinin fiziksel bellekteki her sayfa için bir page yapı nesnesi tuttuğunu belirtmiştik. Linux çekirdeği
+    aynı zamanda fiziksel belleğe ilişkin tüm page nesnelerini bir dizi içerisinde de tutmaktadır. Ancak bunları tutuş 
+    biçimi konfigürasyon parametrelerine göre değişmektedir. NUMA düğümlerinin içerisindeki bölgelerdeki (zones) ikiz
+    blok tahsisat sistemi (buddy allocator) aslında bu page dizisine referans etmektedir. İzleyen paragraflarda biz 
+    önce çekirdin fiziksel belleğe ilişkin page nesnelerini nasıl tuttuğunu açıklayacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    Linux çekirdekleri belli bir süredir tüm page nesneleri CONFIG_FLATMEM, CONFIG_SPARSEMEM ve CONFIG_SPARSEMEM_VMEMMAP 
+    konfigürasyon parametrelerine bağlı olarak değişik biçimlerde saklamaktadır. CONFIG_FLATMEM ilgili sistemdeki fiziksel 
+    belleğin hiç delikler olmadan düz bir biçimde bulunduğunu belirtmektedir. Yani CONFIG_FLATMEM durumunda fiziksel 
+    bellek yer sayfası kullanabilen arada hiç boşluk olmayan tek parça durumundadır. Siz "zaten fiziksel belleğin 
+    bu biçimde olması gerektiğini" düşünebilirsiniz. Ancak bu durum zorunlu değildir. Bazı mimarilrde fiziksel belleğin 
+    belli bölgelerinde delikler vardır. Tabii bu delikler başka amaçlarla oluşturulmuştur. Ancak bu delikler işletim 
+    sistemi tarafından bllek yönetiminde kullanılmamaktadır. Örneğin bugün yaygın kullandığmız kökeni IBC PC'ye dayanan 
+    Intel işlemcilerinin kullanıldığı masaüstü bilgisayar mimarisinde BIOS alanı fiziksel adres alanı içerisindedir ve 
+    buraya yazma yapılamamktadır. Bu bölge aslında fiziksel belleği kesintiye uğratan bir delik oluşturmaktadır. İşte 
+    fiziksel belleğin aralarında böyle boşlukların buunduğu durum CONFIG_SPARSEMEM konfigürasyon parametresiyle 
+    belirtilmektedir. Bugün kullandığımız Intel tabanlı masaüstü bilgisayarlarındaki delikler aşağıdaki gibidir:
+
+        Fiziksel Adres Alanı (x86-64) — Tipik Intel Masaüstü
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Adres                Boyut     İçerik
+    ──────────────────────────────────────────────────────────────
+
+    0x0000_0000 ┬──────────────────────────────────────────────┐
+                │  IVT + BDA                        (    1 KB) │ RAM
+    0x0000_0500 │  Kullanılabilir RAM               (  637 KB) │
+    0x0009_FC00 │  EBDA                             (    1 KB) │ RAM (reserved)
+    0x000A_0000 ├──────────────────────────────────────────────┤
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+                │░  VGA Frame Buffer                (  128 KB) │░ DELİK
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+    0x000C_0000 ├──────────────────────────────────────────────┤
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+                │░  Video BIOS ROM                  (   32 KB) │░ DELİK
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+    0x000C_8000 ├──────────────────────────────────────────────┤
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+                │░  Option ROM / reserved           (  224 KB) │░ DELİK
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+    0x000F_0000 ├──────────────────────────────────────────────┤
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+                │░  System BIOS ROM                 (   64 KB) │░ DELİK
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+    0x0010_0000 ├──────────────────────────────────────────────┤
+                │                                              │
+                │  Kullanılabilir RAM               (  ~ GB'lar│ RAM
+                │  (çekirdek + kullanıcı belleği)           )  │
+                │                                              │
+    0xBFFE_0000 ├──────────────────────────────────────────────┤
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+                │░  ACPI Tabloları / Reserved       (  128 KB) │░ DELİK
+                │░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+    0xC000_0000 ├──────────────────────────────────────────────┤
+                │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+                │▓  PCI Hole (32-bit MMIO alanı)               │▓ BÜYÜK DELİK
+                │▓  PCIe BAR'ları, GPU belleği      (  ~1  GB) │▓
+                │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+    0xFEC0_0000 ├──────────────────────────────────────────────┤
+                │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+                │▓  I/O APIC                        (    4 KB) │▓ DELİK
+                │▓  HPET                            (    4 KB) │▓
+                │▓  TPM                             (   64 KB) │▓
+                │▓  Local APIC  (0xFEE0_0000)       (    4 KB) │▓
+                │▓  UEFI Runtime / MSI-X            (  ~12 MB) │▓
+                │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+    0xFFFF_FFFF └──────────────────────────────────────────────┘  ← 4 GB sınırı
+
+    0x1_0000_0000 ┬─────────────────────────────────────────────┐
+                │  Remapped RAM                               │ RAM
+                │  (32-bit'te görünemeyen RAM buraya taşınır) │
+                │  TOLUD/TOUUD üzeri sistem RAM'i             │
+                │                                             │
+                │         . . .                               │
+                │                                             │
+    0x?_????_???? └─────────────────────────────────────────────┘
+                    (kurulu RAM miktarına bağlı olarak değişir)
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Gösterim:   (boş)  = Kullanılabilir RAM  (struct page tahsis edilir)
+                ░░░░░  = Küçük delik         (donanım ROM / legacy I/O)
+                ▓▓▓▓▓  = Büyük delik         (MMIO / PCIe / APIC)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Buradaki deliklerin bir kusur olmadığına bir tasarım biçimi olduğuna dikkat ediniz. Ancak fiziksel bellekte 
+    deliklerin bulunması durumunda deliklerdeki sayfalar için page nesneleri sayfa tablolarıyla yoluyla daha etkin 
+    bir biçimde temsil edilebilir durumdaysa buna CONFIG_SPARSEMEM_VMEMMAP konfigürasyonu denilmektedir. İşte aslında 
+    Intel tabanlı masaüstü bilgisayarlarımızda delikler olmakla birlikte bunların page nesneleri sayfa tabloları yoluyla 
+    daha etkin bir biçimde oluşturulablmektedir. Yani bu sistemler CONFIG_SPARSEMEM_VMEMMAP biçiminde konfigüre edilmiştir. 
+    Örneğin 32 ARM tabanlı "Beaglebone Black (BBB)" mimarisinde fiziksel RAM en fazla 2GB olabilmektedir ve deliksizdir. 
+    Bu mimari CONFIG_FLATMEM biçiminde konfigüre edilmiştir. Raspberry Pi 5 ve ARM tabanlı Mac bilgisayarlar mimarileri
+    ise CONFIG_SPARSEMEM_VMEMMAP biçiminde konfigüre edilmeketdir. Aşağıda bu dört mimariyi bir tablo eşliğinde karşılaştırıyoruz:
+
+    ┌──────────────────────┬──────────────────┬─────────────────┬──────────────────┬──────────────────────┐
+    │      Özellik         │  Intel Masaüstü  │ Beaglebone Black│  Raspberry Pi 5  │  Apple Silicon Mac   │
+    │                      │   (x86-64)       │ (AM335x/ARMv7)  │ (BCM2712/ARM64)  │  (M1/M2/M3/M4)       │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ İşletim Sistemi      │ Linux            │ Linux           │ Linux            │ macOS (XNU çekirdeği)│
+    │ (tipik)              │                  │                 │                  │ ya da Asahi Linux    │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ CPU Çekirdeği        │ Çeşitli          │ Cortex-A8       │ Cortex-A76       │ Firestorm/Everest    │
+    │                      │ (Alder Lake vb.) │                 │ (quad-core)      │ (performans+verimli) │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ ISA                  │ x86-64 (64-bit)  │ ARMv7 (32-bit)  │ ARMv8.2 (64-bit) │ ARMv8.5+ (64-bit)    │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ Max RAM              │ TB mertebesi     │ 512 MB – 2 GB   │ 4/8/16 GB        │ 16/24/32/48/128 GB   │
+    │                      │                  │                 │                  │ (Unified Memory)     │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ Linux Çekirdeği      │ Evet             │ Evet            │ Evet             │ macOS'ta: Hayır      │
+    │ kullanıyor mu?       │                  │                 │                  │ Asahi'de: Evet       │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ Linux Bellek         │ SPARSEMEM        │ FLATMEM         │ SPARSEMEM        │ macOS: N/A (XNU)     │
+    │ Modeli               │ _VMEMMAP         │                 │ _VMEMMAP         │ Asahi: SPARSEMEM     │
+    │                      │                  │                 │                  │        _VMEMMAP      │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ Model                │ Hayır            │ Evet            │ Hayır            │ Hayır                │
+    │ değiştirilebilir mi? │ (tek seçenek)    │ (SPARSEMEM de   │ (2021'den beri   │ (ARM64 zorunlu)      │
+    │                      │                  │  seçilebilir)   │  tek seçenek)    │                      │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ Sayfa Boyutu         │ 4 KB             │ 4 KB            │ 4 KB             │ macOS: 16 KB         │
+    │                      │                  │                 │                  │ Asahi: 16 KB         │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ NUMA Desteği         │ Evet (Xeon)      │ Hayır           │ Hayır            │ Hayır (tek die)      │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ RAM Hot-plug         │ Desteklenir      │ Desteklenmez    │ Desteklenmez     │ Desteklenmez         │
+    ├──────────────────────┼──────────────────┼─────────────────┼──────────────────┼──────────────────────┤
+    │ Fiziksel adres       │ Çok sayıda büyük │ Tek sürekli     │ GPU MMIO +       │ Unified Memory;      │
+    │ uzayı yapısı         │ delik (VGA,PCIe, │ blok            │ RP1 PCIe deliği  │ CPU+GPU ortak;       │
+    │                      │ APIC, ACPI…)     │ (0x80000000'dan)│                  │ DART IOMMU zorunlu   │
+    └──────────────────────┴──────────────────┴─────────────────┴──────────────────┴──────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    CONFIG_FLATMEM durumunda fiziksel bellek sayfalarına ilişkin page nesneleri mem_map isimli bir göstericinin gösterdiği
+    dizide bulundurulmaktadır. Bu dizi çekirdek yüklendiğinde bellek yönetimi alt sisteminin ilklenmesi sırasında 
+    yaratılmaktadır. mem_map dizisinin tanımlanması güncel çekirdeklerde "mm/mm_init.c" dosyası içerisinde aşağıdaki 
+    gibi yapılmıştır:
+
+    #ifndef CONFIG_NUMA
+    unsigned long max_mapnr;
+    EXPORT_SYMBOL(max_mapnr);
+
+    struct page *mem_map;
+    EXPORT_SYMBOL(mem_map);
+    #endif
+
+    Görüldüğü gibi bu dizinin uzunluğu da max_mapnr değişkeninde tutulmaktadır. Yani sistemde en fazla max_mapnr kadar 
+    fiziksel sayfa vardır. Fiziksel belleğin hangi miktarda olduğunun tespiti masaüstü bilgisayarlarda ACPI protokolü 
+    yoluyla gömülü sistemlerde aygıt ağaçları yoluyla tespit edilmektedir. 
+
+    Eğer CONFIG_SPARSEMEM_VMEMMAP durumu söz konusuysa fiziksel sayfalar için page dizisinin başlangıç adresi vmemmap 
+    değişkeninde tutulmaktadır. vmemmap bazı mimarilerde bir nesne biçiminde bazı mimarilerde ise bir makro biçiminde 
+    tanımlanmıştır. Örneğin Intel x86 mimari için güncel çekirdeklerde vmemmap "arch/x86/include/asm/pgtable_64.h" 
+    dosyasında aşağıdaki gibi bir makro biçiminde tanımlanmıştır:
+
+    #define vmemmap ((struct page *)VMEMMAP_START)
+
+    Buradaki VMEMMAP_START değeri şöyle define edilmiştir:
+
+    # define VMEMMAP_START		vmemmap_base
+    ...
+    extern unsigned long vmemmap_base;
+
+    Buradan vmemmap dizisinin aslında sanal bellekte belli bir değişkenin içindeki değer olarak alındığını 
+    görüyorsunuz. Yani vmemmap_base aslında sabit bir adres belirtmektedir. Peki neden CONFIG_SPARSEMEM_VMAMMAP 
+    durumunda doğrudan bir dizi kullanılamış da bir sanal adrese referans edilmiştir. İşte bunun nedeni delikli olan 
+    ancak deliklerin belli büyüklüklerde ve makul olduğu sistemlerde daha etkin bir temsilin oluşturulması gayretidir. 
+    vmemmap sanal adresinin gösterdiği yerde page yapılarından oluşan bir dizi vardır, ancak bu dizinin deliklere karşı
+    gelen elemanları için sayfa tablosunda eşleştirme yapılmamıştır. vmemmap göstericisinin gösterdiği sanal adrese 
+    ilişkin sayfa tablosunu aşağıdaki gibi düşünebilirsiniz (basitlik oluşturmak için sayfa tablosunu tek kademeymiş 
+    gibi çizeceğiz):
+
+                      Sayfa Tablosu
+                   ┌─────────────────┐
+                   │                 │
+                   │       ...       │
+    vmemmap ──→    ├─────────────────┤ ──→ dizi elemanı
+                   ├─────────────────┤ ──→ dizi elemanı
+                   ├─────────────────┤
+                   │      BOŞ        │
+                   ├─────────────────┤
+                   │      BOŞ        │
+                   ├─────────────────┤ ──→ dizi elemanı
+                   ├─────────────────┤
+                   │       ...       │
+                   │                 │
+                   └─────────────────┘
+    
+    Görüldüğü gibi sanki vmemmap adresinden itibaren ardışıl bir page dizis varmış gibi bir durum oluşturulmuştur. Ancak
+    bu dizinin bazı elemanları deliklere ilişkin olduğu için o elemanlara ilişkinsayfa tablosunda fiziksel sayfa önlendirmesi 
+    yapılmamıştır. Dolayısıyla delikli yapı aslında fiziksel bellekte hiç yr harcanmadan oluşturulabilmektedir. Tabii
+    burada bir noktaya dikkat ediniz. Bir sayfa tipik olarak 4K küyüklüğündedir. page yapı nesnesinin de bellekte 
+    64 byte yer kapladığını belirtmiştik. O halde bir sayfa toplam 64 dizi elemanını tutacak genişliktedir. Eğer 
+    delikler 4K'dan küçükse böyle bir temsil uygulanamayacaktır. 
+
+    Eğer delikler yukarıdaki gibi büyük değilse bu durumda iki seçenek söz konusu olur. Birincisi dizide boş elemanlar 
+    bulundurmak ikincisi ise başka bir temsil kullanmak. İşte CONFIG_SPARSEMEM durumunda belli bir fiziksel sayfanın 
+    page nesnesinin elde edilmesi değişik bir yöntem kullanılarak yapılmaktadır. CONFIG_SPARSEMEM durumunda çekirdek 
+    fiziksel belleği bölümlere (sections) ayırmaktadır. Her bölüm ardşıl uzunluktadır. Çekirdekte bu uzunluk SECTION_SIZE_BITS
+    değeri ile belirtilmektedir. Bu değer bölümün 2 üzeri kaç uzunlukta olduğunu belirtir. Bölümler tipik olarak 
+    128MB'dir ve 32768 sayfa içermektedir. Bu durumu aşağıdaki gibi bir çizimle betimleyebiliriz:
+
+    Fiziksel Adres Alanı:
+
+    PFN: 0                                                    max
+        │                                                      │
+        ▼                                                      ▼
+        ┌──────────┬──────────┬──────────┬──────────┬──────────┐
+        │ section  │ section  │ section  │ section  │ section  │
+        │    0     │    1     │    2     │    3     │    4     │
+        └──────────┴──────────┴──────────┴──────────┴──────────┘
+  
+    Çekirdek bölümleri mem_section isminde bir yapıyle temsil etgmektedir. Bu yapı güncel çekirdeklerde şöyle 
+    bildirilmiştir:
+
+    struct mem_section {
+        /*
+        * This is, logically, a pointer to an array of struct
+        * pages.  However, it is stored with some other magic.
+        * (see sparse.c::sparse_init_one_section())
+        *
+        * Additionally during early boot we encode node id of
+        * the location of the section here to guide allocation.
+        * (see sparse.c::memory_present())
+        *
+        * Making it a UL at least makes someone do a cast
+        * before using it wrong.
+        */
+        unsigned long section_mem_map;
+
+        struct mem_section_usage *usage;
+    #ifdef CONFIG_PAGE_EXTENSION
+        /*
+        * If SPARSEMEM, pgdat doesn't have page_ext pointer. We use
+        * section. (see page_ext.h about this.)
+        */
+        struct page_ext *page_ext;
+        unsigned long pad;
+    #endif
+        /*
+        * WARNING: mem_section must be a power-of-2 in size for the
+        * calculation and use of SECTION_ROOT_MASK to make sense.
+        */
+    };
+
+    Yapının section_mem_map elemanı o bölümdeki page nesnelerinin başlangıç adresini belirtmektedir. Tabii çekirdek 
+    tüm bölümleri mem_section isimli bir dizide saklamaktadır:
+
+    mem_section[] dizisi:
+
+        ┌──────────────────────┐
+    0   │  struct mem_section  │──→ section 0'ın struct page dizisi
+        ├──────────────────────┤
+    1   │  struct mem_section  │──→ NULL (bu section populate edilmemiş)
+        ├──────────────────────┤
+    2   │  struct mem_section  │──→ section 2'nin struct page dizisi
+        ├──────────────────────┤
+     3  │  struct mem_section  │──→ NULL
+        ├──────────────────────┤
+                ...
+
+    Bu sistemlerde çekirdek için fiziksel sayfa numarası ikiş bileşenden oluşmaktadır:
+
+    PFN (örneğin 64-bit):
+
+    ┌─────────────────────────────┬──────────────────────────┐
+    │      section_nr             │     within_section_pfn   │
+    │  (üst bitler)               │     (alt bitler)         │
+    └─────────────────────────────┴──────────────────────────┘
+    │← PFN >> SECTION_SIZE_BITS  →│← PFN & ~SECTION_MASK    →│
+
+    Bu bileşenleri veren makrolar vardır:
+
+    #define pfn_to_section_nr(pfn)   ((pfn) >> PFN_SECTION_SHIFT)
+    #define pfn_to_section_offset(pfn) ((pfn) & ~PAGE_SECTION_MASK)
+
+    Bu durumda çekirdek fiziksel sayfa numarası verildiğinde ilgili page nesnesine şöyle erişmektedir: 
+
+    1) Çekirdek önce fiziksel sayfa numarasını iki bileşene ayırır. 
+    2) Fiziksel sayfa numarasındaki bölüm numarasını mem_section dizisine indeks yaparak oradan ilgili bölümün 
+    bilgilerine, dolayısıyla da o bölümün page dizisinin adresine erişir. 
+    3) Fiziksel sayfa numarasında offset'i (yukarıdaki şekildeki within_section_pfn kısmını) indeks yaparak bu dizideki 
+    page nesnesine erişir.
+
+    Bu işlemi şekilsel olarak da aşağıdaki gibi ifade edebiliriz:
+
+    Adım 1: section_nr = pfn >> PFN_SECTION_SHIFT
+            ┌─────────────────────────────────────────────────┐
+            │  PFN'nin üst bitlerini al → section numarası    │
+            └─────────────────────────────────────────────────┘
+
+    Adım 2: sp = __nr_to_section(section_nr)
+            ┌─────────────────────────────────────────────────┐
+            │  mem_sections[] dizisine index'le               │
+            │  → struct mem_section pointer'ı al              │
+            └─────────────────────────────────────────────────┘
+
+    Adım 3: page_base = sp->section_mem_map  (flag bitleri maskelenir)
+            ┌─────────────────────────────────────────────────┐
+            │  bölüme ilişkin struct page dizisinin başı      │
+            └─────────────────────────────────────────────────┘
+
+    Adım 4: within = pfn & ~PAGE_SECTION_MASK
+            ┌─────────────────────────────────────────────────┐
+            │  PFN'nin alt bitleri → bölüm içi offset         │
+            └─────────────────────────────────────────────────┘
+
+    Adım 5: return page_base + within
+            ┌─────────────────────────────────────────────────┐
+            │  diziye offset ekle → struct pagenesnesi        │
+            └─────────────────────────────────────────────────┘
+
+    Örnek bir erişim görseli de şöyle olabilir:
+
+        PFN (örnek: 0x8001F)
+    ┌──────────────────────┬──────────────────┐
+    │   section_nr = 0x10  │  offset = 0x01F  │
+    └──────────────────────┴──────────────────┘
+            │                       │
+            │                       │
+            ▼                       │
+    mem_section[]                   │
+    ┌──────────────────┐            │
+    │ [0]  mem_section │            │
+    ├──────────────────┤            │
+    │ [1]  mem_section │            │
+    ├──────────────────┤            │
+    │      ...         │            │
+    ├──────────────────┤            │
+    │ [0x10]           │            │
+    │  section_mem_map │            │
+    │       │          │            │
+    └───────┼──────────┘            │
+            │                       │
+            ▼                       ▼
+            ┌──────────────────────────────────────┐
+            │   section'ın struct page dizisi      │
+            ├───────┬───────┬───────┬───────┬──────┤
+            │ [0]   │ [1]   │  ...  │[0x01F]│ ...  │
+            │ page  │ page  │       │ page  │      │
+            └───────┴───────┴───────┴───────┴──────┘
+                                        ▲
+                                        │
+                                pfn_to_page()
+                                sonucu burası
+
+    Son olarak üç konfigürasyon parametresini de özet biçimde karşılaştıralım:
+
+    ┌──────────────────────┬────────────────────────────────────────────┐
+    │        Model         │       pfn_to_page() yöntemi                │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ CONFIG_FLATMEM       │ mem_map + (pfn - ARCH_PFN_OFFSET)          │
+    │                      │ → tek global dizi, tek toplama             │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ CONFIG_SPARSEMEM     │ vmemmap + pfn                              │
+    │ _VMEMMAP             │ → FLATMEM kadar hızlı, tek toplama         │
+    │                      │ → ama delikler için fiziksel sayfa yok     │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ CONFIG_SPARSEMEM     │ mem_sections[pfn >> SHIFT]                 │
+    │ (VMEMMAP'siz)        │    .section_mem_map + pfn                  │
+    │                      │ → önce section lookup, sonra toplama       │
+    │                      │ → dolaylı bellek erişimi var (daha yavaş)  │
+    └──────────────────────┴────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdeğin yukarıda belirttiğimiz CONFIG_FLATMEM, CONFIG_SPARSEMEM_VMEMMAP ve CONFIG_SPARSEMEM konfigürasyon 
+    parametreleri ne olursa olsun çekirdek belli bir fiziksel sayfa numarasını alarak page nesnesinin adresini veren 
+    pfn_to_page isimli bir makro bulundurmaktadır. Yani bu makro bu üç konfigürasyon parametresinde de kullanılbilir 
+    durumdadır. Makro CONFIG_FLATMEM durumunda şöyle tanımlanmıştır:
+
+    #define pfn_to_page         __pfn_to_page
+    #define __pfn_to_page(pfn)	(mem_map + ((pfn) - ARCH_PFN_OFFSET))
+
+    Buradaki ARCH_PFN_OFFSET değeri genellikle 0'dır. Görüldüğü gibi makronun yaptığı tek şey mem_map dizisinin ilgili 
+    elemanın adresini elde etmektir. CONFIG_SPARSEMEM_VMEMMAP durumunda ise makro şöyle tanımlanmıştır:
+
+    #define pfn_to_page         __pfn_to_page
+    #define __pfn_to_page(pfn)	(vmemmap + (pfn))
+
+    Burada da görüldüğü gibi page yapı nesnesinin adresi vmemmap adresine pfn toplanarak elde edilmiştir. CONFIG_SPARSEMEM
+    durumunda ise makro şöyledir:
+
+    #define pfn_to_page         __pfn_to_page
+    #define __pfn_to_page(pfn)				                    \
+    ({	unsigned long __pfn = (pfn);			                \
+        struct mem_section *__sec = __pfn_to_section(__pfn);	\
+        __section_mem_map_addr(__sec) + __pfn;		            \
+    })
+
+    Burada yukarıda açıkladığımız gibi önce fiziksel sayfa numarasından bölüm (section), sonra da bu bölüm içerisindeki 
+    page nesnesi elde edilmiştir. Buradaki __pfn_to_section fonksiyonu sayfa numarısından bölüm nesnesini, __section_mem_map_addr
+    fonksiyonu ise sayfa numarasından offset'i elde etmektedir. 
+
+    Örneğin 12345 numaralı fiziksel sayfanın page yapı nesnesinin adresini elde etmek isteyelim. Yukarıda da belirttiğimiz 
+    gibi bizim artık hangi konfigürasyonda olundupunu bilmemize gerek kalmamaktadır. Tek yapacağımız şey pfn_to_page(12345)
+    çağırısıdır. 
+
+    Bazen yukarıdaki işlemin tersinin de yapılması gerekebilmektedir. Yani bizim elimizde bir page nesnesinin adresi 
+    vardır, biz de bunun hangi fiziksel sayfa numarasına karşı geldiğini bulmak isteyebiliriz. Eskiden page yapısının 
+    içerisinde bu bilgi vardı. Ancak daha sonra bu bilgi kaldırıldı. Bu işlemi yapan page_to_pfn makrosu bulundurulmuştur. 
+    Bu makro yukarıdaki işlemlerin tersini yapmaktadır. Örneğin CONFIG_FLATMEM durumunda şöyle tanımlanmıştır:
+
+    #define page_to_pfn __page_to_pfn
+    #define __page_to_pfn(page)  ((unsigned long)((page) - mem_map) + ARCH_PFN_OFFSET)
+
+    CONFIG_SPARSEMEM_VMEMMAP durumunda ise şöyle tanımlanmıştır:
+
+    #define page_to_pfn __page_to_pfn
+    #define __page_to_pfn(page)  ((unsigned long)((page) - vmemmap)
+    
+    CONFIG_SPARSEMEM durumunda ise şöyle tanımlanmıştır:
+
+    #define __page_to_pfn(pg)					                                    \
+    ({	const struct page *__pg = (pg);				                                \
+        int __sec = memdesc_section(__pg->flags);		\
+        (unsigned long)(__pg - __section_mem_map_addr(__nr_to_section(__sec)));	    \
+    })
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+					                        75. Ders 03/05/2026 - Pazar				
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de çekirdeğin fiziksel belleğe fazıl eriştiği üzerinde duralım. Bu komuya Linux çekirdek terminolojisinde 
+    "kernel direct mapping" de denilmektedir. Anımsanacağı gibi proseslerin sayfa tablolarında çekirdeğe ilişkin alanlar
+    aynıdır ve prosesler arası geçiş olsa bile çekirdek her zaman sanal belleğin aynı yerindedir. Örneğin 32 bit Linux
+    sistemlerinde sayfa tablolarının şuna benzediğini belirtmiştik (aslında bu sistemlerde sayfa tabloları iki kademelidir,
+    ancak biz algısal kolaylık sağlamak amacıyla sanki bunu tek kademeliymiş gibi gösteriyoruz):
+
+                            Sayfa Tablosu
+    0x00000000  ┌─────────────────────────────────────┐
+                │                                     │
+                │                                     │
+                │           Kullanıcı Alanı           │  3 GB
+                │                                     │
+                │                                     │
+    0xC0000000  ├─────────────────────────────────────┤
+                │                                     │
+                │           Çekirdek Alanı            │  1 GB
+                │                                     │
+    0xFFFFFFFF  └─────────────────────────────────────┘
+
+    64 bit sistemlerde de sayfa tablosu şöyleydi:
+
+    
+    0x0000000000000000  ┌─────────────────────────────────────┐
+                        │                                     │
+                        │           Kullanıcı Alanı           │  128 TB
+                        │                                     │
+    0x00007FFFFFFFFFFF  ├─────────────────────────────────────┤
+                        │                                     │
+                        │       Non-canonical Hole            │  ~16 million TB
+                        │         (Geçersiz Aralık)           │
+                        │                                     │
+    0xFFFF800000000000  ├─────────────────────────────────────┤
+                        │                                     │
+                        │           Çekirdek Space            │  128 TB
+                        │                                     │
+    0xFFFFFFFFFFFFFFFF  └─────────────────────────────────────┘
+
+
+    Peki çekirdek (ya da aygıt sürücüler) belli bir fiziksel adrese erişmek isterse bu nasıl yapabiliyor? Çünkü 
+    çekirdek kodları da yine aynı sayfa tablosunu kullanmaktadır. Yani çekirdek kodları da sayfa tablosu dönüştürmesiyle
+    fiziksel belleğe erişmektedir. İşte Linux çekirdeğinde sayfa tablosunun çekirdek alanı fiziksel belleğin başından 
+    itibaren haritalanmıştır (map edilmiştir). Örneğin 32 bit bir sistemde sayfa tablosunda çekirdek alanının ilk 
+    sayfası  fiziksel 0 numaralı sayfaya, ikinci sayfası 1 numaralı sayfaya, üçüncü sayfası 2 numaralı sayfaya ve 
+    diğer sayfaları  da bu biçimde fiziksel belleğin diğer sayfalarına yönlendirilmiştir. Başka bir deyişle örneğin 
+    32 bit Linux sistemlerinde biz çekirdek modunda  0xC0000000 sanal adresini kullandığımızda aslında fiziksel 
+    belleğin 0'ıncı adresine erişmiş oluruz. Bu durumda hesap oldukça basittir. Biz 32 bit bir sistemde çekirdek 
+    modunda fiziksel belleğin paddr adresine erişmek için aslında 0xC0000000 + paddr adresini kullanırız. Ya da biz 
+    çekirdek modunda sanal vaddr adresinin fiziksel belleğin neresi olduğunu vaddr - 0xC0000000 işlemiyle tespit 
+    edebiliriz. Çekirdek alanının başlangıcı çekirdek kodlarında PAGE_OFFSET sembolik sabitiyle belirtilmektedir. 
+    Yani 32 bit Linux sistemlerinde tipik olarak PAGE_OFFSET değeri 0xC0000000 biçimindedir. 32 bit Linux sistemlerinde
+    sayfa tablosunun çekirdek kısmını şöyle düşünebilirsiniz:
+
+    ┌───────────────┬──────────────────┐
+    │  Sanal Sayfa  │  Fiziksel Sayfa  │
+    ├───────────────┼──────────────────┤
+    │      ...      │       ...        │
+    │     C0000     │      00000       │
+    │     C0001     │      00001       │
+    │     C0002     │      00002       │
+    │      ...      │       ...        │
+    └───────────────┴──────────────────┘
+
+    Ancak 32 bit Linux sistemlerinde "doğrudan haritalama (direct mapping)" konusunda bir sorun vardır. Sayfa tablosunda 
+    çekirdek alanı için 1GB yer kaldığına göre ancak bu yolla olsa olsa fiziksel belleğin ilk 1GB'sine doğrudan erişilebilmektedir. 
+    Aslında durum tam böyle de değildir. 32 bit Linux çekirdeklerinde sayfa tablosunun çekirdek kısmının hepsi değil 
+    yalnızca ilk 896MB'lik kısım doğrudan adresleme için kullanılmaktadır. Çünkü 32 bit Linux çekirdekleri geri kalan 
+    s128MB'lik alanı başka yerlere erişmek için yani amaçlarla kullanmaktadır:
+
+    0 GiB   ┌─────────────────────────────────────────────────────┐
+            │                                                     │
+            │              U S E R   S P A C E                    │
+            │                    (3 GiB)                          │
+            │                                                     │
+            │             ┌──────────────────────────────────┐    │
+            │             │  Text / Data / BSS segments      │    │
+            │             ├──────────────────────────────────┤    │
+            │             │  Heap  (grows upward ↑)          │    │
+            │             ├──────────────────────────────────┤    │
+            │             │  mmap / shared libs              │    │
+            │             ├──────────────────────────────────┤    │
+            │             │  Stack (grows downward ↓)        │    │
+            │             └──────────────────────────────────┘    │
+            │                                                     │
+    3 GiB   ├─────────────────────────────────────────────────────┤
+            │            K E R N E L   S P A C E                  │
+            │                    (1 GiB)                          │
+            │  0xC0000000  ┌──────────────────────────────────┐   │
+            │(PAGE_OFFSET) │                                  │   │
+            │              │  Direct-mapped physical memory   │   │
+            │              │  PA 0x00000000 → VA 0xC0000000   │   │
+            │              │      ...  (identity shift)       │   │
+            │              │  PA 0x3FFFFFFF → VA 0xFFFFFFFF   │   │
+            │              │  (up to ~896 MiB, ZONE_NORMAL)   │   │
+            │  0xC0800000  ├──────────────────────────────────┤   │
+            │              │  pkmap (ZONE_HIGHMEM eşleme)     │   │
+            │  0xC8000000  ├──────────────────────────────────┤   │
+            │              │  vmalloc / ioremap area          │   │
+            │  0xF8000000  ├──────────────────────────────────┤   │
+            │              │  Kernel text, data, BSS          │   │
+            │              └──────────────────────────────────┘   │
+    4 GiB   └─────────────────────────────────────────────────────┘
+
+    Doğrudan Haritalama Formülü:
+    VA = PA + 0xC0000000    (PAGE_OFFSET)
+    PA = VA − 0xC0000000    (PAGE_OFFSET)
+
+    Şekilden de gördüğünüz gibi 896 MB'tın yukarsı başka amaçlarla kullanılmaktadır. 32 bit Linux sistemlerinde 
+    fiziksel bellekteki ilk 896MB'nin yukarısına HIGMMEM denilmektedir. NUMA düğümleri içerisinde (SMP sistemleri 
+    tek NUMA düğümü varmış gibi ele alınıyordu) ZONE_HIGMEM isimli bir bölgenin de olduğunu anımsayınız. Bu bölge 
+    yalnızca 32 bit Linux sistemlerinde bulunmaktadır. İzleyen paragraflarda göreceğimiz gibi 64 bit Linux sistemlerinde 
+    fiziksel belleğin her yeri zaten doğrudan haritalanabilmektedir. 
+
+    Peki 32 Linux sistemlerinde çekirdek ya da aygıt sürücüler HIGMEM fiziksel bellek alanına naıl erişmektedir? İşte
+    bu erişim ancak çekirdeğin sayfa tablosununun belli bölgesini (buraya kmap bölgesi de denmektedir) geçici biçimde 
+    değiştirmesiyle sağlanabilmektedir. 
+
+    0x00000000  ┌────────────────────────────────────┐
+                │                                    │
+                │           LOWMEM                   │  0 – 896 MB
+                │   (Normal Zone / DMA Zone)         │
+                │                                    │
+                │  Her sayfanın kalıcı sanal         │
+                │  adresi vardır:                    │
+                │  virt = phys + PAGE_OFFSET         │
+                │                                    │
+    0x38000000  ├────────────────────────────────────┤  ← high_memory
+    (896 MB)    │                                    │
+                │           HIGHMEM                  │  896 MB üstü
+                │   (High Memory Zone)               │
+                │                                    │
+                │  Sayfalar geçici olarak            │
+                │  eşlenir, erişim sonrası           │
+                │  eşleme kaldırılır                 │
+                │                                    │
+    0xFFFFFFFF  └────────────────────────────────────┘
+    
+    Geçici eşleştirme için kmap, kmap_atomic ve kmap_local_page fonksiyonları kullanılmaktadır. Bu fonksiyonlar sayfa 
+    tablosunun kmap alanını sayfa tablosunu geçici olarak değiştirmektedir. 
+
+
+        Fiziksel RAM                    Çekirdek Sanal Alanı (0xC0000000–0xFFFFFFFF)
+    ─────────────────               ──────────────────────────────────────────
+    0x00000000  ┌──────────┐        0xC0000000  ┌──────────────────┐
+                │          │                    │  Direct Mapping  │  ← LOWMEM (896 MB)
+                │  LOWMEM  │  ←───────────────→ │  (1:1 map)       │
+                │          │                    │                  │
+    0x38000000  ├──────────┤        0xF8000000  ├──────────────────┤
+    (896 MB)    │          │                    │  pkmap area      │  ← kmap()
+                │          │                    │  (PKMAP_BASE)    │
+                │ HIGHMEM  │        0xFF800000  ├──────────────────┤
+                │          │                    │  fixmap area     │  ← kmap_atomic()
+                │          │                    ├──────────────────┤
+                │          │                    │  vmalloc area    │
+    0xFFFFFFFF  └──────────┘        0xFFFFFFFF  └──────────────────┘
+
+
+    Şekli şöyle de çizebiliriz:
+   
+    0xC0000000  ┌────────────────────────────────────┐
+                │  Direct Mapping (LOWMEM)           │  896 MB
+                │  Fiziksel RAM'in 1:1 eşlemesi      │
+                │  phys = virt - PAGE_OFFSET         │
+    0xF8000000  ├────────────────────────────────────┤
+                │  Persistent Kernel Map (pkmap)     │  ~2 MB
+                │  kmap() için rezerve               │
+                │  PKMAP_BASE adresi                 │
+    0xFF800000  ├────────────────────────────────────┤
+                │  Fixed-Address Mappings (fixmap)   │  ~2 MB
+                │  kmap_atomic() slotları            │
+    0xFFC00000  ├────────────────────────────────────┤
+                │  vmalloc / ioremap alanı           │  kalan
+                │  Sanal sürekli, fiziksel dağınık   │
+    0xFFFFFFFF  └────────────────────────────────────┘
+    Yüksek Adres
+
+    kmap fonksiyonun parametrik yapısı şöyledir:
+
+    void *kmap(struct page *page);
+
+    Fonksiyon fiziksel sayfayı temsil eden bir page nesnesini parametre olarak alır,çekirdeğin sayfa tablosunda 
+    pkmap alanında değişiklik yapıp o fiziksel sayfaya erişmekte kullanılan sanal adresi geri döndürür. kmap işlemi 
+    sırasında bloke oluşabilir. Ancak bloke oluşmadan eşleme için çekirdek içerisinde ayrıca kmap_atomic ya da bunun 
+    daha modern biçimi olan kmap_local_page fonksiyonu kullanılmaktadır:
+
+    void *kmap_atomic(const struct page *page);
+    void *kmap_local_page(struct page *page);
+
+    Tabii bu fonksiyonları kullanmak için önceden bir page nesnesinin bölge içerisinde tahsis edilmiş olması gerekir. 
+    Biz bu tahsisatın nasıl yapıldığını "ikiz blok sistemi (buddy allocator)" kısmında zaten açıklayacağız. 
+    
+    Bu fonksiyonlarla oluşturulan geçici haritalama aşağıdaki fonksiyonlarla kaldırılabilmektedir:
+
+    void kunmap(const struct page *page);
+    #define kunmap_atomic(__addr)					            \
+    do {								                        \
+        BUILD_BUG_ON(__same_type((__addr), struct page *));	    \
+        __kunmap_atomic(__addr);				                \
+    } while (0)
+    void kunmap_local(void *addr);
+
+    Bir page nesnesinin HIGHMEM alanına ilişkin olup olmadığı is_hihmem_pahe fonksiyonuyla kontrol edilebilmektedir:
+
+    bool is_highmem_page(struct page *page)
+
+    HIGMEM alanına erişmek için kmap, kmap_atomic ve kmap_local_page fonksiyonlarının hangilerinin hangi durumlarda 
+    kullanılacağına ilişkin aşağıda bir karar ağacı veriyoruz:
+
+    HIGHMEM sayfasına erişmem gerekiyor
+            │
+            ▼
+    Interrupt / IRQ bağlamı içerisinde miyim?
+    ├── Evet ──► kmap_atomic() veya kmap_local_page()
+    │              │
+    │              ▼
+    │         Çok kısa bir erişim mi? (birkaç satır)
+    │         ├── Evet ──► kmap_atomic()
+    │         └── Hayır ─► kmap_local_page() (kernel 5.x+)
+    │
+    └── Hayır ─► Process bağlamı içerisinde miyim?
+                   │
+                   ▼
+              Uzun süreli erişim gerekli mi?
+              ├── Evet ──► kmap()  (uyku alabilir)
+              └── Hayır ─► kmap_local_page() tercih et
+
+    Bu üç fonksiyonu şöyle karşılaştırabiliriz:
+
+    ┌──────────────────────┬────────────┬────────────────┬────────────────────┐
+    │      Özellik         │  kmap()    │ kmap_atomic()  │ kmap_local_page()  │
+    ├──────────────────────┼────────────┼────────────────┼────────────────────┤
+    │ Bölge                │  pkmap     │  fixmap        │  per-CPU slot      │
+    │ Bloke oluşur mu?     │   Evet     │    Hayır       │      Hayır         │
+    │ Preemption disable   │   Hayır    │    Evet        │      Hayır         │
+    │ IRQ içinde güvenli   │   Hayır    │    Evet        │      Evet          │
+    │ Task switch güvenli  │   Evet     │    Hayır       │      Evet          │
+    │ Max eşzamanlı slot   │   512      │  CPU başına    │  CPU başına        │
+    │ LOWMEM sayfası için  │ page_addr  │  page_addr     │   page_addr        │
+    │ Önerilen bağlam      │ process    │  IRQ/softirq   │ process + IRQ      │
+    │ Kernel versiyonu     │   2.x+     │    2.x+        │     5.x+           │
+    └──────────────────────┴────────────┴────────────────┴────────────────────┘
+
+    Biz buradaki anlatımlarda 32 bit Intel işlemcilerini temel aldık. 32 bit ARM işlemcileri için çok küçük farklılıklar
+    söz konusu olmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bir kez daha bir noktayı vurgulamak istiyoruz. Burada açıkladığımız HIGMEM sorunu ve geçici haritalama yalnızca
+    32 bit Linux sistemlerinde söz konusudur. 64 bit Linux sistemlerinde zaten sayfa tablosunun çekirdek alanındaki 
+    kısmı tüm fiziksel belleği haritalandırabilmektedir. Dolayısıyla ZONE_HIHMEM bölgesi de yalnızca 32 bit sistemlerde
+    bulunan bir bölgedir. 64 bit Linux sistemlerinde proseslerin ve çekirdeğin sanal bellek alanı 128 TB olsa da bu 
+    sistemler şimdilik ancak 64TB'lik fiziksel belleği kullanabilmektedir. 128 TB'lik çekirdek alanının sayfa tablosunda 
+    64TB'lik fiziksel bellek zaten doğrudan hartitalandırılabilmektedir. 
+
+    ┌────────────────────────────────────────────────────────────────────┐
+    │              x86-64 Canonical Adres Uzayı (48-bit VA)              │
+    ├──────────────────────────┬─────────────────────────────────────────┤
+    │         Adres            │                 Bölge                   │
+    ├──────────────────────────┼─────────────────────────────────────────┤
+    │ 0x0000_0000_0000_0000    │                                         │
+    │          │               │   Kullanıcı Sanal Adres Uzayı           │
+    │          │               │           (~128 TiB)                    │
+    │          │               │                                         │
+    │ 0x0000_7FFF_FFFF_FFFF    │                                         │
+    ├──────────────────────────┼─────────────────────────────────────────┤
+    │ 0x0000_8000_0000_0000    │                                         │
+    │          │               │     ⚠ Non-Canonical Delik ⚠            │
+    │          │               │       [Erişim = General Protection      │
+    │          │               │              Fault]                     │
+    │ 0xFFFF_7FFF_FFFF_FFFF    │                                         │
+    ├──────────────────────────┼─────────────────────────────────────────┤
+    │ 0xFFFF_8000_0000_0000    │                                         │
+    │          │               │   Kernel Sanal Adres Uzayı (~128 TiB)   │
+    │          │               │                                         │
+    │          │               │   ├── Direct Map (64 TiB)  ◄── BURADA   │
+    │          │               │   ├── vmalloc / ioremap                 │
+    │          │               │   ├── vmemmap (struct page dizisi)      │
+    │          │               │   └── Kernel kodu, BSS, data            │
+    │          │               │                                         │
+    │ 0xFFFF_FFFF_FFFF_FFFF    │                                         │
+    └──────────────────────────┴─────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Linux çekirdeklerinde doğrudan haritalandırılan bölge için sanal adres ve fiziksel adres dönüştürmelerini yapan 
+    __pa ve ve __va makroları bulundurulmuştur. Bu makrolar şöyle yazılmıştır:
+
+    #define __pa(x)   ((unsigned long)(x) - PAGE_OFFSET)
+    #define __va(x)   ((void *)((unsigned long)(x) + PAGE_OFFSET))
+
+    Makroların yerleri mimariye göre değişebilmektedir.
+
+    Buradaki PAGE_OFFSET değeri 32 bit sistemlerle 64 bit sistemlerde farklıdır. Ayrıca 64 bit Intel, ARM ve RISC-V 
+    mimarisinde de küçük bir farklılık bulunmaktadır:
+
+    ┌─────────────────┬────────────────────────┬───────────────────────────────┐
+    │    Mimari       │      PAGE_OFFSET       │          Açıklama             │
+    ├─────────────────┼────────────────────────┼───────────────────────────────┤
+    │ x86-32          │ 0xC000_0000            │ 3 GB / 1 GB bölünmesi         │
+    │ x86-64          │ 0xFFFF_8880_0000_0000  │ Direct map başlangıcı         │
+    │ ARM32           │ 0xC000_0000            │ x86-32 ile aynı               │
+    │ ARM64 (48-bit)  │ 0xFFFF_0000_0000_0000  │ Kernel uzayı başlangıcı       │
+    │ RISC-V 64       │ 0xFF60_0000_0000_0000  │ Konfigürasyona göre değişir   │
+    └─────────────────┴────────────────────────┴───────────────────────────────┘
+
+    Bu makroların fonksiyon biçimleri de oluşturulmuştur:
+
+    static inline phys_addr_t virt_to_phys(volatile void *address)
+    {
+        return __pa(address);
+    }
+
+    static inline void *phys_to_virt(phys_addr_t address)
+    {
+        return __va(address);
+    }
+
+    __pa ve __va makroları ve fonksiyonlar platforma bağlı dizinlerde bulunmaktadır. (Örneğin "arch/x86/asm/io.h"). 
+    
+    ┌─────────────────────────┬──────────────────────────┬─────────────────────────────┐
+    │         Makro           │       Dönüşüm            │       Tanımlandığı Yer      │
+    ├─────────────────────────┼──────────────────────────┼─────────────────────────────┤
+    │ __pa(virt)              │ Sanal   → Fiziksel       │ asm/page.h                  │
+    │ __va(phys)              │ Fiziksel → Sanal         │ asm/page.h                  │
+    │ virt_to_phys(virt)      │ Sanal   → Fiziksel       │ asm/io.h                    │
+    │ phys_to_virt(phys)      │ Fiziksel → Sanal         │ asm/io.h                    │
+    │ page_to_phys(page)      │ struct page → Fiziksel   │ asm/memory_model.h          │
+    │ page_to_virt(page)      │ struct page → Sanal      │ asm/page.h                  │
+    │ virt_to_page(virt)      │ Sanal   → struct page    │ asm/page.h                  │
+    │ page_to_pfn(page)       │ struct page → PFN        │ include/linux/mm.h          │
+    │ pfn_to_page(pfn)        │ PFN → struct page        │ include/linux/mm.h          │
+    └─────────────────────────┴──────────────────────────┴─────────────────────────────┘
+
+    Bu tabloda page yapısı ile dönüştürme yapan fonksiyonlar da bulunmaktadır. Bu fonksiyonlardan izleyen konularda da 
+    söz edeceğiz.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdeğin hangi fiziksel sayfaların boş olduğunu, hangi fiziksel sayfaların hangi amaçla kullanıldığını izlemesi 
+    gerekmektedir. Biz önce çekirdeğin boşsayfaları nasıl tuttuğunu ve sayfa düzeyşnde tahsisatı nasıl yaptığını açıklayacağız. 
+    Sonra da byte düzeyinde çekirdek tahsisatları üzerinde duracağız. Daha önceden de belirttiğimiz gibi Linux çekirdeğinde
+    iki düzey tahsista sistemi vardır:
+
+    1) Sayfa düzeyinde tahsisat sistemi
+    2) Byte düzeyinde tahsisat sistemi
+
+    Sayfa düzeyinde tahsisat için kullanılan veri yapısına "ikiz blok sistemi" ya da İngilizcesiyle "buddy allocator" 
+    denilmektedir. Byte düzeyinde tahsisat sistemine de "dilimli tahsisat sistemi (slab allocator)" denilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek tüm fiziksel sayfaları bir heap alanı gibi ele alıp onların tahsisatlarını yönetmektedir. Fiziksel sayfaları 
+    temsil eden struct page nesneleri ilgili sayfanın tahsis edilip edilmediği gibi bilgileri de tutmaktadır. Biz bir 
+    aygıt sürücü yazarken ya da çekirdeğe bir modül eklerken bir fiziksel sayfayı doğrudan kullanamayız. Çünkü o sayfa
+    başka amaçlarla kullanılıyor olabilir. Biz önce sayfa düzeyinde tahsisat yapan fonksiyonlarla sayfayı tahsis edip 
+    ondan sonra kullanabiliriz. Yukarıda da belirttiğimiz gibi Linux çekirdeğinde "sayfa düzeyinde tahsisat" yapan bir
+    tahsisat sistemi bulunmaktadır. Biz bu sisteme Türkçe "ikiz blok sistemi" diyeceğiz. Bu sistemin İngilizce ismi 
+    "Buddy Allocator" biçimindedir. İzleyen paragraflarda ikiz blok tahsisat sisteminin algoritmik yapısını açıklayacağız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    İşletim sistemlerinde sayfa düzeyinde tahsisatların hızlı yapılması gerekir. Aynı zamanda sayfa tahsisat sisteminin 
+    mümkün olduğunca bellek bölünmesi (fragmentaton) olgusuna dirençli olması istenir. İkiz blok tahsisat sistemi
+    ilk kez Knowlton tarafından ortaya atılmış ve Knowlton bu algoritmayı 1965 yılında "Communications of the ACM" 
+    dergisinde "A Fast Storage Allocator" başlıklı makalesinde açıklamıştır. Bu algoritma Linux sistemlerine çok eskiden
+    çekirdeğe 1.2 versiyonuyla (1995) eklenmiştir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
