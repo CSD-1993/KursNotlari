@@ -3569,7 +3569,8 @@ int main(void)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Bilindiği gibi UNIX/linux sistemlerinde her prosesin sistem genelinde tek (unique) olan bir "proses id (pid)" değeri 
-    vardır. Linux çekirdeği proses id değerini task_struct içerisindeki pid elemanında saklamaktadır:
+    vardır. Linux çekirdeği proses'in id değerini prosesin ana thred'ine ilişkin task_struct içerisindeki pid elemanında 
+    saklamaktadır:
 
     struct task_struct {
         /* ... */
@@ -3584,7 +3585,7 @@ int main(void)
     thread'lerin pid değeri olmaz, pid değerleri proseslere özgüdür. getpid POSIX fonksiyonu prosesin hangi thread akışı 
     içerisinde çağrılırsa çağrılsın prosese ilişkin pid değerini vermektedir. İşte Linux çekirdeği bu uyumu korumak için 
     şöyle bir yöntem izlemiştir: Prosesin pid değeri aslında prosesin ana thread'ine ilişkin task_struct nesnesi içerisindeki 
-    pid değeridir. Evet Linux'ta her thread'in task_struct nesnesinde ayrı bir pid değeri vardır fakat prosesin pid değeri 
+    pid değeridir. Evet Linux'ta her thread'in task_struct nesnesinde ayrı bir pid değeri vardır, fakat prosesin pid değeri 
     denildiğinde prosesin ana thread'inin pid değeri anlaşılmaktadır. Ana thread'in pid değeri aynı zamanda task_struct 
     içerisindeki tgid isimli bir eleman da tutulmaktadır. task_struct nesnesi hangi thread'e ilişkin olursa olsun tgid elemanı 
     her zaman prosesin ana thread'inin pid değerini tutmaktadır:
@@ -3599,7 +3600,7 @@ int main(void)
     };
 
     Bu durumda biz prosesin thread'lerine ilişkin task_struct nesnelerini dolaştığımızda bu task_struct nesnelerinin 
-    birinde pid == tgid olacaktır. İşte bu thread prosesin ana thread'idir. O halde aslında bazı yarıntıları da göz ardı 
+    birinde pid == tgid olacaktır. İşte bu thread prosesin ana thread'idir. O halde aslında bazı ayrıntıları da göz ardı 
     edersek getpid POSIX fonksiyonun çağırdığı sys_getpid sistem fonksiyonu prosesin proses id değerini doğrudan current 
     göstericisinin gösterdiği task_struct nesnesinin içerisindeki tgid değerinden alarak vermektedir:
 
@@ -3608,7 +3609,7 @@ int main(void)
 
     Şimdi aklınıza "neden her thread'te ayrıca ana thread'in pid değeri tgid ismiyle tutuluyor?" sorusu gelebilir. Bunun 
     iki nedeni vardır: Birincisi prosesin ana thread'i sonlanabilir, bu durumda ana thread'e ilişkin task_struct nesnesine 
-    erişilemeyebilir. İkincisi ise bu yolla prosesin id değerine bu yolla daha hızlı erişimin sağlanabilmesidir.
+    erişilemeyebilir. İkincisi ise bu yolla prosesin id değerine daha hızlı erişimin sağlanabilmesidir.
 
     Anımsanacağı gibi POSIX thread kütüphanesinde (pthread kütüphanesini kastediyoruz) thread'lerin id değerleri sistem 
     genelinde tek değil proses genelinde tektir. Yani POSIX'teki pthread_t ile temsil edilen thread id değerinin Linux 
@@ -3832,9 +3833,9 @@ int main(void)
     - task_struct içerisindeki real_parent ve parent göstericileri o prosesi ya da thread'i yaratan thread'in task_struct
     nesnesini göstermektedir.
 
-    - task_struct içerisindeki tgid ana thread'in pid değerini, thread_group göstericisi ise ana thread'in task_struct 
-    nesnesinin adresini tutmaktadır. Ana thread sonlansa bile onun task_struct nesnesi proses sonlanana kadar muhafaza 
-    edilmektedir.
+    - task_struct içerisindeki tgid prosesin ana thread'inin pid değerini, thread_group göstericisi ise prosesin ana 
+    thread'inin task_struct nesnesinin adresini tutmaktadır. Ana thread sonlansa bile onun task_struct nesnesi proses 
+    sonlanana kadar muhafaza edilmektedir.
 
     - Bir prosesin bütün alt proseslerine ilişkin ana thread'lerinin task_struct nesneleri children/sibling bağlı 
     listesinde tutulmaktadır.
@@ -3846,7 +3847,7 @@ int main(void)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-										14. Ders 31/08/2025 - Pazar
+										    14. Ders 31/08/2025 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3861,11 +3862,11 @@ int main(void)
     Yanıt: Prosesin ana thread'indeki children düğümü kök yapılarak sibling düğümlerinin dolaşılmasıyla prosesin tüm alt 
     proesleri elde edilebilir.
 
-    Soru: Bir task_struct nesnesinin prosesin ana thread'ine ilişkin olduğu nasıl anlaşılır?
-    Yanıt: Eğer task_struct nesnesinde pid == tgid ise bu task_struct ilgili prosesin ana thread'ine ilişkin task_struct 
-    nesnesidir. Zaten prosesin tüm thread'lerine ilişkin task_struct nesnelerinde group_leader göstericisi ana thread'e 
-    ilişkin bu task_struct nesnesini göstermektedir. O anda çalışmakta olan thread eğer prosesin ana thread'i ise 
-    current == group_leader koşulunun sağlanacağına da dikkat ediniz.
+    Soru: Bir task_struct nesnesinin prosesin ana thread'ine ilişkin olup olmadığı nasıl anlaşılır?
+    Yanıt: Eğer task_struct nesnesinde pid == tgid ise bu task_struct nesnesi ilgili prosesin ana thread'ine ilişkin 
+    task_struct nesnesidir. Zaten prosesin tüm thread'lerine ilişkin task_struct nesnelerinde group_leader göstericisi 
+    ana thread'e ilişkin bu task_struct nesnesini göstermektedir. O anda çalışmakta olan thread eğer prosesin ana 
+    thread'i ise current == group_leader koşulunun sağlanacağına da dikkat ediniz.
 
     Soru: Sistemdeki tüm proseslerin ana thread'lerine ilişkin task_struct nesneleri nasıl dolaşılır?
     Yanıt: init_task prosesindeki tasks düğümü kök düğüm yapılıp tasks düğümleri dolaşılırsa tüm proseslerin ana 
@@ -5505,9 +5506,10 @@ rm -f $module
         return 0;
     }
 
-    Kodu önce çeşitli alt prosesler yarattıktan sonra aygıt sürücü üzerinde ioctl çağrısı yapan bir programla test edebilirsiniz. 
-    Biz test işlemini yapan "app.c" programında 10 tane alt proses ve her alt proseste 3 tane thread yarattık. Aygıt 
-    sürücüyü yükleyip "app.c" programını derleyip çalıştırdıktan sonra "dmesg" komutunu uygulayarak çıktıyı incelemelisiniz.
+    Kodu önce çeşitli alt prosesler yarattıktan sonra aygıt sürücü üzerinde ioctl çağrısı yapan bir programla test 
+    edebilirsiniz. Biz test işlemini yapan "app.c" programında 10 tane alt proses ve her alt proseste 3 tane thread 
+    yarattık. Aygıt sürücüyü yükleyip "app.c" programını derleyip çalıştırdıktan sonra "dmesg" komutunu uygulayarak 
+    çıktıyı incelemelisiniz.
 
     Aşağıda tüm kodları bütünsel olarak veriyoruz.
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -7678,8 +7680,8 @@ unsigned int hash_func(unsigned int key)
 
 /*----------------------------------------------------------------------------------------------------------------------
     İşletim sistemleri son okunan ya da yazılan disk bloklarını RAM'de bir önbellek sisteminde saklamaktadır. Bu önbellek 
-    (cache) sisteminde genel olarak "işletim sisteminin disk önbellek sistemi" denilmektedir. Linux dünyasında eskiden bu 
-    önbellek sistemine "buffer cache" deniliyordu. Sonra bu önbellek sistemi iyileştirildi ismi de "page cache" olarak 
+    (cache) sisteminde genel olarak "işletim sisteminin disk önbellek sistemi" denilmektedir. Linux dünyasında eskiden 
+    bu önbellek sistemine "buffer cache" deniliyordu. Sonra bu önbellek sistemi iyileştirildi ismi de "page cache" olarak 
     değiştirildi. İşletim sistemlerinin bu disk önbellek sistemleri disk erişimini ciddi boyutta azaltmakta ve sistem 
     performansı üzerinde en önemli olumlu etkilerden birini oluşturmaktadır. Eğer işletim sistemlerinde böyle bir disk 
     önbellek sistemi olmasaydı sistemler çok yavaş çalışırdı.
@@ -7704,7 +7706,7 @@ unsigned int hash_func(unsigned int key)
     ┌─────────────────────────────────────┐
     │    read/write POSIX Fonksiyonları   │
     └──────────────┬──────────────────────┘
-                   │
+                   │    Çekirdek Moduna Geçiliyor
                    ▼
     ┌──────────────────────────────┐
     │    sys_read / sys_write      │
@@ -7725,18 +7727,18 @@ unsigned int hash_func(unsigned int key)
                                   │
                                   ▼
                         ┌────────────────────────┐
-                        │  Page Cache güncellenir│
+                        │ Page Cache güncellenir │
                         └────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Peki dosyadaki okunacak ya da yazılacak kısım sayfa önbelleğinde (page caceh) yoksa gerçek transfer nasıl yapılmaktadır? 
+    Peki dosyadaki okunacak ya da yazılacak kısım sayfa önbelleğinde (page cache) yoksa gerçek transfer nasıl yapılmaktadır? 
     İşte işletim sistemlerinde bu tür transferler aslında başka bir birime devredilmektedir. Linux sistemlerinde bu 
     transferlerin yapıldığı birime "blok aygıt sürücüleri (block device drivers)" denilmektedir. Bir Linux sistemi 
     kurulduğunda zaten temel disk denetleyicileri üzerinden transfer yapabilen blok aygıt sürücüleri çekirdeğin içerisine 
-    gömülmüş durumda olur. Ancak sistem programcısının kendisi de blok aygıt sürücüleri yazabilir. Örneğin bir 
-    gömülü Linux sisteminde yeni bir SD kart birimi için bir blok aygıt sürücüsü yazmak zorunda kalabilirsiniz. Blok 
-    aygıt sürücülerinin yazımı aygıt sürücülerinin yazılmasına ilişkin konuların bir bölümünü oluşturmaktadır.
+    gömülmüş durumda olur. Ancak sistem programcısının kendisi de blok aygıt sürücüleri yazabilir. Örneğin bir gömülü 
+    Linux sisteminde yeni bir SD kart birimi için bir blok aygıt sürücüsü yazmak zorunda kalabilirsiniz. Blok aygıt 
+    sürücülerinin yazımı aygıt sürücülerinin yazılmasına ilişkin konuların bir bölümünü oluşturmaktadır.
 
     Aslında işletim sistemi sayfa öneblleğinde (page cache) olmayan kısımların transfer edilmesini blok aygıt sürücülerinden 
     istemektedir. Disklere ilişkin (bunlara genel olarak blok aygıtları denilmektedir) birtakım okuma yazma işlemleri 
@@ -7754,21 +7756,22 @@ unsigned int hash_func(unsigned int key)
     O halde bir dosya okuması ya da yazması sonucunda gelişen olayları şöyle özetleyebiliriz:
 
     1) Kullanıcı modunda çalışan program (yani proses) read ya da write POSIX fonksiyonlarını çağırır. (UNIX/Linux 
-    sistemlerindeki C derleyicilerinin standart dosya fonksiyonları da eğer okunacak ya da yazılacak kısım kendi tamponlarında 
-    yoksa zaten bu POSIX fonksiyonlarını çağırmaktadır.)
+    sistemlerindeki C derleyicilerinin standart dosya fonksiyonları da eğer okunacak ya da yazılacak kısım kendi 
+    tamponlarında yoksa zaten bu POSIX fonksiyonlarını çağırmaktadır.)
     
     2) read ve write POSIX fonksiyonları Linux'ta sys_read ve sys_write isimli sistem fonksiyonlarını çağırır. Artık 
     akış kullanıcı modundan (user mode) çekirdek moduna (kernel mode) geçmiştir. Çekirdekteki kodlar çalışmaktadır.
 
-    3) sys_read ve sys_write fonksiyonları önce okunacak ya da yazılacak yerin Linux'un' disk önbellek sistemi olan "sayfa 
-    önbelleğinde ("page cache", eski ismiyle "buffer cache") sisteminde olup olmadığına bakar. Eğer ilgili disk blokları 
-    sayfa önbelleğinde varsa akış hiç bloke olmadan sayfa önbelleği içerisinden karşılanır. Ancak eğer söz konusu bloklar 
-    sayfa önbelleğinde yoksa bu durumda Linux çekirdeği isteği "IO çizelgeleyicisi (IO scheduler)" denilen çekirdek birimine 
-    iletir. read/write çağrısını yapan thread bloke edilir.
+    3) sys_read ve sys_write fonksiyonları önce okunacak ya da yazılacak yerin Linux'un disk önbellek sistemi olan "sayfa 
+    önbelleğinde ("page cache", eski ismiyle "buffer cache") olup olmadığına bakar. Eğer ilgili disk blokları sayfa 
+    önbelleğinde varsa akış hiç bloke olmadan sayfa önbelleği içerisinden karşılanır. Ancak eğer söz konusu bloklar 
+    sayfa önbelleğinde yoksa bu durumda Linux çekirdeği isteği "IO çizelgeleyicisi (IO scheduler)" denilen çekirdek 
+    birimine iletir. read/write çağrısını yapan thread bloke edilir.
 
-    4) IO çizelgeleyicisi istekleri çizelgeler. Okuma işlemi söz konusuyse sayfa önbelleğinde transfer edilecek önbellek 
+    4) IO çizelgeleyicisi istekleri çizelgeler. Okuma işlemi söz konusuysa sayfa önbelleğinde transfer edilecek önbellek 
     bloklarını tahsis eder. Yazma işlemi söz konusuysa diske transfer edilecek önbellek bloklarını belirler. (Bu konuda 
-    bazı ayrıntılar da vardır.) Blok aygıt sürücüsüne transfer edilecek sektörleri iletir. 
+    bazı ayrıntılar da vardır.) Blok aygıt sürücüsüne transfer edilecek sektörleri ve transfere ilişkin bellek adreslerini
+    iletir. 
 
     5) Gerçek transfer işlemi blok aygıt sürücüsü tarafından yapılmaktadır. İşletim sistemi blok aygıt sürücüsüne "hangi 
     sektörlerin sayfa önbelleğindeki hangi adreslere transfer edileceğini ya da sayfa önbelleği içerisindeki hangi adresteki
@@ -7780,9 +7783,9 @@ unsigned int hash_func(unsigned int key)
     7) Artık okuma söz konusuysa okunan bilgi sayfa önbelleği içerisindedir. İşlemi başlatan thread'in blokesi çözülür. 
     sys_read sistem fonksiyonu bunu sayfa önbelleği içerisinden programcının kullanıcı modundaki adresine kopyalar.
 
-    Tabii bugün kullandığımız Linux sistemlerinde aslında transfleri yapan blok aygıt sürücüleri zaten çekirdek imajı 
-    içerisine gömülmüş bir biçimde bulunmaktadır. Ancak nadiren de olsa sistem programcısının yeni birtakım aygıtlar için 
-    blok aygıt sürücüleri yazması gerekebilmektedir. 
+    Tabii bugün kullandığımız Linux sistemlerinde aslında disk transflerini yapan blok aygıt sürücüleri zaten çekirdek 
+    imajı içerisine gömülmüş bir biçimde bulunmaktadır. Ancak nadiren de olsa sistem programcısının yeni birtakım aygıtlar 
+    için blok aygıt sürücüleri yazması gerekebilmektedir. 
 
     Linux sistemlerinde yukarıda özetlediğimiz olaylar silsilesi zaman içerisinde değişikliklere uğratılarak ve sürekli
     geliştirilerek bugünkü durumuna getirilmiştir. 
@@ -7790,7 +7793,7 @@ unsigned int hash_func(unsigned int key)
     Yukarıda maddeler halinde açıkladığımız süreci bir şekille de özetleyebiliriz:
 
     ┌───────────────────────────────────────────────────┐
-    │ Kullanıcı Modu (User Mode)                        │
+    │          Kullanıcı Modu (User Mode)               │
     └───────────────────────────────────────────────────┘
                             │
                             ▼
@@ -7802,8 +7805,8 @@ unsigned int hash_func(unsigned int key)
                             ▼
     ┌───────────────────────────────────────────────────┐
     │ 2) POSIX fonksiyonları sys_read / sys_write       │
-    │    sistem çağrılarını çağırır                     │
-    │    → Geçiş: User Mode ➜ Kernel Mode              │
+    │    sistem fonksiyonlarını çağırır                 │
+    │    → Geçiş: User Mode ➜ Kernel Mode               │
     └───────────────────────────────────────────────────┘
                             │
                             ▼
@@ -7812,7 +7815,7 @@ unsigned int hash_func(unsigned int key)
     │    (disk cache) kontrol eder:                     │
     │  - Veri Page Cache'te varsa:                      │
     │    → Bloke olmaz, doğrudan bellekten okunur veya  │
-    │      yazılır                                      │
+    │      belleğe yazılır                              │
     └───────────────────────────────────────────────────┘
                             │
                             ▼
@@ -7861,11 +7864,17 @@ unsigned int hash_func(unsigned int key)
     yazılmak istenen bilgiler diske yazılana kadar write işlemini yapan thread'i bloke etmez. Yazma işlemi her zaman 
     Linux'un RAM'deki sayfa önbelleğine yapılmaktadır. sys_write fonksiyonu yazmayı sayfa önbelleği içerisine yaptıktan 
     sonra hemen "başarılı" olarak geri dönmektedir. Yani gerçek transferi beklememektedir. Bu bakımdan write işlemi
-    aslında seknron yapılmamaktadır. Sistem programlama terminolojisinde IO işlemlerinde "senkron" terimi "fonksiyon geri 
+    aslında senkron yapılmamaktadır. Sistem programlama terminolojisinde IO işlemlerinde "senkron" terimi "fonksiyon geri 
     döndüğünde tüm işlemlerin yapılıp bitmiş olması" anlamına gelmektedir. Asenkron terimi ise "işlemin başlatılması, 
     fonksiyonun geri dönmesi ancak işlemin aslında arka planda devam etmesi" anlamına gelmektedir. Görüldüğü gibi 
     modern işletim sistemlerinde diske yazma işlemi aslında senkron bir işlem değildir. Çünkü gerçek aktarım yapılmadan 
     yazan fonksiyon hemen başarıyla geri dönmektedir. 
+
+    Biz yukarıdaki paragrafta yazma işlemlerinin çekirdek trafından asenkron biçimde yapıldığını belirttik. Ancak bunun 
+    bir istisnası vardır. Eğer bir dosya O_DSYNC ya da O_SYNC bayraklarıyla açılmışsa o dosyaya yapılan yazma işlemleri 
+    aygıta aktarılana kadar thread write fonksiyonunda (sys_write sistem fonksiyonunda) bloke edilmektedir. Yani bu bayraklar
+    yazma işlemlerinin senkron yapılmasını sağlamaktadır. Bu bayrakların işlevleri hakkında izleyen paragraflarda daha 
+    ayrıntılı açıklamalar yapacağız. 
 
     Peki yazma işleminde sayfa önbelleğine yazılan bilgiler çekirdek tarafından ne zaman gerçek aygıta aktarılmakatdır? 
     İşte işletim sistemi kasten bu tür durumlarda araya belli bir gecikme koymaktadır. Böylece peşi sıra yapılan write 
@@ -7904,7 +7913,7 @@ unsigned int hash_func(unsigned int key)
     için (disk bölümü için değil, diskin bütünü için) ayrı bir flush thread'i oluşturulmaya başlandı. Bu thread'leri 
     komut satırında aşağıdaki gibi görüntüleyebilirsiniz:
 
-    $ s -aux | grep flush
+    $ ps -aux | grep flush
     
     flush thread'leri arka planda sürekli olarak sayfa önbelleğini izler. Orada "kirlenmiş (dirty)" olan sektörleri 
     ilgili blok aygıt sürücüsüne gönderir. Peki bu işleyişte yazma gecikmesi takriben kaç saniye civarında olmaktadır? 
@@ -7946,26 +7955,28 @@ unsigned int hash_func(unsigned int key)
 /*----------------------------------------------------------------------------------------------------------------------
     Peki "gecikmeli yazım (delayed write)" işleminin gerekçeleri nelerdir? Yukarıda da belirttiğimiz gibi en önemli
     gerekçe peşi sıra yapılan yazma işlemlerinin tek hamlede aygıta yansıtılmasıdır. Bu sayede yazma işlemini yapan 
-    thread bloke olmaz ve toplamda bu işlemler paralel yürütüldüğü içim sistem performasnı yükselir. Aynı zamanda flash 
-    belleklerde ve SSD'lerde bu gecikme aynı zamanda sürekli yazım sonucunda belleğin eskimesini de kısmen engellemektedir.
+    thread bloke olmaz ve toplamda bu işlemler paralel yürütüldüğü içim sistem performansı yükselir. Aynı zamanda flash 
+    belleklerde ve SSD'lerde bu gecikme sürekli yazım sonucunda oluşan belleğin eskimesini de kısmen engellemektedir.
     (Tabii "bu eskime" sorunu aslında asıl olarak flash belleklerdeki ve SSD içerisindeki önbellekler yardımıyla
     azaltılmaktadır.)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Aslında sayfa önbelleğinde "kirlenmiş (dirty)" hale gelmiş olan sayfalar bazı durumlarda işletim sisteminin "tazaleyici
-    ("flusher") thread'lerini beklemeden de diske aktarılabilmektedir. Örneğin bir dosya kapatıldığında artık bu işlem 
-    arka planda dosyanın kirlenmiş sayfalarının da diske yazılmasına yol açmaktadır. UNIX/Linux sistemlerinin çoğunda bazı 
-    özel sistem fonksiyonları yoluyla ya da open fonksiyonundaki bayraklarla da bu duruma müdahale edilebilmektedir. Örneğin 
-    sync isimli POSIX fonksiyonu çağrıldığında o anda dosya sistemine ilişkin "kirlenmiş (dirty olan)" olan sayfaların 
-    hepsinin flush edilmesini sağlamaktadır:
+    Aslında sayfa önbelleğinde kirlenen sayfalar bazı durumlarda işletim sisteminin "tazeleyici (flusher)" thread'lerini 
+    beklemeden de diske aktarılabilmektedir. Örneğin bir dosya kapatıldığında artık bu işlem arka planda dosyanın kirlenmiş 
+    sayfalarının da diske yazılmasına yol açmaktadır. UNIX/Linux sistemlerinin çoğunda bazı özel sistem fonksiyonları 
+    yoluyla ya da open fonksiyonundaki bayraklarla da bu duruma müdahale edilebilmektedir. Örneğin sync isimli POSIX 
+    fonksiyonu çağrıldığında o anda dosya sistemine ilişkin "kirlenmiş (dirty olan)" olan sayfaların hepsi flush edilmektedir. 
 
     #include <unistd.h>
 
     void sync(void); 
 
     sync fonksiyonu asenkron biçimde çalışmaktadır. Yani fonksiyon geri döndüğünde tüm blokların flush edilmiş olma garantisi
-    yoktur. fsync POSIX fonksiyonu ise belli bir dosyaya ilişkin kirlenmiş sayfaların flush edilmesi için kullanılmaktadır:
+    yoktur. Aynı zamanda Linux sistemlerden "sync" isimli bir kabuk kkomutu da bulunmaktadır. Bu komut sync fonksiyonunu 
+    çağırmaktadır. 
+        
+    fsync POSIX fonksiyonu ise belli bir dosyaya ilişkin kirlenmiş sayfaların flush edilmesi için kullanılmaktadır:
 
     #include <unistd.h>
 
@@ -11182,8 +11193,8 @@ clean:
 
 /*----------------------------------------------------------------------------------------------------------------------
     Bilindiği gibi çekirdek çalışma sırasında bazı bilgileri kullanıcı modundan erişilebilsin diye "proc" dosya sistemi 
-    içerisindeki çeşitli dosyalara yazmaktadır. Dentry önbellek sistemi için önemli olacak birkaç proc dosyası vardır. 
-    Bunlar hakkında kısaca bilgiler vermek istiyoruz:
+    içerisindeki çeşitli dosyalara yazmaktadır. (Aslında proc dosya sistemindeki bilgiler talep edildiğine verilmektedir.)
+    Dentry önbellek sistemi için önemli olacak birkaç proc dosyası vardır. Bunlar hakkında kısaca bilgiler vermek istiyoruz:
 
     - "/proc/sys/fs/dentry-state" dosyasında dentry önbelleğinin genel durumu hakkında bilgiler nulunmaktadır. Bu dosyanın
     içeriği aşağıdakine benzer biçimdedir:
