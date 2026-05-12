@@ -1681,9 +1681,11 @@ for i in range(NCLUSTERS):
     söylesin. Resimleri veren kişinin amacı bunların otomatik bir biçimde ayrıştırılmasını sağlamak olsun. Biz de K-Means 
     yöntemiyle bunu yapmaya çalışalım.
 
-    Bilindiği gibi aslında resimler pixellerden pixeller de sayılardan oluşmaktadır. MNIST resimlerinin "gri tonlamalı (gray 
+    Bilindiği gibi aslında resimler pixellerden, pixeller de sayılardan oluşmaktadır. MNIST resimlerinin "gri tonlamalı (gray 
     scale) olduğunu anımsayınız. (Yani resimlerdeki her pixel 1 byte'lık bir sayı ile temsil edilmektedir.) O halde resimler 
     toplamda 28 * 28 = 784 tane nümerik sütundan oluşan noktalar gibi ele alınabilir. 
+    
+    Aşağıda zambak veri kümesinin K-Means yöntemiyle kümelenmesi örneği verilmiştir.
 #----------------------------------------------------------------------------------------------------------------------------
 
 NCLUSTERS = 10
@@ -1785,37 +1787,21 @@ for cluster_no in range(10):
 #----------------------------------------------------------------------------------------------------------------------------
     Agglomerative hiyerarşik kümeleme algoritmasının gerçekleştirilmesi zor değildir. Tüm noktaların diğer noktalara uzaklığı 
     iç içe iki döngü ile hesaplanabilir. Tabii algoritmada kümeleri daraltan dış bir döngü de bulunmak zorundadır. Bu durumda
-    algoritma karmaşıklığı O(n^3) halline gelebilmektedir. Algoritmada ek birtakım önlemler alınarak algoritima O(n^2) karmaşıklığına 
+    algoritma karmaşıklığı O(N³) halline gelebilmektedir. Algoritmada ek birtakım önlemler alınarak algoritima O(N²) karmaşıklığına 
     yaklaştırılabilmektedir. 
 
-    Aşağıda ChatGPT ile üretilen (ancak prompt'larla yönlendirme yapılarak kodun dha iyi hale getirilmesi de sağlanmıştır) 
-    agglomerative hiyearşik kümeleme algoritmasına bir örnek verilmiştir. 
+    Aşağıda agglomerative hiyearşik kümeleme algoritmasına bir örnek verilmiştir. 
 #----------------------------------------------------------------------------------------------------------------------------
 
-import numpy as np
+iimport numpy as np
 
 def euclidean_distance(a, b):
-    """
-    Compute the Euclidean distance between two points a and b.
-    """
     return np.sqrt(np.sum((a - b) ** 2))
 
 def calculate_pairwise_distances(X):
-    """
-    Calculate the pairwise Euclidean distance between all data points.
-    
-    Parameters:
-    X : ndarray of shape (n_samples, n_features)
-        The input data points.
-        
-    Returns:
-    distance_matrix : ndarray of shape (n_samples, n_samples)
-        A matrix containing pairwise distances.
-    """
     n_samples = X.shape[0]
     distance_matrix = np.zeros((n_samples, n_samples))
     
-    # Compute the pairwise Euclidean distance between all points
     for i in range(n_samples):
         for j in range(i + 1, n_samples):
             distance = euclidean_distance(X[i], X[j])
@@ -1825,36 +1811,16 @@ def calculate_pairwise_distances(X):
     return distance_matrix
 
 def update_distances(distance_matrix, clusters, new_cluster_index):
-    """
-    Update the distance matrix after merging two clusters.
-    
-    Parameters:
-    distance_matrix : ndarray of shape (n_samples, n_samples)
-        The distance matrix.
-    
-    clusters : dict
-        A dictionary of clusters with cluster ids as keys and lists of data points as values.
-        
-    new_cluster_index : int
-        The index of the newly formed cluster.
-    
-    Returns:
-    distance_matrix : ndarray
-        Updated distance matrix.
-    """
-    # Remove the distances related to the merged cluster
     distance_matrix = np.delete(distance_matrix, new_cluster_index, axis=0)
-    distance_matrix = np.delete(distance_matrix, new_cluster_index, axis=1)
-    
-    # Recalculate the distances for the new merged cluster
+    distance_matrix = np.delete(distance_matrix, new_cluster_index, axis=1) 
     new_distances = []
+    
     for cluster_id in clusters:
         if cluster_id != new_cluster_index:
-            # Calculate the average linkage: distance between clusters by average
-            dist = np.mean([distance_matrix[idx1, idx2] for idx1 in clusters[cluster_id] for idx2 in clusters[new_cluster_index]])
+            dist = np.mean([distance_matrix[idx1, idx2] for idx1 in clusters[cluster_id] 
+                    for idx2 in clusters[new_cluster_index]])
             new_distances.append(dist)
     
-    # Add the new distances to the distance matrix
     new_row = np.array(new_distances)
     distance_matrix = np.vstack([distance_matrix, new_row])
     new_col = np.append(new_row, 0).reshape(-1, 1)
@@ -1863,53 +1829,27 @@ def update_distances(distance_matrix, clusters, new_cluster_index):
     return distance_matrix
 
 def agglomerative_hierarchical_clustering(X, n_clusters=2):
-    """
-    Perform Agglomerative Hierarchical Clustering using average linkage.
-    
-    Parameters:
-    X : ndarray of shape (n_samples, n_features)
-        The input data points.
-    
-    n_clusters : int
-        The number of clusters to form.
-        
-    Returns:
-    labels : ndarray of shape (n_samples,)
-        Cluster labels for each data point.
-    """
-    # Step 1: Calculate the pairwise distance matrix
     distance_matrix = calculate_pairwise_distances(X)
+    clusters = {i: [i] for i in range(X.shape[0])}
     
-    # Step 2: Initialize each point as its own cluster
-    clusters = {i: [i] for i in range(X.shape[0])}  # Use a dictionary for clusters
-    
-    # Step 3: Merge clusters until the number of clusters equals n_clusters
     while len(clusters) > n_clusters:
-        # Step 3.1: Find the closest pair of clusters (minimum distance)
         min_dist = np.inf
         cluster_pair = None
         
         for i in clusters:
             for j in clusters:
-                if i < j:  # To avoid checking the same pair twice
-                    # Calculate distance between clusters using average linkage
+                if i < j:
                     dist = np.mean([distance_matrix[idx1, idx2] for idx1 in clusters[i] for idx2 in clusters[j]])
                     
-                    # Update the minimum distance and the pair of clusters
                     if dist < min_dist:
                         min_dist = dist
                         cluster_pair = (i, j)
         
-        # Step 3.2: Merge the two closest clusters
         i, j = cluster_pair
-        # Merge clusters by updating the dictionary
-        clusters[i] = clusters[i] + clusters[j]  # Merge clusters
-        del clusters[j]  # Remove the merged cluster
-        
-        # Step 3.3: Update the distance matrix after merging the clusters
+        clusters[i] = clusters[i] + clusters[j]
+        del clusters[j]
         distance_matrix = update_distances(distance_matrix, clusters, j)
     
-    # Step 4: Assign labels to data points based on final clusters
     labels = np.zeros(X.shape[0])
     for cluster_id, cluster in clusters.items():
         for idx in cluster:
@@ -1917,14 +1857,11 @@ def agglomerative_hierarchical_clustering(X, n_clusters=2):
     
     return labels
 
-# Example usage
 np.random.seed(42)
-X = np.random.rand(10, 2)  # 10 data points with 2 features
+X = np.random.rand(10, 2)
 
-# Perform Agglomerative Hierarchical Clustering with average linkage
 labels = agglomerative_hierarchical_clustering(X, n_clusters=3)
 
-# Print the resulting cluster labels
 print("Cluster labels:", labels)
 
 #----------------------------------------------------------------------------------------------------------------------------
@@ -2409,7 +2346,7 @@ print(f'Agglomerative ratio: {agglomerative_ratio}')
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
-                                        92. Ders - 11/01/2025 - Cumartesi
+                                            92. Ders - 11/01/2025 - Cumartesi
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
@@ -2506,83 +2443,46 @@ print(f'Agglomerative ratio: {agglomerative_ratio}')
 #----------------------------------------------------------------------------------------------------------------------------
 
 #----------------------------------------------------------------------------------------------------------------------------
-    Aşağıda ChatGPT'nin bedava versiyonu tarafından yazılan bir DBSCAN gerçekleştirimini veriyoruz. Bu gerçekleştirimi 
-    incelediğinizde yukarıdaki algoritmanın uygulandığını göreceksiniz. 
+    Aşağıda DBSCAN gerçekleştirimini veriyoruz. Bu gerçekleştirimi incelediğinizde yukarıdaki algoritmanın uygulandığını 
+    göreceksiniz. 
 #----------------------------------------------------------------------------------------------------------------------------
 
 import numpy as np
 from collections import deque
 
 def dbscan(data, eps=0.5, min_samples=5):
-    """
-    DBSCAN kümeleme algoritmasının sıfırdan implementasyonu.
-    
-    Parametreler:
-    data: numpy array, veri seti (n, m) boyutunda, n: örnek sayısı, m: özellik sayısı
-    eps: float, iki nokta arasındaki maksimum mesafe. Kümeleme için eşik değeri.
-    min_samples: int, bir küme için minimum örnek sayısı.
-    
-    Döndürülenler:
-    - labels: numpy array, her veri noktasının küme etiketi.
-      - -1 değeri gürültü noktalarını belirtir.
-    """
-    
-    # Veri setinin boyutları
     n_points = data.shape[0]
-    
-    # Etiketler, -1 gürültü anlamına gelir.
     labels = -np.ones(n_points)
-    
-    # Ziyaret edilen noktaları takip etmek için bir liste
     visited = np.zeros(n_points, dtype=bool)
+    cluster_id = 0
     
-    # Komşuları hesaplamak için bir yardımcı fonksiyon
     def region_query(point_idx):
-        """
-        Belirli bir noktaya yakın olan noktaların indekslerini döndürür.
-        """
         neighbors = []
         for i in range(n_points):
             if np.linalg.norm(data[point_idx] - data[i]) <= eps:
                 neighbors.append(i)
         return neighbors
-    
-    # Küme numarasını izlemek için bir sayaç
-    cluster_id = 0
-    
-    # DBSCAN algoritması
+       
     for i in range(n_points):
         if visited[i]:
             continue
-        
-        # Noktayı ziyaret et
-        visited[i] = True
-        
-        # Komşuları bul
+
+        visited[i] = True       
         neighbors = region_query(i)
         
-        # Yeterli komşuya sahip değilse, bu nokta gürültü olarak işaretlenir
         if len(neighbors) < min_samples:
             labels[i] = -1
         else:
-            # Yeni bir küme başlat
             labels[i] = cluster_id
             cluster_id += 1
-            
-            # Komşuları işle
             queue = deque(neighbors)
             while queue:
-                current_point = queue.popleft()
-                
+                current_point = queue.popleft()        
                 if not visited[current_point]:
                     visited[current_point] = True
-                    current_neighbors = region_query(current_point)
-                    
-                    # Eğer yeterli komşu varsa, komşuları kuyruğa ekle
+                    current_neighbors = region_query(current_point) 
                     if len(current_neighbors) >= min_samples:
                         queue.extend(current_neighbors)
-                
-                # Komşu zaten başka bir kümeye ait değilse, onu mevcut kümeye dahil et
                 if labels[current_point] == -1:
                     labels[current_point] = labels[i]
     
