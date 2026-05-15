@@ -60,8 +60,8 @@
     Çekirdek içerisindeki kritik kod bloklarının önemli bir bölümü birden fazla akışın paylaşılan bir veri yapısına 
     erilmesi nedeniyle oluşturulmaktadır. Örneğin aynı hash tablosuna birden fazla prosesin çağırdığı sistem fonksiyonları 
     eleman ekleyebilir. Bu durumda bu hash tablosunun böyle erişimlerde seri hale getirilmesi ("serialize" edilmesi)
-    gerekir. Ancak senkronizasyon sorunu yalnızca ortak veri yapılarına ve nesnelere erişirken ortaya çıkmaz. Bu bölümde
-    ele alacağımız senkronizasyonu gerektiren başka durumlar da vardır. 
+    gerekir. Ancak senkronizasyon sorunu yalnızca ortak veri yapılarına ve nesnelere erişirken ortaya çıkmaz. Bu 
+    bölümde ele alacağımız senkronizasyonu gerektiren başka durumlar da vardır. 
 
     Genel olarak (ancak her zaman değil) bir nesne (nesne demekle burada çekirdek alanı içerisinde tahsis edilmiş bir 
     alanı kastediyoruz) eğer birden fazla akış tarafından kullanılıyorsa bu nesnenin senkronize edilmesi için ayrı 
@@ -636,17 +636,17 @@ void exit_sys(const char *msg)
 
     Güncel çekirdeklerde bu makro şöyle tanımlanmıştır:
 
-    #define DEFINE_SEMAPHORE(_name, _n)	    \
+    #define DEFINE_SEMAPHORE(_name, _n)	                        \
 	    struct semaphore _name = __SEMAPHORE_INITIALIZER(_name, _n)
 
     Buaradaki __SEMAPHORE_INITIALIZER makrosu da şöyle tanımlanmıştır:
 
-    #define __SEMAPHORE_INITIALIZER(name, n)				\
-    {									\
+    #define __SEMAPHORE_INITIALIZER(name, n)				    \
+    {									                        \
         .lock		= __RAW_SPIN_LOCK_UNLOCKED((name).lock),	\
-        .count		= n,						\
-        .wait_list	= LIST_HEAD_INIT((name).wait_list)		\
-        __LAST_HOLDER_SEMAPHORE_INITIALIZER				\
+        .count		= n,						                \
+        .wait_list	= LIST_HEAD_INIT((name).wait_list)		    \
+        __LAST_HOLDER_SEMAPHORE_INITIALIZER				        \
     }
 
     DEFINE_SEMAPHORE makrosunun birinci parametresi semaphore değişkeninin ismini, ikinci parametresi ise başlangıç 
@@ -1043,7 +1043,7 @@ void exit_sys(const char *msg)
         enable_preemption();
     }
 ----------------------------------------------------------------------------------------------------------------------*/
-<BURADA KALDIK>
+
 /*----------------------------------------------------------------------------------------------------------------------
     Linux çekirdeğindeki spinlock işlemleri şöyle yütürülmektedir:
 
@@ -1061,11 +1061,8 @@ void exit_sys(const char *msg)
     #endif
     } spinlock_t;
 
-    Tek işlemcili ya da tek çekirdekli sistemlerde ise spinlock_t yapısının bildirimi şöyledir:
-
-    typedef struct { } spinlock_t;
-
-    C'de içi boş bir yapı bildirilememektedir. İçi boş yapı bildirimi gcc derleyicilerinin bir eklentisidir. 
+    Tek işlemcili ya da tek çekirdekli sistemlerde (CONFIG_SMP=n durumu) ise spinlock_t yapısı yalnızca int eleman 
+    içerecek biçimdedir. 
 
     2) spinlock nesnesine ilkdeğer DEFINE_SPINLOCK makrosuyla verilebilmektedir. Bu makro aynı zamanda yapı nesnesini 
     de tanımlar. Örneğin:
@@ -1076,27 +1073,32 @@ void exit_sys(const char *msg)
 
     Buradaki DEFINE_SPINLOCK makrosu da güncel çekirdeklerde şöyle tanımlanmıştır:
 
-    #define ___SPIN_LOCK_INITIALIZER(lockname)	\
-	{					\
-        .raw_lock = __ARCH_SPIN_LOCK_UNLOCKED,	\
-        SPIN_DEBUG_INIT(lockname)		\
+    #define ___SPIN_LOCK_INITIALIZER(lockname)	            \
+	{					                                    \
+        .raw_lock = __ARCH_SPIN_LOCK_UNLOCKED,	            \
+        SPIN_DEBUG_INIT(lockname)		                    \
         SPIN_DEP_MAP_INIT(lockname) }
 
-    #define __SPIN_LOCK_INITIALIZER(lockname) \
+    #define __SPIN_LOCK_INITIALIZER(lockname)               \
         { { .rlock = ___SPIN_LOCK_INITIALIZER(lockname) } }
 
-    #define __SPIN_LOCK_UNLOCKED(lockname) \
+    #define __SPIN_LOCK_UNLOCKED(lockname)                  \
         (spinlock_t) __SPIN_LOCK_INITIALIZER(lockname)
 
     #define DEFINE_SPINLOCK(x)	spinlock_t x = __SPIN_LOCK_UNLOCKED(x)
 
-    spinlock nesnesine spinlock_init makrosouyla da başlangıç değer verilebilmektedir. Güncel çekirdeklerde bu makro 
+    Tek işlemcili ya da çekirdekli sistemlerde (CONFIG_SMP=n durumu) bu makro basit bir biçime dönüşmektedir:
+
+    #define __SPIN_LOCK_UNLOCKED(lockname)  (spinlock_t) { 1 }
+    #define DEFINE_SPINLOCK(x)  spinlock_t x = __SPIN_LOCK_UNLOCKED(x)
+  
+    spinlock nesnesine spinlock_init makrosuyla da başlangıç değerleri verilebilmektedir. Güncel çekirdeklerde bu makro 
     şöyle bildirilmiştir:
 
-    # define spin_lock_init(_lock)			\
-    do {						            \
-        spinlock_check(_lock);			    \
-        *(_lock) = __SPIN_LOCK_UNLOCKED(_lock);	\
+    # define spin_lock_init(_lock)			            \
+    do {						                        \
+        spinlock_check(_lock);			                \
+        *(_lock) = __SPIN_LOCK_UNLOCKED(_lock);	        \
     } while (0)
 
     Makronun parametre olarak spinlock nesnesinin adresini aldığını görüyorsunuz. Örneğin:
@@ -1116,18 +1118,18 @@ void exit_sys(const char *msg)
     void spin_lock_bh(spinlock_t *lock);
 
     spin_lock fonksiyonu klasik spin yapan fonksiyondur. Bu fonksiyon thread'ler arası geçişi (preemption mekanizmasını) 
-    kapatır ancak kesmeleri kapatmamaktadır. Preemption işleminin kapatılması IRQ'ların (yani donnaım kesmelerinin) 
-    kapatıldığı anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemcideki IRQ'ları da (yani donanım 
-    kesmelerini de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana kadar donanım 
-    kesmeleri o işlemcide oluşmayacaktır. Ancak diğer işlemcilerde aynı IRQ oluşabilir ve kesme kodu aynı kilidi almaya 
-    çalışırsa spin işlemi yapılabilir. spin_lock_irqsave fonksiyonu ise hem  o anda çılışılan işlemcideki kesmeleri kapatır 
-    hem de işlemcinin bayrak yazmacını da saklamaktadır. Aslında bu fonksiyonların bazıları makro olarak yazılmıştır. 
-    Örneğin spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci parametresine nesne adresini geçmemiş olsak 
-    da bu bir makro olduğu için aslında ikinci parametrede verdiğimiz nesnenin içerisine IRQ durumları yazılmaktadır. 
-    spin_lock_bh fonksiyonu ise yalnızca yazılım kesmelerini kapatmaktadır. Örneğin spin_lock_irqsave aslında bir makrodur. 
-    Biz bu fonksiyonun ikinci parametresine nesne adresini geçmemiş olsak da bu bir makro olduğu için aslında ikinci 
-    parametrede verdiğimiz nesnenin içerisine IRQ durumları  yazılmaktadır. spin_lock_bh fonksiyonu ise yalnızca yazılım 
-    kesmelerini kapatmaktadır.
+    kapatır, ancak kesmeleri kapatmaz. Preemption işleminin kapatılması IRQ'ların (yani donnaım kesmelerinin) kapatıldığı 
+    anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemcideki IRQ'ları da (yani donanım kesmelerini 
+    de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana kadar donanım kesmeleri o 
+    işlemcide oluşmayacaktır. (Ancak diğer işlemcilerde aynı IRQ oluşabilir ve kesme kodu aynı kilidi almaya çalışırsa 
+    spin işlemi yapılabilir.) spin_lock_irqsave fonksiyonu ise hem o anda çılışılan işlemcideki kesmeleri kapatır hem de 
+    işlemcinin bayrak yazmacını da saklar. Aslında bu fonksiyonların bazıları makro olarak yazılmıştır. Örneğin 
+    spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci parametresine nesne adresini geçmiyor olsak da 
+    bu bir makro olduğu için ikinci parametrede verdiğimiz nesnenin içerisine IRQ durumları yazılmaktadır. spin_lock_irqsave 
+    fonksiyonu ile IRQ durumunun flags değişkenine kaydedilmesinin nedeni kilit bırakılırken IRQ durumunun kilit alınmadan 
+    önceki biçimde bırakılmasının sağlanması içindir. (Örneğin spin_lock_irqsave donksiyonundan önce zaten yerel kesmeler 
+    disable edilmişse kilidi bırakırken yerek kesmelerin enable edilmemesi gerekir.) spin_lock_bh fonksiyonu ise yalnızca 
+    yazılım kesmelerini kapatmaktadır. 
 
     3) Spinlock kilidini bırakmak için spin_unlock fonksiyonları kullanılmaktadır:
 
@@ -1167,11 +1169,12 @@ void exit_sys(const char *msg)
     int spin_trylock_bh(spinlock_t *lock);
 
     Bu fonksiyonlar eğer spinlock kilitliyse spin yapmazlar ve 0 ile geri dönerler. Eğer kilidi alırlarsa sıfır dışı bir 
-    değerle geri dönerler.
+    değerle geri dönerler. Böylece çekirdek programcısı eğer spinlock kilidi başka bir işlemci tarafndan alınmışsa 
+    başka işlemler yapabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-		                                53. Ders 01/02/2026 - Pazar							
+		                                    53. Ders 01/02/2026 - Pazar							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1218,27 +1221,79 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Diğer çok kullanılan senkronizasyon nesneleri de "okuma yazma kilitleri (readers-writer lock)" denilen nesnelerdir. 
-    Önce bu nesnelere neden gereksinim duyulduğunu bir örnekle açıklamak istiyoruz. Çekirdek kodlarında paylaşılan bir 
-    kaynak bulunuyor olsun. Örneğin bunun global bir bağlı liste (linked list) olduğunu düşünelim. Bu bağlı listeye bir 
-    grup thread eleman (düğüm) ekliyor olsun, bir grup thread de bu bağlı listeyi dolaşarak eleman arıyor olsun. Burada 
-    bağlı listede arama yapmak "okuma (read)" işlemi gibi düşünülebilir. Çünkü bu işlem paylaşılan kaynakta (burada bağlı 
-    liste) bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilmektedir. Ancak bağlı 
-    listeye eleman ekleyen thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o sırada başka bir 
-    thread de aynı baplı listeye ekleme yaparsa ya da arama yaparsa bu durum çökmeye yol açabilir. Burada bağlı listeye 
-    eleman eklemek bir "yazma (write)" işlemi olarak düşünülebilir. O halde bizim öyle bir kritik kod oluşturmamız gerekir 
-    ki birden fazla okuma yapan thread bu kritik koda girebilsin ancak bir thread okuma yaparken yazma yapan bir thread 
-    okuma yapan thread kritik koddan çıkana kadar beklesin. Benzer biçimde eğer yazma yapan bir thread kritik koda girmişse 
-    bu işlem bitene kadar okuma yapan bir thread de kritik koda giremesin. Aşağıda Thread-1 kritik koda girmişse Thread-2'nin 
-    kritik koda girip girmeyeceği bir tablo biçiminde verilmiştir:
+    Spinlock nesnelerinin "kısa sürecek kritimk kodlar için" kullanılması uygundur. Aksi takdirde diğer işlemci ya da 
+    çekirdekteki kilidin bekleyen thread'ler meşgul döngüde spin yaparak uzun süre beklerler bu da gereksiz CPU zamanının
+    harcanmasına yok açar. Spinlock kilidi alındıktan sonra akışın bloke olmadan hızlı bir biçimde kilidi geri bırakması 
+    gerekir. Spinlock kilidi alındıktan sonra bloke oluşması pek çok soruna yol açabilmektedir. IRQ bağlamında (yani 
+    IRQ kesme kodları içerisinde) mutex gibi semaphore gibi blokeye yol açabilecek senkronizasyon nesneleri kullanılmamalıdır.
+    Bu tür durumlarda spinlock kullanılmalıdır. Aşağıdaki tabloda spinlock kullanımı ile mutex kullanımı çeşitli bakımlardan
+    karşılaştırılmıştır. 
 
-    Thread-1            Thread-2        Thread-2 Kritik Koda Girebilmeli Mi?
-    ------------------------------------------------------------------------
-    Okuma               Okuma           Evet
-    Okuma               Yazma           Hayır
-    Yazma               Okuma           Hayır
-    Yazma               Yazma           Hayır
+    ┌─────────────────────────┬──────────────────────────────────────────────┬─────────────────────────────────────────────┐
+    │         Ölçüt           │                   Spinlock                   │                    Mutex                    │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ BEKLEME DAVRANIŞI                                                                                                    │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ Bekleme tipi            │ Busy-wait — CPU kilit serbest olana döndürür │ Sleep — thread uyutur, başka iş çalışır     │
+    │ CPU kullanımı           │ Yüksek — bekleme süresince CPU %100          │ Düşük — bekleme süresince CPU boşta         │
+    │ Overhead                │ Çok düşük — birkaç instruction               │ Yüksek — bağlam switch + scheduler         │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ KULLANILABİLECEK BAĞLAM                                                                                              │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ Interrupt handler (ISR) │ [OK] Kullanılabilir                          │ [!!] YASAK — sleep yapamaz                  │
+    │ Softirq / Tasklet       │ [OK] Kullanılabilir                          │ [!!] YASAK — atomic bağlam                  │
+    │ Process bağlam          │ [OK] Kullanılabilir                          │ [OK] Kullanılabilir — tercih edilmeli       │
+    │ Preemption durumu       │ Alındığında preemption devre dışı kalır      │ Preemption etkilenmez                       │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ KRİTİK BÖLGE                                                                                                         │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ Uygun bölge uzunluğu    │ Çok kısa — birkaç instruction (µs düzeyi)    │ Uzun olabilir — ms, hatta sn düzeyi         │
+    │ Sleep çağrısı           │ [!!] YASAK — kmalloc(GFP_KERNEL), msleep...  │ [OK] Serbest — istediğin gibi uyuyabilirsin │
+    │ GFP flags               │ Sadece GFP_ATOMIC                            │ GFP_KERNEL kullanılabilir                   │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ SMP / ÇOK ÇEKİRDEK                                                                                                   │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ Çok çekirdekli etkinlik │ Bekleme çok kısaysa avantajlı                │ Bekleme uzunsa avantajlı                    │
+    │ Tek çekirdekte          │ [!!] DİKKAT — aynı CPU'da deadlock riski     │ Scheduler önler, güvenli                    │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ TİPİK KULLANIM YERLERİ                                                                                               │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ Örnek senaryolar        │ IRQ handler, tasklet, register erişimi,      │ open/read/write/ioctl, donanım başlatma,    │
+    │                         │ ISR ↔ process paylaşımlı veri                │ uzun I/O bekleme, kullanıcı alanı istekleri │ 
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ ÖZET KURAL                                                                                                           │
+    ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
+    │ Ne zaman?               │ Atomic bağlam VEYA kritik bölge çok kısaysa  │ Process bağlamındaysan VE bölge uzunsa      │
+    └─────────────────────────┴──────────────────────────────────────────────┴─────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
 
+/*----------------------------------------------------------------------------------------------------------------------
+	Diğer çok kullanılan senkronizasyon nesnelerinden biri de "okuma yazma kilitleri (readers-writer lock)" denilen 
+    nesnelerdir. Önce bu nesnelere neden gereksinim duyulduğunu bir örnekle açıklamak istiyoruz. Çekirdek kodlarında 
+    paylaşılan bir kaynak bulunuyor olsun. Örneğin bunun global bir bağlı liste (linked list) olduğunu düşünelim. Bu 
+    bağlı listeye bir grup thread eleman (düğüm) ekliyor olsun, bir grup thread de bu bağlı listeyi dolaşarak eleman 
+    arıyor olsun. Burada bağlı listede arama yapmak "okuma (read)" işlemi gibi düşünülebilir. Çünkü bu işlem paylaşılan 
+    kaynakta (burada bağlı liste) bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilmektedir. 
+    Ancak bağlı listeye eleman ekleyen thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o 
+    sırada başka bir thread de aynı bağlı listeye ekleme yaparsa ya da ondan arama yaparsa bu durum çökmeye yol açabilir. 
+    Burada bağlı listeye eleman eklemek bir "yazma (write)" işlemi olarak düşünülebilir. O halde bizim öyle bir kritik kod 
+    oluşturmamız gerekir ki birden fazla okuma yapan thread bu kritik koda nekleme yapmadan girebilsin ancak bir thread 
+    okuma yaparken yazma yapan bir thread okuma yapan thread kritik koddan çıkana kadar beklesin. Benzer biçimde eğer yazma 
+    yapan bir thread kritik koda girmişse bu işlem bitene kadar okuma yapan bir thread de kritik koda giremesin. Aşağıda 
+    Thread-1 kritik koda girmişse Thread-2'nin kritik koda girip girmeyeceği bir tablo biçiminde verilmiştir:
+
+    ┌────────────┬────────────┬────────────────────────────────────┐
+    │  Thread-1  │  Thread-2  │ Thread-2 Kritik Koda Girebilir mi? │
+    ├────────────┼────────────┼────────────────────────────────────┤
+    │   Okuma    │   Okuma    │               Evet                 │
+    ├────────────┼────────────┼────────────────────────────────────┤
+    │   Okuma    │   Yazma    │               Hayır                │
+    ├────────────┼────────────┼────────────────────────────────────┤
+    │   Yazma    │   Okuma    │               Hayır                │
+    ├────────────┼────────────┼────────────────────────────────────┤
+    │   Yazma    │   Yazma    │               Hayır                │
+    └────────────┴────────────┴────────────────────────────────────┘
+    
     Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalar için kritik koda girilmesine izin vermektedir. 
 
     Böyle bir mekanizma tek başına mutex ya da semaphore nesneleriyle sağlanamaz. Aşağıdaki temsili koda (pseudo code) 
@@ -1260,8 +1315,8 @@ void exit_sys(const char *msg)
         mutex_unlock(&g_mutex);
     }
 
-    Burada birden fazla okuma işlemi de blokeye yol açacaktır. Halbukş bizim istediğimiz biredne fazla okumanın kilide 
-    yakalanmadan kritik koda girmebilmesidir.							
+    Burada birden fazla okuma işlemi de blokeye yol açacaktır. Halbuki bizim istediğimiz birden fazla okumanın kilide 
+    yakalanmadan kritik koda yapılabilmesidir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1330,7 +1385,7 @@ void exit_sys(const char *msg)
     void write_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void write_unlock_bh(rwlock_t *lock);
 
-    Nesne read_lock fonksiyonalrıyla kilitlenmişse nesnenin açılması read_unlock fonksiyonlarıyla, nesne write_lock 
+    Nesne read_lock fonksiyonlarıyla kilitlenmişse nesnenin açılması read_unlock fonksiyonlarıyla, nesne write_lock 
     fonksiyonlarıyla kilitlenmişse nesnenin açılması write_unlock fonksiyonlarıyla yapılmalıdır. Örneğin okuma amaçlı 
     krtik kod şöyle oluşturulabilir:
 
@@ -1374,8 +1429,9 @@ void exit_sys(const char *msg)
     Eğer bir thread kilidi write_lock ile almışsa başka bir thread kilidi read_lock ile de write_lock ile de alamaz ve 
     spin yaparak bekler.
 
-    read_lock ve write_lock fonksiyonlarının irq sonekli versiyonları yine akış kritik kodda girdiğinde ilgili CPU ya da 
-    çekirdeğin yerel kesmelerini kapatmaktadır.								
+    read_lock ve write_lock fonksiyonlarının irq sonekli versiyonları spinlock konusunda belirttiğimiz gibi akış kritik 
+    koda girdiğinde ilgili işlemci ya da çekirdeğin yerel kesmelerini kapatmaktadır. irqsave sonekli fonksiyonlar yine 
+    önce IRQ durumunu flags değişkeninde saklayıp unlock işlemi sırasında IRQ durumunu önceki duruma set etmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1410,7 +1466,7 @@ void exit_sys(const char *msg)
     Biz burada önbellek 
     protokolleri üzerinde durmayacağız. Bunlar hakkındaki bilgileri başka kaynaklardan edinebilirsiniz. 
 
-    NUMA mimarisinde DRAM bellek bank'lara ayrılmıştır. Her işelemcinin ya da çekirdeğin ayrı bir bank'ı vardır. Bunlar 
+    NUMA mimarisinde DRAM bellek bank'lara ayrılmıştır. Her işlemcinin ya da çekirdeğin ayrı bir bank'ı vardır. Bunlar 
     kendi bank'larına diğer bank'lardan daha hızlı erişebilmektedir. Çünkü bunlar kendi bank'larına erişirken diğer CPU 
     ya da çekirdekleri durdurmamaktadır. Bu nedenle bu mimarilerde belleğin her bölgesine erişim aynı sürede yapılamamaktadır. 
     "Non-unified" sözcüğü bunu anlatmaktadır. Bu mimariyi aşağıdaki şekille betimleyebiliriz:
@@ -1433,8 +1489,8 @@ void exit_sys(const char *msg)
     NUMA Mimarisinin Avantajları:
 
     - Daha yüksek ölçeklenebilirlik sunar (64+ işlemciye kadar ölçeklenebilir).
-    - Yerel bellek erişimleri çok hızlıdır (düşük gecikme).
-    - Bellek bant genişliği toplamda daha yüksektir (her düğüm kendi belleğine erişir).
+    - Yerel bellek (kendi bank'ına) erişimleri çok hızlıdır (düşük gecikme).
+    - Bellek bant genişliği toplamda daha yüksektir (her çekirdek kendi belleğine erişir).
     - Büyük ve paylaşımlı bellek sistemleri için daha uygundur.
     - Bellek kapasitesi daha kolay arttırılabilir (düğüm başına bellek eklenebilir).
     - Performansı artırmak için veri yerelliği (data locality) optimizasyonu yapılabilir.
@@ -1446,7 +1502,7 @@ void exit_sys(const char *msg)
     - İşletim sisteminin ve uygulamaların NUMA-farkında (NUMA-aware) olması gerekir.
     - Yanlış veri yerleşimi performansı ciddi şekilde düşürebilir.
     - Donanım maliyeti daha yüksektir.
-    - Önbellek tutarlılık mekanizmaları daha karmaşıktır.
+    - Önbellek tutarlılık (cache consistency) mekanizmaları daha karmaşıktır.
 
     SMP Mimarisinin Avantajları:
 
@@ -1484,7 +1540,8 @@ void exit_sys(const char *msg)
 
     Linux çekirdeği hem SMP hem de NUMA mimarisini destekleyecek biçimde gerçekleştirilmiştir. Yani biz SMP içeren 
     sistemlerde de NUMA içeren sistemlerde de Linux'u kurduğumuzda Linux bunu fark etmekte ve o mimariye özgü çalışmayı 
-    desteklemektedir. 
+    desteklemektedir. Genel olarak Linux çekirdeği (konfigürasyona da bağlıdır) SMP sistemlerini sanki tek düğümden 
+    (bank'tan) oluşan NUMA sistemleri ele almaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1494,15 +1551,15 @@ void exit_sys(const char *msg)
     2) Komutların yer değiştirmesi (instruction reordering) nedeniyle oluşan sorunlar.
 
     Birden fazla işlemci ya da çekirdeğin aynı global değişkeni tesadüfen aynı zamanda güncellemeye çalıştığını düşünelim. 
-    Ya da bir CPU ya da çekirdek o global değişkeni güncellerken diğerinin onu okumaya çalıştığını düşünelim. Yukarıda biz 
-    modern sistemlerde bir CPU ya da çekirdeğin belleğe erişirken zaten diğerlerini durdurduğunu belirtmiştik. Ancak Intel 
-    gibi bazı mimarilerde bu durdurma bazı durumlarda tüm makine komutu süresince yapılmamaktadır. Intel ve 64 bit ARM 
-    işlemcileri bazı koşullarda belleğe erişim yapan makine komutunu çalışırken veri yolunu birden fazla kez tutup bırakabilmektedir.  
-    Örneğin 32 bit Intel işlemcilerinde aslında işelmci fiziksel belleğe hep 32 bit genişliğinde erişmektedidr. Bu işlemciler 
-    bellekten 1 byte bile okuyacak olsalar aslında 4 byte okuyup o 4 byte içerisinden o byte'ı vermektedir. İşte bu işlemcilerde 
-    eğer 4 byte'lık nesneler hizalanmamışsa makine komutunun başından sonuna kadar veri yolu tutulmamaktadır. Aşağıdaki gibi 
-    bir bellek içeriğinde işlemcinin 4'ün katlarına hizalanmamış olan yyyy byte'larına tek bir makine komutuyla yazmak 
-    istediğini varsayalım:
+    Ya da bir işlemci ya da çekirdek o global değişkeni güncellerken diğerinin onu okumaya çalıştığını düşünelim. Yukarıda 
+    biz modern sistemlerde bir işlemci ya da çekirdeğin belleğe erişirken zaten diğerlerini durdurduğunu belirtmiştik. 
+    Ancak Intel gibi bazı mimarilerde bu durdurma bazı durumlarda tüm makine komutu süresince yapılmamaktadır. Intel ve 
+    64 bit ARM işlemcileri bazı koşullarda belleğe erişim yapan makine komutunu çalışırken veri yolunu birden fazla kez 
+    tutup bırakabilmektedir. Örneğin 32 bit Intel işlemcilerinde aslında işlemci fiziksel belleğe hep 32 bit genişliğinde 
+    erişmektedidr. Bu işlemciler bellekten 1 byte bile okuyacak olsalar aslında 4 byte okuyup o 4 byte içerisinden o byte'ı 
+    ayrıştırmaktadır. İşte bu işlemcilerde eğer 4 byte'lık nesneler hizalanmamışsa makine komutunun başından sonuna kadar 
+    veri yolu tutulmamaktadır. Aşağıdaki gibi bir bellek içeriğinde işlemcinin 4'ün katlarına hizalanmamış olan yyyy byte'larına 
+    tek bir makine komutuyla yazmak istediğini varsayalım:
 
     ...
     xxxx
@@ -1652,7 +1709,7 @@ void exit_sys(const char *msg)
     4) sonucu R1’e yaz
 
     Mikrokodlar daha çok CISC işlemcilerine özgüdür. RISC işlemcileri komutları mikrokodlara bölerek işlem yapmaz. 
-    Tek bir lojik devreyle bütünsel bir biçimde işlemleri yapar. Tabii bu sırada komutlar evrelere ayrılarak yuklarıda 
+    Tek bir lojik devreyle bütünsel bir biçimde işlemleri yapar. Tabii bu sırada komutlar evrelere ayrılarak yukarıda 
     belirttiğimiz gibi kemdi içlerinde pipeline mekanizması eşliğinde çalıştırışmaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -1672,14 +1729,14 @@ void exit_sys(const char *msg)
 
     INC mem
 
-    Peki Intel gibi bir işlemcide bu işlem atomik midir? İşte bu tür işlemcilerde "read-modify-write" biçiminde gerçekleştirilen
-    işlemlerde ilgili bellek adresi hizalanmış olsa bile işlem birden fazla işlemci ya da çekirdek söz konusu olduğunda 
-    atomik değildir. Biz atomikliği yukarıda "bir işlemcinin yaptığı işlemi diğeri ya tam olarak görecek ya da görmeyecek" 
-    biçimde tanımlamıştık. Bu makine komutunu örneğin iki işlemci aynı zaman dilimi içerisinde yapmaya çalışırsa birinin 
-    belleğe yazdığı artırılmış değer diğeri tarafından ezilebilir. Bu durumda da bellekdeki değer iki kez değil sanki bir 
-    kez artırılmış gibi bir durum oluşabilir. İşte bu tür durumlar işlemcilerin makine komutu bitene kadar veri yolunu 
-    kilitlemesiyle ya da buna benzer bir mekanizmayla engellenmektedir. Intel işlemcilerinde LOCK öneki bu işlemi 
-    yapmaktadır:
+    Peki Intel ailesine ilişkin bir işlemcide bu işlem atomik midir? İşte bu tür işlemcilerde "read-modify-write" biçiminde 
+    gerçekleştirilen işlemlerde ilgili bellek adresi hizalanmış olsa bile işlem birden fazla işlemci ya da çekirdek söz 
+    konusu olduğunda atomik değildir. Biz atomikliği yukarıda "bir işlemcinin yaptığı işlemi diğeri ya tam olarak görecek 
+    ya da görmeyecek" biçimde tanımlamıştık. Bu makine komutunu örneğin iki işlemci aynı zaman dilimi içerisinde yapmaya 
+    çalışırsa birinin belleğe yazdığı artırılmış değer diğeri tarafından ezilebilir. Bu durumda da bellekdeki değer iki 
+    kez değil sanki bir kez artırılmış gibi bir durum oluşabilir. İşte bu tür durumlar işlemcilerin makine komutu bitene 
+    kadar veri yolunu kilitlemesiyle ya da buna benzer bir mekanizmayla engellenmektedir. Intel işlemcilerinde LOCK öneki 
+    bu işlemi yapmaktadır:
 
     LOCK INC mem
 
@@ -1692,19 +1749,19 @@ void exit_sys(const char *msg)
     Bizim C'de tek bir operatör ile gerçekleştirdiğimiz ifadeler atomik davranış bakımından hiçbir garanti oluşturmamaktadır. 
     Örneğin:
 
-    ++count;
+    ++g_count;
 
-    Burada count değişkeni 1 artırılmıştır. Ancak bu işlem örneğin Intel x86 kodu üreten derleyiciler tarafından tek bir 
+    Burada g_count değişkeni 1 artırılmıştır. Ancak bu işlem örneğin Intel x86 kodu üreten derleyiciler tarafından tek bir 
     makine komutuyla LOCK öneki getirilerek yapılmak zorunda değildir. RISC mimarisi için kod üreten derleyicilerde ise 
     bu tür işlemler zaten tek bir makine komutuyla yapılamamaktadır. Örneğin Intel x86 derleyicileri yukarıdaki gibi C'de 
     tek bir operatörden oluşan ifade için aşağıdaki gibi üç makine komutu üretebilmektedir:
 
-    MOV reg, count
+    MOV reg, g_count
     INC reg
-    MOV count, reg
+    MOV g_count, reg
 
-    Kaldı ki x86 kodu üreten bir derleyici -yukarıda da belirtmiştik- bunun için tek makine komutu üretse bile komuta LOCK 
-    öneki getirmedikten sonra yine birden fazla işlemci ya da çekirdeğin bulunduğu durumda atomiklik sağlanamamaktadır:
+    Kaldı ki x86 kodu üreten bir derleyici -yukarıda da belirtmiştik- bunun için tek bir makine komutu üretse bile komuta 
+    LOCK öneki getirmedikten sonra yine birden fazla işlemci ya da çekirdeğin bulunduğu durumda atomiklik sağlanamamaktadır:
 
     INC count
 
@@ -1788,7 +1845,7 @@ void exit_sys(const char *msg)
         long counter;
     } atomic_long_t;
 
-    Yeni çekirdeklerde atomic_long_t türü "include/linuc/atomic/atomic_long.h" dosyası içerisinde diğer türlerle 
+    Yeni çekirdeklerde atomic_long_t türü "include/linux/atomic/atomic_long.h" dosyası içerisinde diğer türlerle 
     typedef edilmiş durumdadır:
 
     #ifdef CONFIG_64BIT
@@ -1802,9 +1859,9 @@ void exit_sys(const char *msg)
     atomic_t türündeki atomik değişken int türünden, atomic64_t türündeki atomik değişken ise long long türündendir. 
     atomic_long_t türündeki atomik değikenin türü de o sistemdeki long türünün uzunluğuna bağlı olarak değişebilmektedir. 
     Bu türlerin neden yapılarla sarmalandığını merak edebilirsiniz. Bunun en önemli nedeni atomik işlemler yapan çekirdek 
-    fonksiyonlarına yanlışlıkla başka bir türün parametre olarak geçilmesinin ve atomik türlerle işlemlerin yanlışlıkla 
-    yapılmasının engellenmek istenmesidir. Aynı zamanda bu atomik temsilin daha okunabilir olacağı düşünülmüştür. Örneğin
-    bu tesmil sayesinde atomik işlemlerin C'nin operatörleriyle işleme sokulması da engellenmektedir:
+    fonksiyonlarına yanlışlıkla başka bir türün parametre olarak geçilmesinin engellenmek istenmesidir. Örneğin eğer 
+    atomic_t türü int olarak typedef edilseydi atomic_t türünden bir değişkene doğrudan int bir değer atanabilirdi. 
+    Aynı zamanda bu atomik temsilin daha okunabilir olacağı düşünülmüştür. Örneğin:
 
     atomic_t count;
 
@@ -1820,9 +1877,9 @@ void exit_sys(const char *msg)
     Bu makrolar aslında küme parantezleri oluşturup yapının counter elemanına değer atanmasını sağlamaktadır. Örneğin
     ATOMIC_INIT makrosu şöyle bildirilmiştir:
 
-    #define ATOMIC_INIT(i) { (i) }
+    #define ATOMIC_INIT(i)      { (i) }
 
-    Ancak yerel değişken söz konusu ise bu biçimde ilkdeğer verme atomikliği bozabilmektedir. Çünkdü derleyiciler 
+    Ancak yerel değişken söz konusu ise bu biçimde ilkdeğer verme atomikliği bozabilmektedir. Çünkü derleyiciler 
     yerel değişkenlere de makine komutlarıyla değer atamaktadır. Atomik değişkenlere daha sonra değer atamak için 
     atomic_set fonksiyonu kullanılmaktadır. Güncel çekirdeklerde atomic_set fonksiyonu inline biçimde şöyle bildirilmiştir:
 
@@ -1891,13 +1948,13 @@ void exit_sys(const char *msg)
     tek makine makine komutu üreteceği de bilinmektedir. gcc volatile atama işlemlerini her zaman tek makine komutuyla 
     yapmaktadır. Ayrıca yukardaki işlemde ileride ele alacağımız bir bellek bariyerinin kullanılmadığına dikkatinizi 
     çekmek istiyoruz. Bellek bariyerleri bir grup makine komutunun sıralamasını garanti etmek için kullanılmaktadır. 
-    Atomiklik ise ise bir işlemin araya girilmeden, kesilmeden tek parça bir işlem olarka yapılması anlamına gelmektedir. 
+    Atomiklik ise ise bir işlemin araya girilmeden, kesilmeden tek parça bir işlem olarak yapılması anlamına gelmektedir. 
 
     Yukarıdarıdaki akış Linux çekirdeğinde çok karşılaşın bir kalıptır. İşlemler işlemci bağımsız fonksiyonlar çağrılarak 
     yapılır. Ancak belli bir aşamadan sonra işlemciye ilişkin "arch" dizini içerisindeki fonksiyonlar ya da makrolar
-    devreye girer. Bazen yalnızca bazı işlemciler için özel işlemlerin yapılması zöz konusu olabilmektedir. Bu durumda 
+    devreye girer. Bazen yalnızca bazı işlemciler için özel işlemlerin yapılması söz konusu olabilmektedir. Bu durumda 
     ilgili fonksiyonlar ya da makrolar o işlemciler için yazılır, diğerleri için de "generic" bir tanımlama yapılır. Bu 
-    tür kodlarda isminde "generic" geçen dosyalar görürseniz şaşırmayınız. Bunlar adeta "geri kalan işlemcilerin hepsi 
+    tür kodlarda, isminde "generic" geçen dosyalar görürseniz şaşırmayınız. Bunlar adeta "geri kalan işlemcilerin hepsi 
     için" anlamına gelmektedir. Atomik fonksiyonlardaki çağırma dizgesi tipik olarka şöyledir:
 
     atomic_xxx ---> raw_atomic_xxx ---> arch_atomic_xxx (işlemciye özgü fonksiyon ya da makro)
@@ -1951,9 +2008,10 @@ void exit_sys(const char *msg)
     Burada değişkenin adresi alınarak bu adres volatile bir adrese dönüştürülmüş ve yukarıda belirttiğimiz gibi volatile 
     erişim yapılmıştır. Fonksiyonun kullanımına şöyle bir örnek verebiliriz:
 
-    atomic_t counter = ATOMIC_INIT(100);
+    atomic_t g_counter = ATOMIC_INIT(100);
+    /* ... */
 
-    int value = atomic_read(&counter);          /* atomik okuma */
+    int value = atomic_read(&g_counter);          /* atomik okuma */
 
     Atomik artırımlar ve eksiltimler için şu fonksiyonlar bulundurulmuştur:
 
@@ -1967,8 +2025,8 @@ void exit_sys(const char *msg)
     atomic_long_dec(atomic_long_t *v);
 
     Bu fonksiyonlar artırımın atomik bir biçimde yapılmasını garanti etmektedir. Intel'de atomic bellek artırımları LOCK 
-    öneki getirilmiş tek makine komutuyla yapılabilmektedir. Ancak ARM gibi RISC işlemcilerinde bu işlemler bir döngü 
-    içerisinde özel makine komutlarıyla yapılmaktadır. atomic_inc fonksiyonu güncel çekirdeklerde şöyle yazılmıştır:
+    öneki getirilmiş tek makine komutuyla yapılabilmektedir. Ancak 32 bitlik ARM gibi RISC işlemcilerinde bu işlemler bir 
+    döngü içerisinde özel makine komutlarıyla yapılmaktadır. atomic_inc fonksiyonu güncel çekirdeklerde şöyle yazılmıştır:
 
     static __always_inline void
     atomic_inc(atomic_t *v)
@@ -2011,11 +2069,11 @@ void exit_sys(const char *msg)
 
     Artırma yapan atomik fonksiyonların artırılmış yeni değeri veren biçimleri de vardır:
 
-    int  atomic_inc_return(atomic_t *v);   
-    int  atomic_dec_return(atomic_t *v);    
+    int atomic_inc_return(atomic_t *v);   
+    int atomic_dec_return(atomic_t *v);    
 
-    s64  atomic64_inc_return(atomic64_t *v);
-    s64  atomic64_dec_return(atomic64_t *v);
+    s64 atomic64_inc_return(atomic64_t *v);
+    s64 atomic64_dec_return(atomic64_t *v);
 
     long atomic_long_inc_return(atomic_long_t *v);
     long atomic_long_dec_return(atomic_long_t *v);
@@ -2168,7 +2226,7 @@ void exit_sys(const char *msg)
     #define cmpxchg(ptr, old, new)      /* ... */
 
     "Compare-exchange" mekanizması şu işlemin yapılmasına yol açmaktadır: "Eğer bellekteki bir nesne içerisinde bulunan 
-    değer benim belirttiğim değerle aynısya o zaman onun yerine şu değeri yaz". Tabii bu işlem atomik bir biçimde yapılmaktadır. 
+    değer benim belirttiğim değerle aynıysa o zaman onun yerine şu değeri yaz". Tabii bu işlem atomik bir biçimde yapılmaktadır. 
     Örneğin bir nesne içerisinde 0 değeri bulunuyor olsun. Biz de bu mekanizmayla şu işlemi atomik olarak yapabiliriz:
     "Eğer nesne içerisinde 0 varsa onu 1 yap". Burada bir koşulun yani karşılaştırmanın (compare) olduğuna dikkat ediniz. 
     Bu örneğimizde nesne içerisinde 0 yoksa işlem başarısız olacaktır, ancak 0 varsa başarılı olacaktır. Buradaki karşılaştırma 
@@ -2185,8 +2243,8 @@ void exit_sys(const char *msg)
         return current;  /* Eski değeri döndür */
     }
 
-    Tabii tüm işlem aslında kesilmeden yapılmaktadır. Fonksiyonların hedeflenen nesnenin önceki değeriyle geri döndüğüne 
-    dikkat ediniz. 
+    Tabii tüm işlem aslında tek bir makine komutuyla kesilmeden yapılmaktadır. Fonksiyonların hedeflenen nesnenin önceki 
+    değeriyle geri döndüğüne dikkat ediniz. 
 
     "Compare-exchange" mekanizması senkronizasyon nesnelerinin gerçekleştiriminde kullanılan bir mekanizmadır. Örneğin 
     manuel bir spinlock gerçekleştirimi yapacak olalım:
@@ -2207,11 +2265,13 @@ void exit_sys(const char *msg)
     preempt_enable()
 
     Buradaki sorun g_flag değişkeni 0 ise onun 1 yapılması sırasında başka bir işlemcideki kodun açık pencere bularak 
-    kritik koda girmesidir:
+    kritik koda girebilmesidir:
 
     while (atomic_read(&g_flag) == 1)
         ;
+    
     ---> DİKKAT BURADA AÇIK BİR PENCERE VAR!
+    
     atomic_set(&g_flag , 1);    
 
     İşte "compare-exchange" mekanizması bu pencerenin oluşumunu engellemektedir. Çünkü bu mekanizma atomik yürütülmektedir:
@@ -2356,7 +2416,7 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Linux çekirdeklerinde atomik bir biçimde bir nesnenin bitleri üzerinde işlem yapan fonksiyonlar da bulundurulmuştur. 
-    Bu fonksiyonlar ilgili işlemcideki özel makine komutlarını da kullanmaktadır. Bu işlemler "read-modify-write" 
+    Bu fonksiyonlar ilgili işlemcideki özel makine komutlarınıda  kullanmaktadır. Bu işlemler "read-modify-write" 
     biçimindedir. Intel işlemcilerinin bellek üzerinde doğrudan bit işlemlerini yapan  makine komutlarına sahip olduğunu
     anımsayınız. Intel işlemcilerinde bu makine komutlarının başına LOCK öneki getirilmesi yeterli olmaktadır. Ancak 
     ARM gibi RISC işlemcilerinde bu tür işlemler izleyen paragraflarda açıklayacağıız gibi özel load/store komutlarını 
@@ -2539,10 +2599,10 @@ void exit_sys(const char *msg)
         ;
     use(data);       
 
-    Burada kodu yazan sistem programcısı "ready = 1 ise kesinlikle data = 42" olduğunu varsaymıştır. Çünkü data ataması 
-    ready atamasından önce yapılmıştır. Dolayısıyla Thread 2'de ready == 1 olduğunda data == 42 olacağı sanılmaktadır. 
-    Ancak burada bir ihmal söz konusudur. Derleyici ya da işlemci data ve ready değişkenleri birbirlerinden bağımsız 
-    olduğu için bu atamaları yer değiştirebilmektedir. Bu atamalar yer değiştirildiğinde aşağıdaki durum oluşacaktır:
+    Burada kodu yazan sistem programcısı "ready = 1 ise kesinlikle data = 42" olacağını varsaymıştır. Çünkü data 
+    ataması ready atamasından önce yapılmıştır. Dolayısıyla Thread 2'de ready == 1 olduğunda data == 42 olacağı 
+    sanılmaktadır. Ancak burada bir ihmal söz konusudur. Derleyici ya da işlemci data ve ready değişkenleri birbirlerinden 
+    bağımsız olduğu için bu atamaları yer değiştirebilmektedir. Bu atamalar yer değiştirildiğinde aşağıdaki durum oluşacaktır:
 
      /* Thread 1 */
 
@@ -2558,7 +2618,7 @@ void exit_sys(const char *msg)
 
     Artık sorun kolaylıkla anlaşılabilir. Diğer işlemci ya da çekirdek ready = 1 durumu oluştuğunda hemen hızlı davranıp 
     use işlemine girebilir. Bu durumda data değişkeni eski değeriyle kullanılacaktır. İşte sistem programcısı yukarıdaki 
-    gibi görünürde biribirinden bağımsız olan ancak mantıksal bakımdan birbirileriyle ilişkili olan işlemlerde komutların 
+    gibi görünürde birbirinden bağımsız olan ancak mantıksal bakımdan birbirileriyle ilişkili olan işlemlerde komutların 
     yer değiştirmesi durumunu göz önünde bulundurarak önlemini almalıdır. Bu önlem de "bellek bariyerleri (memory barriers)" 
     denilen mekanizmalarlarla alınmaktadır.
 
@@ -2606,13 +2666,13 @@ void exit_sys(const char *msg)
     │    Load B                                                │
     └──────────────────────────────────────────────────────────┘
 								
-    Ancak yukarıdaki dört yer değiştirme her türlü işlemci tarafından uygulanmamaktadır. Örneğin Intel işlemcileri 
-    yalnızca Store/Load işlemlerininin yerlerini değiştirebilmektedir. Diğer işlemlerde yer değiştirme yapmamaktadır. 
-    Ancak genel olarak RISC işlemcileri yukarıdki dört yer değiştirmeyi de yapmaktadır. Aşağıda bazı yaygın işlemcilerin 
-    hangi yer değiştirmeleri yaptığını tablo biçiminde veriyoruz:
+    Yukarıdaki dört yer değiştirme her türlü işlemci tarafından uygulanmamaktadır. Örneğin Intel işlemcileri yalnızca 
+    Store/Load işlemlerininin yerlerini değiştirebilmektedir. Diğer işlemlerde yer değiştirme yapmamaktadır. Ancak genel 
+    olarak RISC işlemcileri yukarıdaki dört yer değiştirmeyi de yapabilmektedir. Aşağıda bazı yaygın işlemcilerin hangi 
+    yer değiştirmeleri yaptığını tablo biçiminde veriyoruz:
 
     ┌─────────────────┬─────────────┬─────────────┬─────────────┬─────────────────┐
-    │ Reordering Turu │    x86      │    ARM.     │   RISC-V    │    PowerPC      │
+    │ Reordering Turu │    x86      │    ARM      │   RISC-V    │    PowerPC      │
     ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
     │ Load/Load       │     NO      │     YES     │     YES     │       YES       │
     ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
@@ -2636,13 +2696,16 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Derleyici bariyerleri oldukça basittir. Biz bir yere derleyici bariyeri yerleştirirsek ondan önceki tüm Load/Store 
-    işlemleri ondan sonraki tüm Load/Store işlemlerinden önce yapılır. Yani biz bir yere derleyici bariyeri yerleştirdiğimizde
+    Yukarıda da belirttiğimiz gibi komut yer değiştirmesi derleyici tarafından da işlemci tarafından da yapılabilmektedir. 
+    Komut yer değiştirmesi denildiğinde akla default olarak işlemcilerin yaptığı yer değiştirmeler gelmektedir. 
+    
+    Derleyici bariyerleri oldukça basittir. Biz bir yere derleyici bariyeri yerleştirirsek ondan önceki tüm Load ve Store 
+    işlemleri ondan sonraki tüm Load ve Store işlemlerinden önce yapılır. Yani biz bir yere derleyici bariyeri yerleştirdiğimizde
     derleyiciye şunu demiş oluruz: "Önce yukarıdaki işlemler için makine kodları üret, sonra aşağıdaki işlemler için 
-    makine kodları üret. Bariyerin yukarısıyla aşağısı arasında komut yer değiştirmesi yapma". Linux çekirdeklerinde 
+    makine kodları üret, bariyerin yukarısıyla aşağısı arasında komut yer değiştirmesi yapma". Linux çekirdeklerinde 
     derleyici bariyerleri için barrier isimli makro kullanılmaktadır:
 
-    # define barrier()  __asm__ __volatile__("": : :"memory")
+    # define barrier()   __asm__ __volatile__("": : :"memory")
 
     Örneğin:
 
@@ -2655,20 +2718,21 @@ void exit_sys(const char *msg)
     Burada derleyici asla bariyerin yukarısıyla aşağısındaki kodları yer değiştirmemektedir. Ancak tabii bu örnekte 
     a = 10 ile b = 20 kendi aralarında, c = 30 ile de d = 40 işlemleri kendi aralarında yer değiştirebilir. Derleyici 
     bariyerlerinin bir makine kodu üretmediğine yalnızca derleyici için bir direktif oluşturduğuna dikkat ediniz. 
-    gcc derleyicilerinde Linux çekirdeğinin gcc ile derlenebildiğini anımsayınız. (Son yıllarda clang derleyicileri 
-    ile derleme de artık başarılı biçimde yapılabilmektedir.) volatile erişim zaten derleyici bariyeri anlamına da 
-    gelmektedir. Yani örneğin a değişkeni volatile ise ona yapılan atamalar ve ondan sonra yapılan okumalar zaten bariyer 
-    etkisi yaratmaktadır. Başka bir deyişle gcc derleyicileri volatile erişimin yukarısını ve aşağısını kendi aralarında 
-    yer değiştirmemektedir. Tabii değişken volatile değilse biz onu tür dönüştürmesi ile sanki volatile imiş gibi de 
-    kullanabiliriz. Örneğin:
+    Linux çekirdeğinin gcc ile derlenebildiğini anımsayınız. (Son yıllarda clang derleyicileri ile derleme de artık 
+    başarılı biçimde yapılabilmektedir.) 
+    
+    C'deki volatile tür niteleyicisi zaten derleyici bariyeri anlamına da gelmektedir. Yani örneğin a değişkeni volatile 
+    ise ona yapılan atamalar ve ondan sonra yapılan okumalar zaten bariyer etkisi yaratmaktadır. Başka bir deyişle C 
+    derleyicileri volatile erişimin yukarısını ve aşağısını kendi aralarında yer değiştirmemektedir. Tabii değişken 
+    volatile değilse biz onu tür dönüştürmesi ile sanki volatile imiş gibi de kullanabiliriz. Örneğin:
 
     *(volatile int *)&x = 10;
 
     Zaten Linux çekirdeğindeki READ_ONCE ve WRITE_ONCE makroları bu işlemi yapmaktadır. READ_ONCE ve WRITE_ONCE makroları 
     iki işleve sahiptir:
 
-    1) Erişimi volatile olarak yaparlar. Dolayısıyla derleyici ilgili nnesne için her zaman bellek başvurusu yapar. 
-    2) volatile erişiminde dolayı aynı zamanda derleyici bariyeri de oluştururlar. 
+    1) Bu makrolar erişimi volatile olarak yaparlar. Dolayısıyla derleyici ilgili nesne için her zaman bellek başvurusu yapar. 
+    2) Bu makrolar volatile erişiminden dolayı aynı zamanda derleyici bariyeri de oluştururlar. 
 
     Güncel çekirdeklerde READ_ONCE ve WRITE_ONCE makroları "include/asm-generic/rwonce.h" dosyası içerisinde şöyle 
     tanımlanmıştır:
@@ -2865,7 +2929,7 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Biz daha önce barrier fonksiyonunu ve READ_ONCE ile WRITE_ONCE makrolarını görmüştük. Bunlar derleyici bariyeri 
-    oluşturmaktaydı. Şimdi de işlemlerin komut sıralaması üzerinde etkili olan bellek bariyerleri konusunu ele alaacağız.
+    oluşturmaktaydı. Şimdi de işlemcilerin komut sıralaması üzerinde etkili olan bellek bariyerleri konusunu ele alaacağız.
 
     İşlemciler için bellek bariyerleri işlemciye özgü özel makine komutlarıyla oluşturulmaktadır. Linux çekirdeği bazı 
     fonksiyon ve makrolarla donanım bariyerlerinin işlemciden bağımsız biçimde kullanılmasını sağlamaktadır. İşlemci
@@ -2890,7 +2954,7 @@ void exit_sys(const char *msg)
     │ (full barrier)  │             │             │             │             │
     └─────────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 
-    rmb makrosu "okuma amaçlı bellek bariyeri" oluşturmak için kullanılmaktadır. Bu makro "load/load" bariyeri oluşturmaktadır. 
+    rmb makrosu "okuma amaçlı bellek bariyeri" oluşturmak için kullanılmaktadır. Bu makro "Load/Load" bariyeri oluşturmaktadır. 
     Yani rmb() çağrısının yapıldığı yerin yukarındaki bellek okumalarıyla bu çağrının yapıldığı yerin aşağısındaki bellek 
     okumaları yer değiştiremez. Örneğin:
 
@@ -2904,7 +2968,7 @@ void exit_sys(const char *msg)
 
     Burada rmb() çağrısı 1 ve 3'ün 4 ve 6 ile yer değiştirmesini engellemektedir. Yani aşağıdaki okumalar yapılmadan 
     önce kesinlikle yukarıdaki okumalar yapılmış olmak zorudadır. Ancak örneğimizde bu rmb() çağrısı 1, 2 ve 3'ün kendi 
-    aralarındaki, 4, 5 ve 6'nın da kendi aralarındaki yer değiştirmesi üzerinde etkili olmamaktadır. Bariyer üsttekilerle 
+    aralarındaki 4, 5 ve 6'nın da kendi aralarındaki yer değiştirmesi üzerinde etkili olmamaktadır. Bariyer üsttekilerle 
     alttakiler arasında bir sınır çizmektedir. Burada rmb bariyeri 2 ile 5 arasındaki yer değiştirme üzerinde etkili 
     olmaz. Çünkü bu bariyer yalnızca okuma için (load/load) kullanılmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -2914,9 +2978,9 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    wmb makrosu "yazma amaçlı bellek bariyeri" oluşturmak için kullanılmaktadır. Bu makro store/store bariyeri 
+    wmb makrosu "yazma amaçlı bellek bariyeri" oluşturmak için kullanılmaktadır. Bu makro Store/Store bariyeri 
     oluşturmaktadır. Yani wmb çağrısının yapıldığı yerin yukarısındaki bellek yazmalarıyla bu çağrının yapıldığı yerin 
-    altındaki bellek yazmaları yer değiştiremez. Örneğin:
+    aşağısındaki bellek yazmaları yer değiştiremez. Örneğin:
 
     bellek yazması - 1
     bellek okuması - 2
@@ -2927,10 +2991,10 @@ void exit_sys(const char *msg)
     bellek yazması - 6
 
     Burada kesinlikle 1 ve 3 numaralı bellek yazmaları 4 ve 6 numaralı bellek yazmalarından daha önce yapılacaktır. 
-    Ancak 1, 2, 3 ve 4, 5, 6 bellek işlemlerini kendi aralarında işlemci tarafından uygun koşullar sağlanıyorsa yer 
-    değiştirebilir. wmb makrosu yalnızca yazma bariyeri oluşturduğu için yukarıdaki örneğimizde 2 ile 5 yer değiştirebilir. 
-    Örneğin bellek tabanlı IO kullanılarak bir aygıtın kontrol yazmacına yazma yapılarak önce bir ayar yapılıyor olsun 
-    sonra da bu ayar doğrultusunda başka bir yazmacına yazma yapılıyor olsun:
+    Ancak 1, 2, 3 ve 4, 5, 6 bellek işlemlerini işlemci kendi aralarında uygun koşullar sağlanıyorsa yer değiştirebilir. 
+    wmb makrosu yalnızca yazma bariyeri oluşturduğu için yukarıdaki örneğimizde 2 ile 5 yer değiştirebilir. Örneğin 
+    bellek tabanlı IO kullanılarak bir aygıtın kontrol yazmacına yazma yapılarak önce bir ayar yapılıyor olsun sonra 
+    da bu ayar doğrultusunda başka bir yazmacına yazma yapılıyor olsun:
 
     <kontrol_yazmacına_yazarak_durumu_ayarla>
     <bilgiyi_hedefe_yaz>
@@ -2943,9 +3007,8 @@ void exit_sys(const char *msg)
     wmb()
     <bilgiyi_hedefe_yaz>
 
-    mb makrosu load/load, load/store, store/load ve store/store bariyerlerinin hepsini oluşturmaktadır. Yani bu 
-    makronn yukarısındaki bellek okumaları ve yazmaları aşağısındaki bellek okumaları ve yazmalarıyla yer değiştiremez. 
-    Örneğin:
+    mb makrosu Load/Load, Load/Store, Store/Load ve Store/Store bariyerlerinin hepsini oluşturmaktadır. Yani bu makronun 
+    yukarısındaki bellek okumaları ve yazmaları aşağısındaki bellek okumaları ve yazmalarıyla yer değiştiremez. Örneğin:
 
     bellek yazması - 1
     bellek okuması - 2
@@ -2964,7 +3027,7 @@ void exit_sys(const char *msg)
     <kontrol_yazmacına_yazarak_durumu_ayarla>
     <bilgiyi_hedeften_oku>
 
-    Burada store/load durumu oluştuğuna dikkat ediniz. İşlemci bu iki bellek adresi biribiriyle ilgili olmadığı için 
+    Burada Store/Load durumu oluştuğuna dikkat ediniz. İşlemci bu iki bellek adresi biribiriyle ilgili olmadığı için 
     iki işlemin yerlerini değiştirebilir. Bunun engellenmesi için araya mb makrosu ile genel bariyer yerleştirmemiz
     gerekir:
 
@@ -2972,25 +3035,26 @@ void exit_sys(const char *msg)
     mb()
     <bilgiyi_hedeften_oku>
 
-    Burada bir noktaya dikkatinizi çekmek istiyoruz. rmb makrosu load/load, wmb makrosu store/store bariyerini 
-    oluşturmaktadır. load/store ve store/load bariyerlerini oluşturan ayrı bir makro yoktur. mb makrosu tüm bariyerleri 
-    oluşturmaktadır. Genel olarak işlemcilerde load/store ve store/load bariyerleri için diğer bariyerlerin de oluşturulması 
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. rmb makrosu Load/Load, wmb makrosu Store/Store bariyerini 
+    oluşturmaktadır. Load/Store ve Store/Load bariyerlerini oluşturan ayrı bir makro yoktur. mb makrosu tüm bariyerleri 
+    oluşturmaktadır. Genel olarak işlemcilerde Load/Store ve Store/Load bariyerleri için diğer bariyerlerin de oluşturulması 
     gerekmektedir. Linux çekirdeği de mb makrosuyla genel bariyer oluşturmuştur. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     rmb, wmb ve mb makroları zaten derleyici bariyerini de oluşturmaktadır. Yani bu makroları kullanıyorsanız ayrıca 
     derleyici bariyeri oluşturmanıza gerek yoktur. Bu makroların herhangi birini çağırdığınızda onun yukarısıyla aşağısı 
-    arasında derleyici komut yer değiştirmesi yapmamaktadır. (Derleyici için load/load, load/store, store/load ve 
-    store/store biçiminde ayrı yer değiştirme biçimleri yoktur. Derleyici bariyerleri yalnızca barrier isimli fonksiyonla 
+    arasında derleyici komut yer değiştirmesi yapmamaktadır. (Derleyici için Load/Load, Load/Store, Store/Load ve 
+    Store/Store biçiminde ayrı yer değiştirme biçimleri yoktur. Derleyici bariyerleri yalnızca barrier isimli fonksiyonla 
     oluşturulmaktadır.) 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Anımsanacağı gibi Intel x86 mimarisinde zaten işlemci load/load, load/store, store/store yer değiştimesini yapmıyordu.
-    Yalnızca store/load yer değiştirmesini yapıyordu. Peki bu durumda biz çekirdek kodlarında kullandığımız rmb() ve 
+    Anımsanacağı gibi Intel x86 mimarisinde zaten işlemci Load/Load, Load/Store, Store/Store yer değiştimesini yapmıyordu.
+    Yalnızca Store/Load yer değiştirmesini yapıyordu. Peki bu durumda biz çekirdek kodlarında kullandığımız rmb() ve 
     wmb() makrolarının Intel'de bir etkisi olacak mıdır? Hayır genel olarak bu makroları Intel'de çağırdığınızda -bazı 
-    ayrıntıları göz ardı edersek- bu makrolar yalnızca derleyici bariyeri oluşturacaktır. 
+    ayrıntıları göz ardı edersek- bu makrolar yalnızca derleyici bariyeri oluşturacaktır. Yani koda ekstra bir makine 
+    komutu eklemeyecektir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3016,7 +3080,11 @@ void exit_sys(const char *msg)
 
     Görüldüğü gibi bu makrolar tek işlemcili ya da tek çekirdekli sistemlerde yalnızca derleyici bariyeri oluşturmaktadır. 
     O halde biz çekirdek kodlarımızda ya da aygıt sürücülerimizde rmb, wmb ya da mb yerine smp_rmb, smp_wmb ve smp_mb 
-    makrolarını kullanabiliriz. Böylece bu makrolar çalıştığımız sisteme göre en uygun davranışı gösterecektir. 
+    makrolarını kullanabiliriz. Böylece bu makrolar çalıştığımız sisteme göre en uygun davranışı gösterecektir. Burada 
+    bir noktayı anımsatmak istiyoruz. Bugün kullandığımız Ubuntu, Debian gibi dağıtımlardaki çekirdekler CONFIG_SMP=y 
+    biçiminde derlenmiştir. Yani biz bu dağıtımları tek çekirdekli işlemcilerde kullanıyor olsak bile çekirdek çok 
+    çekirdekli işlemciler için derlenmiş durumdadır. Fakat örneğin BeagleBone Black (BBB) isimli SBC'de tek çekirdekli
+    ARM işlemcileri kullanılmaktadır. Orada çalışacak Linux çekirdekleri CONFIG_SMP=n biçiminde derlenebilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3038,7 +3106,7 @@ void exit_sys(const char *msg)
     erişimlerinin sırasını değiştirirse sorunlar ortaya çıkabilmektedir. Bu tür durumlarda tek işlemcili sistemlerde de  
     işlemci için bellek bariyerleri kullanılmalıdır. 
 ----------------------------------------------------------------------------------------------------------------------*/
-
+<BURADA KALDIK>
 /*----------------------------------------------------------------------------------------------------------------------
 	rmb, wmb ve mb makroları çift yönlü bariyer oluşturmaktadır. Bu bariyerler modern işlemcilerdeki pipeline mekanizması 
     üzerinde olumsuz etkiler oluşturduğu için çalışmayı göreli biçimde yavaşlatmaktadır. İşte mb ile genel bir bariyer 
