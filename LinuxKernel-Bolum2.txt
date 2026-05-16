@@ -15,7 +15,7 @@
                      (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                          (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                      Son Güncelleme: 03/05/2026 - Pazar
+                                      Son Güncelleme: 16/05/2026 - Cumartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -2721,18 +2721,25 @@ void exit_sys(const char *msg)
     Linux çekirdeğinin gcc ile derlenebildiğini anımsayınız. (Son yıllarda clang derleyicileri ile derleme de artık 
     başarılı biçimde yapılabilmektedir.) 
     
-    C'deki volatile tür niteleyicisi zaten derleyici bariyeri anlamına da gelmektedir. Yani örneğin a değişkeni volatile 
-    ise ona yapılan atamalar ve ondan sonra yapılan okumalar zaten bariyer etkisi yaratmaktadır. Başka bir deyişle C 
-    derleyicileri volatile erişimin yukarısını ve aşağısını kendi aralarında yer değiştirmemektedir. Tabii değişken 
-    volatile değilse biz onu tür dönüştürmesi ile sanki volatile imiş gibi de kullanabiliriz. Örneğin:
+    C standartlarına göre volatile erişimler kodda yazıldığı sırada yapılmak zorundadır. Yani birbirleriyle alakasız 
+    bile olsa C standartlarına göre iki volatile erişimler kendi aralarındaki sıra korunarak gerçekleştirilir. Örneğin:
 
-    *(volatile int *)&x = 10;
+    x = *(volatile int *)&val1;
+    y = *(volatile int *)&val2;
 
-    Zaten Linux çekirdeğindeki READ_ONCE ve WRITE_ONCE makroları bu işlemi yapmaktadır. READ_ONCE ve WRITE_ONCE makroları 
-    iki işleve sahiptir:
+    Burada C standartlarına göre erişim bu sırada yapılmak zorundadır. Dolayısıyla C standartlarına göre bu iki işlem 
+    arasında bir derleyici bariyerinin kullanılmasına gerek yoktur. Ancak C standartlarındaki bu volatile semantiği 
+    derleyici bariyeri görevini tam olarak yerine getirmemektedir C standartlarına göre volatile erişimlerin sıraları 
+    yalnızca kendi aralarında korunmaktadır. Dolayısıyla yukarıdaki okuma işlemini yer değiştirebilmektedir. 
+
+    Linux çekirdeğindeki READ_ONCE ve WRITE_ONCE makroları ilgili işlemin volatile semantbiği ile yapılmasını sağlamaktadır.
+    READ_ONCE ve WRITE_ONCE makroları üç işleve sahiptir:
 
     1) Bu makrolar erişimi volatile olarak yaparlar. Dolayısıyla derleyici ilgili nesne için her zaman bellek başvurusu yapar. 
-    2) Bu makrolar volatile erişiminden dolayı aynı zamanda derleyici bariyeri de oluştururlar. 
+    2) Bu makrolar volatile erişim yaptığundan derleyiciler bunların birbirlerine göre sırasını korurlar. Ancak bu tam bir 
+    derleyici bariyeri anlamına gelmemektedir. 
+    3) Eğer erişim tek bir makine komutuyla yapılabiliyorsa (yırtılma (tearing) olmuyora) bu makrolar okuma ve yazma 
+    işlemlerinin atomik biçimde yapılmasını sağlarlar.
 
     Güncel çekirdeklerde READ_ONCE ve WRITE_ONCE makroları "include/asm-generic/rwonce.h" dosyası içerisinde şöyle 
     tanımlanmıştır:
@@ -2753,19 +2760,6 @@ void exit_sys(const char *msg)
     } while (0)
 
     Burada görüldüğü gibi tek yapılan şey volatile erişimdir. 
-    
-    C standartlarına göre volatile erişimler kodda yazıldığı sırada yapılmak zorundadır. Yani birbirleriyle alakasız 
-    bile olsa C standartlarına göre iki volatile erişimler kendi aralarındaki sıra korunarak gerçekleştirilir. Ancak 
-    gcc standartlardaki bu kurala tam olarak uymamaktadır. Örneğin:
-
-    x = READ_ONCE(val1)
-    y = READ_ONCE(val2)
-
-    Burada C standartlarına göre erişim bu sırada yapılmak zorundadır. Dolayısıyla C standartlarına göre bu iki işlem 
-    arasında bir derleyici bariyerinin kullanılmasına gerek yoktur. (Tabii bu durum volatile erişimlerin derleyici 
-    bariyeri oluşturduğu anlamına gelmemektedir. volatile erişimlerin sıraları yalnızca kendi aralarında korunmaktadır.)
-    Ancak gcc bu kurala tam uymamaktadır. Dolayısıyla yukarıdaki okuma işlemini yer değiştirebilmektedir. Bunu engellemek 
-    için derleyici bariyerinin kullanılması gerekmektedir. 
     
     Daha önceden de belirttiğimiz gibi Linux çekirdeği zaten gcc ile ve bir süredir de clang ile derlenmek zorundadır. 
     Linux çekirdeğinde gcc derleyicisine özgü onlarca özellik kullanılmaktadır. Dolayısıyla çekirdek kodları herhangi bir 
@@ -2812,6 +2806,8 @@ void exit_sys(const char *msg)
 
     Çekirdek kodlarında paylaşılan bellek alanlarına erişimlerde her zaman READ_ONCE ve WRITE_ONCE makrolarını 
     kullanmalısınız.
+----------------------------------------------------------------------------------------------------------------------*/
+
 /*----------------------------------------------------------------------------------------------------------------------
                                             57. Ders 15/02/2026 - Pazar								
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -10440,8 +10436,8 @@ void exit_sys_errno(const char *msg, int eno)
     pfn_to_page isimli bir makro bulundurmaktadır. Yani bu makro bu üç konfigürasyon parametresinde de kullanılbilir 
     durumdadır. Makro CONFIG_FLATMEM durumunda şöyle tanımlanmıştır:
 
-    #define pfn_to_page         __pfn_to_page
-    #define __pfn_to_page(pfn)	(mem_map + ((pfn) - ARCH_PFN_OFFSET))
+    #define pfn_to_page             __pfn_to_page
+    #define __pfn_to_page(pfn)	    (mem_map + ((pfn) - ARCH_PFN_OFFSET))
 
     Buradaki ARCH_PFN_OFFSET değeri genellikle 0'dır. Görüldüğü gibi makronun yaptığı tek şey mem_map dizisinin ilgili 
     elemanın adresini elde etmektir. CONFIG_SPARSEMEM_VMEMMAP durumunda ise makro şöyle tanımlanmıştır:
@@ -10488,7 +10484,7 @@ void exit_sys_errno(const char *msg, int eno)
         (unsigned long)(__pg - __section_mem_map_addr(__nr_to_section(__sec)));	    \
     })
 
-    page_to_virt isimli makrı page nesnesini parametre olarak alıp sanal adres vermektedir. Bu işlem aslında zaten 
+    page_to_virt isimli makro page nesnesini parametre olarak alıp sanal adres vermektedir. Bu işlem aslında zaten 
     page_to_pfn kullanılarak yapılabilmektedir. Bu makro "include/linux/pfn.h" dosyasında tipik olarak şöyle yazılmıtır:
 
     #define page_to_virt(x)	    __va(PFN_PHYS(page_to_pfn(x)))
@@ -10502,11 +10498,13 @@ void exit_sys_errno(const char *msg, int eno)
 
     #define virt_to_page(kaddr)     pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 
-    Burada tam ters işlem yapıldığını görüyorzunuz. Ayrıca çekirdekte page_to_virt fonksiyonuna benzer page_address isimli
-    bir fonksiyon da bulunmaktadır. Bu fonksiyon da spage nesne adresini alıp sayfanın sanal bellek adresini vermektedir. 
-    Ancak bu fonksiyon page_to_virt fonksiyonundan daha temkinli yazılmıştır. page_to_virt fonksiyonu 32 bit sistemlerdeki 
-    HIGHMEM alanındaki sayfa adreslerini dönüştürmemektedir. Halbuki bu fonksiyon bu işlemi de yapmaktadır. Fonsiyon 
-    mevcut çkirdeklerde  "mm/highmem.c" içerisinde aşağıdaki paranmetrik yapıya sahip biçimde tanımlanmıştır:
+    Burada tam ters işlem yapıldığını görüyorsunuz. 
+    
+    Ayrıca çekirdekte page_to_virt fonksiyonuna benzer page_address isimli bir fonksiyon da bulunmaktadır. Bu fonksiyon 
+    da spage nesne adresini alıp sayfanın sanal bellek adresini vermektedir. Ancak bu fonksiyon page_to_virt fonksiyonundan 
+    daha temkinli yazılmıştır. page_to_virt fonksiyonu 32 bit sistemlerdeki HIGHMEM alanındaki sayfa adreslerini 
+    dönüştürmemektedir. Halbuki bu fonksiyon bu işlemi de yapmaktadır. Fonsiyon mevcut çkirdeklerde  "mm/highmem.c" 
+    içerisinde aşağıdaki paranmetrik yapıya sahip biçimde tanımlanmıştır:
 
     void *page_address(const struct page *page);
     
@@ -11184,6 +11182,7 @@ void exit_sys_errno(const char *msg, int eno)
         /* ... */
 
         struct free_area free_area[NR_PAGE_ORDERS];
+        int nr_zones;       
 
         /* ... */
     };
@@ -11241,10 +11240,13 @@ void exit_sys_errno(const char *msg, int eno)
 
     struct page *alloc_pages(gfp_t gfp_mask, unsigned int order);
 
-    Fonksiyonun birinci parametresi tahsisatın nereden yapılacağını belirtmektedir. İkinci parametresi ise tahsisat 
-    için düzey belirtmektedir. (Yani örneğin 1 sayfa tahsis edilecekse bu parametre 0, iki sayfa tahsis edilecekse 1, 
-    4 sayfa tahis edilecekse 2 girilmelidir.) Fonksiyonun birinci parametresindeki gfp_t türü tipik olarak unsigned int
-    biçiminde typedef edilmektedir. Bu parametreye çeşitli mask bayrakları bit düzeyinde OR işlemine sokularak 
+    alloc_pages eskiden "include/linux/gfp.h" CONFIG_NUMA konfigürasyon parametresine göre makro ya da inline fonksiyon 
+    biçiminde tanımlanıyordu. Ancak daha sonra makro haline getirilmiştir. 
+
+    alloc_pages fonksiyonun birinci parametresi tahsisatın nereden yapılacağını belirtmektedir. İkinci parametresi ise 
+    tahsisat için düzey belirtmektedir. (Yani örneğin 1 sayfa tahsis edilecekse bu parametre 0, iki sayfa tahsis edilecekse 
+    1, 4 sayfa tahis edilecekse 2 girilmelidir.) Fonksiyonun birinci parametresindeki gfp_t türü tipik olarak unsigned 
+    int biçiminde typedef edilmektedir. Bu parametreye çeşitli mask bayrakları bit düzeyinde OR işlemine sokularak 
     verilmektedir. Mask bayrakları "include/linux/gfp_types.h" dosyası içerisinde define edilmiştir. Bunları aşağıda 
     bir tablo biçiminde veriyoruz:
 
@@ -11322,9 +11324,10 @@ void exit_sys_errno(const char *msg, int eno)
 
     void __free_pages(struct page *page, unsigned int order);
 
-    Fonksiyonun birinci parametresi tahsisata ilişkin ilk page nesnesinin adresini, ikinci parametresi ise düzey 
-    bilgisini belirtmektedir. Örneğin 2'inci düzeyden 4 sayfa tahsis etmiş olalım. Bu sayfaları serbest bırakırken 
-    yine düzey bilgisini 2 olarak girmeliyiz. Örneğin:
+    Fonksiyon "mm/page_alloc.c" dosyası içerisinde tanımlanmıştır ve prototipi "include/linux/gfp.h" dosyasında bulunmaktadır. 
+    Fonksiyonun birinci parametresi tahsisata ilişkin ilk page nesnesinin adresini, ikinci parametresi ise düzey bilgisini 
+    belirtmektedir. Örneğin 2'inci düzeyden 4 sayfa tahsis etmiş olalım. Bu sayfaları serbest bırakırken yine düzey bilgisini 
+    2 olarak girmeliyiz. Örneğin:
 
     struct page *pages;
     /* ... */
@@ -11337,7 +11340,11 @@ void exit_sys_errno(const char *msg, int eno)
 
     __free_pages(pages, 2);                     /* 2'inci düzeyden yapılan tahsisat iade ediliyor */
 
-    alloc_pages ile tahsis edilen sayfaları farklı miktarlarda iade etmeye çalışmayınız. Bu durumda filimli tahsisat 
+    alloc_pages fonksiyonun başında __ yokken yapılan tahsisatı serbest bırakan __free_pages fonksiyonun başında __
+    olması bir uyumsuzluk oluşturmaktadır. Çekirdekte aslında free_pages isimli başka bir fonksiyon da vardır. Bu 
+    fonksiyon sayfaları onların sanal adreslerini alarak serbest bırakamaktadır. 
+
+    alloc_pages ile tahsis edilen sayfaları farklı miktarlarda iade etmeye çalışmayınız. Bu durumda dilimli tahsisat 
     sistemini bozabilirsiniz:
 
     __free_pages(pages + 0, 0);         /* dikkat! yanlış kullanım */
@@ -11345,27 +11352,527 @@ void exit_sys_errno(const char *msg, int eno)
     __free_pages(pages + 2, 0);         /* dikkat! yanlış kullanım */
     __free_pages(pages + 3, 0);         /* dikkat! yanlış kullanım */
 
-    alloc_pages fonksiyonunun önünde __ bulunmamasına karşın, __free_pages fonksiyonun başında __ bulunması eleştirilebilir. 
+    alloc_pages ve __free_pages fonksiyonları export edildiği için aygıt sürücüler tarafından da kullanılabilmektedir. 
 
     alloc_pages fonksiyonunun bize fiziksel sayfanın sanal adresini vermediğine o sayfayı yönetmekte kullanılan page 
     nesnesinin adresini verdiğine dikkat ediniz. Biz eğer ilgili sayfanın içeriğine erişmek istiyorsak page_to_virt 
     makrosunu ya da page_address fonksiyonunu kullanmalıyız. 
+
+    Eğer tek sayfalık tahsisat yapılacaksa alloc_pages yerine alloc_page makrosu kullanılabilir. Bu makro  
+    include/linux/gfp.h" dosyasında şöyle yazılmıştır:
+
+    #define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
+
+    Yukarıda da belirttiğimiz gibi artık alloc_pages çekirdeklerde bir süredi makro olarak yazılmaktadır. Bu makronun 
+    çağırma grafı şöyledir:
+
+    alloc_pages(gfp, order)                            [MAKRO]
+    include/linux/gfp.h
+    #define alloc_pages(gfp, order)  alloc_pages_noprof(gfp, order)
+                        │
+            ┌─────────┴──────────┐
+    CONFIG_NUMA                !CONFIG_NUMA
+            │                        │
+            ▼                        ▼
+    ┌─────────────────────┐   ┌──────────────────────────────┐
+    │ alloc_pages_noprof  │   │ alloc_pages_node             │
+    │ (gfp, order)        │   │ (numa_node_id(), gfp, order) │
+    │ mm/mempolicy.c      │   │ include/linux/gfp.h          │
+    │ EXPORT_SYMBOL       │   │   static inline              │
+    └────────┬────────────┘   └──────────────┬───────────────┘
+             │                               │
+             ▼                               ▼
+    ┌─────────────────────┐   ┌──────────────────────────────┐
+    │ get_task_policy     │   │ __alloc_pages_node           │
+    │ (current)           │   │ (nid, gfp, order)            │
+    │ mm/mempolicy.c      │   │ include/linux/gfp.h          │
+    │   static            │   │   static inline              │
+    └────────┬────────────┘   └──────────────┬───────────────┘
+             │                               │
+             ▼                               │
+    ┌─────────────────────┐                  │
+    │ alloc_pages_mpol    │                  │
+    │ (gfp, order, pol,   │                  │
+    │  ilx, nid)          │                  │
+    │ mm/mempolicy.c      │                  │
+    │   static            │                  │
+    └───┬─────────────┬───┘                  │
+        │             │                      │
+    MPOL_           diğer                    │
+    INTERLEAVE    politikalar                │
+        │             │                      │
+        ▼             ▼                      │
+    ┌──────────┐  ┌────────────────┐         │
+    │ alloc_   │  │ alloc_pages_   │         │
+    │ page_    │  │ preferred_many │         │
+    │ inter-   │  │ (gfp, order,   │         │
+    │ leave()  │  │  nid, nodemask)│         │
+    │ mempol.c │  │ mempolicy.c    │         │
+    │  static  │  │   static       │         │
+    └────┬─────┘  └───────┬────────┘         │
+         │                │                  │
+         └────────┬────────┘                 │
+                  │                          │
+                  └──────────────┬───────────┘
+                                 │
+                                 ▼
+                ┌───────────────────────────────────┐
+                │  __alloc_pages_noprof             │
+                │  (gfp, order, preferred_nid,      │
+                │   nodemask)                       │
+                │  mm/page_alloc.c                  │
+                │  EXPORT_SYMBOL                    │
+                │  (#define __alloc_pages(...)  \   │
+                │     __alloc_pages_noprof(...))    │
+                └──────────────┬────────────────────┘
+                                │
+                                ▼
+                ┌───────────────────────────────────┐
+                │  __alloc_pages                    │
+                │  (gfp, order, preferred_nid,      │
+                │   nodemask)                       │
+                │  mm/page_alloc.c                  │
+                │    normal fonksiyon (export yok)  │
+                └──────┬───────────────┬────────────┘
+                       │               │
+                       ▼               ▼
+            ┌──────────────┐  ┌─────────────────────┐
+            │ prepare_     │  │ get_page_from_      │
+            │ alloc_pages  │  │ freelist            │
+            │ (gfp, order, │  │ (gfp, order,        │
+            │  nid, nm,    │  │  alloc_flags, ac)   │
+            │  ac, ...)    │  │ mm/page_alloc.c     │
+            │ page_alloc.c │  │   static            │
+            │   static     │  └────────┬────────────┘
+            └──────────────┘           │
+                            sayfa      │ sayfa
+                            bulundu ◄──┘ bulunamadı
+                                        │
+                                        ▼
+                            ┌──────────────────────────┐
+                            │ __alloc_pages_slowpath   │
+                            │ (gfp, order, ac)         │
+                            │ mm/page_alloc.c          │
+                            │   static (export yok)    │
+                            └────────┬────────┬────────┘
+                                     │        │
+                                     ▼        ▼
+                            ┌─────────────┐  ┌──────────────┐
+                            │  kswapd     │  │  OOM killer  │
+                            │  wake_up    │  │  out_of_     │
+                            │  mm/vmscan.c│  │  memory()    │
+                            │   internal  │  │ mm/oom_kill.c│
+                            └─────────────┘  └──────────────┘
+    
+    Burada çekirdekteki makroların ve static inline fonksiyonların aygıt sürücülerde kullanımına ilişkin bir noktayı 
+    belirtmek istiyoruz. Bir makro ya da inline fonksiyon koda açılmaktadır. Açılan koddaki makrolar da yeniden 
+    açılmaktadır. Makroların ve inline fonksiyonların export edilmesi anlamlı değildir. Ancak bunların açımları sonucunda 
+    çağrılan fonksiyonların export edilmiş olması gerekir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+                                        78. Ders 16/05/2026 - Cumartesi								
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    Aşağıda alloc_pages ve __free_pages fonksiyonlarının kullanımına ilişkin basit bir aygıt sürücü örneği verilmiştir. 
+    Aygıt sürücünün init fonksiyonunda saufa tahsisatı yapılmış ve sayfanın sanal adresi bir global değişkende saklanmıştır. 
+    write işleminde bu sayfaya yazma yapılıp read işleminde de bu sayfadan okuma yapılmıştır. Aygıt sürücünün exit 
+    fonksiyonunda da tahsis edilen sayfa serbest bırakılmıştır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* test-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/gfp.h>
+#include <linux/mm.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("test-driver");
+
+static int test_driver_open(struct inode *inodep, struct file *filp);
+static int test_driver_release(struct inode *inodep, struct file *filp);
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+	.open = test_driver_open,
+	.read = test_driver_read,
+	.write = test_driver_write,
+	.release = test_driver_release,
+};
+static void *g_pageaddr;
+
+static int __init test_driver_init(void)
+{
+	int result;
+	struct page *page;
+	
+	printk(KERN_INFO "test-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "test-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	if ((page = alloc_pages(GFP_KERNEL, 0)) == NULL) {
+		printk(KERN_ERR "cannot alloc pages!..\n");
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		return -ENOMEM;
+	}
+
+	g_pageaddr = page_address(page);
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	__free_pages(virt_to_page(g_pageaddr), 0);
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+
+	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static int test_driver_open(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static int test_driver_release(struct inode *inodep, struct file *filp)
+{
+	return 0;
+}
+
+static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+{
+	if (copy_to_user(buf, g_pageaddr, size) != 0)
+		return -EFAULT;
+
+	return size;
+}
+
+static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+{
+	if (copy_from_user(g_pageaddr, buf, size) != 0)
+		return -EFAULT;
+
+	return size;
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* page-test.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd;
+    char wbuf[] = "this is a test";
+    char rbuf[4096 + 1];
+    size_t result;
+
+    if ((fd = open("test-driver", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (write(fd, wbuf, strlen(wbuf)) == -1)
+        exit_sys("write");
+
+    if ((result = read(fd, rbuf, strlen(wbuf))) == -1)
+        exit_sys("read");
+    rbuf[result] = '\0';
+
+    printf("%s\n", rbuf);
+    
+    close(fd);
+    
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Çekirdekteki __get_free_pages fonksiyonu alloc_pages gibi sayfa tahsisatı yapmakla birlikte bize page nesnesinin 
+    adresini değil doğrudan tahsis edilen sayfanın sanal bellek adresini vermektedir. (Tabii çekirdek alanındaki fiziksel 
+    sayfaların ardışıl içimde sanal adrese map map edildiğini anımsayınız.) __get_free_ages aslında  "include/linux/gfp.h"
+    dosyasında bir makro olarak yazılmıştır. Biz burada anlatımı kolaylaştırmak için fonksiyon terimini kullanacağız. 
+    Fonksiyonun parametrik yapısı şöyledir:
+
+    unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order);
+
+    Fonksiyon tahsis edilen sayfaların sanal adresine geri dönmektedir. Geri dönüş değerinin unsigned long türünden 
+    olması sizi şaşırtmasın. __get_free_pages fonksiyonu ile tahsis edilen sayfalar free_pages fonksiyonu ile serbest 
+    bırakılabilir. (Bu fonksiyonu __free_pages fonksiyonu ile karıştırmayınız.) free_pages fonksiyonunun parametrik 
+    yapısı şöyledir:
+    
+    void free_pages(unsigned long addr, unsigned int order);
+    
+    Tabii aslında bu fonksiyon da __free_pages fonksiyonunu çağırmaktadır. Şöyle yazılmıştır:
+
+    void free_pages(unsigned long addr, unsigned int order)
+    {
+        if (addr != 0) {
+            VM_BUG_ON(!virt_addr_valid((void *)addr));
+            __free_pages(virt_to_page((void *)addr), order);
+        }
+    }
+
+    EXPORT_SYMBOL(free_pages);
+
+    Örneğin:
+
+    unsigned long addr;
+    char *buf;
+    /* ... */
+
+    if ((addr = __get_free_pages(GFP_KERNEL, 1)) != 0) 
+        return -ENOMEM;
+
+    buf = (char *)addr;
+    memset(buf, 0, PAGE_SIZE * 2);
+    
+    free_pages(addr, 1);
+
+    __get_free_pages fonksiyonunun tek sayfa tahsis eden __get_free_page isimli makrosu da vardır:
+
+    #define __get_free_page(gfp_mask) __get_free_pages((gfp_mask), 0)
+
+    Çekirdekteki get_zerod_page fonksiyonu içi sıfırlanmış tek bir sayfanın tahsisatını yapmaktadır. Fonksiyon tahsis 
+    edilen sayfanın sanal bellek adresiyle geri dönmektedir:
+
+    unsigned long get_zeroed_page(gfp_t gfp_mask);
+
+    Çekirdekte alloc_pages_exact isimli ilginç bir sayfa tahsisat fonksiyonu (aslında bir makro) da vardır. Fonksiyonun 
+    parametrik yapısı şöyledir:
+
+    void *alloc_pages_exact(size_t size, gfp_t gfp_mask);
+
+    Fonksiyonun birinci parametresi byte cinsinden büyüklük belirtmektedir. Fonksiyon parametresiyle belirtilen 
+    büyüklüğü kaysayan en küçük sayfa miktarını tahsis eder. Ancak ikiz blok tahsisat sisteminde tahisisatlar 2'nin 
+    kuvvetlerine göre yapıldığı için artan sayfalar olabilecekditr. Bunlar fonksiyon tarafından geri bırakılmaktadır. 
+    Örneğin biz bu fonksiyonun birinci parametresine 25000 değerini girelim. 25000 byte'ı karşılayabilecek sayfa sayısı 
+    6'dır. Ancak ikiz blok tahsisat sisteminde 6 sayfa tahsis edilememektedir ancak 8 sayfa tahsis edilebilmektedir. 
+    İşte fonksiyon 8 sayfayı yahsis edip 6 sayfayı geri bırakmaktadır. fonksiyonun doğrudan sanal adresle geri döndüğüne 
+    dikkat ediniz. 
+
+    alloac_pages_exact fonksiyonuyla tahsis edilen sayfalar free_pages_exact fonksiyonuyla serbest bırakılmaktadır:
+
+    void free_pages_exact(void *virt, size_t size);
+
+    Ayrıca çekirdekte belli NUMA düğümlerinden sayfa tahsisatı yapan bir fonksiyon bulundurulmuştur:
+
+    struct page *alloc_pages_node(int nid, gfp_t gfp_mask, unsigned int order);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
+    Şimdi de ikiz blok tahsisat sistemindeki "fallback" mekanizması üzerinde duracağız. ("fallback" Türkçe "yedek plan",
+    "B panı" anlamlarına gelmektedir.) Fallback "belli bir NUMA düğümünde ya da belli bir bölgede ya da belli bir göz
+    türünde tahsisat yapılamazsa diğer başka düğümlere, bölgelere ve göç türlerine de bakılması" anlamına gelmektedir. 
 
-/*----------------------------------------------------------------------------------------------------------------------
-									
+    Bellek yönetiminin giriş bölümünde de açıkladığımız gibi Linux çekirdeği fiziksel belleği NUMA düğümlerinden, NUMA
+    düğümlerini bellek bölgelerinden (zones), bellek bölgelerini de göç türlerinden (migration type)" oluşan bir 
+    sistem biçiminde ele almaktadır. Lnux çekirdeğinde her göç türünün ayrı bir boş listesi vardır. Başka bir deyişle 
+    her göç türü ayrı bir ikiz blok tahsisat sistemine sahiptir. Bu tahsisat sisteminin veri yapısını yukarıda açıklamıştık. 
+    Aşağıda yeniden veriyoruz:
+
+    typedef struct pglist_data {
+        /* ... */
+
+        struct zonelist node_zonelists[MAX_ZONELISTS];
+        int nr_zones; 
+    
+        /* ... */
+    };
+
+    struct free_area {
+        struct list_head	free_list[MIGRATE_TYPES];
+        unsigned long		nr_free;
+    };
+
+    zone (örn. ZONE_NORMAL):
+    │
+    ├── free_area[0]   (düzey-0, 4 KB bloklar)
+    │   ├── free_list[MIGRATE_UNMOVABLE]   → [pg1] → [pg4] → [pg9] → NULL
+    │   ├── free_list[MIGRATE_MOVABLE]     → [pg2] → [pg7] → NULL
+    │   ├── free_list[MIGRATE_RECLAIMABLE] → [pg3] → NULL
+    │   ├── free_list[MIGRATE_HIGHATOMIC]  → NULL
+    │   ├── free_list[MIGRATE_CMA]         → NULL
+    │   └── free_list[MIGRATE_ISOLATE]     → NULL
+    │
+    ├── free_area[1]   (düzey-1, 8 KB bloklar)
+    │   ├── free_list[MIGRATE_UNMOVABLE]   → [pg16,17] → NULL
+    │   ├── free_list[MIGRATE_MOVABLE]     → [pg32,33] → [pg64,65] → NULL
+    │   └── ...
+    │
+    ├── free_area[2]   (düzey-2, 16 KB bloklar)
+    │   └── ...
+    │
+    ...
+    │
+    └── free_area[10]  (düzey-10, 4 MB bloklar)
+        └── ...
+
+    Aslında sayfa tahsisatları "belli bir düğümün, belli bölgesinin bellli bir göç türünü" hedef alarak işlemlere 
+    başlamaktadır. İşte alloc_pages gibi fonksiyonların birinci parametresindeki bayraklar bu tespitin yapılmasını 
+    sağlamaktadır. Aşağıda hangi bayraklar kullanıldığında işlemerin hangi bölgeden ve hangi göç türünden başlatılacağı 
+    bilgisi bir tablo halinde verilmiştir:
+
+    ┌──────────────────────────────┬───────────────┬─────────────────────┬──────────────────────────────────┐
+    │      GFP Kombinasyonu        │  Hedef Zone   │   Migration Type    │          Tipik Kullanım          │
+    ├──────────────────────────────┼───────────────┼─────────────────────┼──────────────────────────────────┤
+    │ GFP_KERNEL                   │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ kmalloc, kzalloc, genel kernel   │
+    │ GFP_ATOMIC                   │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ IRQ handler, spinlock tutan kod  │
+    │ GFP_USER                     │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ bazı kullanıcı alanı tahsisatları│
+    │ GFP_HIGHUSER_MOVABLE         │  ZONE_NORMAL  │ MIGRATE_MOVABLE     │ anonim kullanıcı sayfaları       │
+    │ GFP_NOFS                     │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ FS kritik yol (deadlock önlemi)  │
+    │ GFP_NOIO                     │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ I/O kritik yol (deadlock önlemi) │
+    │ GFP_TRANSHUGE_MOVABLE        │  ZONE_NORMAL  │ MIGRATE_MOVABLE     │ transparent huge page (THP)      │
+    │ GFP_KERNEL |                 │               │                     │                                  │
+    │   __GFP_RECLAIMABLE          │  ZONE_NORMAL  │ MIGRATE_RECLAIMABLE │ slab cache (kmem_cache)          │
+    └──────────────────────────────┴───────────────┴─────────────────────┴──────────────────────────────────┘
+
+    Bileşke bayrakların nasıl oluşturulduğunu daha önce vermiştik. Aynı tabloyu yine verelim:
+
+    ┌──────────────────────┬────────────────────────────────────────────────────────┐
+    │  Kompozit Bayrak Adı │               Bileşen Bayraklar                        │
+    ├──────────────────────┼────────────────────────────────────────────────────────┤
+    │ GFP_ATOMIC           │ __GFP_HIGH | __GFP_KSWAPD_RECLAIM                      │
+    │ GFP_KERNEL           │ __GFP_RECLAIM | __GFP_IO | __GFP_FS                    │
+    │ GFP_KERNEL_ACCOUNT   │ GFP_KERNEL | __GFP_ACCOUNT                             │
+    │ GFP_NOWAIT           │ __GFP_KSWAPD_RECLAIM                                   │
+    │ GFP_NOIO             │ __GFP_RECLAIM                                          │
+    │ GFP_NOFS             │ __GFP_RECLAIM | __GFP_IO                               │
+    │ GFP_USER             │ __GFP_RECLAIM | __GFP_IO | __GFP_FS | __GFP_HARDWALL   │
+    │ GFP_HIGHUSER         │ GFP_USER | __GFP_HIGHMEM                               │
+    │ GFP_HIGHUSER_MOVABLE │ GFP_HIGHUSER | __GFP_MOVABLE | __GFP_SKIP_KASAN        │
+    │ GFP_DMA              │ __GFP_DMA                                              │
+    │ GFP_DMA32            │ __GFP_DMA32                                            │
+    │ GFP_TRANSHUGE        │ GFP_HIGHUSER_MOVABLE | __GFP_COMP | __GFP_NOMEMALLOC | │
+    │                      │ __GFP_NORETRY | __GFP_NOWARN | __GFP_KSWAPD_RECLAIM    │
+    │ GFP_TRANSHUGE_LIGHT  │ GFP_HIGHUSER_MOVABLE | __GFP_COMP | __GFP_NOMEMALLOC | │
+    │                      │ __GFP_NORETRY | __GFP_NOWARN                           │
+    └──────────────────────┴────────────────────────────────────────────────────────┘
+
+    Biz daha önce bellek bölgelerinin anlamlarını açıklamıştık. Ancak göç türleri hakkında ayrıntılı bir açıklama 
+    yapmamıştık. Önce bir bölgedeki göç türleri üerinde açıklamalar yapalım. 
+
+    Linux çekirdeğinde kullanılan göç türleri şunlardır:
+
+    enum migratetype {
+        MIGRATE_UNMOVABLE,       /* 0 — taşınamaz, geri alınamaz */
+        MIGRATE_MOVABLE,         /* 1 — taşınabilir */
+        MIGRATE_RECLAIMABLE,     /* 2 — geri alınabilir */
+        MIGRATE_PCPTYPES,        /* 3 — PCP listelerinin sonu (marker) */
+        MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,  /* 3 — acil rezerv */
+        MIGRATE_CMA,             /* 4 — Contiguous Memory Allocator */
+        MIGRATE_ISOLATE,         /* 5 — izole edilmiş, tahsisat yapılmaz */
+        MIGRATE_TYPES            /* toplam tür sayısı */
+    };
+
+    - MIGRATE_UNMOVABLE ve MIGRATE_MOVABLE göç türü tahsis edilen sayfanın yerinin çekirdek tarafından değiştirilip 
+    değiştirilmeyeceği anlamına gelmektedir. Çekirdek ikiz blok sisteminde ardışıl yeteri kadar blok bulunamağında 
+    (yani "fragmentation" durumunda) ardışıl sayfa    elde etmek içim sayfaların fiziksel bellekteki yerlerini 
+    değiştirebilmektedir. İşte bu tür sayafalara Linux çekirdeğinde "movable sayfalar" denilmektedir. Tabii çekirdek 
+    fiziksel sayfanın yerini değiştirdiğinde bu sayfaya referans eden  öğelerin fiziksel adreslerinide  sayfa tablolarında 
+    değiştirmektedir. Örneğin ikiz blok tahsisat sisteminde şöyle bir durum oluşmuş olsun: istmde 1 sayfalık çok sayıda 
+    blok olduğu halde yan yana 2 sayfalık hiç blok bulunmasın. İşte çekirdek 1 sayfalık bloğun yanındaki sayfanın fiziksel 
+    bellekte yerini değiştirerek (yani onu boş sayfalardan birine taşıyarak) yan yana iki fiziksel sayfa oluşturabilmektedir. 
+    Tabii bu durum oldukça seyrek gerçekleşir. Bir sayfanın taşınabilmesi için onun "reversible" özelliklere sahip olması 
+    gerekmektedir. İşte MIGRATE_MOVABLE bayrağı sayfayı taşınabilir hale getirmektedir. Görüldüğü gibi çekirdekte 
+    taşınabilen sayfalarla, taşınamayan sayfalar ayrı ikiz blok tahsisat sisteminde tutulmaktadır. Çekirdekte sayfa taşıma 
+    işlemi şu aşamalardan geçilerek yapılmaktadır:
+
+    migrate_page(old_page, new_page):
+        1. new_page için fiziksel frame al
+        2. old_page içeriğini new_page'e kopyala
+        3. rmap üzerinden tüm PTE'leri bul
+        4. Her PTE'yi new_page'e yönlendir (TLB flush)
+        5. old_page'i buddy'e iade et
+
+    C'deki malloc fonksiyonu gerektiğinde brk ya da mmap sistem fonksiyonlarını çağırarak tahsisatları yapmaktadır. Bunlar 
+    için tahsis edilen sayfalar MIGRATE_MOVABLE biçimdedir. 
+
+    ┌─────────────────────┬───────────────────┬──────────────────────┬──────────────────┐
+    │      Özellik        │ MIGRATE_UNMOVABLE │ MIGRATE_RECLAIMABLE  │  MIGRATE_MOVABLE │
+    ├─────────────────────┼───────────────────┼──────────────────────┼──────────────────┤
+    │ Fiziksel taşıma     │    Hayır          │      Hayır           │    Evet          │
+    │ Geri alma (reclaim) │    Hayır          │      Evet            │    Dolaylı       │
+    │ Compaction katkısı  │    Hayır          │   Dolaylı            │    Doğrudan      │
+    │ Tipik tahsisat      │ kmalloc, DMA,     │ kmem_cache,          │ malloc, mmap,    │
+    │                     │ modül kodu, IRQ   │ page/buffer cache    │ THP, KSM         │
+    └─────────────────────┴───────────────────┴──────────────────────┴──────────────────┘
+
+    - MIGRATE_RECLAIMABLE göç türü fiziksel olarak taşınamaz ancak çekirdek tarafından "swap out" amacıyla boşaltılabilen 
+    sayfaların bulunduğu ikiz blok sistemini belirtmektedir. Bu göç türünden işlemleri başlatmak için __GFP_RECLAIMABLE 
+    bayrağının da eklenmesi gerekmektedir.  Dilimli tahsisat sisteminden (slab allocator) tahsis edilen sayfalar 
+    bu özelliğe sahiptir. Çekirdekteki pek çok nesne zaten dilimli tahsisat sistemi ile tahsis edilmektedir. Örneğin:
+
+    kmem_cache_alloc()
+        │
+        ├─► inode          ──┐
+        ├─► dentry         ──┤──► Hepsi slab sayfaları
+        ├─► vm_area_struct ──┤    Hepsi MIGRATE_RECLAIMABLE
+        └─► task_struct    ──┘
+
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
