@@ -11476,9 +11476,56 @@ void exit_sys_errno(const char *msg, int eno)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Aşağıda alloc_pages ve __free_pages fonksiyonlarının kullanımına ilişkin basit bir aygıt sürücü örneği verilmiştir. 
-    Aygıt sürücünün init fonksiyonunda saufa tahsisatı yapılmış ve sayfanın sanal adresi bir global değişkende saklanmıştır. 
-    write işleminde bu sayfaya yazma yapılıp read işleminde de bu sayfadan okuma yapılmıştır. Aygıt sürücünün exit 
-    fonksiyonunda da tahsis edilen sayfa serbest bırakılmıştır. 
+    Aygıt sürücünün init fonksiyonunda sayfa tahsisatı yapılmış ve sayfanın sanal adresi bir global değişkende saklanmıştır. 
+    write işleminde bu sayfaya yazma yapılıp, read işleminde de yazılanlar okunmuştur. Aygıt sürücünün exit fonksiyonunda 
+    da tahsis edilen sayfa serbest bırakılmıştır. Aygıt sürcünün init fonksiyonunda sayfa tahsisatı şöyle yapılmıştır:
+
+    static void *g_pageaddr;
+    /* ... */
+
+    static int __init test_driver_init(void)
+    {
+        struct page *page;
+        /* ... */ 
+    
+        if ((page = alloc_pages(GFP_KERNEL, 0)) == NULL) {
+            printk(KERN_ERR "cannot alloc pages!..\n");
+            cdev_del(&g_cdev);
+            unregister_chrdev_region(g_dev, 1);
+            return -ENOMEM;
+        }
+
+        g_pageaddr = page_address(page);
+
+        return 0;
+    }
+
+    Aygıt sürücünün exit fonksiyonunda da tahsisat şöyle geri alınmıştır:
+
+    static void __exit test_driver_exit(void)
+    {
+        __free_pages(virt_to_page(g_pageaddr), 0);
+
+        /* ... */
+    }
+
+    Aygıt sürücünün read ve write fonksiyonları da şöyledir:
+
+    static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off)
+    {
+        if (copy_to_user(buf, g_pageaddr, size) != 0)
+            return -EFAULT;
+
+        return size;
+    }
+
+    static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off)
+    {
+        if (copy_from_user(g_pageaddr, buf, size) != 0)
+            return -EFAULT;
+
+        return size;
+    }
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* test-driver.c */
@@ -11545,7 +11592,6 @@ static void __exit test_driver_exit(void)
 	__free_pages(virt_to_page(g_pageaddr), 0);
 	cdev_del(&g_cdev);
 	unregister_chrdev_region(g_dev, 1);
-
 
 	printk(KERN_INFO "test-driver module exit...\n");
 }
@@ -11652,17 +11698,16 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Çekirdekteki __get_free_pages fonksiyonu alloc_pages gibi sayfa tahsisatı yapmakla birlikte bize page nesnesinin 
-    adresini değil doğrudan tahsis edilen sayfanın sanal bellek adresini vermektedir. (Tabii çekirdek alanındaki fiziksel 
-    sayfaların ardışıl içimde sanal adrese map map edildiğini anımsayınız.) __get_free_ages aslında  "include/linux/gfp.h"
-    dosyasında bir makro olarak yazılmıştır. Biz burada anlatımı kolaylaştırmak için fonksiyon terimini kullanacağız. 
-    Fonksiyonun parametrik yapısı şöyledir:
+    adresini değil doğrudan tahsis edilen sayfanın sanal bellek adresini vermektedir. (Çekirdek alanındaki fiziksel 
+    sayfaların ardışıl biçimde sanal adrese map edildiğini anımsayınız.) __get_free_pages aslında  "include/linux/gfp.h"
+    dosyasında bir makro olarak yazılmıştır. Biz burada anlatımı kolaylaştırmak için ona fonksiyon diyeceğiz. Fonksiyonun 
+    parametrik yapısı şöyledir:
 
     unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order);
 
-    Fonksiyon tahsis edilen sayfaların sanal adresine geri dönmektedir. Geri dönüş değerinin unsigned long türünden 
-    olması sizi şaşırtmasın. __get_free_pages fonksiyonu ile tahsis edilen sayfalar free_pages fonksiyonu ile serbest 
-    bırakılabilir. (Bu fonksiyonu __free_pages fonksiyonu ile karıştırmayınız.) free_pages fonksiyonunun parametrik 
-    yapısı şöyledir:
+    Fonksiyon tahsis edilen sayfaların sanal adresine geri dönmektedir. Geri dönüş değerinin unsigned long türünden olması 
+    sizi şaşırtmasın. __get_free_pages fonksiyonu ile tahsis edilen sayfalar free_pages fonksiyonu ile serbest bırakılabilir. 
+    (Bu fonksiyonu __free_pages fonksiyonu ile karıştırmayınız.) free_pages fonksiyonunun parametrik yapısı şöyledir:
     
     void free_pages(unsigned long addr, unsigned int order);
     
@@ -11707,11 +11752,11 @@ void exit_sys(const char *msg)
     void *alloc_pages_exact(size_t size, gfp_t gfp_mask);
 
     Fonksiyonun birinci parametresi byte cinsinden büyüklük belirtmektedir. Fonksiyon parametresiyle belirtilen 
-    büyüklüğü kaysayan en küçük sayfa miktarını tahsis eder. Ancak ikiz blok tahsisat sisteminde tahisisatlar 2'nin 
-    kuvvetlerine göre yapıldığı için artan sayfalar olabilecekditr. Bunlar fonksiyon tarafından geri bırakılmaktadır. 
+    büyüklüğü kapsayan en küçük sayfa miktarını tahsis eder. Ancak ikiz blok tahsisat sisteminde tahisisatlar 2'nin 
+    kuvvetlerine göre yapıldığı için artan sayfalar oluşabilecektir. Bunlar fonksiyon tarafından geri bırakılmaktadır. 
     Örneğin biz bu fonksiyonun birinci parametresine 25000 değerini girelim. 25000 byte'ı karşılayabilecek sayfa sayısı 
-    6'dır. Ancak ikiz blok tahsisat sisteminde 6 sayfa tahsis edilememektedir ancak 8 sayfa tahsis edilebilmektedir. 
-    İşte fonksiyon 8 sayfayı yahsis edip 6 sayfayı geri bırakmaktadır. fonksiyonun doğrudan sanal adresle geri döndüğüne 
+    6'dır. Ancak ikiz blok tahsisat sisteminde 6 sayfa tahsis edilememektedir, ancak 8 sayfa tahsis edilebilmektedir. 
+    İşte fonksiyon 8 sayfayı tahsis edip 2 sayfayı geri bırakmaktadır. Fonksiyonun doğrudan sanal adresle geri döndüğüne 
     dikkat ediniz. 
 
     alloac_pages_exact fonksiyonuyla tahsis edilen sayfalar free_pages_exact fonksiyonuyla serbest bırakılmaktadır:
@@ -11731,14 +11776,13 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Şimdi de ikiz blok tahsisat sistemindeki "fallback" mekanizması üzerinde duracağız. ("fallback" Türkçe "yedek plan",
-    "B panı" anlamlarına gelmektedir.) Fallback "belli bir NUMA düğümünde ya da belli bir bölgede ya da belli bir göz
+    "B panı" gibi anlamlara gelmektedir.) Fallback "belli bir NUMA düğümünde ya da belli bir bölgede ya da belli bir göç
     türünde tahsisat yapılamazsa diğer başka düğümlere, bölgelere ve göç türlerine de bakılması" anlamına gelmektedir. 
 
-    Bellek yönetiminin giriş bölümünde de açıkladığımız gibi Linux çekirdeği fiziksel belleği NUMA düğümlerinden, NUMA
-    düğümlerini bellek bölgelerinden (zones), bellek bölgelerini de göç türlerinden (migration type)" oluşan bir 
-    sistem biçiminde ele almaktadır. Lnux çekirdeğinde her göç türünün ayrı bir boş listesi vardır. Başka bir deyişle 
-    her göç türü ayrı bir ikiz blok tahsisat sistemine sahiptir. Bu tahsisat sisteminin veri yapısını yukarıda açıklamıştık. 
-    Aşağıda yeniden veriyoruz:
+    Bellek yönetiminin giriş bölümünde de açıkladığımız gibi Linux çekirdeği fiziksel belleği NUMA düğümlerinden (node), 
+    NUMA düğümlerini bellek bölgelerinden (zones), bellek bölgelerini de göç türlerinden (migration type)" oluşan bir 
+    sistem biçiminde ele almaktadır. Lnux çekirdeğinde her göç türünün ayrı bir ikiz blok tahsisat sistemi vardır. Bu 
+    tahsisat sisteminin kullandığı veri yapısını yukarıda açıklamıştık. Yeniden anımsatmak istiyoruz:
 
     typedef struct pglist_data {
         /* ... */
@@ -11777,8 +11821,8 @@ void exit_sys(const char *msg)
     └── free_area[10]  (düzey-10, 4 MB bloklar)
         └── ...
 
-    Aslında sayfa tahsisatları "belli bir düğümün, belli bölgesinin bellli bir göç türünü" hedef alarak işlemlere 
-    başlamaktadır. İşte alloc_pages gibi fonksiyonların birinci parametresindeki bayraklar bu tespitin yapılmasını 
+    Aslında sayfa tahsisatları "belli bir düğümün, belli bölgesinin, bellli bir göç türünü" hedef alarak süreci 
+    başlatmaktadır. İşte alloc_pages gibi fonksiyonların birinci parametresindeki bayraklar bu tespitin yapılmasını 
     sağlamaktadır. Aşağıda hangi bayraklar kullanıldığında işlemerin hangi bölgeden ve hangi göç türünden başlatılacağı 
     bilgisi bir tablo halinde verilmiştir:
 
@@ -11796,7 +11840,7 @@ void exit_sys(const char *msg)
     │   __GFP_RECLAIMABLE          │  ZONE_NORMAL  │ MIGRATE_RECLAIMABLE │ slab cache (kmem_cache)          │
     └──────────────────────────────┴───────────────┴─────────────────────┴──────────────────────────────────┘
 
-    Bileşke bayrakların nasıl oluşturulduğunu daha önce vermiştik. Aynı tabloyu yine verelim:
+    Bileşke bayrakların nasıl oluşturulduğunu daha önce vermiştik. Anımsatmak istiyoruz:
 
     ┌──────────────────────┬────────────────────────────────────────────────────────┐
     │  Kompozit Bayrak Adı │               Bileşen Bayraklar                        │
@@ -11819,7 +11863,7 @@ void exit_sys(const char *msg)
     └──────────────────────┴────────────────────────────────────────────────────────┘
 
     Biz daha önce bellek bölgelerinin anlamlarını açıklamıştık. Ancak göç türleri hakkında ayrıntılı bir açıklama 
-    yapmamıştık. Önce bir bölgedeki göç türleri üerinde açıklamalar yapalım. 
+    yapmamıştık. Önce bölgelerdeki bölgedeki göç türleri üerinde açıklamalar yapalım. 
 
     Linux çekirdeğinde kullanılan göç türleri şunlardır:
 
