@@ -10558,14 +10558,14 @@ void exit_sys_errno(const char *msg, int eno)
     çekirdek kodları da yine aynı sayfa tablosunu kullanmaktadır. Yani çekirdek kodları da sayfa tablosu dönüştürmesiyle
     fiziksel belleğe erişmektedir. İşte Linux çekirdeğinde sayfa tablosunun çekirdek alanı fiziksel belleğin başından 
     itibaren haritalanmıştır (map edilmiştir). Örneğin 32 bit bir sistemde sayfa tablosunda çekirdek alanının ilk 
-    sayfası  fiziksel 0 numaralı sayfaya, ikinci sayfası 1 numaralı sayfaya, üçüncü sayfası 2 numaralı sayfaya ve 
+    sayfası fiziksel 0 numaralı sayfaya, ikinci sayfası 1 numaralı sayfaya, üçüncü sayfası 2 numaralı sayfaya ve 
     diğer sayfaları  da bu biçimde fiziksel belleğin diğer sayfalarına yönlendirilmiştir. Başka bir deyişle örneğin 
     32 bit Linux sistemlerinde biz çekirdek modunda  0xC0000000 sanal adresini kullandığımızda aslında fiziksel 
     belleğin 0'ıncı adresine erişmiş oluruz. Bu durumda hesap oldukça basittir. Biz 32 bit bir sistemde çekirdek 
     modunda fiziksel belleğin paddr adresine erişmek için aslında 0xC0000000 + paddr adresini kullanırız. Ya da biz 
     çekirdek modunda sanal vaddr adresinin fiziksel belleğin neresi olduğunu vaddr - 0xC0000000 işlemiyle tespit 
     edebiliriz. Çekirdek alanının başlangıcı çekirdek kodlarında PAGE_OFFSET sembolik sabitiyle belirtilmektedir. 
-    Yani 32 bit Linux sistemlerinde tipik olarak PAGE_OFFSET değeri 0xC0000000 biçimindedir. 32 bit Linux sistemlerinde
+    32 bit Linux sistemlerinde tipik olarak PAGE_OFFSET değeri 0xC0000000 biçimindedir. 32 bit Linux sistemlerinde
     sayfa tablosunun çekirdek kısmını şöyle düşünebilirsiniz:
 
     ┌───────────────┬──────────────────┐
@@ -10581,13 +10581,13 @@ void exit_sys_errno(const char *msg, int eno)
     Ancak 32 bit Linux sistemlerinde "doğrudan haritalama (direct mapping)" konusunda bir sorun vardır. Sayfa tablosunda 
     çekirdek alanı için 1GB yer kaldığına göre ancak bu yolla olsa olsa fiziksel belleğin ilk 1GB'sine doğrudan erişilebilmektedir. 
     Aslında durum tam böyle de değildir. 32 bit Linux çekirdeklerinde sayfa tablosunun çekirdek kısmının hepsi değil 
-    yalnızca ilk 896MB'lik kısım doğrudan adresleme için kullanılmaktadır. Çünkü 32 bit Linux çekirdekleri geri kalan 
-    s128MB'lik alanı başka yerlere erişmek için yani amaçlarla kullanmaktadır:
+    yalnızca ilk 896MB'lik kısım doğrudan haritalama için kullanılmaktadır. Çünkü 32 bit Linux çekirdekleri geri kalan 
+    128MB'lik alanı başka yerlere erişmek için yani başka amaçlarla kullanmaktadır:
 
     0 GiB   ┌─────────────────────────────────────────────────────┐
             │                                                     │
-            │              U S E R   S P A C E                    │
-            │                    (3 GiB)                          │
+            │                  U S E R   S P A C E                │
+            │                       (3 GiB)                       │
             │                                                     │
             │             ┌──────────────────────────────────┐    │
             │             │  Text / Data / BSS segments      │    │
@@ -10600,8 +10600,8 @@ void exit_sys_errno(const char *msg, int eno)
             │             └──────────────────────────────────┘    │
             │                                                     │
     3 GiB   ├─────────────────────────────────────────────────────┤
-            │            K E R N E L   S P A C E                  │
-            │                    (1 GiB)                          │
+            │                    K E R N E L   S P A C E          │
+            │                           (1 GiB)                   │
             │  0xC0000000  ┌──────────────────────────────────┐   │
             │(PAGE_OFFSET) │                                  │   │
             │              │  Direct-mapped physical memory   │   │
@@ -10618,7 +10618,8 @@ void exit_sys_errno(const char *msg, int eno)
             │              └──────────────────────────────────┘   │
     4 GiB   └─────────────────────────────────────────────────────┘
 
-    Doğrudan Haritalama Formülü:
+    32 bit Linux sistemlerinde doğrudan haritalamada sanal adres ile fiziksel adres dönüştürmesi şöyle yapılmaktadır:
+
     VA = PA + 0xC0000000    (PAGE_OFFSET)
     PA = VA − 0xC0000000    (PAGE_OFFSET)
 
@@ -10628,32 +10629,32 @@ void exit_sys_errno(const char *msg, int eno)
     yalnızca 32 bit Linux sistemlerinde bulunmaktadır. İzleyen paragraflarda göreceğimiz gibi 64 bit Linux sistemlerinde 
     fiziksel belleğin her yeri zaten doğrudan haritalanabilmektedir. 
 
-    Peki 32 Linux sistemlerinde çekirdek ya da aygıt sürücüler HIGMEM fiziksel bellek alanına naıl erişmektedir? İşte
-    bu erişim ancak çekirdeğin sayfa tablosununun belli bölgesini (buraya kmap bölgesi de denmektedir) geçici biçimde 
+    Peki 32 Linux sistemlerinde çekirdek ya da aygıt sürücüler HIGMEM fiziksel bellek alanına nasıl erişmektedir? İşte
+    bu erişim ancak çekirdeğin sayfa tablosununun belli bölgesini (buraya "kmap bölgesi" de denmektedir) geçici biçimde 
     değiştirmesiyle sağlanabilmektedir. 
 
-    0x00000000  ┌────────────────────────────────────┐
-                │                                    │
-                │           LOWMEM                   │  0 – 896 MB
-                │   (Normal Zone / DMA Zone)         │
-                │                                    │
-                │  Her sayfanın kalıcı sanal         │
-                │  adresi vardır:                    │
-                │  virt = phys + PAGE_OFFSET         │
-                │                                    │
-    0x38000000  ├────────────────────────────────────┤  ← high_memory
-    (896 MB)    │                                    │
-                │           HIGHMEM                  │  896 MB üstü
-                │   (High Memory Zone)               │
-                │                                    │
-                │  Sayfalar geçici olarak            │
-                │  eşlenir, erişim sonrası           │
-                │  eşleme kaldırılır                 │
-                │                                    │
-    0xFFFFFFFF  └────────────────────────────────────┘
+    0x00000000  ┌───────────────────────────────┐
+                │                               │
+                │           LOWMEM              │  0 – 896 MB
+                │   (Normal Zone / DMA Zone)    │
+                │                               │
+                │  Her sayfanın kalıcı sanal    │
+                │  adresi vardır:               │
+                │  virt = phys + PAGE_OFFSET    │
+                │                               │
+    0x38000000  ├───────────────────────────────┤  ← high_memory
+    (896 MB)    │                               │
+                │           HIGHMEM             │  896 MB üstü
+                │   (High Memory Zone)          │
+                │                               │
+                │  Sayfalar geçici olarak       │
+                │  eşlenir, erişim sonrası      │
+                │  eşleme kaldırılır            │
+                │                               │
+    0xFFFFFFFF  └───────────────────────────────┘
     
     Geçici eşleştirme için kmap, kmap_atomic ve kmap_local_page fonksiyonları kullanılmaktadır. Bu fonksiyonlar sayfa 
-    tablosunun kmap alanını sayfa tablosunu geçici olarak değiştirmektedir. 
+    tablosunun kmap alanını geçici olarak değiştirmektedir. 
 
 
         Fiziksel RAM                    Çekirdek Sanal Alanı (0xC0000000–0xFFFFFFFF)
@@ -10689,22 +10690,21 @@ void exit_sys_errno(const char *msg, int eno)
                 │  vmalloc / ioremap alanı           │  kalan
                 │  Sanal sürekli, fiziksel dağınık   │
     0xFFFFFFFF  └────────────────────────────────────┘
-    Yüksek Adres
 
     kmap fonksiyonun parametrik yapısı şöyledir:
 
     void *kmap(struct page *page);
 
-    Fonksiyon fiziksel sayfayı temsil eden bir page nesnesini parametre olarak alır,çekirdeğin sayfa tablosunda 
-    pkmap alanında değişiklik yapıp o fiziksel sayfaya erişmekte kullanılan sanal adresi geri döndürür. kmap işlemi 
-    sırasında bloke oluşabilir. Ancak bloke oluşmadan eşleme için çekirdek içerisinde ayrıca kmap_atomic ya da bunun 
-    daha modern biçimi olan kmap_local_page fonksiyonu kullanılmaktadır:
+    Fonksiyon fiziksel sayfayı temsil eden bir page nesnesini parametre olarak alır, çekirdeğin sayfa tablosunda 
+    kmap alanında değişiklik yapıp o fiziksel sayfaya erişmekte kullanılan sanal adresi geri döndürür. kmap işlemi 
+    sırasında bloke oluşabilir. Ancak blokesiz eşleştirme için çekirdek içerisinde ayrıca kmap_atomic ya da bunun 
+    daha modern biçimi olan kmap_local_page fonksiyonu bulundurulmuştur:
 
     void *kmap_atomic(const struct page *page);
     void *kmap_local_page(struct page *page);
 
-    Tabii bu fonksiyonları kullanmak için önceden bir page nesnesinin bölge içerisinde tahsis edilmiş olması gerekir. 
-    Biz bu tahsisatın nasıl yapıldığını "ikiz blok sistemi (buddy allocator)" kısmında zaten açıklayacağız. 
+    Tabii bu fonksiyonları kullanmak için önceden bir page nesnesinin bölge (zone) içerisinde tahsis edilmiş olması 
+    gerekir. Biz bu tahsisatın nasıl yapıldığını "ikiz blok tahsisat sistemi (buddy allocator)" kısmında zaten açıklayacağız. 
     
     Bu fonksiyonlarla oluşturulan geçici haritalama aşağıdaki fonksiyonlarla kaldırılabilmektedir:
 
@@ -10718,7 +10718,7 @@ void exit_sys_errno(const char *msg, int eno)
 
     Bir page nesnesinin HIGHMEM alanına ilişkin olup olmadığı is_hihmem_pahe fonksiyonuyla kontrol edilebilmektedir:
 
-    bool is_highmem_page(struct page *page)
+    bool is_highmem_page(struct page *page);
 
     HIGMEM alanına erişmek için kmap, kmap_atomic ve kmap_local_page fonksiyonlarının hangilerinin hangi durumlarda 
     kullanılacağına ilişkin aşağıda bir karar ağacı veriyoruz:
@@ -10764,9 +10764,9 @@ void exit_sys_errno(const char *msg, int eno)
 /*----------------------------------------------------------------------------------------------------------------------
     Bir kez daha bir noktayı vurgulamak istiyoruz. Burada açıkladığımız HIGMEM sorunu ve geçici haritalama yalnızca
     32 bit Linux sistemlerinde söz konusudur. 64 bit Linux sistemlerinde zaten sayfa tablosunun çekirdek alanındaki 
-    kısmı tüm fiziksel belleği haritalandırabilmektedir. Dolayısıyla ZONE_HIHMEM bölgesi de yalnızca 32 bit sistemlerde
-    bulunan bir bölgedir. 64 bit Linux sistemlerinde proseslerin ve çekirdeğin sanal bellek alanı 128 TB olsa da bu 
-    sistemler şimdilik ancak 64TB'lik fiziksel belleği kullanabilmektedir. 128 TB'lik çekirdek alanının sayfa tablosunda 
+    kısmı tüm fiziksel belleği haritalandırabilmektedir. Dolayısıyla ZONE_HIHMEM de yalnızca 32 bit sistemlerde bulunan 
+    bir bölgedir. 64 bit Linux sistemlerinde proseslerin ve çekirdeğin sanal bellek alanı 128 TB olsa da bu sistemler 
+    şimdilik ancak 64TB'lik fiziksel belleği kullanabilmektedir. 128 TB'lik çekirdek alanının sayfa tablosunda 
     64TB'lik fiziksel bellek zaten doğrudan hartitalandırılabilmektedir. 
 
     ┌────────────────────────────────────────────────────────────────────┐
@@ -10832,7 +10832,7 @@ void exit_sys_errno(const char *msg, int eno)
         return __va(address);
     }
 
-    __pa ve __va makroları ve fonksiyonlar platforma bağlı dizinlerde bulunmaktadır. (Örneğin "arch/x86/asm/io.h"). 
+    __pa ve __va makroları ve fonksiyonlar platforma bağlı dizinlerde bulunmaktadır (örneğin "arch/x86/asm/io.h" gibi). 
     
     ┌─────────────────────────┬──────────────────────────┬─────────────────────────────┐
     │         Makro           │       Dönüşüm            │       Tanımlandığı Yer      │
@@ -10843,7 +10843,7 @@ void exit_sys_errno(const char *msg, int eno)
     │ phys_to_virt(phys)      │ Fiziksel → Sanal         │ asm/io.h                    │
     │ page_to_phys(page)      │ struct page → Fiziksel   │ asm/memory_model.h          │
     │ page_to_virt(page)      │ struct page → Sanal      │ asm/page.h                  │
-    |  page_address(page)     | struct page → Sanal      │ mm/highmem.c
+    |  page_address(page)     | struct page → Sanal      │ mm/highmem.c                │
     │ virt_to_page(virt)      │ Sanal   → struct page    │ asm/page.h                  │
     │ page_to_pfn(page)       │ struct page → PFN        │ include/linux/mm.h          │
     │ pfn_to_page(pfn)        │ PFN → struct page        │ include/linux/mm.h          │
@@ -10859,70 +10859,70 @@ void exit_sys_errno(const char *msg, int eno)
     Sonra da byte düzeyinde çekirdek tahsisatları üzerinde duracağız. Daha önceden de belirttiğimiz gibi Linux çekirdeğinde
     iki düzey tahsista sistemi vardır:
 
-    1) Sayfa düzeyinde tahsisat sistemi
-    2) Byte düzeyinde tahsisat sistemi
+    1) Sayfa düzeyinde tahsisat sistemi (buddy allocator)
+    2) Byte düzeyinde tahsisat sistemi (slab allocator)
 
-    Sayfa düzeyinde tahsisat için kullanılan veri yapısına "ikiz blok sistemi" ya da İngilizcesiyle "buddy allocator" 
-    denilmektedir. Byte düzeyinde tahsisat sistemine de "dilimli tahsisat sistemi (slab allocator)" denilmektedir. 
+    Sayfa düzeyinde tahsisat için kullanılan veri yapısına "ikiz blok tahsisat sistemi" ya da İngilizcesiyle "buddy 
+    allocator" denilmektedir. Byte düzeyinde tahsisat sistemine de "dilimli tahsisat sistemi (slab allocator)" denilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Çekirdek tüm fiziksel sayfaları bir heap alanı gibi ele alıp onların tahsisatlarını yönetmektedir. Fiziksel sayfaları 
-    temsil eden struct page nesneleri ilgili sayfanın tahsis edilip edilmediği gibi bilgileri de tutmaktadır. Biz bir 
-    aygıt sürücü yazarken ya da çekirdeğe bir modül eklerken bir fiziksel sayfayı doğrudan kullanamayız. Çünkü o sayfa
-    başka amaçlarla kullanılıyor olabilir. Biz önce sayfa düzeyinde tahsisat yapan fonksiyonlarla sayfayı tahsis edip 
-    ondan sonra kullanabiliriz. Yukarıda da belirttiğimiz gibi Linux çekirdeğinde "sayfa düzeyinde tahsisat" yapan bir
-    tahsisat sistemi bulunmaktadır. Biz bu sisteme Türkçe "ikiz blok sistemi" diyeceğiz. Bu sistemin İngilizce ismi 
-    "Buddy Allocator" biçimindedir. İzleyen paragraflarda ikiz blok tahsisat sisteminin algoritmik yapısını açıklayacağız. 
+    temsil eden page nesneleri ilgili sayfanın tahsis edilip edilmediği gibi bilgileri de tutmaktadır. Biz bir aygıt 
+    sürücü yazarken ya da çekirdeğe bir modül eklerken bir fiziksel sayfayı doğrudan kullanamayız. Çünkü o sayfa başka 
+    amaçlarla kullanılıyor olabilir. Biz önce sayfa düzeyinde tahsisat yapan fonksiyonlarla sayfayı tahsis edip ondan 
+    sonra o sayfayı kullanabiliriz. Yukarıda da belirttiğimiz gibi Linux çekirdeğinde "sayfa düzeyinde tahsisat" yapan 
+    bir tahsisat sistemi bulunmaktadır. Biz bu sisteme Türkçe "ikiz blok tahisat sistemi" diyeceğiz. Bu sistemin İngilizce 
+    ismi "buddy allocator" biçimindedir. İzleyen paragraflarda ikiz blok tahsisat sisteminin algoritmik yapısını açıklayacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     İşletim sistemlerinde sayfa düzeyinde tahsisatların hızlı yapılması gerekir. Aynı zamanda sayfa tahsisat sisteminin 
-    mümkün olduğunca bellek bölünmesi (fragmentaton) olgusuna dirençli olması istenir. İkiz blok tahsisat sistemi
-    ilk kez Knowlton tarafından ortaya atılmış ve Knowlton bu algoritmayı 1965 yılında "Communications of the ACM" 
-    dergisinde "A Fast Storage Allocator" başlıklı makalesinde açıklamıştır. Bu algoritma Linux sistemlerine çok eskiden
-    çekirdeğe 1.2 versiyonuyla (1995) eklenmiştir. 
+    mümkün olduğunca bellek bölünmesi (fragmentaton) olgusuna dirençli olması da istenir. İkiz blok tahsisat sistemi
+    ilk kez Knowlton tarafından ortaya atılmıştır. Knowlton bu algoritmayı 1965 yılında "Communications of the ACM" 
+    dergisinde "A Fast Storage Allocator" başlıklı makalesinde açıklamıştır. Bu sistem Linux çekirdeklerine 1.2 versiyonuyla 
+    (1995) eklenmiştir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-				                        76. Ders 09/05/2026 - Cumartesi					
+				                            76. Ders 09/05/2026 - Cumartesi					
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Linux çekirdeklerinde zamanla ikiz blok sistemi karmaşık hale getirilmiştir. Bu karmaşıklık tahsisat algoritmasından 
-    değil "boş listelerin (free lists)" ve bölgelerin (zones) "fallback" denilen gözden geçirilmesi mekanizmasından 
-    kaynaklanmaktadır. Biz burada önce "ikiz blok tahsisat sisteminin" algoritmik yapısı açıklayacağız sonra Linux 
-    çekirdeğindeki gerçekleştirim üzerinde duracağız.
+	Linux çekirdeklerinde zamanla ikiz blok tahsisat sistemi daha karmaşık hale getirilmiştir. Bu karmaşıklık tahsisat 
+    algoritmasının kendisinden değil "boş listelerin (free lists)" ve bölgelerin (zones) "fallback" denilen gözden 
+    geçirilmesi mekanizmasından kaynaklanmaktadır. Biz burada önce "ikiz blok tahsisat sisteminin" algoritmik yapısı 
+    açıklayacağız sonra Linux çekirdeğindeki gerçekleştirim üzerinde duracağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     İkiz blok tahsisat sisteminde boş bloklar 2'nin kuvvetlerine ardışıl fiziksel sayfalardan oluşan bloklar biçiminde 
-    organize edilmektedir. Buradaki 2'nin kuvvetine ilişkin boş blok listelerine İngilizce "order" denilmeketdir. Biz 
+    organize edilmektedir. Buradaki 2'nin kuvvetine ilişkin boş blok listelerine İngilizce "order" denilmektedir. Biz 
     "order" sözcüğü yerine Türkçe "düzey" sözcüğünü kullanacağız. Aşağıda 5 düzeyli bir ikiz blok sisteminin çizimi 
     yapılmıştır:
 
-    order-4: ┌────────────────────────────────┐ ┌────────────────────────────────┐     ┌────────────────────────────────┐
+    düzey-4: ┌────────────────────────────────┐ ┌────────────────────────────────┐     ┌────────────────────────────────┐
              │           16 Sayfa             │ │           16 Sayfa             │ ... │           16 Sayfa             │
              └────────────────────────────────┘ └────────────────────────────────┘     └────────────────────────────────┘
 
-    order-3: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-3: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    8 Sayfa     │ │    8 Sayfa     │ ... │     8 Sayfa    │
              └────────────────┘ └────────────────┘     └────────────────┘ 
 
-    order-2: ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     ┌────────┐
+    düzey-2: ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐     ┌────────┐
              │   4S   │ │   4S   │ │   4S   │ │   4S   │ ... │   4S   │
              └────────┘ └────────┘ └────────┘ └────────┘     └────────┘
 
-    order-1: ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐     ┌────┐
+    düzey-1: ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐     ┌────┐
              │ 2S │ │ 2S │ │ 2S │ │ 2S │ │ 2S │ │ 2S │ │ 2S │ │ 2S │ ... │ 2S │
              └────┘ └────┘ └────┘ └────┘ └────┘ └────┘ └────┘ └────┘     └────┘
 
-    order-0: ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐     ┌──┐
+    düzey-0: ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐     ┌──┐
              │1S│ │1S│ │1s│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ │1S│ ... |1S|
              └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘     └──┘
 
     Tabii buradaki listeler boş sayfa listeleridir. Tahsis edilen sayfalar bu listelerden çıkartılmaktadır. Tahsisat 
-    her zaman 2ⁿ sayfa oalacak biçiminde düzey belirtilerek yapılmaktadır. Örneğin 4 sayfanın (2² sayfanın) tahsis 
+    her zaman 2ⁿ sayfa olacak biçiminde düzey belirtilerek yapılmaktadır. Örneğin 4 sayfanın (2² sayfanın) tahsis 
     edilmek istendiğini düşünelim. Tahsisat 2'inci düzeydeki boş listeden sağlanacaktır. Peki ya istenilen düzeyde 
     hiç boş sayfa bloğu yoksa ne olur? İşte bu durumda daha yüksek düzeylere başvurulup onlar parçalanmaktadır. Örneğin 
     2'inci düzeyde boş sayfa bloğu bulunmuyor olsun. Algoritma bu durumda 3'üncü düzeye bakar. Eğer 3'üncü düzeyde 8 
@@ -10931,45 +10931,45 @@ void exit_sys_errno(const char *msg, int eno)
     yoksa ne olacaktır? İşte bu durumda gittikçe yukarı çıkılır, ilk boş sayfa bloğu olan düzeyden blok tahsis edilir. 
     Sonra blok bölüne bölüne aşağıya inilir. Örneğin 4 sayfa tahsis etmek istediğimizde 3'üncü düzeyde boş sayfa bloğu 
     yoksa ancak 4'üncü düzeyde boş sayfa bloğu varsa bu düzeydeki 16 sayfalık blok yarıya bölünür. Bunun 8'lik kısmı 
-    3'üncü düzeydeki boş listeye eklenir, diğer 8'lik kısmı yine bölünür, onun 4'lük kısmı 2'düzey düzey isteye eklenir 
-    diğeri de tahsis edilir. Şimdi bu süreci şekillerle adım adım gösterilim. Başlangıç durumu şöyledir:
+    3'üncü düzeydeki boş listeye eklenir, diğer 8'lik kısmı yine bölünür, onun 4'lük kısmı 2'düzey düzey isteye eklenir,  
+    diğeri de tahsis edilir. Şimdi bu süreci şekillerle adım adım gösterelim. Başlangıç durumu şöyledir:
 
 
-    order-4: ┌────────────────┐ ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │   16 Sayfa     │ │   16 Sayfa     │ ... │   16 Sayfa     │
              └────────────────┘ └────────────────┘ └────────────────┘     └────────────────┘
 
-    order-3: (boş)
+    düzey-3: (boş)
 
-    order-2: (boş)
+    düzey-2: (boş)
 
 
-    2'inci düzey de ve 3'üncü düzeyde boş sayfa bloğu olmadığı için 4'üncü düzeydeki boş sayfa bloklarının biri alınıp
+    2'inci düzeyde ve 3'üncü düzeyde boş sayfa bloğu olmadığı için 4'üncü düzeydeki boş sayfa bloklarının biri alınıp
     bölünür. Böünen bloklar 8 sayfalık olacaktır. Bunlardan biri 3'üncü düzeydeki boş listeye eklenir, diğeri bölünmeye
     devan eder:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │  16 Sayfa      │
              └────────────────┘ └────────────────┘     └────────────────┘
 
-    order-3: ┌────────┐ ┌────────┐
-             │ SPLIT  │ │   8S   │  ← sağdaki order-3 boş listeye eklenir
+    düzey-3: ┌────────┐ ┌────────┐
+             │ SPLIT  │ │   8S   │  ← sağdaki düzey-3 boş listeye eklenir
              └────────┘ └────────┘
               │
               ▼ (hâlâ büyük, tekrar bölünmesi gerekiyor)
 
 
-    Burada 3'üncü düzeydeki 8 sayfanın yeniden ikiye bölünmesiyle bunlardan biri 2'üncü düzeydeki boş listeye eklenir:
+    Burada 3'üncü düzeydeki 8 sayfanın yeniden ikiye bölünmesiyle bunlardan biri 2'inci düzeydeki boş listeye eklenir:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │  16 Sayfa      │
              └────────────────┘ └────────────────┘     └────────────────┘
 
-    order-3: ┌────────┐
+    düzey-3: ┌────────┐
              │  8S    │  ← boş listede kalır
              └────────┘
 
-    order-2: ┌────┐ ┌────┐
+    düzey-2: ┌────┐ ┌────┐
              │TAH.│ │ 4S │     ← boş listeye eklenir
              └────┘ └────┘
                 │
@@ -10978,16 +10978,16 @@ void exit_sys_errno(const char *msg, int eno)
     İşte 8 sayfanın 4'lük kısmı 2'inci düzeydeki bağlı listeye eklenip kalan 4'lük kısmı da çağrıyı yapana verilmektedir. 
     Boş listelerin son hali şöyle olacaktır:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │  16 Sayfa      │
              └────────────────┘ └────────────────┘     └────────────────┘
 
 
-    order-3: ┌────────┐
+    düzey-3: ┌────────┐
              │  8S    │
              └────────┘
 
-    order-2: ┌────┐
+    düzey-2: ┌────┐
              │ 4S │
              └────┘
 
@@ -10995,20 +10995,20 @@ void exit_sys_errno(const char *msg, int eno)
     işletilmektedir. Yani bu 4 sayfalık blok 2'inci düzeye yerleştirilir. Ancak bu 2'inci düzeyde onun ikizi (buddy'si) 
     varsa free hale getirilenle bu ikizi birleştirilerek üst düzeydeki boş listeye eklenir. Tabii aynı durum üst düzey 
     için de yapılacaktır. Burada bir noktaya dikkatinizi çekmek istiyoruz: Free hale getirme algoritmasından amaç en yüksek 
-    sayfa içeren arşılık bloğun oluşturulmasıdır. free edilen blokla onun ikizinin (buddy'sini) birleştirilip üst bloğa 
+    sayfa içeren ardışıl bloğun oluşturulmasıdır. free edilen blokla onun ikizinin (buddy'sini) birleştirilip üst bloğa 
     taşınmasının temel amacı budur. Şimdi bu birleştirme işlemini yine adım adım gösterelim. Free işlemi öncesindeki durum 
     şöyledir:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │  16 Sayfa      │
              └────────────────┘ └────────────────┘     └────────────────┘
 
 
-    order-3: ┌────────┐
+    düzey-3: ┌────────┐
              │  8S    │
              └────────┘
 
-    order-2: ┌────┐
+    düzey-2: ┌────┐
              │ 4S │
              └────┘
 
@@ -11016,15 +11016,15 @@ void exit_sys_errno(const char *msg, int eno)
     o düzeyde var mı diye bakar. Eğer varsa onları birleştirip bir yukarıdaki düzeye eklemeye çalışır. Bizim örneğimizde
     onun ikizi 2'inci düzeyde bulunmaktadır:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │    16 Sayfa    │
              └────────────────┘ └────────────────┘     └────────────────┘
 
-    order-3: ┌────────┐
+    düzey-3: ┌────────┐
              │   8S   │
              └────────┘
 
-    order-2: ┌────┐ ┌────┐
+    düzey-2: ┌────┐ ┌────┐
              │free│ │free│
              └────┘ └────┘
                 │      │ Bunlar ikizler
@@ -11035,42 +11035,42 @@ void exit_sys_errno(const char *msg, int eno)
 
     Birleştirme sonucunda şu durum oluşacaktır:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │    16 Sayfa    │
              └────────────────┘ └────────────────┘     └────────────────┘
 
-    order-3: ┌────────┐ ┌────────┐
-             │   8S   │ │   8S   │   ← yeni oluşan order-3 bloğu boş listeye eklendi
+    düzey-3: ┌────────┐ ┌────────┐
+             │   8S   │ │   8S   │   ← yeni oluşan düzey-3 bloğu boş listeye eklendi
              └────────┘ └────────┘
                  │          │
                  └──────────┘
                      │
                      ▼
-            buddy çifti tespit edildi → coalesce (birleştir)
+            ikiz çifti tespit edildi → birleştir (coalesce)
 
-    order-2: (boş)
+    düzey-2: (boş)
 
-    İşte 3'üncü düzeyde de birleştirilmiş bloğun ikizi bulunduğu için o ikiz blok da birleştirilip üst boş bloğa
-    yerleştirilecektir:
+    İşte 3'üncü düzeyde de birleştirilmiş bloğun ikizi bulunduğu için o ikiz blok da birleştirilip üst boş blok listesine
+    (4'üncü düzeydeki boş blok listesine) yerleştirilecektir:
 
-    order-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐ ┌────────────────┐
+    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐ ┌────────────────┐
              │    16 Sayfa    │ │    16 Sayfa    │ ... │    16 Sayfa    │ │    16 Sayfa    │
              └────────────────┘ └────────────────┘     └────────────────┘ └────────────────┘
                                                                                   │
                                                                                   ▼
                                                                              yeni eklenen
-                                                                             order-4 bloğu
-    order-3: (boş)
+                                                                             düzey-4 bloğu
+    düzey-3: (boş)
 
-    order-2: (boş)
+    düzey-2: (boş)
 
     Görüldüğü gibi her şey ters sırada eski haline gelmiştir. 
 
     Linux çekirdeğinde maksimum düzey "include/linux/mmzone.h" dosyasındaki MAX_ORDER sembolik sabitiyle belirtiliyordu. 
     Ancak en son çekirdeklerde (>= 6.8) artık MAX_ORDER yerine aşağıdaki iki sembolik sabit kullanılmaya başlanmıştır:
 
-    #define MAX_PAGE_ORDER    10                        /* en yüksek order indeksi     */
-    #define NR_PAGE_ORDERS    (MAX_PAGE_ORDER + 1)      /* list sayısı = 11  */
+    #define MAX_PAGE_ORDER      10                        /* en yüksek order indeksi     */
+    #define NR_PAGE_ORDERS      (MAX_PAGE_ORDER + 1)      /* listw sayısı = 11  */
 
     MAX_PAGE_ORDER maksimum düzeyin indeks numarasını, NR_PAGE_ORDERS ise bunların sayısını belirtmektedir. Linux 
     çekirdeklerinde maksimum düzey 10'dur. (Yani toplam 11 tane düzey listesi bulunmaktadır.) 6.1 çekirdeği ve öncesinde
