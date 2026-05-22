@@ -15,7 +15,7 @@
                      (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                          (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                      Son Güncelleme: 18/05/2026 - Pazartesi
+                                      Son Güncelleme: 22/05/2026 - Cuma
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -1629,31 +1629,32 @@ void exit_sys(const char *msg)
     böyle ifade edilse de aslında sıra değil görünürlük değişebilmektedir. Konunun ayrıntılarını izleyen paragraflarda 
     ele alacağız.) Örneğin:
 
-    MOV reg1, [mem1]
-    MOV reg2, [mem2]
+    LOAD reg1, [mem1]
+    LOAD reg2, [mem2]
 
     Burada belleğin iki farklı bölgesindeki değerler işlemcinin farklı iki yazmacına çekilmiştir. Bu makine komutlarınn 
     hangisinin önce yapıldığı sonuç üzerinde etkili olmayacaktır. İşte modern işlemciler kodun çalışmasını hızlandırmak 
-    için bu komutları derleyicinin yazdığı sırada değil farklı sıralarda yapabilmektedir. Örneğin yukarıdaki makine 
-    komutları işlemci tarafından aşağıdaki sırada da yapılabilecektir:
+    için bu komutları derleyicinin yazdığı sırada değil farklı sıralarda yapabilmektedir. Bu duruma İngilizce "out of order 
+    execution" denilmektedir. Örneğin yukarıdaki makine komutları işlemci tarafından aşağıdaki sırada da yapılabilecektir:
 
-    MOV reg2, [mem2]
-    MOV reg1, [mem1]
+    LOAD reg2, [mem2]
+    LOAD reg1, [mem1]
    
     Tabii işlemciler biibirleriyle ilişkili olan makine komutlarının sırasını değiştirmezler. örneğin:
     
-    MOV reg1, [mem]
-    MOV reg2, reg1
+    LOAD reg1, [mem]
+    LOAD reg2, reg1
 
     Ya da örneğin:
 
-    MOV [mem], reg1
-    MOV reg2, [mem]
+    LOAD [mem], reg1
+    LOAD reg2, [mem]
 
     Bu makine komutlarının yer değiştirmesi programın yanlış çalışmasına yol açacağından işlemci bunları yer değiştirmez.
-    Ancak maalesef birden fazla CPU ya da çekirdek söz konusu olduğunda diğer çekirdekler birbirine bağlı işlemleri 
+    Ancak maalesef birden fazla CPU ya da çekirdek söz konusu olduğunda diğer çekirdekler birbirine bağlı bazı işlemleri 
     bile farklı sıralarda görebilmektedir. Komutların yer değiştirmesinin gözlemlenebilir etkisi çok işlemcili ya da 
-    çok çekirdekli sistemlerde ortaya çıkmaktadır.
+    çok çekirdekli sistemlerde ortaya çıkmaktadır. Bu konunun ayrıntılarını "bellek bariyerleri (memory barriers)" komusu
+    içerisinde ele alacağız.
 
     Burada "medemki çalışan kodu etkilemiyor o zaman sorun nerede?" diye düşünebilirsiniz. Ancak işte "birden fazla 
     işlemci ya da çekirdeğin bulunduğu sistemlerde bu komut yer değiştirmesi (daha doğru bir ifadeyle görünürlüğün 
@@ -2569,35 +2570,77 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Şimdi de çok işlemcili ya da çok çekirdekli sistemlerdeki bellek bariyerleri üzerinde duralım. Konuya girişte 
-    işlemcilerin birbirileriyle ilişki olmayan makine komutlarının yerlerini değiştirebildiğini belirtmiştik. Örneğin:
+	Şimdi de çok işlemcili ya da çok çekirdekli sistemlerdeki bellek bariyerleri (memory barriers) üzerinde duralım. 
+    Konuya girişte işlemcilerin birbirileriyle ilişki olmayan makine komutlarının yerlerini değiştirebildiğini belirtmiştik. 
+    Örneğin:
 
     a = 10;
     b = 20;
 
-    İşlemci buradaki belleğe atama işlemlerini farklı sıralarda yapabilmektedir. (Daha doğru bir ifadeyle bu komutlar 
-    farklı sıralarda bitirilebilmektedir.) Yani derleyici örneğin yukarıdaki iki atama işlemininin sırasını optimizasyon 
-    gerekçesi ile değiştirebilmektedir. Komutların yer değiştirmesi (instruction reordering) hem derleyici tarafından 
-    hem de işlemci tarafından yapılabilen bir optimizasyon işlemidir. Çok işlemcili ya da çok çekirdekli sistemlerde 
-    sistem programcısının (örneğin çekirdek geliştiricilerin) bu sorunu bilip bazı önlemleri alması gerekebilmektedir.
+    Bu işlemleri makine komutları biçiminde sembolik olarak şöyle ifade edebiliriz:
+    
+    STORE a, 10
+    STORE b, 20
 
-    Burada bir noktayı vurdulamak istiyoruz. İşlemciler birbirine bağlı olan makine komutlarının sırasını kendi çalışma 
-    tutarlılığını sağlamak için değiştirmemektedir. Ancak maalesef birden fazla CPU ya da çekirdeğin bulunduğu sistemlerde 
-    birbirleri ile ilişkili komutları bile başka çekirdekler değişik sırada yapılıyormuş gibi görebilmektedir. Örneğin
-    aşağıdaki atamaların tek bir makine komut ile yapıldığını varsayalım:
+    İşlemci buradaki belleğe atama (store) işlemlerini farklı sıralarda yapabilmektedir. Yani derleyici örneğin yukarıdaki 
+    iki atama işlemininin sırasını etkin bir çalışma sağlamak için yer değiştirebilmektedir. Komutların yer değiştirmesi 
+    (instruction reordering) hem derleyici tarafından hem de işlemci tarafından yapılabilen bir optimizasyon işlemidir. 
+    Biz burada sürecin işlemciyle ilgili kısımları üzerinde duracağız. Çok işlemcili ya da çok çekirdekli sistemlerde 
+    sistem programcısının (örneğin çekirdek geliştiricilerinin) bu sorunu bilip bazı önlemleri alması gerekebilmektedir.
+    İşlemciler birbirine bağlı olan makine komutlarının sırasını tek akışşlı davranışı korumak için değiştirmemektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Modern işlemciler tek akışlı davranışı koruyarak çoklu optimizasyonlar uygulamaktadır. Bu optimizasyonlar, farklı 
+    işlemci ya da çekirdeklerin bellek işlemlerini programcının beklediğinden farklı sıralarda görmesine yol açabilmektedir.
+    Öncelikle konu ile ilgili bazı terimleri açıklamak istiyoruz:
+
+    ┌────────────────────┬──────────────────────────────────────────────────────────────┐
+    │      Terim         │                          Açıklama                            │
+    ├────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Programdaki Sıra   │ Makine komutlarının koddaki sırasını belirtmektedir.         │
+    │ (Program Order)    │                                                              │
+    ├────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Çalışma Sırası     │ CPU'nun gerçekte işlediği sırayı belirtmektedir. Programdaki │
+    │ (Execution Order)  │ sıra ile çalışma sırası aynı olmak zorunda değildir.         │
+    ├────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Görünürlük Sırası  │ Diğer CPU'ların gerçekte gözlemlediği sıradır.               │
+    │ (Visibility Order) │                                                              │
+    ├────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Bellek Modeli      │ CPU'nun hangi tür yeniden sıralamalara izin verdiğini        │
+    │ (Memory Model)     │ belirtmektedir.                                              │
+    ├────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Uyumluluk          │ Aynı bellek adresine yapılan işlemlerin tutarlılığını        │
+    │ (Coherency)        │ belirtmektedir.                                              │
+    ├────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Tutarlılık         │ Farklı adreslere yapılan işlemlerin görünürlük sırasını      │
+    │ (Consistency)      │ belirtmektedir.                                              │
+    └────────────────────┴──────────────────────────────────────────────────────────────┘
+
+    Modern işlemcilerde işlemlerin "programdaki sırası", "çalışma sırası" ve "görünürlük sırası" faklı olabilmektedir. 
+    Örneğin:
+
+    data = 42;         
+    ready = 1;  
+
+    Burada STORE işlemleri birbirindne farklı yerlere yapıldığı için işlemci bunları değişik sırada yapabilmekte ya da 
+    farklı işlemciler ve çekirdekler bunları farklı sıralarda yapılıyormuş gibi görebilmektedir. Yani burada diğer bir 
+    işlemci ya da çekirdek ready değerini 1 olarak gördüğünde data değerinin o anda 42 olması zorunlu değildir. 
+
+    Ancak maalesef birden fazla CPU ya da çekirdeğin bulunduğu sistemlerde birbirleri ile ilişkili komutları bile başka 
+    çekirdekler değişik sırada yapılıyormuş gibi görebilmektedir. Örneğin a ve b'nin önceki değerleri 0 olsun. Bir işlemci 
+    ya da çekirdekte aşağıdaki işlemlerin yapıldığını varsayalım:
 
     a = 1;
     b = a;
 
-    Burada kodu işleten işlemci işlemleri bu sırada yapmak zorundadır. Ancak başka bir işlemci bunları ters sırada yapılıyormuş
-    gibi görebilmektedir:
+    Diğer bir işlemci ya da çekirdek b'de 1 gördüğü halde a'da 0 görebilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
 
-    b = a;
-    a = 1;
-
+/*----------------------------------------------------------------------------------------------------------------------
     Bellek bariyerleri (memory barriers) temel olarak bir işlem yapılmadan önce diğer işlemlerin yapılmış olduğunu garanti 
     etmek amacıyla oluşturulan mekanizmalardır. Bellek bariyerleri uygun yerlerde kullanılmazsa çok işlemcili ya da çok 
-    çekirdekli sistemlerde çalışan kodlarda böcek oluşması kaçınılmazdır. Aşağıdaki koda dikkat ediniz:
+    çekirdekli sistemlerde çalışan kodlarda böcekler oluşabilmektedir. Aşağıdaki koda dikkat ediniz:
 
     /* Thread 1 */
 
@@ -2613,7 +2656,8 @@ void exit_sys(const char *msg)
     Burada kodu yazan sistem programcısı "ready = 1 ise kesinlikle data = 42" olacağını varsaymıştır. Çünkü data 
     ataması ready atamasından önce yapılmıştır. Dolayısıyla Thread 2'de ready == 1 olduğunda data == 42 olacağı 
     sanılmaktadır. Ancak burada bir ihmal söz konusudur. Derleyici ya da işlemci data ve ready değişkenleri birbirlerinden 
-    bağımsız olduğu için bu atamaları yer değiştirebilmektedir. Bu atamalar yer değiştirildiğinde aşağıdaki durum oluşacaktır:
+    bağımsız olduğu için bu atamaları yer değiştirebilmekte ya da başka bir işlemci ya da çekirdek bunları farklı sıralarda 
+    yapılıyormuş gibi görebilmektedir.  Bu atamalar yer değiştirildiğinde aşağıdaki durum oluşacaktır:
 
      /* Thread 1 */
 
@@ -2628,25 +2672,27 @@ void exit_sys(const char *msg)
     use(data);      
 
     Artık sorun kolaylıkla anlaşılabilir. Diğer işlemci ya da çekirdek ready = 1 durumu oluştuğunda hemen hızlı davranıp 
-    use işlemine girebilir. Bu durumda data değişkeni eski değeriyle kullanılacaktır. İşte sistem programcısı yukarıdaki 
-    gibi görünürde birbirinden bağımsız olan ancak mantıksal bakımdan birbirileriyle ilişkili olan işlemlerde komutların 
-    yer değiştirmesi durumunu göz önünde bulundurarak önlemini almalıdır. Bu önlem de "bellek bariyerleri (memory barriers)" 
-    denilen mekanizmalarlarla alınmaktadır.
+    use işlemine girebilir. Bu durumda data değişkeni eski değeriyle kullanılacaktır. İşte sistem programcısının "görünürlük 
+    sırasının (visibilty order) değişebileceğini göz önünde bulundurarak bu tür durumlara önlem alması gerekir. Bu tür 
+    önlemler "bellek bariyerleri (memory barriers)" denilen mekanizmalarlarla alınmaktadır.
 
-    Burada bir noktaya dikkatinizi çekmek istiyoruz. Derleyici de işlemci de biribirlerinden bağımsız olmayan komutları yer 
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. Derleyici de işlemci kendi akışlarında bağımsız olmayan komutları yer 
     değiştirmemektedir. Örneğin:
 
     data = 42;
     use(data);
 
-    Buradaki iki işlemin yeri asla değiştirilemez. Çünkü sonraki öncekini zaten kullanmaktadır. Ancak yukarıda da belirttiğimiz
-    gibi birden fazla işlemci ya da çekirdek sçz konusu olduğunda diğer işlemci ya a çekirdekler işlemler birbirine 
-    bağlı olsa bile onları ters sırada görebilmektedir. 
+    Buradaki işlemi yürüten işlemci ya da çekirdekte bu sıra korunmaktadır. Buradaki sorun başka işlemci ya da çekirdeklerin
+    bu işlemleri sanki farklı sıralarda yapılıyormuş gibi görmesidir. 
+
+    Biz yukarıdaki örnekte yalnızca peş peşe iki işlemin çalışma sırası ve görünürlük sırası üzerinde örnek verdik. Aslında
+    bu durum yalnızca peş peşe gelen iki makine komutu için söz konusu değildir. Peş peşe gelen ikiden fazla makine komurunda 
+    da çalışma sırası ve görünürlük sırası değişebilmektedir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Derleyicilerin ve işlemcilerin uyguladıkları dört farklı "yeniden sıralama (reordering)" durumu vardır: Load/Load, 
-    Load/Store, Store/Store ve Store/Load. 
+	İşlemcilerin birbirinden bağımsız LOAD/STORE komutları için kendi içlerinde uyguladıkları dört farklı "çalıştırma 
+    sıralaması (execution reordering)" vardır: Load/Load, Load/Store, Store/Store ve Store/Load. 
 
     ┌──────────────────────────────────────────────────────────┐
     │            DÖRT TEMEL YENİDEN SIRALAMA TÜRÜ              │
@@ -2671,34 +2717,35 @@ void exit_sys(const char *msg)
     │    ─ ─ ─  ← CPU, Load B'yi Store A'nın önüne taşıyabilir │
     │    Load B                                                │
     └──────────────────────────────────────────────────────────┘
-								
+
     Yukarıdaki dört yer değiştirme her türlü işlemci tarafından uygulanmamaktadır. Örneğin Intel işlemcileri yalnızca 
     Store/Load işlemlerininin yerlerini değiştirebilmektedir. Diğer işlemlerde yer değiştirme yapmamaktadır. Ancak genel 
     olarak RISC işlemcileri yukarıdaki dört yer değiştirmeyi de yapabilmektedir. Aşağıda bazı yaygın işlemcilerin hangi 
     yer değiştirmeleri yaptığını tablo biçiminde veriyoruz:
 
     ┌─────────────────┬─────────────┬─────────────┬─────────────┬─────────────────┐
-    │ Reordering Turu │    x86      │    ARM      │   RISC-V    │    PowerPC      │
+    │ Sıralama Türü   │     x86     │     ARM     │   RISC-V    │    PowerPC      │
     ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
-    │ Load/Load       │     NO      │     YES     │     YES     │       YES       │
+    │ Load/Load       │    Hayır    │    Evet     │    Evet     │      Evet       │
     ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
-    │ Load/Store      │     NO      │     YES     │     YES     │       YES       │
+    │ Load/Store      │    Hayır    │    Evet     │    Evet     │      Evet       │
     ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
-    │ Store/Store     │     NO      │     YES     │     YES     │       YES       │
+    │ Store/Store     │    Hayır    │    Evet     │    Evet     │      Evet       │
     ├─────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤
-    │ Store/Load      │     YES     │     YES     │     YES     │       YES       │
+    │ Store/Load      │    Evet     │    Evet     │    Evet     │      Evet       │
     └─────────────────┴─────────────┴─────────────┴─────────────┴─────────────────┘
 
-    Genel olarak işlemciler söz konusu olduğunda komutların yeniden sıralanması üç modele uygun yapılabilmektedir:
+    Genel olarak diğer işlemciler söz konusu olduğunda görünürlük sıralaması üç biçimde olabnilmektedir:
 
-    1) Sequential Consistency (SC): Bu modelde komut sıralaması yapılmaz. Komutları her zaman diğer işlemciler yapıldığı 
-    sırada görür.
+    1) Sequential Consistency (SC): Bu modelde komutlar her işlemci ya da çekirdekte program sırasında gözükğr.
 
-    2) Total Store Order (TSO): Bu modelde yalnızca Store/Load işlemlerinin sırası değiştirilebilmektedir. Intel x86 
+    2) Total Store Order (TSO): Bu modelde yalnızca Store/Load program sırası değiştirilebilmekte ve diğer işlemci 
+    ya da çekirdekler yalnızca Store/Load işlemlerini farklı sıralarda yapılıyormuş gibi görebilmektedir. Intel x86 
     işlemci ailesi bu modeli kullanmaktadır. 
 
-    3) Relaxed (Weak) Memory Ordering: Bu modelde yukarıda belirttiğimiz dört grup işlemin de sırası değiştirilebilmektedir. 
-    ARM gibi RISC-V gibi, Power PC gibi işlemciler bu modeli kullanmaktadır. 
+    3) Relaxed (Weak) Memory Ordering: Bu modelde yukarıda belirttiğimiz dört grup işlemin de program sırası 
+    değiştirilebilmektedir. Diğer işlemciler ve çekirdekler bunları farklı sıralarda görebilmektedir. ARM gibi RISC-V gibi, 
+    Power PC gibi işlemciler bu modeli kullanmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -6362,8 +6409,8 @@ void exit_sys(const char *msg)
 
     Ancak bazen programcı "tek bir therad'in uyanmasını, diğer thread'lerin uykuya devam etmesini" isteyebilir. 
     Anımsanacağı gibi wake_up işlemleri birden fazla thread'i uyandırabilmektedir. İşte bu tür durumlarda sistem 
-    programcısının bir döngü içerisinde bu durumu manuel biçimde sağlaması gerekir. Bunu yapabilmek için tipik bir 
-    kalıp şöyledir:
+    programcısının bir döngü içerisinde bu durumu manuel biçimde sağlaması gerekir. Bunu yapabilen tipik bir kalıp 
+    şöyledir:
 
     if (mutex_lock_interruptible(&g_mutex) != 0)
         return -EXXX;
@@ -6375,7 +6422,8 @@ void exit_sys(const char *msg)
             return -EXXX;
     }
     g_flag = 0;
-    mutex_unlock(&mutex)
+    mutex_unlock(&mutex);
+    /* burada uyanınca yapılacak işlemler var */
     
     Burada önce mutex kilitlenmiş ve while döngüsüne girilmiştir. (Örneğimizdeki -EXXX errno değeri "herhangi bir errno 
     değeri anlamında kullanılmıştır.) while döngüsündeki koşula dikkat ediniz. Artık bu koşul sağlanmadığı sürece uyanan 
@@ -6400,6 +6448,20 @@ void exit_sys(const char *msg)
     mutex'in sahipliğini bırakıp yeniden uykuya dalacaktır. Diğer thread'ler de benzer davranışı gösterecektir. 
     Bu kalıp sayesinde aslında çok sayıda thread uyandırıldığı halde bunlardan yalnızca bir tanesi akışına devam 
     edecek ve diğerleri yeniden bloke olacaktır. 
+
+    Yukarıdaki kalıpta mutex yerine kod bloğu kısaysa spinlock da kullanabilirsiniz. Örneğin:
+
+    spin_lock(&g_spinlock);
+    while (g_flag == 0) {
+        spin_unlock(&g_spinlock);
+        if (wait_event(g_wq, g_flag != 0) != 0)
+            return -EXXX;
+        spin_lock(&g_spinlock)
+            return -EXXX;
+    }
+    g_flag = 0;
+    spin_unlock(&g_spinlock);
+    /* burada uyanınca yapılacak işlemler var */
 ----------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -6412,10 +6474,10 @@ void exit_sys(const char *msg)
     kodlarındaki bekleme kuyruklarının bir bölümü burada görümüş olduğumuz veri yapısı (wait_queue_head_t) ve makrolarla 
     (wait_event ve wake_up makroları) oluşturulmuştur. Ancak bazı bekleme kuyrukları performans kazancı sağlayabilmek 
     için ilgili veri yapısının içerisinde manuel oluşturulmuştur. Örneğin eskiden semaphore, mutex gibi nesnelerin bekleme 
-    kuyrukları yukarıda ele almış olduğumuz wait_queue_head_t yapısını kullanıyordu, işlemler de  wait_event ile wake_up 
-    yapılıyordu. Ancak daha sonraları bu senkronizasyon nesnelerine ilişkin bekleme kuyrukları daha az maliyetle bu 
-    senktronizasyon nesneleri içerisinde manuel bir biçimde oluşturulmuştur. Örneğin çekirdeğin 2.4'lü versyonlarında 
-    semaphore yapısı şöyleydi:
+    kuyrukları yukarıda ele almış olduğumuz wait_queue_head_t yapısını kullanıyordu, işlemler de  wait_event ve wake_up 
+    ile yapılıyordu. Ancak daha sonraları bu senkronizasyon nesnelerine ilişkin bekleme kuyruklarının daha az maliyetle 
+    bu senkronizasyon nesnelerinin içerisinde manuel bir biçimde oluşturulması yoluna gidilmiştir. Örneğin çekirdeğin 
+    2.4'lü versyonlarında semaphore yapısı şöyleydi:
 
     struct semaphore {
         atomic_t count;
@@ -7354,10 +7416,10 @@ void exit_sys(const char *msg)
 /*----------------------------------------------------------------------------------------------------------------------
     Şimdi de bekleme kuyruklarıyla ilgili bazı ayrıntılar üzerinde duracağız. Bekleme kuyruklarına ilişkin İngilizce 
     "spurious wakeup" denilen önemli bir olgu vardır. "Spurious" sözcüğü "sahte, yapay, yanlış" gibi anlamlara gelmektedir. 
-    Biz buna "sahte uyanma" diyeceğiz. Sahte uyandırma "bekleme kuyruğunda uykuda olan thread'in koşulla ilgisi olmayan
-    başka nedenden dolayı uyandırılması" anlamına gelmektedir. Biz bekleme kuyruğundaki thread'lerin wake_up fonksiyonlarıyla 
-    uyandırıldığını görmüştük. Uyandırılan thread de koşula yeniden koşula bakıyordu. Thread'in uykuya daldırılmaısna 
-    ilişkin aşağı seviyeli kodu anımsayınız:
+    Biz buna "sahte uyanma" diyeceğiz. Sahte uyanma "bekleme kuyruğunda uykuda olan thread'in koşulla ilgisi olmayan başka 
+    nedenden dolayı (yani wake_up dışında bir nedenden dolayı) uyandırılması" anlamına gelmektedir. Biz bekleme kuyruğundaki 
+    thread'lerin wake_up makrolarıyla uyandırıldığını görmüştük. Uyandırılan thread de koşula yeniden bakıyordu. Thread'in 
+    uykuya daldırılmasına  ilişkin aşağı seviyeli kodu anımsayınız:
 
     #define ___wait_event(wq_head, condition, state, exclusive, ret, cmd)		\
     ({										                                    \
@@ -7389,30 +7451,31 @@ void exit_sys(const char *msg)
     })
 
     Burada çekirdek kodunun bir döngü içerisinde koşula bakıp, koşul sağlanmıyorsa yeniden thread'i uyuttuğuna 
-    dikkat ediniz. İşte bu döngünün nedeni yukarıda bahsettiğimiz "sahte uyandırma" sorununu çözmek içindir. Daha açık 
-    bir ifadeyle bu döngü "eğer thread koşulla ilişkisiz bir biçimde başka bir nedenden dolayı yanlışlıkla uyandırılmışsa
-    onun yeniden uykuya dalmasını" sağlamaktadır. 
+    dikkat ediniz. İşte bu döngünün bir işlevi de yukarıda bahsettiğimiz "sahte uyandırma" sorununu çözmek içindir. 
+    Daha açık bir ifadeyle bu döngü "eğer thread koşulla ilişkisiz bir biçimde başka bir nedenden dolayı yanlışlıkla 
+    uyandırılmışsa onun yeniden uykuya dalmasını" sağlamaktadır. 
     
     Peki bir thread neden yanlışlıkla uyandırılmaktadır? İşte aslında çekirdek bazı durumlarda thread'leri mecburen 
     uyandırmak zorunda kalabilmektedir. Çünkü bazı işlemlerin yapılabilmesi için thread'in çalışıyor durumda olması 
     gerekir. Biz aslında uyutma işleminin schedule fonksiyonun içerisinde yapıldığını görmüştük. Dolayısıyla aslında 
     uyanan thread schedule fonksiyonu içerisinde uyanmaktadır. Ancak thread uyandırıldığında yoluna da devam edecektir. 
-    İşte yukarıdaki çekirdek kodundaki döngünün amacı böyle sahte uyanmalarda thread'in yeniden uykuya daldırılmasıdır. 
+    İşte yukarıdaki çekirdek kodundaki döngünün bir amacı da koşulun sağlanmadığı (yani wake_up yüzünden olmayan) sahte 
+    uyanmalarda thread'in yeniden uykuya daldırılmasıdır. 
 
-    Linux çekirdeğinde sahte uyandırmalara nedne olan çeşitli durumlar vardır. Bunlardan bazıları şunlardır:
+    Linux çekirdeğinde sahte uyandırmalara neden olan çeşitli durumlar vardır. Bunlardan bazıları şunlardır:
 
-    - Uyuyan bir thread'e sinyal geldiğinde thread uyandırılmaktadır. Bu uyandırmanın koşulun sağlanması ile bir 
+    - Uyuyan bir thread'e sinyal geldiğinde thread uyandırılmaktadır. Bu uyandırmanın wake_up işlemiyle bir 
     ilgisi yoktur.
 
-    - Çekirdek thread'leri kthread_stop() ile durulmak istendeğinde eğer thread uyuyorsa onun uyandırılması geerekir. 
+    - Çekirdek thread'leri kthread_stop() ile durulmak istendiğinde eğer thread uyuyorsa önce onun uyandırılması gerekir. 
 
-    - Çekirdekteki zamanlayıcı mekanizmaları (örneğin hrtimer zaman aşımı) thread'i koşulun sağlanmasıyla ilgisiz 
-    bir biçimde uyandırabilmektedir. 
+    - Çekirdekteki zamanlayıcı mekanizmaları (örneğin hrtimer zaman aşımı) thread'i wkae_up işlemiyle ilgisiz bir biçimde 
+    uyandırabilmektedir. 
 
     - ARM ve POWER PC gibi bazı mimarilerde işlemci tasarımından kaynaklanan nedenlerden dolayı bekleme kuyruğundaki 
-    thread'lerin çekirdek tarafındna uyandırılması gerekebilmektedir. 
+    thread'lerin wake_up işlemi dışında çekirdek tarafından uyandırılması gerekebilmektedir. 
 
-    Sahte uyandırmaların nedenleri aşağıdaki tabloda özetlenmektedir. Ancak tabii biz bu tabloyu yorumlayabilmek için 
+    Sahte uyanmaların nedenleri aşağıdaki tabloda özetlenmektedir. Ancak tabii biz bu tabloyu yorumlayabilmek için 
     bazı bilgilere henüz sahip değiliz:
     
     ┌───────────────────────────┬──────────────────────────────────────────┬─────────────────────────┐
@@ -7451,7 +7514,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    wait_event makrolarının sahte uyandırma nedeniyle bir döngü eşliğinde işlem yaptığını belirtmiştik. Ancak bazen 
+    wait_event makrolarının sahte uyanma nedeniyle bir döngü eşliğinde işlem yaptığını belirtmiştik. Ancak bazen 
     sistem programcısı bu döngüyü istemeyebilir. Bu durumda thread'i uykuya doğrudan kendisi yatırabilir. İşte yukarıda 
     de ele aldığımız gibi aslında thread'i bekleme kuyruğuna yerleştiren asıl fonksiyon prepare_to_wait_event isimli 
     fonksiyondur. Thread'i bekleme kuyruğundan çıkartan fonksiyon da finish_wait fonksiyonudur. Bu fonksiyonların 
@@ -7463,12 +7526,12 @@ void exit_sys(const char *msg)
     prepare_to_wait fonksiyonunun birinci parametresi bekleme kuyruğuna ilişkin wait_queue_head nesnesinin adresini, 
     ikinci parametresi ise bekleme kuyruğundaki düğümleri temsil eden wait_queue_entry nesnesinin adresini almaktadır. 
     Görüldüğü gibi programcının wait_queue_entry nesnesini de kendisinin oluşturması gerekmektedir. Fonksiyonun 
-    üçüncü parametresi thread'e (task da denilmektedir) durum bilgisidir. Örneğin eğer eğer thread sinyalle uyandırılmak 
+    üçüncü parametresi thread'e (task da denilmektedir) ilişkin durum bilgisidir. Örneğin eğer thread sinyalle uyandırılmak 
     isteniyorsa bu parametreye TASK_INTERRUPTIBLE girilmesi gerekir. prepare_to_wait fonksiyonu thread'i bekleme 
     kuyruğuna yerleştirdikten sonra CPU'yu bırakmamaktadır. Bunun için sistem programcısının schedule fonksiyonunu 
     çağırması gerekir. 
 
-    finish_wait fonksiyonun da birinci parametresi wait_queue_head nesnesinin ikinci parametresi de wait_queue_entry
+    finish_wait fonksiyonun da birinci parametresi wait_queue_head nesnesinin, ikinci parametresi de wait_queue_entry
     nesnesinin adresini almaktadır. finish_wait fonksiyonu yalnızca thread'i bekleme kuyruğundan çıkarmaktadır. 
 
     Bu fonksiyonlarla uykuya daldırılan thread'ler yine wake_up fonksiyonlarıyla uyandırılmalıdır. 
@@ -7482,12 +7545,8 @@ void exit_sys(const char *msg)
         if (IS_ERR(g_waiter_thread))
             return PTR_ERR(g_waiter_thread);
 
-        /* Give waiter a chance to call schedule() */
         msleep(100);
-
-        printk(KERN_INFO "main: setting g_condition and calling wake_up\n");
-        g_condition = 1;
-        wake_up_interruptible(&g_wq);   /* finish_wait will already have been called, this is harmless */
+        wake_up_interruptible(&g_wq);  
 
         return 0;
     }
@@ -7499,20 +7558,10 @@ void exit_sys(const char *msg)
     {
         DEFINE_WAIT(wait);
 
-        printk(KERN_INFO "waiter: adding to wait queue\n");
-
-        /* Add thread to wait queue, set its state to TASK_INTERRUPTIBLE */
         prepare_to_wait_event(&g_wq, &wait, TASK_INTERRUPTIBLE);
-
-        printk(KERN_INFO "waiter: checking g_condition\n");
-
-        if (!g_condition)
-            schedule();   /* Let another thread run; we are blocked */
-
-        /* Cleanup after waking up */
+        schedule(); 
         finish_wait(&g_wq, &wait);
 
-        printk(KERN_INFO "waiter: woke up, g_condition = %d\n", g_condition);
         return 0;
     }
 
@@ -7520,9 +7569,8 @@ void exit_sys(const char *msg)
     prepare_to_wait_event fonksiyonu ile thread bekleme kuyruğuna yerleştirilmiştir. Bu işlemden sonra da koşul 
     kontrol edilmiş, koşul sağlanmıyorsa schedule işlemiyle CPU bırakılmıştır. Çıkışta da finish_wait fonksiyonu 
     ile kuyruktaki wait_queue_entry bağlı listeden atılmıştır. Örneğimizdkei uyandırma işlemi modün init fonksiyonunda
-    aşağıdaki gibi yaoılmıştır:
+    aşağıdaki gibi yapılmıştır:
 
-    g_condition = 1;
     wake_up_interruptible(&g_wq);   
 
     Örneğimizdeki çekirdek modülünü aşağıdaki gibi derleyebilirsiniz:
@@ -7532,14 +7580,6 @@ void exit_sys(const char *msg)
     Şöyle yükleyebilrisiniz:
 
     $ sudo insmod wait-module.ko
-
-    Modülü yükledikten sonra "dmesg" yaptığınızda aşağıdaki mesajları görmelisiniz:
-
-    .....
-    [43095.142492] waiter: adding to wait queue
-    [43095.142516] waiter: checking g_condition
-    [43095.244595] main: setting g_condition and calling wake_up
-    [43095.245026] waiter: woke up, g_condition = 1
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* wait-module.c */
@@ -7551,42 +7591,29 @@ void exit_sys(const char *msg)
 #include <linux/delay.h>
 
 static DECLARE_WAIT_QUEUE_HEAD(g_wq);
-static int g_condition = 0;
 static struct task_struct *g_waiter_thread;
 
 static int waiter(void *data)
 {
     DEFINE_WAIT(wait);
 
-    printk(KERN_INFO "waiter: adding to wait queue\n");
-
-    /* Add thread to wait queue, set its state to TASK_INTERRUPTIBLE */
     prepare_to_wait_event(&g_wq, &wait, TASK_INTERRUPTIBLE);
-
-    printk(KERN_INFO "waiter: checking g_condition\n");
-
-    if (!g_condition)
-        schedule();   /* Let another thread run; we are blocked */
-
-    /* Cleanup after waking up */
+    schedule();   /* Let another thread run; we are blocked */
     finish_wait(&g_wq, &wait);
 
-    printk(KERN_INFO "waiter: woke up, g_condition = %d\n", g_condition);
     return 0;
 }
 
 static int __init wait_module_init(void)
 {
+    printk(KERN_INFO "wait_demo init\n");
+
     g_waiter_thread = kthread_run(waiter, NULL, "g_waiter_thread");
     if (IS_ERR(g_waiter_thread))
         return PTR_ERR(g_waiter_thread);
 
-    /* Give waiter a chance to call schedule() */
     msleep(100);
-
-    printk(KERN_INFO "main: setting g_condition and calling wake_up\n");
-    g_condition = 1;
-    wake_up_interruptible(&g_wq);   /* finish_wait will already have been called, this is harmless */
+    wake_up_interruptible(&g_wq);   
 
     return 0;
 }
@@ -7652,16 +7679,16 @@ clean:
 
 /*----------------------------------------------------------------------------------------------------------------------
     Yukarıdaki anlatımlardan siz bir thread'in ya "çalışma kuyruğunda (run queue)" ya da "bekleme kuyruğunda (wait queue)"
-    olması gerektiğini sanabilirsiniz. Aslında gerçek durum tan böyle değildir. Thread çalışma kuyruğundan çıkartılabilir 
+    olması gerektiğini sanabilirsiniz. Aslında gerçek durum tam böyle değildir. Thread çalışma kuyruğundan çıkartılabilir 
     ancak bekleme kuyruğuna da yerleştirilmeyebilir. Bunu sağlamak için önce thread'in durumunu (state) TASK_INTERRUPTIBLE
-    olarak ayarlayıp hemen arkasından schedule fonksiyonunu çağırmak gerekir. Örneğin:.
+    olarak ayarlayıp hemen arkasından schedule fonksiyonunu çağırmak gerekir. Örneğin:
 
     set_current_state(TASK_INTERRUPTIBLE);  
     schedule();
 
     Burada set_current_state fonksiyonu thread'in durumunu değiştirmek için kullanılmıştır. schedule fonksiyonu ise 
     bağlamsal geçişi oluşturmaktadır. (Buradaki thread durumunun TASK_INTERRUPTIBLE olması gerekmemektedir. TASK_INTERRUPTIBLE
-    "sinyal deldiğinde yeniden CPU'ya atanıp sinyal fonksiyonu çalıştırılabilir" anlamına gelmektedir.) Tabii konunun 
+    "sinyal geldiğinde thread yeniden CPU'ya atanıp sinyal fonksiyonu çalıştırılabilir" anlamına gelmektedir.) Tabii konunun 
     ayrıntıları aslında "çizelgeleyici (scheduler)" alt sistemi ile ilgilidir. Bu konu çizlegeleyici alt sistemin anlatıldığı 
     bölümde ele alınacaktır. 
 
@@ -7671,9 +7698,9 @@ clean:
     deactivate_task fonksiyonunda thread'in durumuna bakılır, durum 0'dan farklı ise (0 değeri TASK_RUNNING anlamına
     gelmektedir) thread çalışma kuyruğundan çıkartılmaktadır. 
 
-    Peki thread yukarıdaki gibi çalışma kuyruğundan çıkartıldığında ama herhangi bir bekleme kuyruğuna da yerleştirilmediğinde 
-    thread nasıl yeniden çalışma kuyruğuna aktarılacaktır? İşte bu işlem wake_up_process isimli çekirdek fonksiyonuyla 
-    yapılmaktadır. wake_up_process fonksiyonunun parametrik yapısı şöyledir:
+    Peki thread yukarıdaki gibi çalışma kuyruğundan çıkartıldığında ancak herhangi bir bekleme kuyruğuna da yerleştirilmediğinde 
+    nasıl yeniden çalışma kuyruğuna aktarılacaktır? İşte bu işlem wake_up_process isimli çekirdek fonksiyonuyla yapılmaktadır. 
+    wake_up_process fonksiyonunun parametrik yapısı şöyledir:
 
     int wake_up_process(struct task_struct *p);
 
@@ -7686,7 +7713,7 @@ clean:
     }
     EXPORT_SYMBOL(wake_up_process);
 
-    Fonksiyonun export edildiğine dikkat ediniz. Yani bu fonksiyon çekirdek modülleri ve aygıt sürücüler tarafından 
+    Fonksiyonun export edildiğine dikkat ediniz. Yani bu fonksiyon çekirdek modülleri ve aygıt sürücüler tarafından da
     kullanılabilmektedir. Burada asıl işlemi yapan try_to_wake_up fonksiyonudur. Bu fonksiyon export edilmemiştir. 
     try_to_wake_up fonksiyonun parametrik yapısı şöyledir:
 
@@ -7697,7 +7724,7 @@ clean:
 
     #define TASK_ALL		(TASK_NORMAL | __TASK_STOPPED | __TASK_TRACED)
 
-    Çkierdekte wake_up_process fonksiyonuna benzeyen ancak export edilmemiş wake_up_state isimli bir fonksiyon da 
+    Çekirdekte wake_up_process fonksiyonuna benzeyen ancak export edilmemiş wake_up_state isimli bir fonksiyon da 
     bulunmaktadır. Bu fonksiyon da şöyle yazılmıştır:
 
     int wake_up_state(struct task_struct *p, unsigned int state)
@@ -7711,7 +7738,7 @@ clean:
     Thread'lerin bekleme kuyruğuna alınmasının da zamansal maliyeti vardır. Bazı durumlarda bu işlemin yukarıda anlattığımız 
     gibi hiç işin içine bekleme kuyrukları karıştırılmadan doğrudan yapılması uygun olabilmektedir. Gerçekten de çekirdeğin 
     kendisi de bazı durumlarda hiç bekleme kuyruğu kullanmamaktadır. Örneğin SIGSTOP sinyali ile (ya da terminalden 
-    Ctrl+Z tuluöa basılarak) bir proses durdurulduğunda aslında o proses (prosesin thread'lerini kastediyoruz) çekirdek 
+    Ctrl+Z tuşuna basılarak) bir proses durdurulduğunda aslında o proses (prosesin thread'lerini kastediyoruz) çekirdek 
     tarafından herhangi bir bekleme kuyruğuna yerleştirilmemektedir. Prosese SIGCONT sinyali gönderildiğinde (ya da 
     terminalden "fg" komutu uygulandığında) doğrudan wake_up_state fonksiyonu ile proses (prosesin tüm thread'leri)
     çalışma kuyruğuna yeniden yerleştirilmektedir. 
@@ -10888,7 +10915,7 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-				                            76. Ders 09/05/2026 - Cumartesi					
+                                        76. Ders 09/05/2026 - Cumartesi					
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
