@@ -8470,10 +8470,10 @@ unsigned int hash_func(unsigned int key)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi bir dosya sys_open sistem fonksiyonuyla açıldığında kabaca dosya nesnesinin ve dosya betimleycisinin (file 
-    decriptor) nasıl saklandığına ilişkin bilgileri edinelim. Güncel çekirdeklerde bu veri yapısı biraz ayrıntılıdır. 
-    Biz bu ayrıntılardan bahsedeceğiz. Ancak önce çekirdeğin öğrenci ödevi gibi olan 0.01 versiyonunda bu süreci açıklayalım. 
-    Bu ilkel versiyonda henüz struct_files biçiminde bir yapı yoktu. Açık dosya bilgileri doğrudan task_struct içerisinde 
+    Şimdi sys_open sistem fonksiyonuyla bir dosya açıldığında dosya betimleycisinin (file decriptor) nasıl elde edildiğini 
+    açıklayalım. Güncel çekirdeklerde bu sürece ilişkin veri yapısı biraz ayrıntılıdır. Biz bu ayrıntılardan bahsedeceğiz 
+    ancak önce çekirdeğin "öğrenci ödevi gibi olan" 0.01 versiyonunda bu süreci açıklayalım. Bu ilkel versiyonda henüz 
+    struct_files biçiminde bir yapı yoktu. Açık dosya bilgileri doğrudan task_struct içerisinde 
     bulunan aşağıdaki elemalarda saklanıyordu:
 
     struct task_struct {
@@ -8510,10 +8510,11 @@ unsigned int hash_func(unsigned int key)
 
     Buradaki sayılar dizinin indekslerini belirtmektedir. Tabii zamanla dosyalar kapanınca bu dizinin elemanları boşa 
     düşecektir. Boş elemanlara NULL adres yerleştirilmektedir. İşte open POSIX fonksiyonunun (yani sys_open sistem 
-    fonksiyonun) verdiği "dosya betimleyicisi (file descriptor)" aslında dosya betimleyici tablosundaki dizide bir 
-    indeks belirtmektedir. open POSIX fonksiyonun (dolayısıyla sys_open sistem fonksiyonunun) dosya betimleyici tablosundaki 
-    en düşük boş indeksi vereceği POSIX standartlarında garanti altına alımıştır. Dosya betimleyici tablosunun (yani 
-    struct file *) dizisinin uzunluğunun "aynı anda açık tutulabilecek" dosya sayısını da belirttiğine dikkat ediniz.
+    fonksiyonun) verdiği "dosya betimleyicisi (file descriptor)" aslında dosya betimleyici tablosu dizisinde bir 
+    indeks belirtmektedir. open POSIX fonksiyonun (dolayısıyla sys_open sistem fonksiyonunun) dosya betimleyici 
+    tablosundaki en düşük boş indeksi vereceği POSIX standartlarında garanti edilmiştir. Dosya betimleyici  tablosunun 
+    (yani struct file *) dizisinin uzunluğunun "aynı anda açık tutulabilecek" dosya sayısını da belirttiğine dikkat 
+    ediniz.
 
     Linux çekirdeğindeki sys_read, sys_write, sys_lseek, sys_close gibi sistem fonksiyonları önce task_struct yapından 
     hareketle dosya betimleyici tablosuna erişmekte, parametre olarak aldıkları betimleyici değerini bu diziye indeks 
@@ -8525,11 +8526,11 @@ unsigned int hash_func(unsigned int key)
     betimleyici bir proseste bir dosyayı belirtirken diğer bir proseste başka bir dosyayı belirtiyor olabilir. Dolayısıyla 
     biz bir proseste bir dosya açıp elde ettiğimiz dosya betimleyicisini başka bir prosese prosesler arası haberleşme 
     yöntemleriyle iletsek o proseste o betimleyicinin hiçbir anlamı olmaz. Ancak anımsanacağı gibi özel bir durum olarak 
-    üst proses fork işlemi yaptığında üst prosesin dosya betimleyici tablosu alt prosese sığ kopyalanmaktadır. Böylece 
-    üst proses ile alt proses aynı dosya üzerinde işlem yapabilmektedir. (trace işlemlerinde Linux sistemlerine özgü 
-    kullanılmak üzere bulundurulmuş olan sys_pidfd_getfd isimli bir sistem fonksiyonu vardır. Ayrıca başka bir prosesin 
-    açmış olduğu dosyanın başka bir proseste açılmasına olanak sağlayan sys_pidfd_open isimli bir sistem fonksiyonu da 
-    Linux çekirdeğinde bulunmaktadır.)
+    üst proses fork işlemi yaptığında üst prosesin dosya betimleyici tablosu alt prosese sığ (shallow) kopyalanmaktadır. 
+    Böylece üst proses ile alt proses aynı dosya üzerinde işlem yapabilmektedir. (Linux çekirdeklerinde trace işlemleri 
+    için sys_pidfd_getfd isimli bir sistem fonksiyonu bulundurulmuştur. Bu sistem fonksiyonu başka bir prosesin dosya 
+    betimleyici tablosunda betimleyici tahsis etmektedir. Ayrıca çekirdekte başka bir prosesten açmış olduğu dosyaya ilişkin 
+    bir betimleyicinin elde edilmesini sağlayan sys_pidfd_open isimli bir sistem fonksiyonu da bulunmaktadır.)
 
     Yukarıdaki 0.01 versiyonunda konuyla ilgili unsigned long türden close_on_exec isimli bir elemanın da bulunduğunu 
     görüyorsunuz. Bu elemanın her biti bir betimleyicinin "close-on-exec" drumunu belirtmektedir. Söz konusu bit 1 ise 
@@ -8547,7 +8548,7 @@ unsigned int hash_func(unsigned int key)
     "mademki dosya betimleyici tablosundaki boş indekslerde NULL adres var o zaman ilk NULL adres görülene kadar bir 
     döngü ile sıralı arama yapılabilir" diye düşünebilirsiniz. Eğer dosya betimleyici tabloları 0.01 versiyonundaki gibi 
     çok küçük olsaydı sıralı arama yapmanın önemli bir sakıncası olmayabilirdi. Gerçekten de 0.01 versiyonunda boş 
-    betilmeyici şöyle bulunmuştur:
+    betileeyici şöyle bulunmuştur:
 
     int sys_open(const char * filename,int flag,int mode) {
         /* ... */
@@ -8559,26 +8560,27 @@ unsigned int hash_func(unsigned int key)
         /* ... */
     }
 
-    Görüldüğü gibi bu ilkel versiyonda dosya betimleyici tablosu üzerinde tek tek sıralı arama yapılmış, ilk boş 
-    betimleyici (yani NULL adres içeren ilk dizi elemanının indeksi) elde edilmiştir. Ancak uzunca bir süredir proseslerin 
-    default dosya betimleyici tablolarının default uzunlukları 1024'tür ve bu uzunluk da büyütülebilmektedir. 1024 elemanlı 
-    bir tabloda sıralı arama ile ilk NULL olan dizi elemanının indeksinin bulunması yavaş bir işlemdir. İşte bir süre 
-    sonra Linux çekirdeklerinde bu arama işlemi bit düzeyinde aramayla hızlandırılmıştır. Bit düzeyinde arama yönteminde 
-    dosya betimleyici tablosunun uzunluğu kadar bit dizisi oluşturulur. Sonra o bit dizisindeki ilk 0 olan bitin indeksi 
-    bulunmaya çalışılır. Bu bit dizisindeki 0 olan bitler betimleyici tablosundaki boş elemanları 1 olan bitler dolu olan 
-    elemanları belirtmektedir. İşlemcilerde belli bir yazmaçtaki (ya da Intel işlemcileri söz konusuysa bellek adresindeki) 
-    "ilk 0 olan bitin indeksini veren özel makine komutları" bulunmaktadır. Tabii işlemci 32 bit ise bu makine komutları 
-    32 bitlik yani 4 byte'lık bir veri üzerinde, 64 bit ise 64 bitlik yani 8 byte'lık bir veri üzerinde işlem yapabilmektedir. 
-    Örneğin elimizdeki işlemcinin 64 bit olduğunu düşünelim. Bu işlemcilerdeki C derleyicilerinde unsigned long türü 
-    8 byte yani 64 bittir. Bu durumda örneğin 1024 eleman uzunluğundaki dosya betimleyici tablosu için 16 elemanlı bir 
-    unsigned long dizi bitmap olarak kullanılabilir. Tabii bu sistemlerde ilk 0 bitini bulan makine komutları zaten 64 
-    bitlik bir bilgi üzerinde bu işi yapabilmektedir. O halde çekirdek tasarımcısı 16 elemanlı bir döngü kullanıp dizinin 
-    her elemanı için bu özel makine komutunu kullanarak işlemleri hızlandırabilir. Ancak belli bir süreden sonra bu 
-    yöntem de biraz daha geliştirilerek arama işlemi biraz daha hızlandırılmıştır. Bu ikinci hızlandırma yönteminde ikinci 
-    bir bit dizisi kullanılmaktadır. Ancak ikinci bir dizisinin her biti ilk bit dizisindeki unsigned long elemanın tüm 
-    bitlerinin 0 olup olmadığını tutmaktadır. Bu durumda güncel çekirdeklerde önce bu ikinci bit dizisindeki ilk 1 olan 
-    bit bulunur. Sonra bu bitin indeksi birinci bit dizisine indeks yapılarak oradaki unsigned long değer içerisinde ilk 
-    0 olan bit elde edilir. Bu yöntemde örneğin ilk bit dizisinin aşağıdaki gibi olduğunu varsayalım:
+    Görüldüğü gibi bu ilkel versiyonda dosya betimleyici tablosu üzerinde tek tek sıralı arama yapılmış, ilk boş betimleyici 
+    (yani NULL adres içeren ilk dizi elemanının indeksi) elde edilmiştir. Ancak uzunca bir süredir proseslerin default 
+    dosya betimleyici tablolarının default uzunlukları 1024'tür ve bu uzunluk da büyütülebilmektedir. 1024 elemanlı bir 
+    tabloda sıralı arama ile ilk NULL olan dizi elemanının indeksinin bulunması yavaş bir işlemdir. İşte bir süre sonra 
+    Linux çekirdeklerinde bu arama işlemi bit düzeyinde aramayla hızlandırılmıştır. 
+    
+    Bit düzeyinde arama yönteminde  dosya betimleyici tablosunun uzunluğu kadar bit dizisi oluşturulur. Sonra o bit dizisindeki 
+    ilk 0 olan bitin indeksi bulunmaya çalışılır. Bu bit dizisindeki 0 olan bitler betimleyici tablosundaki boş elemanları 
+    1 olan bitler dolu olan elemanları belirtmektedir. İşlemcilerde belli bir yazmaçtaki (ya da Intel işlemcileri söz konusuysa 
+    bellek adresindeki) "ilk 0 olan bitin indeksini veren özel makine komutları" bulunmaktadır. Tabii işlemci 32 bit ise 
+    bu makine komutları 32 bitlik yani 4 byte'lık bir veri üzerinde, 64 bit ise 64 bitlik yani 8 byte'lık bir veri üzerinde 
+    işlem yapabilmektedir.  Örneğin elimizdeki işlemcinin 64 bit olduğunu düşünelim. Bu işlemcilerdeki C derleyicilerinde 
+    unsigned long türü 8 byte yani 64 bittir. Bu durumda örneğin 1024 eleman uzunluğundaki dosya betimleyici tablosu için 
+    16 elemanlı bir unsigned long dizi bitmap olarak kullanılabilir. Tabii bu sistemlerde ilk 0 bitini bulan makine komutları 
+    zaten 64 bitlik bir bilgi üzerinde bu işi yapabilmektedir. O halde çekirdek tasarımcısı 16 elemanlı bir döngü kullanıp 
+    dizinin her elemanı için bu özel makine komutunu kullanarak işlemleri hızlandırabilir. Ancak belli bir süreden sonra 
+    bu yöntem de biraz daha geliştirilerek arama işlemi biraz daha hızlandırılmıştır. Bu ikinci hızlandırma yönteminde 
+    ikinci bir bit dizisi kullanılmaktadır. Ancak ikinci bir dizisinin her biti ilk bit dizisindeki unsigned long elemanın 
+    tüm bitlerinin 0 olup olmadığını tutmaktadır. Bu durumda güncel çekirdeklerde önce bu ikinci bit dizisindeki ilk 1 
+    olan bit bulunur. Sonra bu bitin indeksi birinci bit dizisine indeks yapılarak oradaki unsigned long değer içerisinde 
+    ilk 0 olan bit elde edilir. Bu yöntemde örneğin ilk bit dizisinin aşağıdaki gibi olduğunu varsayalım:
 
     1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 - 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 -
     1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 - 1111 1101 1111 1111 1111 1111 1111 1111 1111 1111 - ....
@@ -8616,7 +8618,7 @@ unsigned int hash_func(unsigned int key)
         struct file * fd_array[NR_OPEN_DEFAULT];
     };
 
-    Burada görmüş olduğunuz fd_set yapısı "bit dizilerini" temsil etmektedir. Nu yapı şöyle bildirilmiştir:
+    Burada görmüş olduğunuz fd_set yapısı "bit dizilerini" temsil etmektedir. Bu yapı şöyle bildirilmiştir:
 
     typedef __kernel_fd_set		fd_set;
 
@@ -8629,10 +8631,10 @@ unsigned int hash_func(unsigned int key)
     dahil olmak üzere bit dizisi anlamında çekirdekte bu fd_set yapısı kullanılmıştır. Ancak bu fd_set temsilinin tasarımında 
     da aslında kusurlar vardır. Bu temsilde bit dizisi büyütülmek istendiğinde artık bu fd_set temsili işe yaramaz 
     hale gelmektedir. Bu nedenle artık güncel çekirdeklerde fd_set yerine doğrudan unsigned long * türünden bir gösterici 
-    tutulup bu göstericinin gösterdiği yer için belli uzunlukta unsşigned long dizi tahsis edilmektedir. Aslında uzun 
+    tutulup bu göstericinin gösterdiği yer için belli uzunlukta unsigned long dizi tahsis edilmektedir. Aslında uzun 
     süre kulanılmış olan bu fd_set temsilinden vazgeçilmesi iyi olmuştur. Yukarıdaki çekirdeğin 2.4 versiyonundaki 
     files_struct yapısında dosya betimleyici tablosunun uzunluğu yapının max_fds elemanında tutulmaktadır. Çünkü işin 
-    başında bu tablo 1024 elemanlık olsa da daha sonra büyütülebilmektedir. Bu versiyonda dosya betimelyeici tablosunun 
+    başında bu tablo 1024 elemanlık olsa da daha sonra büyütülebilmektedir. Bu versiyonda dosya betimeleyeici tablosunun 
     adresinin de fd elemanında tutulduğuna dikkat ediniz. Dosyaların close-on-exec bayrakları da yine yapının close_on_exec 
     elemanında tutulmaktadır.
 
@@ -8658,7 +8660,7 @@ unsigned int hash_func(unsigned int key)
 
     - Çekirdek her zaman dosya tablosunun yerini fd göstericisinin gösterdiği yerde, açık dosya betimleyicilerinin bitmap'ini 
     open_fds göstericisinin gösterdiği yerde, close-on-exec bayraklarına ilişkin bitmap'i ise close_on_exec göstericisinin 
-    gösterdiği yerde aramaktadır. Yapının bu elemanalrına dikkat ediniz:
+    gösterdiği yerde aramaktadır. Yapının bu elemanlarına dikkat ediniz:
 
     struct files_struct {
         /* ... */
@@ -8677,7 +8679,7 @@ unsigned int hash_func(unsigned int key)
     İşin başında default durumda fd göstericisi fd_array elemanını, close_on_exec göstericisi close_on_exec_init elemanını 
     ve open_fds göstericisi de open_fds_init elemanını göstermektedir.
 
-    current göstericisinden hareketle fdx betimeleyicisinin gösterdiği yerdeki dosya nesnesine (struct file) 
+    current göstericisinden hareketle fdx betimleyicisinin gösterdiği yerdeki dosya nesnesine (struct file) 
     current->files->fd[fdx] ifadesiyle erişilebilir. Bu erişimi kolaylaştırmak için 2.2 ve 2.4 çekirdeklerinde fcheck 
     isimli çekirdek fonksiyonu bulundurulmuştur:
 
@@ -8693,7 +8695,7 @@ unsigned int hash_func(unsigned int key)
 
     Ancak bu fonksiyon export edilmemiştir. Yani aygıt sürücüler tarafından kullanılamamaktadır. Aslında çekirdekte bir 
     dosya betimleyicisinden hareketle dosya nesnesini elde etmek için daha yüksek seviyeli fget fonksiyonu kullanılmaktadır. 
-    Bu fonksiyon 2.4 ve 2.6 versiyonlarında aşağıdaki yazılmıştır:
+    Bu fonksiyon 2.4 ve 2.6 versiyonlarında aşağıdaki gibiyazılmıştır:
 
     struct file fastcall *fget(unsigned int fd)
     {
@@ -8709,7 +8711,7 @@ unsigned int hash_func(unsigned int key)
     }
 
     Bu fonksiyonun fcheck fonksiyonu kullanılarak yazıldığını görüyorsunuz. Ancak bu fonksiyon ileride göreceğimiz gibi 
-    dosya nesnesi içerisindeki (struct file yapısındaki) sayacı da güvenli bir biçimde artırmaktadır. fget fınksşyonu 
+    dosya nesnesi içerisindeki (struct file yapısındaki) sayacı da güvenli bir biçimde artırmaktadır. fget fonksiyonu 
     da bu versiyonlarda export edilmemiştir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -8838,7 +8840,7 @@ unsigned int hash_func(unsigned int key)
     };
 
     Görüldüğü gibi artık bit dizileri fd_set yerine doğrudan unsigned long türden bir dizi biçiminde oluşturulmaktadır. 
-    Yine bu versiyonlarda da fdx numaralı dosya onlar betimleyicisinin gösterdiği yerdeki dosya nesnesine current->files->fdt->fd[fdx] 
+    Yine bu versiyonlarda da fdx numaralı dosya betimleyicisinin gösterdiği yerdeki dosya nesnesine current->files->fdt->fd[fdx] 
     ifadesiyle erişilmektedir. Fakat artık güncel versiyonlarda fcheck biçiminde bir makro ve fcheck_files isimli bir 
     fonksiyon yoktur. Ancak yine güncel versiyonlarda dosya betimleyicisi yoluyla dosya nesnesine erişimi referans sayacını 
     artırarak yapan fget fonksiyonu bulunmaktadır:
@@ -8849,7 +8851,7 @@ unsigned int hash_func(unsigned int key)
     }
     EXPORT_SYMBOL(fget);
 
-    Yine referans sayacını eksliterek nesneyi bırakmak için fput fonksiyonu kullanılmaktadır:
+    Yine referans sayacını azaltarak nesneyi bırakmak için fput fonksiyonu kullanılmaktadır:
 
     void fput(struct file *file)
     {
@@ -8860,10 +8862,10 @@ unsigned int hash_func(unsigned int key)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Mevcut çekirdeklerde dosya betimleyici tablosundaki ilk boş betimleyicinin bulunmasının bit dizilerinde "ilk 0 olan 
+    Güncel çekirdeklerde dosya betimleyici tablosundaki ilk boş betimleyicinin bulunmasının bit dizilerinde "ilk 0 olan 
     bitin bulunması" problemi biçiminde ele alındığını belirtmiştik. Bunun için güncel çekirdeklerde iki düzey bitmap 
     kullanılıyordu. Güncel çekirdeklerdeki fdtable yapısının içerisinde bulunan open_fds birinci düzey bitmap'i full_fds_bits 
-    ise ikinci düzey bitmap'i belirtmektedir. Tüm dosya betimleyicilerinin dolu boş mu olduğu open_fds bitmap'inde tutulmaktadır. 
+    ise ikinci düzey bitmap'i belirtmektedir. Tüm dosya betimleyicilerinin dolu mu boş mu olduğu open_fds bitmap'inde tutulmaktadır. 
     full_fds_bits bitmap'i ise open_fds bitmap'indeki tüm bitleri 0 olmayan ilk unsigned long elemanın indeksinin bulunmasında 
     kullanılmaktadır. files_struct ve fdtable yapılarını aşağıda yeniden veriyoruz:
 
@@ -8907,9 +8909,9 @@ unsigned int hash_func(unsigned int key)
 
     Bu çağrı zincirinde bir dizisi içerisinde ilk 0 olan bitin bulunması işlemini find_next_zero_bit fonksiyonu yapmaktadır. 
     İlk 0 olan bitin bulunması aslında baştan başlanarak yapılmamaktadır. files_struct yapısı içerisindeki next_fd elemanı 
-    aramanın başlatılacağı yeri belirtmektedir. Yani buradaki next_fds elemanının belirttiği değerden küçük tüm dosya 
+    aramanın başlatılacağı yeri belirtmektedir. Yani buradaki next_fd elemanının belirttiği değerden küçük tüm dosya 
     betimleyicileri doludur. Dolayısıyla arama full_fds_bits dizisinin hemen başından başlatılmamaktadır. Tabii eğer bu 
-    next_fds elemanın belirttiği dosya betimeleyicisinden daha küçük bir betimleyici kapatılırsa çekirdek zaten bu next_fds 
+    next_fd elemanın belirttiği dosya betimeleyicisinden daha küçük bir betimleyici kapatılırsa çekirdek zaten bu next_fd
     elemanını güncellemektedir.
 
     Güncel çekirdeklerdeki find_next_fd fonksiyonu şöyle yazılmıştır:
@@ -8938,8 +8940,8 @@ unsigned int hash_func(unsigned int key)
     }
 
     Fonksiyonun birinci parametresi fdtable nesnesinin adresini, ikinci parametresi ise aramanın başlatılacağı betimleyicinin 
-    numarasını belirtmektedir. Fonksiyon önce ikinci düzey birtmap'te arama yapmadan ilk düzey bitmap'te, dizinin hemen 
-    aramanın yapılacağı indeksinde hızlı bir arama yapar. Eğer bu aramadan sonuç elde edilemeze önce ikinci düzey bitmap'te 
+    numarasını belirtmektedir. Fonksiyon önce ikinci düzey bitmap'te arama yapmadan ilk düzey bitmap'te, dizinin hemen 
+    aramanın yapılacağı indeksinde hızlı bir arama yapar. Eğer bu aramadan sonuç elde edilemezse önce ikinci düzey bitmap'te 
     birinci düzey bitmap için dizi indeksini elde eder, sonra birinci düzey bitmap'te arama yapar. find_next_zero_bit 
     fonksiyonu da güncel çekirdeklerde şöyle tanımlanmıştır:
 
@@ -9015,9 +9017,9 @@ unsigned int hash_func(unsigned int key)
 /*----------------------------------------------------------------------------------------------------------------------
     POSIX sistemlerinde dolayısıyla da Linux çekirdeğinde thread'lerin ayrı dosya betimleyici tabloları yoktur. Dosya 
     betimleyicileri ve dosya betimleyici tablosu prosese özgüdür. Yani siz bir prosesin hangi thread'inde dosya açmış 
-    olursanız olun bu dosya bilgisi prosese özgüdür, siz prossin herhangi bir thread'inde bu dosyaya erişebilirsiniz. 
-    Bir thread yaratıldığında thread'e ilişkin task_struct nesnesinin fs gibi files gibi elemanları onu yaratan thread'in 
-    task_struct nesnesinden sığ kopyalamayla (yani gösterici elemanları söz konusu olduğunda yalnızca göstericilerin 
+    olursanız olun bu dosya bilgisi prosese özgüdür, siz prosesin herhangi bir thread'inde bu dosyaya erişebilirsiniz. 
+    Bir thread yaratıldığında thread'e ilişkin task_struct nesnesinin fs ve files gibi elemanları onu yaratan thread'in 
+    task_struct nesnesinden sığ kopyalama yoluyla (yani gösterici elemanları söz konusu olduğunda yalnızca göstericilerin 
     içerisindeki adreslerin kopyalamasıyla) kopyalanmaktadır. Dolayısıyla aslında prosesin bütün thread'leri açık 
     dosyalara ilişkin aynı veri yapısı nesnelerini kullanmaktadır. task_struct yapısının ilgili kısmına dikkat ediniz:
 
@@ -9042,20 +9044,20 @@ unsigned int hash_func(unsigned int key)
     Peki bu güncel çekirdeklerde nasıl sağlanmaktadır? Örneğin üst proses open fonksiyonuyla bir dosya açmış olsun. 
     Açılan dosyanın da dosya betimleyicisi 3 olsun. Şimdi bu proses fork yaptığında bu prosesin tamamen özdeş bir kopyası 
     oluşturulacaktır. Ancak alt proses 3 numaralı betimleyiciyi de fork işleminden sonra kullanabilecektir. fork işleminden 
-    sonra Üst prosesin 3 numaralı betimleyicisi ile alt prosesin 3 numaralı betimleyicisi aynı dosya nesnesini gösterecektir. 
+    sonra üst prosesin 3 numaralı betimleyicisi ile alt prosesin 3 numaralı betimleyicisi aynı dosya nesnesini gösterecektir. 
     Özetle fork işlemi sırasında üst prosesin açmış olduğu dosyalar da adeta alt prosese aktarılmış gibi olmaktadır. 
     Peki bu çekirdek veri yapısında nasıl sağlanmaktadır? Anımsanacağı gibi fork işlemi sonrasında artık prosesler 
     birbirinden bağımsızdır. Yani fork işleminden sonra artık birinin açtığı dosya diğeri tarafından görülemez. İşte 
     fork işlemi sırasında tamamen alt proses için yeni bir files_struct nesnesi ve yeni bir dosya betimleyici tablosu 
-    (fd dizisi) yaratılmaktadır. Ancak üst prosesin dosya betimleyici tablosundaki adresler yeni yaratılan alt posesteki 
-    dosya betimleeyici tablosuna kopyalanamktadır. Böylece üst prosesin dosya betimleyici tablosunun aynı mumaralı 
+    (fd dizisi) yaratılmaktadır. Ancak üst prosesin dosya betimleyici tablosundaki adresler yeni yaratılan alt prosesteki 
+    dosya betimleyici tablosuna kopyalanmaktadır. Böylece üst prosesin dosya betimleyici tablosunun aynı mumaralı 
     betimleyicileriyle alt prosesin dosya betimleyici tablosunun aynı numaralı betimleyicileri aynı dosya nesnelerini 
     gösteriyor durumda olur. Tabii artık üst ve alt proseslerin yeni açacağı dosyalar onlara özgü olacaktır. Paylaşılan 
     dosya nesneleri yalnızca fork öncesinde açılmış olanlardır.
 ----------------------------------------------------------------------------------------------------------------------*/
-
+<BURADA KALDIM>
 /*----------------------------------------------------------------------------------------------------------------------
-										26. Ders 12/10/2025 - Pazar
+										    26. Ders 12/10/2025 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
