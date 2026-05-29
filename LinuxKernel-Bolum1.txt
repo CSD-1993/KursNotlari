@@ -9579,7 +9579,7 @@ unsigned int hash_func(unsigned int key)
     Peki bir dosya açıldığında dosyanın dosya sistemindeki yeri (örneğin yol ifadesi) çekirdek tarafından nasıl saklanmaktadır? 
     İşte çekirdek her dosya açıldığında o dosyanın dizin girişi bilgilerini (yani dosya sisteminde nerede olduğu bilgisini 
     ve bazı diğer bilgileri) ismine "dentry" denilen bir yapı nesnesine yerleştirmektedir. Açılmış olan dosyanın dosya 
-    sistemindeki yerine ilişkin bu nesnelere biz "dentry nesneleri" diyeceğiz. Bu noktada hikayaye "dentry" isimli başka 
+    sistemindeki yerine ilişkin bu nesnelere biz "dentry nesneleri" diyeceğiz. Bu noktada hikayeye "dentry" isimli başka 
     bir aktörün daha katıldığını görüyorsunuz. Güncel çekirdeklerde dentry yapısı "include/linux/dcache.h" dosyası 
     içerisinde şöyle bildirilmiştir:
 
@@ -9682,15 +9682,55 @@ unsigned int hash_func(unsigned int key)
 
     Çekirdeğin öğrenci ödevi gibi olan 0.01 versiyonunda dizin girişleri için dentry ya da benzeri bir yapı yoktu.
 
-    Peki dentry nesnelerinin içerisinde beler tutulmaktadır? 
+    Peki dentry nesnelerinin içerisinde neler tutulmaktadır? Temel olarak dentry nesnelerinin içerisinde dosyaya erişmek
+    için kullanılan "dizin girişi (directory entry)" bilgileri tutulmaktadır. Ancak bu bilgiler iyi bir biçimde organize 
+    edilmiştir. Örneğin dentry nesneleri içerisinde hızlı erişim sağlamak için üst dizine ilişkin dentry nesnesinin
+    adresi de tutulmaktadır. İzleyen paragraflarda da açıklayacağımız üzere dentry nesneleri bir önbellek içerisinde 
+    de saklanmaktadır. Bu önbellek yönetimi için gereken bilgiler de dentry nesnelerinin içerisinde tutulmaktadır. Biz
+    aşağıda bir tablo biçiminde güncel çekirdeklerdeki dentry yapısının önemli elemanlarını listeliyoruz:
+
+    ┌─────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────┐
+    │            Eleman           │                                      Açıklama                                      │
+    ├─────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────┤
+    │ d_flags                     │ Dentry durum bayrakları. RCU lookup sırasında kontrol edilir, d_lock ile korunur.  │
+    ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+    │ d_hash                      │ Global dcache hash tablosundaki bucket zinciri (hlist_bl_node, bit-lock korumalı). │
+    │                             │ __d_lookup_rcu() bu zinciri tarar.                                                 │
+    ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+    │ d_parent                    │ Üst dizin dentry'sini gösterir. Lookup sırasında path bileşeni doğrulamasında      │
+    │                             │ kullanılır.  │
+    ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+    │ d_name / __d_name           │ Bileşen adı (struct qstr: hash + len + name gösterici). Hash karşılaştırması       │
+    │                             │ lookup'un ilk hızlı eleme adımıdır.                                                │
+    ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+    │ d_inode                     │ Lookup sonucunda döndürülen inode.                                                 │ 
+    ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+    │ d_sb                        │ Kök superblock işaretçisi. Lookup sırasında dentry'nin doğru                       │
+    │                             │ mount noktasına ait olup olmadığı bu alan üzerinden doğrulanır.                    │
+    └─────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────┘
+
+    Dizin girişinin isminin d_name elemanında qstr olarak tutulduğuna dikkat ediniz. qstr yapısı güncel çekirdeklerde 
+    "include/linux/dcache.h" dosyası içerisinde şöyle bildirilmiştir:
+
+    struct qstr {
+        union {
+            struct {
+                HASH_LEN_DECLARE;
+            };
+            u64 hash_len;
+        };
+        const unsigned char *name;
+    };
+
+    Burada dizin girişinin isminin bulunduğu adresin ve ismin uzunluğunun tutulduğuna dikkat ediniz.  
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Şimdi dosya sistemine ilişkin nesneler hakkında bir özet yapalım:
 
-    Dosya Nesnesi (struct file): Açılmış dosyalar üzerinde işlem yapmak için gereken tüm bilgilerin tutulfuğu nesne.
+    Dosya Nesnesi (struct file): Açılmış dosyalar üzerinde işlem yapmak için gereken tüm bilgilerin tutulduğu nesne.
     Inode Nesnesi (struct inode): Dosyanın diskteki metadata bilgilerini tutan nesne.
-    Dentry Nesnesi (struct dentry) : Dosyanın dosya sisteni üzerinde yerini ve buna ilişkin bazı bilgileri tutan nesne.
+    Dentry Nesnesi (struct dentry) : Dosyanın dosya sistemi üzerinde yerini ve buna ilişkin bazı bilgileri tutan nesne.
 
     Peki dosyanın ilişkin olduğu inode nesnesine ve dentry nesnesine dosya nesnesi yoluyla nasıl erişilmektedir? 
     Uzunca bir süre (2.6'ya kadar ve 2.6'lı versiyonlar da dahil olmak üzere) dosya nesnesinin (file yapısının) içerisinde 
@@ -9709,22 +9749,18 @@ unsigned int hash_func(unsigned int key)
     │          │ --------------------------> │          │
     └──────────┘        └──────────┘         └──────────┘
 
-    UNIX/Linux sistemlerinde bir dosya sistemi kök dizinde bir yere maount edilebilmektedir. Yani aslında bir yol ifadesine 
+    UNIX/Linux sistemlerinde bir dosya sistemi kök dizinde bir yere mount edilebilmektedir. Yani aslında bir yol ifadesine 
     ilişkin dosya ile diğer bir yol ifadesine ilişkin dosya farklı fiziksel aygıtlarda bulunuyor olabilir. Çekirdeğin bazı 
     durumlarda bir dosyanın hangi dosya sisteminin içerisinde bulunduğunu anlaması da gerekebilmektedir. Bu bilgilere dosyanın 
     "mount" bilgileri denilmektedir. Eskiden çekirdeğin 2.2 versiyonunda dosyanın mount bilgileri dentry nesnesi içerisinde 
     tutuluyordu. 2.4 ile birlikte dosyanın mount bilgileri daha düzenli bir biçimde file yapısının (dosya nesnesinin) vfsmount 
     isimli yapı türünden f_vfsmnt elemanında tutulmaya başlandı. 2.6 çekirdeklerinden itibaren de dosyanın dentry nesnesinin 
-    adresiyle vfsmount bilgileri path isimli bir yapıya yerleştirilmiş ve file yapısının içerisindeki f_path elemanında tutulmaya 
-    başlanmıştır. 2.6 ve sonrasına ilişkin çekirdeklerdeki durum şöyledir:
+    adresi ve vfsmount bilgileri path isimli bir yapıya yerleştirilmiş ve file yapısının içerisindeki f_path elemanında tutulmaya 
+    başlanmıştır. 2.6 ve sonrasına ilişkin durum şöyledir:
 
     struct file {
         /* ... */
 
-        fmode_t				f_mode;
-        unsigned int		f_flags;
-        loff_t				f_pos;
-        atomic_long_t		f_count;            /* file_ref_t f_ref */
         struct path			f_path;
         struct inode		*f_inode;
 
@@ -9749,16 +9785,18 @@ unsigned int hash_func(unsigned int key)
 
     Bu durumda ne olacaktır? İşte çekirdek farklı dosya da olsa aynı dosya da olsa her açılan dosya için ayrı bir dosya 
     nesnesi (yani struct file nesnesi) oluşturmaktadır. (Çünkü örneğin aynı dosyayı birden fazla kez açtığımızda bu 
-    dosyaların hepsinin dosya göstericileri faklı olmaktadır. Dosya göstericilerinin de dosya nesnesi içerisinde saklandığını 
-    anımsayınız.) Ancak örneğimizdeki iki dosya neticide aslında diskte aynı dosyayı belirtmektedir. O halde bu iki dosya 
-    için ayrı dentry ve inode nesneslerinin oluşturulmasına gerek yoktur. Kaldı ki farklı prosesler de aynı dosyayı açmış 
-    olabilirler. Bunlar için de ayrı dentry ve inode nesnelerinin oluşturulumasına gerek yoktur. O halde her açılan yeni 
+    dosyaların hepsinin dosya göstericileri farklı olmaktadır. Dosya göstericilerinin de dosya nesnesi içerisinde saklandığını 
+    anımsayınız.) Ancak örneğimizdeki iki dosya neticede aslında diskte aynı dosyayı belirtmektedir. O halde bu iki dosya 
+    için ayrı dentry ve inode nesnelerinin oluşturulmasına gerek yoktur. Kaldı ki farklı prosesler de aynı dosyayı açmış 
+    olabilirler. Bunlar için de ayrı dentry ve inode nesnelerinin oluşturulmasına gerek yoktur. O halde her açılan yeni 
     dosya için çekirdek yeni bir dosya nesnesi yarattığı halde aynı dosyalar açıldığında bu dosyalar için tek bir dentry 
     ve inode nesnesi oluşturmaktadır. Bunun için tabii open fonksiyonuyla bir dosya açıldığında çekirdeğin "bu dosyaya 
     ilişkin dentry nesnesi ve inode nesnesi daha önce yaratılmış mı" diye bir araştırma yapması gerekmektedir. Bu araştırmayı 
     yapabilmesi için de çekirdeğin bir biçimde bütün yaratılmış olan dentry ve inode nesnelerini bir yerde tutması gerekir.
+----------------------------------------------------------------------------------------------------------------------*/
 
-    İşte çekirdek dentry ve inode neneleri için ayrı önbellek (cache) sistemleri oluşturmaktadır. Bunlara Linux sistemlerinde 
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdek dentry ve inode nesneleri için ayrı önbellek (cache) sistemleri oluşturmaktadır. Bunlara Linux sistemlerinde 
     "dentry önbelleği (dentry cache)" ve "inode önbelleği (inode cache)" denilmektedir. Bir dosya açıldığında çekirdek 
     o dosyaya ilişkin dentry ve inode nesneleri zaten bu önbellek sistemlerinde varsa hiç diske gitmeden doğrudan bu 
     önbelleklerden onları alıp kullanmaktadır. Bir dosyayı onu açmış olan bütün prosesler kapatmış olsa bile o dosyaya 
@@ -9769,7 +9807,7 @@ unsigned int hash_func(unsigned int key)
     de belli bir büyüklüğü vardır. Bu önbellek sistemleri dolduğunda dentry ve inode nesnelerinin bazıları bu önbelleklerden 
     atılmaktadır. Linux'taki bu tür önbellek sistemlerinde önbellekten çıkarma için genel olarak "LRU (Least Recently 
     Used)" denilen "önbellek yer değiştirme (cache replacement) algoritması" işletilmektedir. Yani önbellekten toplamda 
-    en az kullanılanlar değil "son zamanalarda en az kullanılanlar" çıkartılmaktadır.
+    en az kullanılanlar değil "son zamanlarda en az kullanılanlar" çıkartılmaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -9785,19 +9823,20 @@ unsigned int hash_func(unsigned int key)
     Geldiğimiz noktaya kadarki konuları dikkate aldığımızda open fonksiyonuyla bir dosyanın açılması durumunda sırasıyla 
     şunların yapıldığını söyleyebiliriz:
 
-    1) Prosesin dosya betimleyici tablosunda boş bir betimleyici hızlı bir biçimde bulunur.
+    1) Prosesin dosya betimleyici tablosunda ilk boş bir betimleyici (yani dizi indeksi) hızlı bir biçimde bulunur.
     2) Bir dosya nesnesi (struct file nesnesi) yaratılır ve elemanlarına gerekli ilkdeğerler verilir.
-    3) Dosyaya ilişkin dentry nesnesi ve inode nesnesi dentry önbelleğinde ve inode önbelleğinde yoksa diskte arama 
-    yapılarak yaratılır ve bunların adresleri dosya nesnesine yerleştirilir.
-    4) Dosya nesnesinin adresi dosya beyimeleyici tablosuna (fd dizisine) yerleştirilir ve yerleştirilen dizi indeksi 
-    dosya betimleyicisi olarak geri döndürülür.
+    3) Dosyaya ilişkin dentry nesnesi ve inode nesnesi dentry önbelleğinde ve inode önbelleğinde varsa oradan alınır, 
+    yoksa bu nesnelere ilişkin bilgiler diskten hareketle elde edilir ve bu nesneler yaratılarak bu önbelleklere 
+    yerleştirilir. Aynı zamanda dentry ve inode nesnelerinin adresleri dosya nesnesine de yerleştirilmektedir. 
+    4) Dosya nesnesinin adresi dosya betimeleyici tablosuna yerleştirilir ve yerleştirilen dizi indeksi dosya betimleyicisi 
+    olarak geri döndürülür.
 
     Ancak dosya açılırken henüz ele almadığımız başka süreçler de işin içerisine girmektedir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Bir prosesin "kök dizininin (root directory)" ve "çalışma dizinin (current working directory)" proses kontrol 
-    bloğunda yani task_struct nesnesinde tutulduğunu belirtmiştik. Güncel çekirdeklerde bu bilgi şöyle tutulmaktadır:
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. Prosesin çalışma dizini ve kök dizini proses kontrol bloğunda 
+    yol ifadesi ile değil dentry nesnesi ile tutulmaktadır. Güncel çekirdeklerde bu bilgiler şöyle tutuluyordu:
 
     struct task_struct {
         /* ... */
@@ -9809,19 +9848,20 @@ unsigned int hash_func(unsigned int key)
 
     struct fs_struct {
         /* ... */
+
         struct path root, pwd;
 
         /* ... */
     } __randomize_layout;
 
-    path yapısını daha önce vermiştik:
+    path yapısı da şöyleydi:
 
     struct path {
         struct vfsmount *mnt;
         struct dentry *dentry;
     } __randomize_layout;
 
-    Görüldüğü gibi çekirdek prosesin kök dizinin ve çalışma dizininini yol ifadesi biçiminde değil dentry nesnesi 
+    Görüldüğü gibi çekirdek prosesin kök dizinin ve çalışma dizinini yol ifadesi biçiminde değil dentry nesnesi 
     biçiminde tutmaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -9830,32 +9870,39 @@ unsigned int hash_func(unsigned int key)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi dosya sisteminin temel veri yapıları üzerinde görmüş olduğumuz konulara ilişkin bazı testler yapalım.
+    Şimdi dosya sisteminin temel veri yapıları üzerinde görmüş olduğumuz konulara ilişkin bazı alıştırmalar yapalım.
+    Alıştırmaların kodlarını en sonunda bir bütün olarak vereceğiz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     İlk örneğimizde bir dosya betimleyicisine ilişkin dosya nesnesini elde ederek onun f_pos elemanını yazdırmaya çalışalım. 
     Dosya nesnesindeki f_pos elemanının dosya göstericisinin değerini tuttuğunu anımsayınız. Bu işlemi bir aygıt sürücü 
     yazarak ioctl yoluyla gerçekleştirebiliriz. (Kursumuzda kullandığımız Linux makinedeki çekirdek sürümü 6.9.2'dir.) 
-    Bunun şçin oluşturduğumuz ioctl fonksiyonuna dikkat ediniz:
+    Bunun için oluşturduğumuz ioctl fonksiyonuna dikkat ediniz:
 
     static long ioctl_test1(struct file *filp, unsigned long arg)
     {
         struct file *f;
-        int fd = (int) arg;
-
+        loff_t fpos;
+        int fd;
+        
+        fd  = (int) arg;
         if (fd < 0 || fd >= current->files->fdt->max_fds) {
             printk(KERN_INFO "file descriptor is not valid!..\n");
             return -EBADF;
         }
-
+    
         f = current->files->fdt->fd[fd];
         if (f == NULL) {
             printk(KERN_INFO "file descriptor is not valid!..\n");
             return -EBADF;
         }
 
-        printk(KERN_INFO "File pointer offset: %lld\n", (long long)f->f_pos);
+        spin_lock(&fd_file(f)->f_lock);
+        pos = f->f_pos;
+        spin_unlock(&fd_file(f)->f_lock);
+
+        printk(KERN_INFO "File pointer offset: %lld\n", (long long)pos);
 
         return 0;
     }
@@ -9869,6 +9916,9 @@ unsigned int hash_func(unsigned int key)
         return -EBADF;
     }
 
+    Örneğimizde file yapısının f_pos elemanına spinlock kilidi ile erişildiğini de görüyorsunuz. spinlock nesnelerinin 
+    kullanımını ayrı bir bölümde ele alacağız. 
+
     Burada önemli bir nokta üzerinde durmak istiyoruz. Biz test amacıyla dosya betimleyicisinden hareketle dosya 
     nesnesine current->files->fdt->fd[fd] ifadesiyle eriştik. Ancak bu erişim aslında güvenli değildir. Çünkü tam bu 
     erişim yapılırken eğer dosya betimleyici tablosu büyütülürse ya da bu betimleyici üzerinde işlem yapılırsa bizim 
@@ -9876,11 +9926,11 @@ unsigned int hash_func(unsigned int key)
     işlem yapmaz. Çekirdek ancak biz bir dosya işlemi yaptığımızda bizim dosya betimleyici tablomuza erişmektedir. Çünkü 
     dosya betimleyici tablosu prosese özgüdür. O halde biz ioctl çağrısı yaparken aynı zamanda başka bir thread'te 
     (ya da alt proseste) dosya işlemi yapmıyorsak bir sorun da oluşmayacaktır. Ancak genel olarak çekirdeğin uyguladığı 
-    senkronizyan mekanizmasına uygun hareket etmek gerekir. Linux çekirdeklerinin bir süredir "kilitsiz (lock-free)" 
+    senkronizasyon mekanizmasına uygun hareket etmek gerekir. Linux çekirdeklerinin bir süredir "kilitsiz (lock-free)" 
     veri yapılarından olan RCU mekanizmasının kullandığını belirtmiştik. Biz bu veri yapısı üzerindeki ayrıntıları 
     "çekirdeğin senkronizasyon mekanizmalarını" anlattığımız bölümde açıklayacağız.
 
-    Burada diğer bir nokta da nesnelerin referans sayaçlarıyla ilgilidir. Daha önceden de belirttiğimiz gibi çekirdek 
+    Buradaki diğer bir nokta da nesnelerin referans sayaçlarıyla ilgilidir. Daha önceden de belirttiğimiz gibi çekirdek 
     nesneleri farklı amaçlarla birden fazla kaynak tarafından kullanılabilmektedir. Bu tür çekirdek nesnelerinde bu 
     nedenle hep bir sayaç tutulmaktadır. Bir çekirdek nesnesi üzerinde işlem yapacak kişi eğer bu sayacı artırmazsa 
     çekirdek onu boşaltabilir. İşlem yapan kişi de tanımsız davranışla karşılaşabilir. Tabii yukarıdaki gibi prosese 
@@ -9888,29 +9938,35 @@ unsigned int hash_func(unsigned int key)
     genel olarak bu tür durumlarda "çekirdek kaynağı boşaltmasın diye" nesnenin referans sayacı artırılmalı, kullanım 
     bittikten sonra da azaltılmalıdır. Daha önceden de belirttiğimiz gibi Linux çekirdeklerinde sayacı artırarak nesneyi 
     elde eden fonksiyonlar "get" soneki ile sayacı azaltarak nesneyi bırakan fonksiyonlar ise "put" soneki ile isimlendirilmiştir. 
-    Örneğin fget isimli yüksek seviyeli çekirdek fonksiyonu dosya betimelicisinden hareketle bize dosya nesnesini 
+    Örneğin fget isimli yüksek seviyeli çekirdek fonksiyonu dosya betimleyicisinden hareketle bize dosya nesnesini 
     RCU mekanizmasını kullanarak dosya nesnesinin sayacını da artırarak vermektedir. fput fonksiyonu da sayacı azaltarak 
     dosya nesnesini geri bırakmaktadır. fget ve fput fonksiyonlarının prototipleri şöyledir:
 
     struct file *fget(unsigned int fd);
     void fput(struct file *);
 
-    Bu fonksiyonların prototipleri "include/linux.file.h" dosyası içerisindedir. Güncel çekirdeklerde fget fonksiyonun 
-    tanımlaması "fs/file.c" dosyası içerisinde fput fonksiyonun tanımlaması ise "fs/file_table.c" içerisinde yapılmıştır. 
-    fget ve fput fonksiyonları export edildiği için aygıt sürücüler içerisinde de kullanılabilmektedir. Bu durumda biz 
-    yukarıdaki testi daha basit bir biçimde fget ve fput fonksiyonlarını kullanarak aşağıdaki gibi de yapabiliriz:
+    Bu fonksiyonların prototipleri "include/linux/file.h" dosyası içerisindedir. Güncel çekirdeklerde fget fonksiyonu
+    "fs/file.c" dosyası içerisinde,     fput fonksiyonu ise "fs/file_table.c" içerisinde tanımlanmıştır. fget ve fput 
+    fonksiyonları export edildiği için aygıt sürücüler içerisinde de kullanılabilmektedir. Bu durumda biz yukarıdaki 
+    testi daha basit bir biçimde fget ve fput fonksiyonlarını kullanarak aşağıdaki gibi de yapabiliriz:
 
     static long ioctl_test2(struct file *filp, unsigned long arg)
     {
         struct file *f;
-        int fd = (int) arg;
+        loff_t pos;
+        int fd;
 
+        fd = (int)arg;
         if ((f = fget(fd)) == NULL) {
             printk(KERN_INFO "file descriptor is not valid!..\n");
-            return -BADF;
+            return -EBADF;
         }
 
-        printk(KERN_INFO "File pointer offset: %ld\n", (long)f->f_pos);
+        spin_lock(&f->f_lock);
+        pos = f->f_pos;
+        spin_unlock(&f->f_lock);
+
+        printk(KERN_INFO "File pointer offset: %ld\n", (long)pos);
 
         fput(f);
 
@@ -9918,7 +9974,7 @@ unsigned int hash_func(unsigned int key)
     }
 
     Güncel çekirdeklere fget ve fput işlemlerini daha etkin gerçekleştirmek için fdget ve fdput isimli fonksiyonlar da 
-    eklenmiştir. Bu fonksiyonların ptototipleri şöyledir:
+    eklenmiştir. Bu fonksiyonların prototipleri şöyledir:
 
     static struct fd fdget(unsigned int fd);
     static void fdput(struct fd fd);
@@ -9936,14 +9992,43 @@ unsigned int hash_func(unsigned int key)
         unsigned long word;
     };
 
+    #define FDPUT_FPUT              1
+    #define FDPUT_POS_UNLOCK        2
+
+    struct fd yapısı bir süre önceye kadar flags elemanı da içeriyordu, sonra bu eleman kaldırılıp göstericinin en düşük 
+    anlamlı 2 biti kullanılmaya başlandı. Her durumda burada buradaki bayrak değeri FDPUT_FPUT (1) ya da FDPUT_POS_UNLOCK (2) 
+    değerini içermektedir. Bu fonksiyonlar referans sayacının gereksiz artırılıp eksiltilmesinin önüne geçmek için 
+    bulundurulmuştur. Eğer proseste bu files_struct yapısını kullanan başka bir thread yoksa bu durumda referans sayacının 
+    artırılıp eksiltilmesine de gerek yoktur. Bu fonksiyonlar bu bilgiyi flags olarak kodlayıp işlemin daha etkin yapılmasını 
+    sağlamaktadır. Bu işlemleri şekilsel olarak şöyle ifade edebiliriz:
+
+    fdget(fd)
+    └── __fdget(fd)
+            ├── files->count == 1 →  FDPUT_FPUT = 0
+            └── files->count  > 1 →  FDPUT_FPUT = 1
+
+    fdput(f)
+        └── FDPUT_FPUT set edilmiş mi?
+                ├── Evet → fput() çağır
+                └── Hayır → hiçbir şey yapma
+
     En yeni çekirdeklerde dosya nesnesine erişim için yalnızca fdget değil fd_file fonksiyonun da kullanılması gerekmektedir. 
+    fd_file fonksiyonu fd yapısını parametre olarak alıp onun içerisindeki dosya nesnesinin adresini vermektedir. fd_file
+    güncel çekirdeklerde "include/linux/file.h" dosyası içerisinde şöyle tanımlanmıştır:
+
+    static inline void fdput(struct fd fd)
+    {
+        if (unlikely(fd.word & FDPUT_FPUT))
+            fput(fd_file(fd));
+    }
+    
     Örneğin:
 
     struct fd f = fdget(fd);
     struct file *file = fd_file(f);
 
-    Güncel çekirdeklerde artık fdget ve fdput fonksiyonları export edilmiştir. Ancak kurusumuzun yapıldığı 6.9.2 
-    çekirdeklerinde bu fonksiyonlar export edilmemişti.
+    Bir süre önceye kadar fdget ve fdput export edilmemişti. Ancak güncel çekirdeklerde artık fdget ve fdput fonksiyonları 
+    export edilmiştir. 
 
     Her ne kadar yeni çekirdeklerde fdget ve fdput daha hızlı çalışıyorsa da fget ve fput basit arayüzü ve kullanım 
     kolaylığı ve eskiden beri aynı biçimde bulunması nedeniyle tercih edilebilir.
@@ -10027,7 +10112,7 @@ unsigned int hash_func(unsigned int key)
     if (fd_table[fddup.fd] == NULL)
         return -EBADF;
 
-    Bu işlemden sonra fonksiyonumuzda bir döngü içerisinde ilk boş betimleyiciyi bulup, çiftlenecek olan betimeleyicinin 
+    Bu işlemden sonra fonksiyonumuzda bir döngü içerisinde ilk boş betimleyiciyi bulup, çiftlenecek olan betimleyicinin 
     gösterdiği dosya nesnesinin adresini bu boş betimleyiciye yerleştirdik. Bu tür işlemlerde dosya nesnesinin sayacının 
     artırılması gerektiğini anımsayınız:
 
@@ -10309,23 +10394,29 @@ static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long
 
 static long ioctl_test1(struct file *filp, unsigned long arg)
 {
-	struct file *f;
-	int fd = (int)arg;
+    struct file *f;
+    loff_t fpos;
+    int fd;
+    
+    fd  = (int) arg;
+    if (fd < 0 || fd >= current->files->fdt->max_fds) {
+        printk(KERN_INFO "file descriptor is not valid!..\n");
+        return -EBADF;
+    }
 
-	if (fd < 0 || fd >= current->files->fdt->max_fds) {
-		printk(KERN_INFO "file descriptor is not valid!..\n");
-		return -EBADF;
-	}
+    f = current->files->fdt->fd[fd];
+    if (f == NULL) {
+        printk(KERN_INFO "file descriptor is not valid!..\n");
+        return -EBADF;
+    }
 
-	f = current->files->fdt->fd[fd];
-	if (f == NULL) {
-		printk(KERN_INFO "file descriptor is not valid!..\n");
-		return -EBADF;
-	}
+    spin_lock(&fd_file(f)->f_lock);
+    pos = f->f_pos;
+    spin_unlock(&fd_file(f)->f_lock);
 
-	printk(KERN_INFO "File pointer offset: %ld\n", (long)f->f_pos);
+    printk(KERN_INFO "File pointer offset: %lld\n", (long long)pos);
 
-	return 0;
+    return 0;
 }
 
 static long ioctl_test2(struct file *filp, unsigned long arg)
