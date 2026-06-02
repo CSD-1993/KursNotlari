@@ -6480,6 +6480,13 @@ void exit_sys(const char *msg)
     Ondan sonra hash tablosuna rastgele 100 eleman eklenmiştir. Ancak bunun yanı sıra belli bir eleman da listeye 
     ayrıca eklenmiştir:
 
+    struct PERSON {
+        char name[32];
+        int no;
+        struct hlist_node hlink;
+    };
+    /* ... */
+
     for (int i = 0; i < 100; ++i) {
         if ((per = (struct PERSON *)malloc(sizeof(struct PERSON))) == NULL) {
              fprintf(stderr, "cannot allocate memory!...\n");
@@ -8633,7 +8640,7 @@ unsigned int hash_func(unsigned int key)
     başka nesneleri gösterir hale gelebilmektedir.
 
     Bu versiyonlarda current göstericisinden hareketle fdx betimleyicisinin gösterdiği yerdeki dosya nesnesine (struct 
-    file) current->files->fdt->fd[fdx] ifadesiyle erişilebilir. Bu versiyonalarda da bu erişimi bazı kontrollerle sağlayan 
+    file) current->files->fdt->fd[fdx] ifadesiyle erişilebilir. Bu versiyonlarda da bu erişimi bazı kontrollerle sağlayan 
     ayrı fonksiyonlar ve makrolar da bulundurulmuştur. Örneğin fcheck_files fonksiyonu şöyle tanımlanmıştır:
 
     static inline struct file * fcheck_files(struct files_struct *files, unsigned int fd)
@@ -11665,7 +11672,7 @@ clean:
     geri döner. Ancak bu durumda çekirdek bu biti set ederek nesneye ikinci bir şans vermektedir. İkinci şansın verildiği 
     yani DCACHE_REFERENCED bitinin set edildiği diğer bazı durumlar şunlardır:
 
-    - d_move fonksiyonunda bir dentry nesnesi yer değiştirdiğinde çekirdek bu biti set etmektedir. 
+    - d_move fonksiyonunda bir dentry nesnesinin ismi değiştirildiğinde çekirdek bu biti set etmektedir. 
     - d_splice_alias fonksiyonunda bir inode ile bir dentry nesnesi arasında bağlantı kurulurken veya bu bağlantı güncellenirken 
     bu bayrak set edilmektedir.
 
@@ -12094,7 +12101,7 @@ clean:
 /*----------------------------------------------------------------------------------------------------------------------
     UNIX/Linux sistemlerinde kullanılan inode tabanlı dosya sistemlerinde dizinlerle (directories) dosyaların (regular 
     files) disk organizasyonu tamamen aynıdır. Yani diskte bir dosya nasıl tutuluyorsa bir dizin de aynı biçimde tutulmaktadır. 
-    Bir dosyanın normal bir dosya mı yoksa bir dizin mi belirttiği inode elemanındaki i_mode değişkeninin bir bitinde 
+    Bir dosyanın normal bir dosya mı yoksa bir dizin mi belirttiği inode elemanındaki i_mode alanının bir bitinde 
     saklanmaktadır. (Bu dosya sistemleri aramaları hızlandırmak için zamanla dosyanın hangi türden olduğu bilgisini 
     dizin girişlerinde de tutmaya başlamıştır.) Bir dizini siz "dizin girişlerinden (directory entries)" oluşan bir 
     dosya gibi düşünebilirsiniz. Bir dizinin içeriği temsili olarak şöyledir:
@@ -12185,6 +12192,11 @@ clean:
     dizin girişi silindiğinde bu sayaç 1 eksiltilir. inode elemanı sayaç 0'a düştüğünde gerçek anlamda silinmektedir. 
     Inode elemanlarındaki hard link sayacının "ls -l" komutunda da görüntülendiğini anımsayınız. Yukarıdaki "ls" komutunda 
     görüntülenen iki girişin de hard link sayacının 2 olduğuna dikkat ediniz.
+
+    Burada bir noktaya da dikkatinizi çekmek istiyoruz. Inode kavramı her ne kadar inode tabanlı dosya sisemlerinden
+    geliyorsa da aslında Linux çekirdeği inode tabanlı olmayan dosya sistemlerindeki dosyalar için de bellekte 
+    bir inode nesnesi oluşturup onlara birer inode numarası atamaktadır. Bu işlemlerden dosya sistemine ilişkin 
+    çekirdek modülleri sorumludur.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -12217,21 +12229,20 @@ clean:
     Linux çekirdeği inode nesnelerini de "inode önbelleği (inode cache)" denilen bir önbellekte tutmaktadır. Nasıl 
     erişilen dizin girişleri dentry önbelleğinde tutuluyorsa erişilen inode nesneleri de inode önbelleğinde tutulmaktadır. 
     Linux çekirdeğinde temel işlem yönü dentry nesnelerinden inode nesnelerine doğrudur. Dolayıyla eğer bir dentry nesnesi 
-    dentry önbelleğinde bulunuyorsa her zaman ona ilişkin inode nesnesi de inode önbelleğinde bulunmak zorundadır. Tabii 
-    istisna olarak eğer dentry nesnesi var olan bir dizin girişini göstermiyorsa (bu durum olmayan bir dosyaya ilişkin 
-    dosya araması (name lookup) yapıldığında oluşabilmektedir) bu durumda dentry nesnesine ilişkin bir inode nesnesi 
-    inode önbelleğinde bulunmayacaktır. Bunlara "negatif dentry nesneleri" dendiğini anımsayınız.
+    dentry önbelleğinde bulunuyorsa ona ilişkin inode nesnesi de inode önbelleğinde bulunmaktadır. Ancak bunun tek bir 
+    istisnası vardır.  Eğer bir dentry nesnesi var olmayan bir dizin girişini belirtiyorsa (bu durum olmayan bir dosyaya 
+    ilişkin dosya araması (name lookup) yapıldığında oluşabilmektedir) bu durumda dentry nesnesine ilişkin bir inode 
+    nesnesi inode önbelleğinde bulunmayacaktır. Bunlara "negatif dentry nesneleri" dendiğini anımsayınız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Linux'ta inode önbelleğinin organizasyonu zaman içerisinde değişikliklere uğratılmıştır. Güncel çekirdeklerde inode 
-    nesneleri için tek bir hash tablosu kullanılmaktadır. Bu hash tablosunun adresi de "fs/inode.c" içerisindeki global 
-    inode_hashtable değişkeninde tutulmaktadır. Hash tablosunun büyüklüğü de aynı dosyadaki i_hash_shift değişkeninde 
-    saklanmaktadır. Bu değişken hash tablosunun büyüklüğünü 2'nin kuvveti olarak tutar. (Yani örneğin bu değer 16 ise 
-    tablo 2^16 = 65536 kova uzunluğundadır.) Ayrıca çekirdek hash fonksiyonunda indeks elde etmede kullanmak için 
-    2^i_hash_shift - 1 değerini de i_hash_mask global değişkeninde de tutmaktadır. (Yani bu i_hash_mask değeri toplam 
-    kova sayısının 1 eksik değeridir.) Inode hash tablosunun büyüklüğü (yani kova sayısı) güncel çekirdeklerde sistemdeki 
-    RAM miktarı dikkate alınarak aşağıdaki formülle hesaplanmaktadır:
+    nesneleri için tek bir hash tablosu kullanılmaktadır. Bu hash tablosunun adresi "fs/inode.c" içerisindeki global 
+    inode_hashtable değişkeninde, büyüklüğü de 2'nin kuvveti olarak aynı dosyadaki i_hash_shift değişkeninde saklanmaktadır. 
+    (Yani örneğin bu değer 16 ise tablo 2^16 = 65536 kova uzunluğundadır.) Ayrıca çekirdek hash fonksiyonunda indeks elde 
+    etmede kullanmak için 2^i_hash_shift - 1 değerini de i_hash_mask global değişkeninde de tutmaktadır. (Yani bu i_hash_mask 
+    değeri toplam kova sayısının 1 eksik değeridir.) Inode hash tablosunun büyüklüğü (yani kova sayısı) güncel çekirdeklerde 
+    sistemdeki RAM miktarı dikkate alınarak aşağıdaki formülle hesaplanmaktadır:
 
     Toplam kova sayısı ≈ (toplam_ram_miktarı / 8192)
 
@@ -12249,15 +12260,15 @@ clean:
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Inode hash tablosuna inode nesneleri super_block nesnesi ve inode numarası anahtar yapılarak yerleştirilmektedir. 
+    Inode hash tablosuna inode nesneleri super_block nesnesinin adresi ve inode numarası anahtar yapılarak yerleştirilmektedir. 
     Arama da buna göre yapılmaktadır. Çünkü UNIX/Linux sistemlerinde farklı dosya sistemlerindeki dosyaların inode 
     numaraları aynı olabilmektedir. Yani inode numaraları tüm dizin ağacında tek (unique) olmak zorunda değildir, yalnızca 
     belli bir dosya sisteminde tek olmak zorundadır.
 
     Tıpkı dentry önbellek sisteminde olduğu gibi inode önbellek sisteminde de son zamanlarda en az kullanılan inode 
-    nesnelerinin önbellekte tutulmasını sağlamak amacıyla bir LRU bağlı listesi oluşturulmuştur. Ancak bu LRU bağlı 
-    listesi toplamda bir tane değil dentry LRU listelerinde olduğu gibi her super_block nesnesi için bir tanedir. inode 
-    önbelleğinin LRU listesi super_block yapısı içerisinde s_ilru elemanında tutulmaktadır:
+    nesnelerinin önbellekte tutulmasını sağlamak amacıyla bir LRU bağlı listesi oluşturulmuştur. Tıpkı dentry önbelleğinde 
+    olduğu gibi LRU listesi her süper bloktaki her NUMA düğümü için bir tane oluşturulmaktadır. inode önbelleğinin LRU 
+    listeleri super_block yapısı içerisinde s_inode_lru elemanında tutulmaktadır:
 
     struct super_block {
         /* ... */
@@ -12267,12 +12278,19 @@ clean:
         */ ... */
     };
 
-    Biz dentry LRU listelerini incelerken zaten list_lru yapısını ele almıştık. Anımsanacağı gibi LRU listeleri NUMA 
-    mimarisinde bir tane değil NUMA bank'larının sayısı kadardı. Güncel çekirdeklerde inode LRU listelerinde de dentry 
-    LRU listelerinde olduğu gibi "son zamanlarda kullanılanları işaretlemek için" bir bit mekanizması kullanılmaktadır. 
-    Çekirdek her inode nesne sayacını azalttığında (iput fonksiyonunda) inode yapısının i_state elemanının I_REFERENCED 
-    bitini 1 yapmakta, bellek baskısı oluştuğunda da bu bite bakarak bu biti 1 olanları LRU listesinin başına alarak 
-    bu biti 0'lamaktadır.
+    Biz dentry LRU listelerini incelerken zaten list_lru yapısını ele almıştık. 
+    
+    Inode LRU listelerinde kullanılmakta olan inode nesneleri tutulmaz. Yalnızca referans sayacı 0'a düşmüş olan inode 
+    nesneleri tutulur. Bir inode nesnesinin referans sayacı 0'a düştüğünde çekirdek inode nesnesini ilgili LRU listesinin
+    sonuna (başına değil) yerleştirmektedir. LRU listelerinde bulunan bir inode nesnesi kullanıldığında onun referans sayacı 
+    artırılacağı için LRU listesinden de çıkartılmaktadır. Güncel çekirdeklerde tıpkı dentry nesnelerinde olduğu gibi inode 
+    nesnelerinde de bayrak mekanizmasıyla "ikinci şans" yöntemi aynı gerekçelerle kullanılmaktadır. I_REFERENCED bayrağının
+    set edildiği tipik durumlar şunlardır:
+
+    - Yol ifadesinin çözümlenmesi sırasında
+    - d_move fonksiyonunda bir dentry nesnesinin ismi eğiştirildiğinde çekirdek bu biti set etmektedir. 
+    - d_splice_alias fonksiyonunda bir inode ile bir dentry nesnesi arasında bağlantı kurulurken veya bu bağlantı güncellenirken 
+    bu bayrak set edilmektedir.
 
     Çekirdek ayrıca super_block yapısının içerisinde o süper bloğa ilişkin disk bölümünün önbelleğinde bulunan bütün 
     inode nesnelerini de s_inodes isimli bir bağlı listede ayrıca tutmaktadır:
@@ -12289,7 +12307,7 @@ clean:
     Bu durumda mevcut çekirdeklerdeki inode önbellek sistemini şöyle özetleyebiliriz:
 
     - Toplamda tek bir inode önbellek sistemi vardır.
-    - Her super_block nesnesinde ayrı LRU listeleri tutulmaktadır.
+    - Her super_block nesnesinde her NUMA düğümü için ayrı LRU listeleri tutulmaktadır.
     - Bir disk bölümündeki tüm inode nesneleri de ayrıca super_block yapısı içerisinde tutulmaktadır.
     - inode nesneleri inode hash tablosuna super_block nesne adresi ve inode numarası anahtar yapılarak yerleştirilmektedir.
 
@@ -12366,14 +12384,13 @@ clean:
 /*----------------------------------------------------------------------------------------------------------------------
     Peki inode önbelleğinden inode nesneleri nasıl çıkarılmaktadır? Daha önceden de belirttiğimiz gibi bir dentry 
     nesnesi dentry önbelleğinde bulunuyorsa ona ilişkin inode nesnesi de inode önbelleğinde bulunmaktadır. Çünkü dentry 
-    nesneleri inode nesnelerinin nesne sayacını (inode yapısındaki i_count elemanı) artırmaktadır. Bir inode nesnesinin 
+    nesneleri inode nesnelerinin nesne sayacını (inode yapısındaki i_count elemanını) artırmaktadır. Bir inode nesnesinin 
     inode önbelleğinden atılabilmesi için onun referans sayacının 0'a düşmüş olması gerekir. (Zaten inode nesnesi LRU 
     listesine referans sayacı 0 olduğunda girmektedir.) Bellek baskısı oluştuğunda çekirdek yine super_block nesnelerinden 
-    hareketle LRU listelerini sondan itibaren dolaşıp belirlenen miktarda inode nesnesini önbellekten atmaktadır. Çekirdek 
-    bir inode nesnesi "kirli (dirty)" durumdaysa onu inode önbelleğinden atmamaktadır. Çünkü kirli inode elemanları başka 
-    bir çekirdek thread'i tarafından flush edilmektedir. Benzer biçimde o anda inode nesnesi kilitliyse yine o inode elemanı 
-    da inode önbelleğinden atılmamaktadır. Özetle inode nesnesinin inode önbelleğinden atılmasının koşulları 
-    şunlardır:
+    hareketle LRU listelerini sondan itibaren dolaşıp belirlenen miktarda inode nesnesini önbellekten atmaktadır. Tabii 
+    Çekirdek bir inode nesnesi "kirli (dirty)" durumdaysa onu inode önbelleğinden atmamaktadır. Çünkü kirli inode elemanları 
+    başka bir çekirdek thread'i tarafından flush edilmektedir. Benzer biçimde o anda inode nesnesi kilitliyse yine o inode 
+    elemanı da inode önbelleğinden atılmamaktadır. Özetle inode nesnesinin inode önbelleğinden atılmasının koşulları şunlardır:
 
     1) Inode nesnesinin referans sayacı (yani i_count elemanı) 0 olmalıdır. (Zaten nesne LRU listesindeyse onun referans 
     sayacı 0 olmak zorundadır. Ancak bu durumun bazı istisnaları olabilmektedir.)
@@ -12452,7 +12469,7 @@ clean:
     1) Dosya açılırken "yol ifadesinin çözümlenmesi (pathname resolution)" sırasında ilgili dosyanın dentry nesnesi dentry 
     önbelleğinde yoksa dentry önbelleğine alınacaktır. Dosya açılmasından dolayı yaratılan dosya nesnesi (yani struct file 
     nesnesi) bu dentry nesnesine referans ettiği için dentry nesnesinin referans sayacı eğer dentry nesnesi yeni yaratılmışsa 
-    1 yapılacak, zaten dentry önbelleğpinde varsa  1 artırılıacaktır.
+    1 yapılacak, zaten dentry önbelleğinde varsa  1 artırılacaktır.
 
     2) Dosya açılırken ilgili dosyanın inode bilgileri inode önbelleğinde aranacak, yoksa inode önbelleğine yerleştirilecektir. 
     Bu inode nesnesi dentry nesnesi tarafından referans edildiği için onun da referans sayacı 1 artırılacaktır.
@@ -12846,16 +12863,16 @@ clean:
 
     Süper blok nesneleri dosya sistemi mount edilirken oluşturulmaktadır. Mount işlemi bir dosya sisteminin dizin ağacındaki 
     bir dizine iliştirilmesi anlamına gelmektedir. mount işlemi tipik olarak komut satırında "mount" isimli komut ile 
-    (tabii biz komut diyoruz ama aslında "mount" bir programdır) yapılmaktdır. Komutun yalın genel biçimi şöyledir:
+    (tabii biz komut diyoruz ama aslında "mount" bir programdır) yapılmaktadır. Komutun yalın genel biçimi şöyledir:
 
-    mount [-t <dosya_sisteminin_tür_ismi] <blok_aygıt_dosyası> <mount_noktası>
+    mount [-t <dosya_sisteminin_tür_ismi>] <blok_aygıt_dosyası> <mount_noktası>
 
     Burada mount noktası dosya sisteminin kökünün monte edileceği dizini belirtmektedir. Örneğin:
 
     $ mount -t ext4 /dev/sbd1 /home/kaan
 
     Mount işlemi sırasında dosya sisteminin tür ismi hiç belirtilmeyebilir. Bu durumda tür otomatik belirlenmeye çalışılır. 
-    Tabii dosya sisteminin türü otomatik olarak Belirlenemezse error olulmaktadır. "mount" programı aslında Linux sistemlerinde 
+    Tabii dosya sisteminin türü otomatik olarak belirlenemezse error oluşmaktadır. "mount" programı aslında Linux sistemlerinde 
     "mount" isimli kütüphane fonksiyonunu çağırarak işlemini yapmaktadır. Bu fonksiyonun parametrik yapısı şöyledir:
 
      #include <sys/mount.h>
@@ -12907,10 +12924,10 @@ clean:
 
 /*----------------------------------------------------------------------------------------------------------------------
     UNIX/Linux sistemlerinde disk gibi blok transferi yapan aygıtlara "blok aygıtları (block devices)" denilmektedir. 
-    Blok aygıtları "blok aygıt sürücüleri (block device drivers)" tarafından yönetilmektedir. Öreğin blok aygıtı bir 
+    Blok aygıtları "blok aygıt sürücüleri (block device drivers)" tarafından yönetilmektedir. Örneğin blok aygıtı bir 
     diski belirtiyorsa biz bu blok aygıtını open fonksiyonuyla açıp oradan read fonksiyonuyla okuma yaptığımızda aslında 
-    diskten okuma yapmış oluruz. Anımsayacağınız gibi blok aygıt sürücüleri Linux'un "sayfa önbelliği (page cache)" ile 
-    ilişkili biçimde çalışmaktadır. Yani blok aygıtlarından okunan bilgiler önce sayfa önbelleiğine aktarılıp aygıt 
+    diskten okuma yapmış oluruz. Anımsayacağınız gibi blok aygıt sürücüleri Linux'un "sayfa önbelleği (page cache)" ile 
+    ilişkili biçimde çalışmaktadır. Yani blok aygıtlarından okunan bilgiler önce sayfa önbelleğine aktarılıp aygıt 
     okumaları minimize edilmeye çalışılmaktadır. Linux blok aygıtlarından yalnızca "sayfa önbelleğinde olmayan" sektörleri 
     talep etmektedir.
 
@@ -12919,7 +12936,7 @@ clean:
     denilmektedir. Linux'ta formatlama işlemi için özel programlar bulundurulmuştur. Bu programlar "mkfs.xxx" biçiminde 
     isimlendirilmiştir. Örneğin ext2 formatlaması için "mkfs.ext2" programı, ext4 formatlaması için "mkfs.ext4" programı 
     Microsoft'un fat dosya sistemi için ise "mkfs.fat" programı bulunmaktadır. Bu programlar blok aygıt dosyasını ya da 
-    normal bir dosyayı parametre olarak alıp dosya sistemini içi boş bir biçimde oluturmaktadır. Örneğin:
+    normal bir dosyayı parametre olarak alıp dosya sistemini içi boş bir biçimde oluşturmaktadır. Örneğin:
 
     $ sudo mkfs.ext4 /dev/sda2
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -12929,7 +12946,7 @@ clean:
     ettirilen tüm dosya sistemlerini bir tek bağlı listede (single linked list) tutmaktadır. Mount işlemi de register 
     ettirilen bu bilgiler kullanılarak gerçekleştirilmektedir.
 
-    Çekirdekte register ettirilmiş olan tüm dosya sistemleri file_systems iisimli global bir tek bağlı listede tutulmaktadır:
+    Çekirdekte register ettirilmiş olan tüm dosya sistemleri file_systems isimli global bir tek bağlı listede tutulmaktadır:
 
     static struct file_system_type *file_systems;
 
@@ -13019,7 +13036,7 @@ clean:
     };
 
     Programcı bu yapının tüm elemanlarını doldurmak zorunda değildir. Yalnızca gerekli birkaç elemanını doldurması 
-    yeterlidir. Diğer elemanlar çekirdek tarafından gerektiğinde kullanılmaktadır. Eskiden bu yapı daha sade bir görümündeydi. 
+    yeterlidir. Diğer elemanlar çekirdek tarafından gerektiğinde kullanılmaktadır. Eskiden bu yapı daha sade bir görünümündeydi. 
     Örneğin 2.6 çekirdeklerinde şöyleydi:
 
     struct file_system_type {
@@ -13058,9 +13075,9 @@ clean:
     Linux'un ilkel 0.01 versiyonunda zaten dosya sisteminin register ettirilmesi diye bir kavram da yoktu.
 
     register_filesystem fonksiyonu ile register ettirilmiş olan dosya sistemi unregister_filesystem fonksiyonuyla 
-    unregister ettirilebilir. Tipik olarak register_filesystem fonksiyonu çekirdek nodülünün init fonksiyonunda 
+    unregister ettirilebilir. Tipik olarak register_filesystem fonksiyonu çekirdek modülünün init fonksiyonunda 
     unregister_filesystem fonksiyonu ise çekirdek modülünün exit fonksiyonunda çağrılmalıdır. unregister_filesystem 
-    fonksiyonu file_system_type nesnesini bağlı listedne silmektedir. Güncel çekirdeklerde bu fonksiyon "fs/filesystem.c" 
+    fonksiyonu file_system_type nesnesini bağlı listeden silmektedir. Güncel çekirdeklerde bu fonksiyon "fs/filesystem.c" 
     dosyasında aşağıdaki gibi tanımlanmıştır:
 
     int unregister_filesystem(struct file_system_type * fs)
@@ -13104,9 +13121,9 @@ clean:
     fonksiyon çağrılmaktadır. O halde dosya sistemini gerçekleştiren sistem programcısı yapının mount elemanına ve 
     kill_sb elemanına uygun parametrik yapılara sahip fonksiyonların adreslerini yerleştirmesi gerekir. Örneğimizde 
     yapının bu elemanlarına myfs_mount ve myfs_kill_super fonksiyonlarının adresleri yerleştirilmiştir. Yeni çekirdeklerde 
-    bir süredir yapının mıunt elemanına alternatif olarak init_fs_context isimli bir eleman daha bulundurulmaktadır. 
+    bir süredir yapının mount elemanına alternatif olarak init_fs_context isimli bir eleman daha bulundurulmaktadır. 
     init_fs_context elemanı da bir fonksiyon göstericisidir ve mount işlemi sırasında çağrılmaktadır. init_fs_context 
-    elemanı mount elemanına daha modern bir alternatiftir. Sistem programcısı yapınn ya mount elemanını ya da init_fs_context 
+    elemanı mount elemanına daha modern bir alternatiftir. Sistem programcısı yapının ya mount elemanını ya da init_fs_context 
     elemanını kullanır. Eğer yapının bu iki elemanı da set edilmişse çekirdek yalnızca mount işlemi sırasında init_fs_context 
     elemanında belirtilen fonksiyonu çağırmaktadır. Her ne kadar init_fs_context elemanı ile yeni bir alternatif oluşturulmuşsa 
     da mount elemanı "deprecated" yapılmamıştır. Yani eski mount elemanının kullanımı devam etmektedir ve bu eleman 
@@ -13130,8 +13147,8 @@ clean:
     Fonksiyonun birinci parametresi register ettirilmiş olan file_system_type nesnesinin adresini belirtmektedir. sys_mount 
     sistem fonksiyonu file_systems bağlı listesinde belirtilen isimdeki file_system_type nesnesini bularak onun adresini bu 
     fonksiyonun birinci parametresine geçirmektedir. Fonksiyonun diğer parametreleri sys_mount sistem fonksiyonundan gelen 
-    parametrelerdir. Bir dosya sistemi mount edilirken dosya sisteminin içinde bulunduğu blok aygıtına ilişkin blok dosyasın 
-    belirtildiğini anımsaynız. İşte bu blok aygıt dosyası fonksiyonun üçüncü parametresine, mount bayrakları ikinci parametresine 
+    parametrelerdir. Bir dosya sistemi mount edilirken dosya sisteminin içinde bulunduğu blok aygıtına ilişkin blok dosyasının 
+    belirtildiğini anımsayınız. İşte bu blok aygıt dosyası fonksiyonun üçüncü parametresine, mount bayrakları ikinci parametresine 
     ve mount edilecek sisteme ilişkin özel bilgiler de dördüncü parametresine geçirilmektedir.
 
     file_system_type yapısının mount elemanına girilen fonksiyon aşağıdaki işlemleri yapmalıdır:
@@ -13141,7 +13158,7 @@ clean:
     önbelleklerine yerleştirmelidir.
     3) Fonksiyon kök dizine ilişkin dentry nesnesinin adresiyle geri dönmelidir.
 
-    AslındaLinux çekirdeğinde mount edilecek dosya sistemi için super_block nesnesini oluşturan daha yüksek seviyeli fonksiyonlar 
+    Aslında Linux çekirdeğinde mount edilecek dosya sistemi için super_block nesnesini oluşturan daha yüksek seviyeli fonksiyonlar 
     da bulunmaktadır. Bu amaçla kullanılan iki önemli çekirdek fonksiyonu mount_nodev ve mount_bdev isimli fonksiyonlarıdır. 
     Bu fonksiyonlar export edilmiştir. mount_nodev ve mount_bdev fonksiyonlarının prototipleri "include/linux/fs.h" dosyası 
     içerisinde şöyle bildirilmiştir:
@@ -13157,7 +13174,7 @@ clean:
     mount_nodev fonksiyonu ramdisk gibi disk tabanlı olmayan dosya sistemlerinin gerçekleştirilmesinde, mount_bdev fonksiyonu 
     ise disk tabanlı dosya sistemlerinin gerçekleştirilmesinde kullanılmaktadır.
 
-    Çekirdeğin en yeni versiyonlarında artık mount_bdev, mount_nodev gibi fonskiyonlar kaldırılmıştır. Artık mount 
+    Çekirdeğin en yeni versiyonlarında artık mount_bdev, mount_nodev gibi fonsiyonlar kaldırılmıştır. Artık mount 
     işlemi sırasında file_system_type yapısının init_fs_context elemanındaki fonksiyon çağrılmaktadır. (Geçmişe doğru 
     uyumu korumak için en yeni versiyonalarda da mount elemanı muhafaza edilmiştir. Ancak bu eleman NULL adres içeriyorsa 
     yapının init_fs_context elemanına başvurulmaktadır.) En yeni çekirdeklerde mount_bdev ve mount_nodev fonksiyonlarının 
@@ -13195,7 +13212,7 @@ clean:
 
     Çekirdek süper blok nesnelerini file_system_type yapısının fs_super elemanındaki bağlı listede tutmaktadır. Yani 
     her dosya sistemi türü için o dosya sistemi türünden disk bölümlerinin mount edilmesi sonucunda elde edilen süper 
-    blok nesneleri o dosya sistemi türüne ilişkin file_system_type yapısının içeisinde tutulmkatdır:
+    blok nesneleri o dosya sistemi türüne ilişkin file_system_type yapısının içerisinde tutulmaktadır:
 
     struct file_system_type {
         /* ... */
@@ -13248,7 +13265,7 @@ clean:
     4) Sistem programcısının son parametreye geçirdiği fill_super fonksiyonunu çağırarak oluşturduğu süper blok nesnesinin 
     içinin sistem programcısı tarafından doldurulmasını sağlar.
 
-    Yukarıda da belirttiğimiz gibi artık en yen çekirdeklerde mount_bdev fonksiyonu kaldırılmıştır. mount_bdev fonksiyonunun 
+    Yukarıda da belirttiğimiz gibi artık en yeni çekirdeklerde mount_bdev fonksiyonu kaldırılmıştır. mount_bdev fonksiyonunun 
     işlevi get_tree_bdev fonksiyonu tarafından yapılmaktadır. Bu yeni arayüzün kullanımı biraz daha zordur. Çünkü burada 
     iki aşamalı işlem yapılmaktadır. Önce file_system_type yapısının init_fs_context elemanına bir fonksiyon girilmekte 
     o fonksiyonda context fonksiyonları set edilmektedir. Ancak eski arayüzü yeni biçime dönüştürmek zor değildir. 
@@ -13279,7 +13296,7 @@ clean:
 
     mount_nodev fonksiyonu da benzer işlemleri yapmaktadır. Ancak bir blok aygıtı söz konusu olmadığı için bazı aşamalar 
     farklı bir biçimde gerçekleştirilmektedir. mount_nodev fonksiyonunu da en yeni çekirdeklerde kaldırılmıştır. Bunun 
-    yerine get_tree_nodev fonksiyonu lullanılmaktadır.
+    yerine get_tree_nodev fonksiyonu kullanılmaktadır.
 
     Sistem programcısının mount fonksiyonun mount_bdev ya da mount_nodev fonksiyonlarının geri dönüş değeriyle geri 
     döndürüldüğüne dikkat ediniz:
@@ -13327,7 +13344,7 @@ clean:
     };
 
     - Yapının s_blocksize ve s_blocksize_bits elemanları sırasıyla dosya sistemindeki bir bloğun büyüklüğünü ve bu büyüklüğün 
-    2 tabanına göre logaritma değerini tutacak biçimnde doldurulmalıdır. Aslında bu elemanların doldurulması için zaten 
+    2 tabanına göre logaritma değerini tutacak biçiminde doldurulmalıdır. Aslında bu elemanların doldurulması için zaten 
     çekirdeğin içerisinde sb_set_blocksize isimli bir fonksiyon bulunmaktadır:
 
     int sb_set_blocksize(struct super_block *sb, int size);
@@ -13337,7 +13354,7 @@ clean:
     paragraflarda açıklayacağız.
 
     - Sistem programcının fill_super fonksiyonu içerisinde kök dizine ilişkin inode ve dentry nesnelerini yaratması 
-    ve bu yaratımları yaptıktan sonra da super_block yaoısının s_root elemanına kök dizine ilişkin dentry nesnesinin 
+    ve bu yaratımları yaptıktan sonra da super_block yapısının s_root elemanına kök dizine ilişkin dentry nesnesinin 
     adresini yerleştirmesi gerekir. Güncel çekirdeklerin içerisinde bir inode nesnesi yaratılmışsa onu gösterecek bir 
     dentry nesnesinin yaratılmasını sağlayan d_make_root isimli export edilmiş bir çekirdek fonksiyonu da bulunmaktadır:
 
@@ -13348,7 +13365,7 @@ clean:
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Yukarıdaki süreçler size biraz karşık gibi gözükebilir. Burada işlemlerin hangi adımlardan geçilerek gerçekleştirildiğine 
+    Yukarıdaki süreçler size biraz karışık gibi gözükebilir. Burada işlemlerin hangi adımlardan geçilerek gerçekleştirildiğine 
     ilişkin özet bir açıklama yapmak istiyoruz:
 
     sys_mount sistem fonksiyonu ---> file_system_type içerisindeki mount fonksiyonu çağrılır ---> mount_bdev çekirdek 
@@ -13361,7 +13378,7 @@ clean:
     açıkladık. Peki ya mount işleminden sonra mount edilen kök dizine geçilip burada dosya yaratılmak istense ya da 
     dizin yaratılmak istense yeni gerçekleştirilen dosya sistemi bu işlemleri nasıl yapabilecektir? İşte bu tür işlemler 
     hep çekirdeğin sistem programcısı tarafından yazılmış olan fonksiyonları çağrılarak yapılmaktadır. İzleyen paragraflarda 
-    bu mekanizma üzerinde temel açıklamaları yapacapız.
+    bu mekanizma üzerinde temel açıklamaları yapacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
