@@ -16263,7 +16263,7 @@ void exit_sys(const char *msg)
 
     $ bitbake-layers create-layer meta-myproject
 
-    Bu komutla ana dizinimizde aşağıdaki içeriğe sahip bir "meta-myprojec" dizini oluşturuldu:
+    Bu komutla ana dizinimizde aşağıdaki içeriğe sahip bir "meta-myproject" dizini oluşturuldu:
 
     $ ls meta-myproject
     conf  COPYING.MIT  README  recipes-example
@@ -16284,7 +16284,7 @@ void exit_sys(const char *msg)
 
     4) Şimdi bizim var olan bir ".bb" dosyasını ".bbappend" dosyası oluşturarak genişletmemiz gerekir. Peki hangi ".bb" dosyasını 
     genişletelim. Burada aklımıza hemen birkaç alternatif gelebilir. Hedef imajımız "core-image-minimal" ise biz bu imaja
-    ilişkin ".bb" dosyasını genişletebiliriz. Bu imaja ilişkin ".bb" dosyasının yeri çöyledir:
+    ilişkin ".bb" dosyasını genişletebiliriz. Bu imaja ilişkin ".bb" dosyasının yeri şöyledir:
 
     "poky/meta/recipes-core/images/core-image-minimal.bb"
 
@@ -16309,11 +16309,134 @@ void exit_sys(const char *msg)
     IMAGE_INSTALL:append = " picocom"
 
     Yine iki tırnak içerisindeki boşluk karakterine dikkat ediniz. 
+
+    5) Kendi oluşturduğumuz katmanı da projeye eklememiz gerekir. Bu işlemi şöyle yapabiliriz:
+
+    $ bitbake-layers add-layer meta-myproject/
+
+    Projemizdeki katmamların listesini görüntüleyelim:
+
+    $ bitbake-layers show-layers
+    NOTE: Starting bitbake server...
+    layer                 path                                                                    priority
+    ========================================================================================================
+    core                  /home/kaan/Study/EmbeddedLinux/Yocto-BBB/poky/meta                      5
+    yocto                 /home/kaan/Study/EmbeddedLinux/Yocto-BBB/poky/meta-poky                 5
+    yoctobsp              /home/kaan/Study/EmbeddedLinux/Yocto-BBB/poky/meta-yocto-bsp            5
+    arm-toolchain         /home/kaan/Study/EmbeddedLinux/Yocto-BBB/meta-arm/meta-arm-toolchain    5
+    meta-arm              /home/kaan/Study/EmbeddedLinux/Yocto-BBB/meta-arm/meta-arm              5
+    meta-ti-bsp           /home/kaan/Study/EmbeddedLinux/Yocto-BBB/meta-ti/meta-ti-bsp            6
+    meta-beagle           /home/kaan/Study/EmbeddedLinux/Yocto-BBB/meta-ti/meta-beagle            6
+    openembedded-layer    /home/kaan/Study/EmbeddedLinux/Yocto-BBB/meta-openembedded/meta-oe      5
+    meta-myproject        /home/kaan/Study/EmbeddedLinux/Yocto-BBB/meta-myproject                 6
+
+    Görüldüğü gibi "meta-oe" katmanı ve kendi oluşturduğumuz "meta-myproject" katmanı projeye eklenmiştir. 
+
+    6) Artık build işlemini aşağıdaki gibi yapabiliriz:
+
+    $ bitbake core-image-minimal
+
+    Derleme bittikten sonra kök dosya sistemini açıp chroot işlemini uygulayıp "picocom" programının eklenip eklenmediğini 
+    kontrol edebilirsiniz. 
+
+    Yukarıdaki işlemlerin akışı şöyledir:
+
+    bitbake-layers create-layer meta-myproject
+            ↓
+    mkdir recipes-core/images/
+            ↓
+    core-image-minimal.bbappend → IMAGE_INSTALL:append = " picocom"
+            ↓
+    bitbake-layers add-layer meta-oe
+    bitbake-layers add-layer meta-myproject
+            ↓
+    bitbake core-image-minimal
+
+    Burada yapılanları şöyle geri alabiliriz:
+
+    - Önce eklediğimiz katmanı "bitbake-layers remove-layer" ile sileriz. Örneğin:
+
+    $ bitbake-layers remove-layer meta-myproject
+
+    - Artık katmn dizinini manuel bir biçimde silebiliriz:
+
+    $ rm -r meta-myproject
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                        182. Ders 21/05/2026 - Perşembe
 -----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Yeni bir paketi eklemenin üçüncü yolu bbappend dosyası yerine bir tarif dosyası oluşturup orijinal "core-image-minimal.bb"
+    dosyasının içeriğini oradan include etmektir. Include işlemi "require" direktifi ile yapılmaktadır. Örneğin:
+
+    require recipes-core/images/core-image-minimal.bb
+
+    Biz önceki yöntemde "core-image-minimal.bb" dosyasına eklentiyi "core-image-minimal.bbappend" dosyası oluşturarak yapmıştık. 
+    Bu yöntemde ise kendi tarif dosyasımızı oluşturup "core-image-minimal.bb" dosyasını require direktifi ile include edeceğiz. 
+    Bu işlemleri şu adımlardan geçerek yapabiliriz:
+
+    1) Yine önce source komutuyla script çalıştırılır:
+
+    $ source poky/oe-init-build-env build-bbb
+
+    Şu anda "build-bbb" dizini içerisindeyiz. Ana dizine geçebiliriz:
+
+    $ cd ..
+
+    2) Yine yeni bir katman yaratılır:
+
+    $ bitbake-layers create-layer meta-myproject
+
+    Yine oluşturulan "recipes-examples" dizinini silebiliriz:
+
+    $ rm -r meta-myproject/recipes-example/
+
+    3) Katman içerisinde kendi "image tarif dosyamızı" oluşturmamız gerekir. Bunun için önce tarif dosyasının bulundurulacağı 
+    dizini yaratalım:
+
+    $ mkdir -p meta-myproject/recipes-core/images/
+
+    Katman dizinimiz şu görünmdedir:
+
+    meta-myproject/
+    ├── conf
+    │   └── layer.conf
+    ├── COPYING.MIT
+    ├── README
+    └── recipes-core
+        └── images
+
+    Artık buradaki images dizini içerisinde kendi tarif dosyamızı oluşturabiliriz:
+
+    $ nano meta-myproject/recipes-core/images/my-bbb-image.bb
+
+    Biz tarif dosyaalrının içeriğini ayrrı bir başlıkta ele alacağız. Ancak burada aşağıdaki gibi bir içerik kullanılabilir:
+                      
+    SUMMARY = "BeagleBone Black için özel image"
+    DESCRIPTION = "picocom ve temel araçları içeren BBB image'ı"
+    LICENSE = "MIT"
+
+    require recipes-core/images/core-image-minimal.bb
+    IMAGE_INSTALL += " picocom" 
+
+    Burada "require" direktifi ile "core-image-minimal.bb" dosyası include edilmiştir. Yne IMAGE_INSTALL ile paket eklenmiştir. 
+
+    4) Katmanları yine Poky'ye eklemeliyiz:
+
+    $ bitbake-layers add-layer meta-openembedded/meta-oe
+    $ bitbake-layers add-layer meta-myproject
+
+    5) Artık build işlemini yapabiliriz. Ancak artık build işlemini yaparken "core-image-minimal" tarifini değil zaten içerisinde 
+    bunu include ettiğimiz kendi tarifimizi (my-bbb-image.bb) kullanmalıyız:
+
+    $ bitbake my-bbb-image
+
+    Burada bir noktaya dikkat ediniz. Artık "build-bbb/tmp/deploy/images/beaglebone-yocto" dizininde oluşturulan dosyaların 
+    isimlerinin başında "my-bbb-image" bulunacaktır. Ancak eski derlemedeki "core-image-minimal" dosyaları silinmeyecektir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
 
 /*-----------------------------------------------------------------------------------------------------------------------------
 
