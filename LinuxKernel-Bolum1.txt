@@ -15715,10 +15715,10 @@ void exit_sys(const char *msg)
     struct inode {
         /* ... */
 
-        const struct inode_operations	*i_op;
+        const struct inode_operations *i_op;
 
         union {
-            const struct file_operations	*i_fop;	            /* former ->i_op->default_file_ops */
+            const struct file_operations *i_fop;	            /* former ->i_op->default_file_ops */
             void (*free_inode)(struct inode *);
         };
 
@@ -15787,13 +15787,20 @@ void exit_sys(const char *msg)
     nesnesine inode_operations fonksiyonlarını atarken onun bir dizin mi dosya mı olduğuna yönelik kontrol de yapmalısınız. 
     Örneğin:
 
-    if (S_ISDIR(inode->i_mode)) {
-        inode->i_op = &simplefs_dir_inode_ops;
-        /* ... */
-    }
-    else {
-        inode->i_op = &simplefs_file_inode_ops;
-        /* ... */
+static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
+   {
+       /* ... */
+
+       if (S_ISDIR(inode->i_mode)) {
+           inode->i_op = &simplefs_dir_inode_ops;
+           /* ... */
+       }
+       else {
+           inode->i_op = &simplefs_file_inode_ops;
+           /* ... */
+       }
+
+       /* ... */
     }
 
     Burada S_ISDIR makrosuyla dosyanın erişim haklarında onun bir dizin olup olmadığı bilgisine bakılmaktadır. Duruma 
@@ -16091,6 +16098,33 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Biz artık mount yapabilir bir duruma geldik. Anımsayacağınız gibi unmount işlemi sırasında file_system_type nesnesindeki 
+    kill_sb fonksiyonu çağrılmaktadır. Biz henüz bu fonksiyonun da içini yazmadık. Eğer bu fonksiyonun içi yazılmazsa unmount 
+    işlemi sırasında bazı geri alımlar yapılamamış olur. Her ne kadar bu durum çekirdeğin çökmesine neden olmayacak olsa da 
+    "bellek sızıntısının (memory leak)" oluşmasına yol açacaktır. kill_sb fonksiyonunda bizim fill_super fonksiyonunda 
+    yaptığımız işlemleri geri almamız gerekir. simplefs_kill_sb fonksiyonunda geri alımları şöyle yapabiliriz:
+
+    static void simplefs_kill_sb(struct super_block *sb)
+    {
+        struct simplefs_super_block *sfs_sb = sb->s_fs_info;
+
+        kill_block_super(sb);
+
+        if (sfs_sb) {
+            if (sfs_sb->data_bitmap_bh)
+                brelse(sfs_sb->data_bitmap_bh);
+            if (sfs_sb->inode_bitmap_bh)
+                brelse(sfs_sb->inode_bitmap_bh);
+            if (sfs_sb->sb_bh)
+                brelse(sfs_sb->sb_bh);
+            kfree(sfs_sb);
+        }
+
+        printk(KERN_INFO "unmount super block...\n");
+    }
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------   
     Biz henüz dosya sistemimizin gerçekleştirimini bitirmedik. Ancak bu aşamada artık çekirdek modülümüzü derleyip 
     onu insmod komutuyla yükleyip basit bir test uygulayabiliriz. Çünkü bu tür projelerde test aşamasına ne kadar erken 
     geçilirse o kadar iyidir. Derlemeyi oluşturduğumuz make dosyasını kullanarak şöyle yapabiliriz:
@@ -16102,7 +16136,7 @@ void exit_sys(const char *msg)
     $ sudo insmod simplefs.ko
 
     Biz modülümüzü yüklediğimizde modülümüzün init fonksiyonu çağrılacaktır. Anımsayacağınız gibi init fonksiyonu içerisinde 
-    dosya sistemni register ettirmiştik. Register ettrilen dosya sistemleri "/proc/filesystems" dosyası yoluyla görüntülenebilmektedir.
+    dosya sistemini kaydettirmiştik. Kaydettirilen dosya sistemleri "/proc/filesystems" dosyası yoluyla görüntülenebilmektedir.
 
     $ cat /proc/filesystems
     nodev	sysfs
@@ -16163,54 +16197,7 @@ void exit_sys(const char *msg)
     Artık mount işlemini yaptık. Ancak mount dizinine geçtiğimizde "ls" komutunu kullanamayız. Çünkü "ls" komutu dosya 
     sistemimize ilişkin henüz yazmadığımız file_operations yapısındaki iterate_shared ya da iterate fonksiyonlarının 
     çağrılmasına yol açacaktır. Ancak biz dosya sistemimiz için lookup fonksiyonunu yazmıştık. Bu fonksiyon sayesinde 
-    yol ifadeleri bizim dizinimizde çözülürken sorun oluşmayacaktır. Unmount işlemi sırasında file_system_type nesnesindeki 
-    kill_sb fonksiyonu çağrılmaktadır. Biz henüz bu fonksiyonun da içini yazmadık. Eğer bu fonksiyonun içi yazılmazsa 
-    unmount işlemi sırasında bazı geri alımlar yapılammış olur. Her ne kadar bu durum çekirdeğn çökmesine neden olmayacak 
-    olsa da "bellek sızıntısının (memory leak)" oluşmasına yol açacaktır. kill_sb fonksiyonunda bizim fill_super fonksiyonunda 
-    yaptığımız işlemleri geri almamız gerekir. simplefs_kill_sb fonksiyonunda geri alımları şöyle yapabilirix:
-
-    static void simplefs_kill_sb(struct super_block *sb)
-    {
-        struct simplefs_super_block *sfs_sb = sb->s_fs_info;
-
-        kill_block_super(sb);
-
-        if (sfs_sb) {
-            if (sfs_sb->data_bitmap_bh)
-                brelse(sfs_sb->data_bitmap_bh);
-            if (sfs_sb->inode_bitmap_bh)
-                brelse(sfs_sb->inode_bitmap_bh);
-            if (sfs_sb->sb_bh)
-                brelse(sfs_sb->sb_bh);
-            kfree(sfs_sb);
-        }
-
-        printk(KERN_INFO "unmount super block...\n");
-    }
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Aşağıda geldiğimiz noktaya kadarki simplfs dosya sistemimizin kodlarını bir bütün olarak veriyoruz. Bu koddaki 
-    eksiklikleri sonraki paragraflarda tamamlayacağız. Ancak dosya sistemimiz bu haliyle mount edilebilecektir. Dosya 
-    sistemimizi aşağıdaki gibi derleyebiliriz:
-
-    $ make file=simplefs
-
-    Diskimizi temsil eden "simplefs.dat" dosyasını loop0 aygıtı gibi gösterebiliriz:
-
-    $ sudo losetup /dev/loop0 simplefs.dat
-
-    Mount işlemi için bir mount dizini yaratmamız gerekir:
-
-    $ mkdir simplefs-root
-
-    Artık dosya sistemimize ilişkin çekirdek modülünü yükleyebiliriz:
-
-    $ sudo insmod simplefs.ko
-
-    Mount işlemini de şöyle yapabiliriz:
-
-    $ sudo mount /dev/loop0 simplefs-root
+    yol ifadeleri bizim dizinimizde çözülürken sorun oluşmayacaktır.
 
     lsblk komutunda artık dosya sistemimizin mount edildiğini görebileceğiz:
 
@@ -16235,27 +16222,8 @@ void exit_sys(const char *msg)
 
     Bu bilgi de aslında "/proc/mounts" dosyasından elde edilmektedir.
 
-    Biz henüz dosya sistemimizde "ls" gibi komutların çalışmasını sağlayacak fonksiyonları yazmadık. Dolayısıyla mount 
-    ettiğimiz dosya sistemi için "ls" komutunu uygularsak hata ortaya çıkacaktır:
-
-    $ ls simplefs-root
-    ls: 'simplefs-root' dizini açılamıyor: Böyle bir aygıt ya da adres yok
-
-    Ancak dosya sistemimiz için lookup fonksiyonunu yazdık. Bu lookup fonksiyonu yol ifadeleri çözülürken dizin içerisindeki 
-    dosya aramaları sırasında kullanılmaktadır. Yani biz bu haliyle dosya sistemimize ilişkin bir giriş için yol ifadesi 
-    belirtebiliriz. Henüz dosya sistemimizin kökünde yalnızca iki dosya bulunduğunu anımsayınız. Bunlar "." ve ".." 
-    dosyalarıdır. Biz test amacıyla ".." dizini için "ls" komutunu kullanabiliriz. ".." dizin girişi bizim dosya sistemimizde 
-    lookup fonksiyonumuz tarafından bulunacaktır. "ls" komutu da üst dizinde listeleme yapacağı için aşağıdaki komut 
-    çalışacaktır:
-
-    $ ls simplefs-root/..
-    load      mkfs.simplefs    modules.order   simplefs.c    simplefs.ko   simplefs.mod.c  simplefs.o     unload
-    Makefile  mkfs.simplefs.c  Module.symvers  simplefs.dat  simplefs.mod  simplefs.mod.o  simplefs-root
-
-    Burada lookup fonksiyonumuzun ".." dizin girişini bulup verebildiğini görüyoruz.
-
-    Kodumuzda şimdilik bir senktronizasyon gerekmemiştir. Ancak dosya sistemimiz için eksik olan fonksiyonları yazarken 
-    bazı yerlerde senkronizasyon uygulamamız gerekecektir.
+    Aşağıda şu ana kadar geldiğimiz noktaya kadarki simplefs dosya sistemi aygıt sürücümüzün kodlarını bir bütün olarak
+    veriyoruz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* simplefs.c */
@@ -16656,8 +16624,33 @@ all:
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
+
+/*----------------------------------------------------------------------------------------------------------------------  
+    Biz henüz dosya sistemimizde "ls" gibi komutların çalışmasını sağlayacak fonksiyonları yazmadık. Dolayısıyla mount 
+    ettiğimiz dosya sistemi için "ls" komutunu uygularsak hata ortaya çıkacaktır:
+
+    $ ls simplefs-root
+    ls: 'simplefs-root' dizini açılamıyor: Böyle bir aygıt ya da adres yok
+
+    Ancak dosya sistemimiz için lookup fonksiyonunu yazdık. Bu lookup fonksiyonu yol ifadeleri çözülürken dizin içerisindeki 
+    dosya aramaları sırasında kullanılmaktadır. Yani biz bu haliyle dosya sistemimize ilişkin bir giriş için yol ifadesi 
+    belirtebiliriz. Henüz dosya sistemimizin kökünde yalnızca iki dosya bulunduğunu anımsayınız. Bunlar "." ve ".." 
+    dosyalarıdır. Biz test amacıyla ".." dizini için "ls" komutunu kullanabiliriz. ".." dizin girişi bizim dosya sistemimizde 
+    lookup fonksiyonumuz tarafından bulunacaktır. "ls" komutu da üst dizinde listeleme yapacağı için aşağıdaki komut 
+    çalışacaktır:
+
+    $ ls simplefs-root/..
+    load      mkfs.simplefs    modules.order   simplefs.c    simplefs.ko   simplefs.mod.c  simplefs.o     unload
+    Makefile  mkfs.simplefs.c  Module.symvers  simplefs.dat  simplefs.mod  simplefs.mod.o  simplefs-root
+
+    Burada lookup fonksiyonumuzun ".." dizin girişini bulup verebildiğini görüyoruz.
+
+    Kodumuzda şimdilik bir senktronizasyon gerekmemiştir. Ancak dosya sistemimiz için eksik olan fonksiyonları yazarken 
+    bazı yerlerde senkronizasyon uygulamamız gerekecektir.
+----------------------------------------------------------------------------------------------------------------------*/
+
 /*----------------------------------------------------------------------------------------------------------------------
-										44. Ders 28/12/2025 - Pazar
+										    44. Ders 28/12/2025 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
