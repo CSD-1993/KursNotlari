@@ -14805,7 +14805,8 @@ void exit_sys(const char *msg)
     süper blok işlemlerini yönetecek simplefs_super_block nesnesinin adresini tutmaktadır. Bizim bu nesneyi çekirdeğin 
     heap sisteminde tahsis etmemiz gerekir. Biz çekirdeğin heap sistemini henüz incelemedik. Burada kzalloc isimli 
     çekirdek fonksiyonuyla bu tahsisatı yapacağız. kzalloc fonksiyonu kmalloc fonksiyonun tahsis edilen alanı sıfırlayan 
-    bir biçimidir. Tahisatı şöyle yapabiliriz:
+    bir biçimidir. kzalloc (ya da kmalloc) ile tahsis edilmiş alanlar kfree fonksiyonuyla serbest bırakılmaktadır. Tahsisatı 
+    şöyle yapabiliriz:
 
     struct simplefs_super_block *sfs_sb;
     /* ... */
@@ -14860,8 +14861,19 @@ void exit_sys(const char *msg)
     Okunan bloğun bilgileri yapının b_data elemanından elde edilmektedir. Bizim bu aşamada bu buffer_head tasarımını 
     bilmemize gerek yoktur.
 
-    sb_bread fonksiyonu başarısızlık durumunda NULL adrese geri dönmektedir. Biz simplefs_fill_super fonksiyonumuzda 
-    diskimizin süper bloğunu şöyle okuyabiliriz:
+    sb_bread fonksiyonu başarısızlık durumunda NULL adrese geri dönmektedir. 
+    
+    sb_bread fonksiyonuyla okunan blok brelse fonksiyonuyla geri bırakılmaktadır. Fonksiyonun parametrik yapısı 
+    şöyledir:
+    
+    void brelse(struct buffer_head *bh);
+
+    Pek çok çekirdek nesnesinde olduğu gibi buffer_head nesnelerinde de bir sayaç bulunmaktadır. sb_read bu sayacı artırmaktadır. 
+    brelse önce sayacğı 1 azaltır, eğer sayaç 0'a düşerse buffer_head nesnesini "dilim önbelleğine (slab cache)" iade eder. 
+    buffer_head nesneleri ayrı bir dilim önbelleğinden tahsis edilmektedir. Dilimli tahsisat sistemi konusunu "Bellek Yönetimi"
+    bölümünde ayrıntılı bir biçimde ele alacağız. 
+    
+    Biz simplefs_fill_super fonksiyonumuzda diskimizin süper bloğunu şöyle okuyabiliriz:
 
     if ((sfs_sb->sb_bh = sb_bread(sb, 0)) == NULL) {
         result = -EIO;
@@ -15069,7 +15081,7 @@ void exit_sys(const char *msg)
     fonksiyonları genel olarak bitmap adreslerini unsigned long olarak almaktadır. İzleyen paragraflarda Linux çekirdeğindeki 
     bitmap'ler üzerinde işlem yapan fonksiyonları gözden geçireceğiz.
 
-    Yukarıdaki işlemlerdne sonra fill_super blok fonksiyonumuzda geldiğimiz yere kadarki kısmı özetleme amacıyla 
+    Yukarıdaki işlemlerden sonra fill_super blok fonksiyonumuzda geldiğimiz yere kadarki kısmı özetleme amacıyla 
     vermek istiyoruz:
 
     static int simplefs_fill_super(struct super_block *sb, void *data, int silent)
@@ -15145,11 +15157,11 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi artık fil_super fonksiyonumuzda sıra kök dizine inode elemanını ve dentry nesnesini oluşturmaya gelmiştir. 
+    Şimdi artık fill_super fonksiyonumuzda sıra kök dizine inode elemanını ve dentry nesnesini oluşturmaya gelmiştir. 
     Bu aşamada durum biraz daha karmaşık hale gelecektir. Bizim diskteki bir inode elemanını okuyacak bir fonksiyon 
     yazmamız gerekir. Çünkü kök dizinin değil ileride belli bir inode numarasına ilişkin inode elemanının da diskten 
-    okunması gerekecektir. Biz de buaşamda belli bir inode numarasına ilişkin inode elemanını diskten okuyan aşağıdaki 
-    paramterik yapıya sahip bir fonksiyon yazacağız:
+    okunması gerekecektir. Biz de bu aşamda belli bir inode numarasına ilişkin inode elemanını diskten okuyan aşağıdaki 
+    parametrik yapıya sahip bir fonksiyon yazacağız:
 
     static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
     {
@@ -15207,7 +15219,7 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Şimdi dosya sistemimiz için diskten bir inode elemenını okuyan simplefs_iget fonksiyonun içini yazalım. Anımsayacağınız 
-    gibi inode nesneleri çekirdek tarafındna bir önbellek içeriisnde saklanıyordu. Bizim dosya sistemimize ilişkin inode 
+    gibi inode nesneleri çekirdek tarafında bir önbellek içeriisnde saklanıyordu. Bizim dosya sistemimize ilişkin inode 
     elemanları da yine bu önbellek içeriisnde saklanacaktır. Dolayısıyla biz bir inode nesnesini elde etmek istediğimizde 
     önce inode önbelleğine bakıp eğer talep ettiğimiz inode elemanı zaten inode önbelleği içerisinde varsa hiç disk 
     okuması yapmadan onu önbellekten alıp geri döndürmeliyiz. Eğer talep ettiğimiz inode nesnesi inode belleğinde yoksa 
@@ -15276,15 +15288,15 @@ void exit_sys(const char *msg)
     }
     EXPORT_SYMBOL(iget_locked);
 
-    Burada önce inode nesnesi inode önbelleğinde aranmış eğer bulunanmışsa yeni bir inode nesnesi alloc_inode fonksiyonuyla 
-    oluşturularak verilmiştir. Tabii oluşturulan bu inode nesnesi de aynı zamanda inode belleğine terleştirilmiştir. 
-    Çekirdekte yeni bir inode nesnesinin tahsis edilmesi inode_alloc fonksiyonu tarafından yapılmaktadır. Ancak bu 
-    fonksiyon da aslında tahsisatı çokbiçimli olarak super_block nesnesine yerleştirdiğimiz super_operations nesnesi 
-    içerisindeki alloc_inode fonksiyonunu çağırarak yapmaktadır. Yani sonuç olarak aslında iget_locked fonksiyonu 
+    Burada önce inode nesnesi inode önbelleğinde aranmış, eğer orada bulunamamışsa yeni bir inode nesnesi alloc_inode 
+    fonksiyonuyla oluşturularak verilmiştir. Tabii oluşturulan bu inode nesnesi de aynı zamanda inode belleğine 
+    yerleştirilmiştir. Çekirdekte yeni bir inode nesnesinin tahsis edilmesi inode_alloc fonksiyonu tarafından yapılmaktadır. 
+    Ancak bu fonksiyon da aslında tahsisatı çokbiçimli olarak super_block nesnesine yerleştirdiğimiz super_operations 
+    nesnesi içerisindeki alloc_inode fonksiyonunu çağırarak yapmaktadır. Yani sonuç olarak aslında iget_locked fonksiyonu 
     inode nesnesini inode önbelleğinde bulmazsa bizim süper blok nesnesine yerleştirdiğimiz fonksiyonu çağırarak 
-    tahsisatı bize yaptırmaktadır. O halde bizim super_operations nesnesine yerleştiriğimiz alloc_inde fonksiyonunda 
+    tahsisatı bize yaptırmaktadır. O halde bizim super_operations nesnesine yerleştirdiğimiz alloc_inode fonksiyonunda 
     kendi inode nesnemizi tahsis etmemiz gerekir. Çekirdekteki "fs/inode.c" dosyası içerisinde bulunan alloc_inode 
-    fonksiyonu aşağıdaki gibi tanımanmıştır:
+    fonksiyonu aşağıdaki gibi tanımlanmıştır:
 
     struct inode *alloc_inode(struct super_block *sb)
     {
@@ -15322,7 +15334,7 @@ void exit_sys(const char *msg)
         inode = alloc_inode_sb(sb, inode_cachep, GFP_KERNEL);
 
     Eğer super_operations nesnesinin alloc_inode elemanı NULL ise bu durumda inode tahsisatı çekirdek içerisindeki 
-    alloc_inode_sb fonksiyonuna yaptırılmıştır. Abcak dosya sistemlerinde çoğu kez her dosya sisteminin kendi inode 
+    alloc_inode_sb fonksiyonuna yaptırılmıştır. Ancak dosya sistemlerinde çoğu kez her dosya sisteminin kendi inode 
     nesnesini kendisinin tahsis etmesi gerekmektedir. Bunun nedenin izleyen paragraflarda anlayacaksınız.
 
     O halde bizim simplefs_iget fonksiyonumuzda inode nesnesini şöyle elde edebiliriz:
@@ -15347,7 +15359,7 @@ void exit_sys(const char *msg)
     programcısı bu fonksiyonda kendi dosya sistemine ilişkin inode nesnesini tahsis eder fakat onu sanki struct inode 
     nesnesiymiş gibi geri döndürür. Dosya sistemlerinin standart inode yapısından farklı inode temsilleri olabilir. 
     Bu nedenle her dosya sistemi aslında kendine özgü bir inode yapısı oluşturmaktadır. Bu durumu nesne yönelimli 
-    programlama telniğindeki taban sınıf türemiş sınıf olgusuna benzetebiliriz. Bu bağlamda struct inode adeta bir 
+    programlama tekniğindeki taban sınıf türemiş sınıf olgusuna benzetebiliriz. Bu bağlamda struct inode adeta bir 
     taban sınıf gibidir. Sistem programcısının kendisinin oluşturduğu inode yapısı da adeta türemiş sınıf gibidir. 
     Biz simplefs dosya sistemimiz için aşağıdaki gibi bir inode yapısı oluşturabiliriz:
 
@@ -15359,25 +15371,25 @@ void exit_sys(const char *msg)
     Görüldüğü gibi aslında bizim kendi inode yapımız çekirdeğin inode yapısını da tutmaktadır. Böylece sistem programcısı 
     alloc_inode fonksiyonu içerisinde aslında struct inode türünden değil struct simplefs_inode türünden nesne tahsis 
     eder ancak nesnenin vfs_inode elemanın adresiyle geri döner. Böylece çekirdek ne zaman bize bizim bir inode nesnemizin 
-    adresini verse container_of makrosuyla biz kendi inode nesnemize erişebiliriz. Dosya sistemimie ilişkin simplefs_inode 
+    adresini verse container_of makrosuyla biz kendi inode nesnemize erişebiliriz. Dosya sistemimize ilişkin simplefs_inode 
     yapısı içerisinde standart inode nesnesinin yanı sıra aynı zamanda ilgili inode elemanının diskteki hangi blokta 
     tutulduğu bilgisinin de bulunduğuna dikkat ediniz:
 
     simplefs_inode
     ┌────────────┐
     │  block_no  │
-    ├────────────┤ ──────────▶ fonksiyonu döndürüyor adres
+    ├────────────┤ ──────────▶ fonksiyonub döndürüğü adres
     │ vfs_inode  │
     └────────────┘
 
     Pekiyi biz alloc_inode fonksiyonumuz içerisinde simplefs_inode nesnesini nasıl tahsis edeceğiz? İşte aslında bu konu 
     ileride alacağımız "dilimli tahsisat sistemi (slab allocator)" denilen çekirdek tahsisat mekanizması ile ilgildir. 
-    Çekirdek içeisinde dinamik tahsisatlar hızlı yapıslın diye hep aynı büyüklükte bloklardan oluşan ve ismine "dilim
-    (slab)" denilen ayrık heap alanları oluşturulabilmektedir. Ayrıc Linux çekirdeği başlangıçta bazı sabit uzunluklu 
+    Çekirdek içerisinde dinamik tahsisatlar hızlı yapılsın diye hep aynı büyüklükte bloklardan oluşan ve ismine "dilim
+    (slab)" denilen ayrık heap alanları oluşturulabilmektedir. Ayrıca Linux çekirdeği başlangıçta bazı sabit uzunluklu 
     bloklar barındıran hazır dilimler de oluşturmaktadır. Çekirdeğin kmalloc gibi kzalloc gibi genel tahsisat fonksiyonları 
     bu hazır dilimlerden tahsisat yapmaktadır. Biz simplefs_inode nesnelerimizi kmalloc gibi kzalloc gibi fonksiyonlarla 
     tahsis edebiliriz. Ancak tam olarak simplefs_inode kadar uzunlukta bloklara sahip olan ayrı bir dilimli tahsisat 
-    nesnesi oluşturmak daha etkin bir yöntemdir. Biz dilimli tahsisat nesnelernin nasıl oluşturulacağını ileride göreceğiz. 
+    nesnesi oluşturmak daha etkin bir yöntemdir. Biz dilimli tahsisat nesnelerinin nasıl oluşturulacağını ileride göreceğiz. 
     Ancak burada bu işlemi yapan fonksiyon çağrısını vermekle yetineceğiz:
 
     static struct kmem_cache *simplefs_inode_cachep;
@@ -15392,14 +15404,14 @@ void exit_sys(const char *msg)
 
     Biz yarattığımız bu dilimli tahsisat nesnesinden blok tahsisatını kmem_cache_alloc fonksiyonuyla yaparız. Örneğin:
 
-    struct simplefs_inode *inode_simpls;
+    struct simplefs_inode *inode_simplefs;
     /* ... */
 
     inode_sfs = kmem_cache_alloc(simplefs_inode_cachep, GFP_KERNEL);
 
     Fonksiyon başarısızlık durumunda NULL adrese geri dönmektedir.
 
-    kmem_cache_alloc fonksiyonuyla tahsis edilen alan kmeme_cache_free fonksiyonuyla serbest bırakılmaktadır:
+    kmem_cache_alloc fonksiyonuyla tahsis edilen alan kmem_cache_free fonksiyonuyla serbest bırakılmaktadır:
 
     kmem_cache_free(simplefs_inode_cachep, inode_sfs);
 
@@ -15484,12 +15496,12 @@ void exit_sys(const char *msg)
     block_no = ino * SIMPLEFS_DISK_INODE_SIZE / SIMPLEFS_BLOCK_SIZE;
 	block_offset = ino * SIMPLEFS_DISK_INODE_SIZE % SIMPLEFS_BLOCK_SIZE;
 
-    Ancak burada bir noktaya dikkat ediniz. Inode elemanlarının diskte bir blokta başlayıpo diğer bloktan devam etmesi 
+    Ancak burada bir noktaya dikkat ediniz. Inode elemanlarının diskte bir blokta başlayıp diğer bloktan devam etmesi 
     iyi bir tasarım değildir. Bunun engellenmesi için inode elemanlarının uzunluğunun blok uzunluğuna tam bölünmesi 
     gerekir. Bizim simplefs dosya sistemimizde diskteki inode elemanlarımız 64 byte uzunluktadır. Bu değer de 4096'ya 
     tam bölünebilmektedir. Ancak eğer blok uzunluğu inode elemanlarının diskteki uzunluğuna tam bölünemeseydi her 
     bloğun sonunda kullanılmayan alan oluşurdu. Dolayısıyla yukarıdaki hesap da hatalı olurdu. Bu durumda (bizim 
-    tasarımıızda geçerli değil) inode elemanın blok numarası ve blok offseti şöyle elde edilebilirdi:
+    tasarımımızda geçerli değil) inode elemanın blok numarası ve blok offseti şöyle elde edilebilirdi:
 
     #define SIMPLEFS_INODE_TABLE_LOCATION		3
     #define SIMPLEFS_DISK_INODE_SIZE	        sizeof(struct simplefs_disk_inode)
@@ -15586,7 +15598,7 @@ void exit_sys(const char *msg)
     }
 
     Artık tahsis edilen inode nesnesinin elemanları diskten alınan inode bilgileri ile doldurulmalıdır. Tabii biz 
-    itahsis ettiğimiz inode nesnesinin tüm elemanlarını doldurmak zorunda değiliz. Yalnızca dosya sistemimize 
+    tahsis ettiğimiz inode nesnesinin tüm elemanlarını doldurmak zorunda değiliz. Yalnızca dosya sistemimize 
     yönelik bazı elemanların doldurmamız yeterli olacaktır. Doldurma işlemini şöyle yapabiliriz:
 
     inode->i_mode = le32_to_cpu(disk_inode->mode);
@@ -15601,22 +15613,22 @@ void exit_sys(const char *msg)
 
     inode nesnesinin elemanları doldurulurken bazı sarma çekirdek fonksiyonlarının da kullanıldığına dikkat ediniz. 
     i_uid_write ve i_gid_write fonksiyonları dosyanın kullanıcı id'si ve grup id'si değerlerini inode nesnesi içerisine 
-    yerleştirmektedir. Burada bu işlem için neden fonksiyon çağrıldığını meraj edebilirsiniz. Daha önce de belirttiğimiz 
+    yerleştirmektedir. Burada bu işlem için neden fonksiyon çağrıldığını merak edebilirsiniz. Daha önce de belirttiğimiz 
     gibi Linux çekirdeklerine belli bir süreden sonra çeşitli alt sistemler için "isim alanları (name spaces)" eklenmiştir. 
     Belli bir kullanıcı id'si ve grup id'si o isim alanına ilişkin kullanıcı id'si ve grup id'sine dönüştürülmektedir. 
     Linux çekirdeği farklı isim alanlarında aynı id'ler bulunabilmesine izin veriyor olsa da aslında kendi içerisinde 
     bu id'leri ayırmaktadır. Bu fonksiyonlar isim alanlarındaki id'leri çekirdeğin kullandığı id'lere dönüştürmektedir. 
-    Aslında default isim alanında bulunuluyorsa bu çekirdekler aynı id değerlerini inode nesnesinin içerisine yerleştirmektedir. 
-    Örneğimizde dosyanın hard link sayscı da set_nlink fonksiyonuyla set edilmiştir. Çünkü hard link sayacının 
-    atomik bir biçimde birkaç durum gözetilerek yerleştirilmesi gerekmektedir.
+    Aslında varsayılan isim alanında bulunuluyorsa bu çekirdekler aynı id değerlerini inode nesnesinin içerisine 
+    yerleştirmektedir. Örneğimizde dosyanın hard link sayacı da set_nlink fonksiyonuyla set edilmiştir. Çünkü hard link 
+    sayacının atomik bir biçimde birkaç durum gözetilerek yerleştirilmesi gerekmektedir.
 
     Linux çekirdeklerinde dosyanın tarih zaman bilgilerinin tutulma biçimi versiyonlarla üç kez değiştirilmiştir. 
     Eskiden yalnızca 01/01/1970'ten geçen saniye sayısı tutuluyordu. Sonra timespec yapısı kullanılmaya başlandı. 
-    Bu yapıyı kullanıcı modu uygulamalarıdan da anımsayacksınız. Bu timespec yapısı hem 01/01/1970'ten geçen saniye 
-    sayısını hem de bu saniyedne sonraki nano saniye sayısını tutuyordu. Nihayet yeni çekirdeklerde artık tarih ve 
-    zaman bilgisi inode nesnesinde iki ayrı yapı elemanıyla tuutlmaktadır. Çekirdekteki bu değişmlerden etkilenmek 
-    istenmiyorsa tarih zama bilgisi doğrudan değil çekirdeğin içerisindeki inode_set_atime, inode_set_mtime, inode_set_ctime 
-    fonksiyonlarıyla set edilmelidir. Bu fonksiyonlar uzunca bir süredir çekirdeklerde bulunmaktadır ve set işlmeini 
+    Bu yapıyı kullanıcı modu uygulamalarıdan da anımsayacaksınız. Bu timespec yapısı hem 01/01/1970'ten geçen saniye 
+    sayısını hem de bu saniyeden sonraki nano saniye sayısını tutuyordu. Nihayet yeni çekirdeklerde artık tarih ve 
+    zaman bilgisi inode nesnesinde iki ayrı yapı elemanıyla tutulmaktadır. Çekirdekteki bu değişimlerden etkilenmek 
+    istenmiyorsa tarih zaman bilgisi doğrudan değil çekirdeğin içerisindeki inode_set_atime, inode_set_mtime, inode_set_ctime 
+    fonksiyonlarıyla set edilmelidir. Bu fonksiyonlar uzunca bir süredir çekirdeklerde bulunmaktadır ve set işlemini 
     çekirdeğin o versiyonundaki formata göre yapmaktadır.
 
     inode nesnesinin doldurulurken inode nesnesinin belirttiği dosyanın bilgilerinin hangi data block içerisinde 
@@ -15644,7 +15656,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Artık simplefs_iget fonksiyonunda inode nesnesimizin içini de doldurmuş olduk. Fonksiyonda geldiğimiz yer şöyledir:
+    Artık simplefs_iget fonksiyonunda inode nesnemizin içini de doldurmuş olduk. Fonksiyonda geldiğimiz yer şöyledir:
 
     static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
     {
@@ -15693,7 +15705,7 @@ void exit_sys(const char *msg)
 
     Şimdi bizim son olarak inode nesnesine ilişkin inode_operations ve file_operations adreslerini oluşturmamız gerekmektedir. 
     Çekirdek izleyen paragraflarda da ayrıntılandıracağımız gibi inode kavramına ilişkin işlemler yapılırken inode_operations 
-    fonksiyonarını dosyaların bilgileri üzerinde işlemler yapılırken file_operations fonksiyonlarını çağırmaktadır.
+    fonksiyonlarını dosyaların bilgileri üzerinde işlemler yapılırken file_operations fonksiyonlarını çağırmaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -15717,7 +15729,7 @@ void exit_sys(const char *msg)
     inode_operations yapısının ilgili fonksiyonunu çağırmaktadır. Örneğin inode elemanı bir dizine ilişkin olsun. Bu 
     dizinde de bir dosya aranacak olsun. Linux çekirdeği bizim dosya sistemimizi bilmediğine göre arama işlemi için 
     bizim bir fonksiyonumuzu çağırması gerekir. Ya da örneğin bu dizinde yeni bir dosya yaratılacak olsun. Linux çekirdeği 
-    bizim dizin organizasyonumunuz bilmediğine göre bu işlem için de bizim bir fonksiyonumuzu çağırması gerekir. Bir dizin 
+    bizim dizin organizasyonumuzu bilmediğine göre bu işlem için de bizim bir fonksiyonumuzu çağırması gerekir. Bir dizin 
     içerisindeki bir dosyanın isminin değiştirilmek istendiğini düşünelim. Linux çekirdeği bizim dosya sistemimize ilişkin 
     disk organizasyonunu bilmediğinde yine bu işlem için bizim bir fonksiyonumuzu çağırması gerekir. İşte inode_operations 
     fonksiyonları bu fonksiyonları barındırmaktadır. Biz daha önce bu operations yapılarından kısaca bahsetmiştik. Güncel 
@@ -15771,7 +15783,7 @@ void exit_sys(const char *msg)
     Dosya sisteminin desteklediği işlemlere yönelik fonksiyonların yazılması yeterli olmaktadır.
 
     Burada önemli bir noktanın üzerinde durmak istiyoruz. Bir inode nesnesi bir dizine ya da bir dosyaya ilişkin 
-    olabilir. Bir dizin için yapılacak işlemlerle dosya için yaılacak işlemler tamamen farklıdır. Dolayısıyla inode 
+    olabilir. Bir dizin için yapılacak işlemlerle dosya için yapılacak işlemler tamamen farklıdır. Dolayısıyla inode 
     nesnesine inode_operations fonksiyonlarını atarken onun bir dizin mi dosya mı olduğuna yönelik kontrol de yapmalısınız. 
     Örneğin:
 
@@ -15819,8 +15831,8 @@ void exit_sys(const char *msg)
     tarafından oluşturulmuş olan ve içerisine aranacak dosyanın isminin yerleştirildiği dentry nesnesinin adresini 
     almaktadır. Yani fonksiyon birinci parametresiyle belirtilen dizinde ikinci parametresiyle belirtilen dosyayı 
     aramalıdır. Fonksiyonun üçüncü parametresi arama işleminin bazı ayrıntılarına ilişkin bayrakları belirtmektedir. 
-    Bu bayraklar aramanın hangi amaçla yapıldığı hakkında ek bilgi vermektedir. eğer bu fonksiyon NULL ile geri 
-    döndürülürse fonksiyona geçirilen ve çekirdek tarafındna yaratılmış olan dentry nesnesi çekirdek tarafından 
+    Bu bayraklar aramanın hangi amaçla yapıldığı hakkında ek bilgi vermektedir. Eğer bu fonksiyon NULL ile geri 
+    döndürülürse fonksiyona geçirilen ve çekirdek tarafında yaratılmış olan dentry nesnesi çekirdek tarafından 
     kullanılır. Ancak bazı durumlarda zaten bu inode nesnesine ilişkin dentry nesneleri de bulunuyor olabilir. Bu 
     durumda fonksiyonu zaten bulunan dentry nesnesi ile geri döndürmek gerekir.
 
@@ -15905,7 +15917,7 @@ void exit_sys(const char *msg)
     bu işlem bir zaman kaybına yol açacaktır. ext2 gibi ext4 gibi dosya sistemlerinde dizin girişlerinin sonu da 
     bir biçimde bilinmektedir. Böylece o dosya sistemlerinde tüm blok ya da bloklar sonuna kadar gözden geçirilmemektedir. 
     Burada biz bloğun sonuna kadar gözden geçirme zorunluluğunu ortadan kaldırmak için simplefs_disk_dentry yapısının 
-    içerisine bir "son giriş mi" bayrağı tutabiliriz.
+    içerisinde bir "son giriş mi" bayrağı tutabiliriz.
 
     Yukarıda kodda eğer dizin girişi bulunmuşsa ona ilişkin inode nesnesi daha önce yazmış olduğumuz simplefs_iget 
     fonksiyonuyla elde edilmiştir. Elde edilen bu inode nesnesinin fonksiyonun parametresiyle bize verilen dentry 
@@ -15948,7 +15960,7 @@ void exit_sys(const char *msg)
     Şimdi simplefs_fill_super fonksiyonuna geri dönüp kaldığımız yerden devam edelim. simplefs_iget ile ilgili bazı 
     eklemeleri de daha sonra yapacağız. Bizim simplefs_fill_super fonksiyonunda, mount edilen kök dizine ilişkin inode 
     nesnesini oluşturduktan sonra, bu inode nesnesine referans eden bir kök dentry nesnesi de oluşturup onun adresini 
-    super_block nesnesnin s_root elemanına yerleştirmemiz gerekir. Bu işlem tek hamlede d_make_root isimli yüksek seviyeli 
+    super_block nesnesinin s_root elemanına yerleştirmemiz gerekir. Bu işlem tek hamlede d_make_root isimli yüksek seviyeli 
     çekirdek fonksiyonuyla yapılabilmektedir. Fonksiyon şöyle yazılmıştır:
 
     struct dentry *d_make_root(struct inode *root_inode)
@@ -15967,7 +15979,7 @@ void exit_sys(const char *msg)
     EXPORT_SYMBOL(d_make_root);
 
     d_make_root fonksiyonu kök inode nesnesini alıp, dentry nesnesi yaratarak bu inode nesnesiyle dentry nesnesini 
-    ilişkilendirmekte ve tarattığı dentry nesnesi ile geri döndürmektedir. Biz simplefs_fill_super fonksiyonumuzda bu 
+    ilişkilendirmekte ve yarattığı dentry nesnesi ile geri döndürmektedir. Biz simplefs_fill_super fonksiyonumuzda bu 
     fonksiyonu şöyle çağırabiliriz:
 
     if ((sb->s_root = d_make_root(root_inode)) == NULL) {
@@ -15975,7 +15987,7 @@ void exit_sys(const char *msg)
 		goto EXIT4;
 	}
 
-    d_make_root fonksiyonunun başarısız durumunda iput(toot_inode) işlemini de yaptığına dikkat ediniz.
+    d_make_root fonksiyonunun başarısız durumunda iput(root_inode) işlemini de yaptığına dikkat ediniz.
 
     Bilindiği gibi bir fonksiyonda çeşitli noktalarda tahsisatlar yapılıyorsa bunların geri alımları "ters sırada goto 
     tekniği kullanılarak" yapılmalıdır. Bu yöntem boşaltım işlemlerinde kod tekrarını ortadan kaldırmaktadır. Biz de 
@@ -16022,17 +16034,17 @@ void exit_sys(const char *msg)
         sfs_sb->sbd = sbd;
 
         if (le32_to_cpu(sbd->magic) != SIMPLEFS_MAGIC) {
-            printk(KERN_INFO "invalid magic number for simpls: %08X\n", sbd->magic);
+            printk(KERN_INFO "invalid magic number for simples: %08X\n", sbd->magic);
             result = -EINVAL;
             goto EXIT2;
         }
         if (le32_to_cpu(sbd->block_size) != SIMPLEFS_BLOCK_SIZE) {
-            printk(KERN_INFO "invalid block size for simpls: %08X\n", sbd->block_size);
+            printk(KERN_INFO "invalid block size for simples: %08X\n", sbd->block_size);
             result = -EINVAL;
             goto EXIT2;
         }
         if (le32_to_cpu(sbd->inode_table_block) != 3) {
-            printk(KERN_INFO "invalid inode table for simpls: %08X\n", sbd->inode_table_block);
+            printk(KERN_INFO "invalid inode table for simples: %08X\n", sbd->inode_table_block);
             result = -EINVAL;
             goto EXIT2;
         }
@@ -20074,7 +20086,7 @@ sudo losetup -d /dev/loop0
 /*----------------------------------------------------------------------------------------------------------------------
     Şimdi de yarattığımız dosyayı silelim. Dosya silme işlemi bilindiği gibi kullanıcı modunda remove ya da unlink POSIX 
     fonksiyonları yoluyla yapılmaktadır. (Bu iki fonksiyon tamamen aynıdır. remove aynı zamanda bir standart C fonksiyonudur.) 
-    Bu fonksiyonlar çekirdek içeriisndeki sys_unlink sistem fonksiyonunu çağırmaktadır. sys_unlink sistem fonksiyonu 
+    Bu fonksiyonlar çekirdek içerisndeki sys_unlink sistem fonksiyonunu çağırmaktadır. sys_unlink sistem fonksiyonu 
     da belli bir aşamada dizine ilişkin inode nesnesinin inode_operations türünden i_op elemanına girilmiş olan unlink 
     fonksiyonu çağırmaktadır. O halde dosya silme işlemi için bizim öncelikle bu unlink fonksiyonunu dizinler kullandığımız 
     inode_operations nesnesine eklememiz gerekir:
