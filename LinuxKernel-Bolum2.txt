@@ -23,14 +23,16 @@
     Kursumuzun bu bölümünde Linux çekirdeğindeki senkronizasyon mekanizmaları üzerinde duracağız. Çekirdek içerisindeki
     kodlar iç içe geçebilecek biçimde (re-entrant) çalışabilmektedir. Eğer makinenizde birden fazla işlemci ya da çekirdek 
     varsa çekirdek kodları bunlar tarafından eş zamanlı biçimde işletilebilmektedir. Tek işlemcili ya da çekirdekli 
-    sistemlerde bile "thread'ler arası geçiş ve kesme mekanizmalarından dolayı" iç içe geçme söz konusu olabilmektedir. 
-    Linux çekirdekleri 2.6 ile birlikte "preemptive" hale getirilmiştir. Eskidne 2.6 öncesinde bir thread akışı çekirdek 
-    moduna geçtiğinde oradan çıkana kadar threadler arası geçiş (preemtion) oluşmuyordu. Ancak 2.6 çekirdekleriyle birlikte 
-    bir thread akışı örneğin bir sistem fonksiyonunda ilerlerken quanta süresi dolduğundan dolayı çekirdek içerisinde 
-    de kesilebilmektedir. 
+    sistemlerde de "thread'ler arası geçiş ve kesme mekanizmalarından dolayı" akışların iç içe geçmesi söz konusu olabilmektedir. 
+    
+    Linux çekirdekleri 2.6 ile birlikte "preemptive" hale getirilmiştir. Eskiden 2.6'dan önceki çekirdeklerde bir thread 
+    akışı çekirdek moduna geçtiğinde oradan çıkana kadar kesilme (preemption) oluşmuyordu. Ancak 2.6 çekirdekleriyle 
+    birlikte bir thread akışı örneğin bir sistem fonksiyonunda ilerlerken de quantum süresi dolduğundan dolayı çekirdek 
+    içerisinde de kesilebilmektedir. 
 
-    Linux çekirdeğinde oldukça ayrıntılı ve çeşitli senkronizasyon nesneleri bulunmaktadır. Bu bölümde biz bu nesneleri
-    ele alıp onların nasıl kullanıldığını açıklayacağız. 
+    Linux çekirdeğinde oldukça çeşitli senkronizasyon nesneleri bulunmaktadır. Bu bölümde biz bu nesneleri ele alıp 
+    onların nasıl kullanıldığını açıklayacağız. Aynı zamanda çok işlemcili ya da çekirdeklerdeki senkronizasyon sorunlarını
+    ele alacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -43,13 +45,13 @@
     ya da başka bir çekirdekteki thread de aynı bağlı liste üzerinde işlem yapmaya çalışırsa tüm veri yapısı 
     bozulabilecektir. 
 
-    Çekirdek senkronizasyonunda en önemli kavram "kritik kod (ciritical section)" denilen kavramdır. Başından sonuna 
-    kadar tek bir akış tarafından işletilmesi gereken kodlara "kritik kod" denilmektedir. Kritik kod kavramını atomiklik
-    ile karıştırmayınız. Atomiklik "bir işlem yapılırken thread'ler arası geçiş ya da kesme mekanizaması yoluyla" 
-    işlemin kesintiye uğramaması anlamına gelmektedir. Bir akış çekirdekteki bir kritik koda girdiğinde akış "preemption"
-    dan dolayı kesintiye uğrayabilir. Ancak bu durumda bile başka bir akış kesintiye uğramış olan akış işini bitirene 
-    kadar kritik koda girmemelidir. Yani kritik koda girmiş olan bir akışın kesintiye uğraması biçiminde bir koşul 
-    yoktur. 
+    Çekirdek senkronizasyonunda en önemli kavram "kritik kod blokları (critical section)" denilen kavramdır. Başından 
+    sonuna kadar tek bir akış tarafından işletilmesi gereken kod bloklarına "kritik kod blokları" denilmektedir. 
+    Kritik kod kavramını atomiklikle karıştırmayınız. Atomiklik "bir işlem yapılırken thread'ler arası geçiş ya da 
+    kesme mekanizması yoluyla işlemin kesintiye uğramaması" anlamına gelmektedir. Bir akış çekirdekteki bir kritik 
+    kod bloğuna girdiğinde akış preemption'dan dolayı kesintiye uğrayabilir. Ancak bu durumda bile başka bir akış 
+    kesintiye uğramış olan akış işini bitirene kadar kritik kod bloğuna girmemelidir. Yani kritik kod bloğuna girmiş 
+    olan bir akışın kesintiye uğramaması biçiminde bir koşul yoktur.
 
     Çekirdek kodları kullanıcı modunda kodlar gibi değildir. Çekirdek kodları aynı zaman diliminde pek çok akış 
     tarafından iç içe geçecek biçimde çalıştırılabilmektedir. Bu nedenle çekirdek tasarımında ve aygıt sürücü yazımında 
@@ -58,7 +60,7 @@
     edilmesi) oldukça zordur. 
 
     Çekirdek içerisindeki kritik kod bloklarının önemli bir bölümü birden fazla akışın paylaşılan bir veri yapısına 
-    erilmesi nedeniyle oluşturulmaktadır. Örneğin aynı hash tablosuna birden fazla prosesin çağırdığı sistem fonksiyonları 
+    erişilmesi nedeniyle oluşturulmaktadır. Örneğin aynı hash tablosuna birden fazla prosesin çağırdığı sistem fonksiyonları 
     eleman ekleyebilir. Bu durumda bu hash tablosunun böyle erişimlerde seri hale getirilmesi ("serialize" edilmesi)
     gerekir. Ancak senkronizasyon sorunu yalnızca ortak veri yapılarına ve nesnelere erişirken ortaya çıkmaz. Bu 
     bölümde ele alacağımız senkronizasyonu gerektiren başka durumlar da vardır. 
@@ -66,13 +68,13 @@
     Genel olarak (ancak her zaman değil) bir nesne (nesne demekle burada çekirdek alanı içerisinde tahsis edilmiş bir 
     alanı kastediyoruz) eğer birden fazla akış tarafından kullanılıyorsa bu nesnenin senkronize edilmesi için ayrı 
     bir senkronizasyon nesnesi bulundurulmaktadır. Linux'un çekirdek kodlarında yapıların içerisinde senkronizasyon
-    nesnelerini görürseniz şaşırmayınız. Bir senkronizasyon nesnesi nesnesi ile birden fazla nesneyi korumak genel olarak
+    nesnelerini görürseniz şaşırmayınız. Bir senkronizasyon nesnesi ile birden fazla nesneyi korumak genel olarak
     iyi bir fikir değildir. Çünkü bu nesnelerden birine erişirken kilit alındığı için aslında alakasız olan diğerine
     erişim de engellenmiş olacaktır. Her nesnenin ayrı bir senkronizasyon nesnesi ile korunması en normal olan durumdur. 
     Linux çekirdek nesnelerini incelediğinizde onları belirten yapıların elemanlarında senkronizasyon nesneleri 
     göreceksiniz. 
 
-    Kritik kodlar ancak özel makine komutları kullanılarak oluşturulabilmektedir. Aşağdaki gibi basit bir mantıkla 
+    Kritik kodlar ancak özel makine komutları kullanılarak oluşturulabilmektedir. Aşağıdaki gibi basit bir mantıkla 
     kritik kod oluşturulamaz:
 
     int g_flag = 0;
@@ -103,32 +105,35 @@
     g_flag = 0;
     
     Burada ok belirtilen noktada thread'ler arası geçiş oluşursa birden fazla thread kritik koda girebilir. İşte 
-    bu sakıncıyı ortadan kaldırmak için özel makine komutlarından faydalanılmaktadır. Bugün bilgisayar sistemlerinde 
-    birden fazla çekirdek bulunabildiği için kritik kod oluşturan sistem programcılarının bunlara dikkat etmesi 
-    gerekir. Linux'un çekirdek kodlarında zaten çeşitli senaryolar için kullanılabilecek senkronizasyon nesneleri 
-    hazır biçimde bulunmaktadır. Bu bölümde biz bu senkronizasyon nesnelerini ele alacağız. Bölümün sonlarına doğru da 
-    bu senkronizasyon nesnelerinin oluşturulabilmesi için gereken makine komutları hakkında bilgiler vereceğiz. 
+    bu sakıncayı ortadan kaldırmak için özel makine komutlarından faydalanılmaktadır. Bugün bilgisayar sistemlerinde 
+    birden fazla işlemci ya da çekirdek bulunabildiği için kritik kod oluşturan sistem programcılarının bunlara 
+    dikkat etmesi gerekir. Linux'un çekirdek kodlarında zaten çeşitli senaryolar için kullanılabilecek senkronizasyon 
+    nesneleri hazır biçimde bulunmaktadır. Bu bölümde biz bu senkronizasyon nesnelerini ele alacağız. Bölümün sonlarına 
+    doğru da bu senkronizasyon nesnelerinin oluşturulabilmesi için gereken makine komutları hakkında bilgiler vereceğiz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 	İşletim sistemindeki senkronizasyon nesnelerini temelde iki gruba ayırabiliriz:
 
-    1) Blokeye yol açan senkronizasyon nesneleri 
+    1) Blokeye yol açabilen senkronizasyon nesneleri 
     2) Blokeye yol açmayan senkronizasyon nesneleri
 
-    Blokeye yol açan senkronizasyon nesneleri çalışmakta olan kodun çalışmasına ara vererek ileride ala alacağımız 
-    "bekleme kuyruklarında (wait queue)" bekletildiği yani göreli olarak uzun süre beklemeye yol açan senkronizasyon 
-    nesneleridir. Blokeye yol açmayan senkronizasyon nesneleri ise akışın bekletilmediği senkronizasyon nesneleridir. 
-    Bunları da kendi aralarında iki kısma ayırabiliriz. Bunların bir bölümü döngü içerisinde spin yaparak beklemyi 
-    sağlamaktadır. Diğer bölümü ise modern "lock-free" veri yapılarından oluşmaktadır. 
+    Blokeye yol açabilen senkronizasyon nesneleri çalışmakta olan kodun çalışmasına ara vererek ileride ele alacağımız
+    "bekleme kuyruklarında (wait queue)" bekletilebildiği, yani göreli olarak uzun süre beklemeye yol açabilen senkronizasyon
+    nesneleridir. Blokeye yol açmayan senkronizasyon nesneleri ise akışın uykuya yatırılarak bekletilmediği senkronizasyon 
+    nesneleridir. Bunları da kendi aralarında iki kısma ayırabiliriz. Bunların bir bölümü okuma sırasında spin
+    yaparak beklemeye yol açabilmekte, diğer bölümü ise bekleme yapmadan okumayı sağlayabilmektedir. Okuma sırasında beklemeye 
+    yol açmayan modern senkronizasyon nesnelerine "klitsiz (lock-free) senkronizasyon nesnesleri" denilmektedir.
+
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Bu bölümde açıklayacağımız çekirdek senkronizasyon nesnelerini kullanıcı modundaki thread senkronizasyonunda 
-    kullanılan senkronizasyon nesneleri ile karıştırmayınız. Kullanıcı modundaki senkronizasyon nesneleri kulalnıcı 
+    kullanılan senkronizasyon nesneleri ile karıştırmayınız. Kullanıcı modundaki senkronizasyon nesneleri kullanıcı 
     modundaki thread'leri senkronize etmek için bulundurulmuştur. Oysa bu bölümde göreceğimiz senkronizasyon nesneleri 
-    isimleri benzer olsa da çekirdek kodlarının senkronizasyonunda kullanılmaktadır. Tabii kullanıcı modundaki senktronizasyon 
-    nesnelerinin bir bölümü aslında burada  açıklayacağımız çekirdekteki senkronizasyon nesneleri kullanılarak yazılmıştır. 
+    -isimleri benzer olsa da- çekirdek kodlarının senkronizasyonunda kullanılmaktadır. Tabii kullanıcı modundaki 
+    senkronizasyon nesnelerinin bir bölümü aslında burada açıklayacağımız çekirdekteki senkronizasyon nesneleri 
+    kullanılarak yazılmıştır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -139,14 +144,15 @@
     Kritik kod oluşturmak için en çok kullanılan senkronizasyon nesnelerinden biri "mutex (mutual exclusion)" denilen 
     nesnelerdir. (UNIX/Linux sistemlerinde kullanıcı modundan kullanılabilecek mutex nesneleri de vardır. Yukarıda 
     belirttiğimiz gibi biz burada çekirdeğin içerisinde bulunan mutex nesneleri üzerinde duracağız.) Mutex nesneleri 
-    Linux çekirdeğine 2.6 versiyonlarıyla eklenmiştir. Bundan önce mutex işlemleri binary semaphore'larla yapılıyordu. 
+    Linux çekirdeğine 2.6 versiyonlarıyla eklenmiştir. Bundan önce mutex işlemleri ikili semaphore'larla yapılıyordu. 
+
     Çekirdeğin mutex mekanizması kullanım bakımından kullanıcı modundaki mutex mekanizmasına çok benzemektedir. Çekirdek 
     mutex nesnelerinin yine thread temelinde sahipliği vardır. Çekirdek mutex nesneleri thread'i bloke edip onu bekleme 
     kuyruklarında bekletebilmektedir.
 
     Mutex mekanizması şöyle işletilmektedir: Önce global düzeyde ya da çekirdeğin heap sisteminde bir mutex nesnesi 
     yaratılır. Kritik koda girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin ele 
-    geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer  mutex'in sahipliği ele geçirilirse (yani 
+    geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer mutex'in sahipliği ele geçirilirse (yani 
     mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik koda giremez. 
     Mutex'in sahipliğini almaya çalışan thread mutex kilitli ise bloke olarak mutex kilidi açılana kadar bekler. Mutex'in 
     sahipliğini almış olan thread kritik koddan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). 
@@ -169,10 +175,10 @@
 
     Çekirdekteki mutex mekanizmasının tipik gerçekleştirimi şöyledir:
 
-    1) mutex_lock işlemi sırasında işlemcinin maliyetsiz compare/set (compare/exchange) komutlarıyla mutex'in kilitli 
-    olup olmadığına bakılır.
+    1) mutex_lock işlemi sırasında işlemcinin maliyetsiz CAS (compare-and-swap) komutlarıyla mutex'in kilitli 
+    olup olmadığına bakılır. CAS komutları ileride ayrı bir başlıkta ele alınacaktır.
 
-    2) Diğer bir işlemcideki ya da çekirdekteki thread mutex'i kilitlemişse boşuna bloke olmamak için yine compare/set 
+    2) Diğer bir işlemcideki ya da çekirdekteki thread mutex'i kilitlemişse gereksiz bloke olmamak için yine CAS 
     komutlarıyla biraz spin işlemi yapılır. Buradaki spin süresi çeşitli faktörlere bağlı olarak değişebilmektedir. 
     Ancak ortalama 1 ile 10 ms arasında sürebilmektedir. Spin işleminin ne olduğu izleyen paragraflarda açıklanacaktır.
     
@@ -184,7 +190,7 @@
     Çekirdeğin mutex nesneleri tipik olarak şöyle kullanılmaktadır:
 
     1) Mutex nesnesi mutex isimli bir yapıyla temsil edilmektedir. Sistem programcısı bu yapı türünden global olarak 
-    ya da çekirdeğin heap sisteminde dinanik biçimde bir nesne yaratır ve ona ilk değerini verir. DEFINE_MUTEX(name) 
+    ya da çekirdeğin heap sisteminde dinamik biçimde bir nesne yaratır ve ona ilk değerini verir. DEFINE_MUTEX(name) 
     makrosu hem struct mutex türünden nesneyi tanımlamakta hem de ona ilk değerini vermektedir. Örneğin:
 
     #include <linux/mutex.h>
@@ -193,26 +199,26 @@
 
     Bu makro güncel çekirdeklerde şöyle bildirilmiştir:
 
-    #define DEFINE_MUTEX(mutexname) \
+    #define DEFINE_MUTEX(mutexname)                                     \
 	    struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
 
     Buradaki __MUTEX_INITIALIZER makrosu da şöyle bildirilmiştir:
 
-    #define __MUTEX_INITIALIZER(lockname) \
-		{ .owner = ATOMIC_LONG_INIT(0) \
-		, .wait_lock = __RAW_SPIN_LOCK_UNLOCKED(lockname.wait_lock) \
-		, .wait_list = LIST_HEAD_INIT(lockname.wait_list) \
-		__DEBUG_MUTEX_INITIALIZER(lockname) \
+    #define __MUTEX_INITIALIZER(lockname)                               \
+		{ .owner = ATOMIC_LONG_INIT(0)                                  \
+		, .wait_lock = __RAW_SPIN_LOCK_UNLOCKED(lockname.wait_lock)     \
+		, .wait_list = LIST_HEAD_INIT(lockname.wait_list)               \
+		__DEBUG_MUTEX_INITIALIZER(lockname)                             \
 		__DEP_MAP_MUTEX_INITIALIZER(lockname) }
 
-    DEFINE_MUTEX makrosu yerine önce mutex nesnesi tanımlanıp nesneye ilkdeğeri mutex_init fonksiyuyla da verebiliriz. 
+    DEFINE_MUTEX makrosu yerine önce mutex nesnesi tanımlanıp nesneye ilkdeğeri mutex_init fonksiyonuyla da verebiliriz. 
     Bu fonksiyon güncel çekirdeklerde makro biçiminde yazılmıştır:
 
-    #define mutex_init(mutex)						\
-    do {									\
+    #define mutex_init(mutex)						    \
+    do {									            \
         static struct lock_class_key __key;				\
-                                        \
-        __mutex_init((mutex), #mutex, &__key);				\
+                                                        \
+        __mutex_init((mutex), #mutex, &__key);			\
     } while (0)
 
     Fonksiyon mutex nesnesinin adresini almaktadır. Örneğin:
@@ -228,7 +234,7 @@
 
     void mutex_lock(struct mutex *lock);
 
-    Fonksiyon paranetresiyle mutex nesnesinin adresini almaktadır. Bloke olmadan mutex'i kilitlemek için mutex_trylock 
+    Fonksiyon parametresiyle mutex nesnesinin adresini almaktadır. Bloke olmadan mutex'i kilitlemek için mutex_trylock 
     fonksiyonu da bulundurulmuştur:
 
     #include <linux/mutex.h>
@@ -244,7 +250,7 @@
     sinyal fonksiyonu çalıştırılmamaktadır. Ayrıca bu durumda biz ilgili prosese SIGINT gibi, SIGKILL gibi sinyaller 
     göndererek de prosesi sonlandıramayız. İşte eğer mutex'in kilitli olması nedeniyle bloke oluştuğunda sinyal yoluyla 
     thread'in uyandırılıp sinyal fonksiyonunun çalıştırması ya da sinyal fonksiyonu set edilmemişse prosesin sonlandırılması 
-    isteniyorsa mutex nesnesi mutex_lock ile değil, mutex_lock_interrupible fonksiyonu ile kilitlenmeye çalışılmalıdır. 
+    isteniyorsa mutex nesnesi mutex_lock ile değil, mutex_lock_interruptible fonksiyonu ile kilitlenmeye çalışılmalıdır. 
     mutex_lock_interruptible fonksiyonunun prototipi şöyledir:
 
     #include <linux/mutex.h>
@@ -280,12 +286,12 @@
 
     Mutex nesnesini kilitledikten sonra fonksiyonlarınızı geri döndürürken kilidi açmayı unutmayınız.
 
-    Çekirdeğin mutex nesneleri özyinelemeli (recursive) değildir. Yani thread bir mutex nesnesni klitlemişse aynı 
-    mutext nesnesini kilitlemeye çalışırsa "deadlock" oluşur. 
+    Çekirdeğin mutex nesneleri "özyinelemeli (recursive)" değildir. Yani thread kilitlediği bir mutex nesnesini
+    yeniden kilitlemeye çalışırsa "deadlock" oluşur.
 
     Aşağıda mutex mekanizmasının çalışmasına ilişkin bir örnek verilmiştir. Burada aygıt sürücü için iki ioctl kodu 
-    oluşturulmuştur. IOCTL_TEST1 kodunda mutex'in sahipliği alınp 30 saniye beklenmektedir. IOCTL_TEST2 kodunda ise 
-    bekleme yaılmadan mutex'in sahipliği alınmak istenmiştir. Test için önce "test-sync1" programını sonra da başka 
+    oluşturulmuştur. IOCTL_TEST1 kodunda mutex'in sahipliği alınıp 30 saniye beklenmektedir. IOCTL_TEST2 kodunda ise 
+    bekleme yapılmadan mutex'in sahipliği alınmak istenmiştir. Test için önce "test-sync1" programını sonra da başka 
     bir terminalde "test-sync2" programını çalıştırmalısınız. Mesajları "dmesg" komutuyla inceleyebilirsiniz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -998,7 +1004,7 @@ void exit_sys(const char *msg)
     switch) kapatılmaktadır. Böylece kilit bırakılana kadar kodun kesilmemesi garanti edilmiş olur. (Tabii birden çok 
     CPU ya da çekirdek söz konusu olduğunda yalnızca ilgili CPU'daki ya da çekirdekteki thread'ler arası geçiş 
     kapatılmaktadır.) Eğer ilgili CPU ya da çekirdek thread'ler arası geçişe kapatılmasaydı bu durumda başka bir thread 
-    işlemi kesebilir ve başka thread'ler aynı spinlock nesnesini kilitlemeye çalıştığında tüm quanta süresince CPU'yu 
+    işlemi kesebilir ve başka thread'ler aynı spinlock nesnesini kilitlemeye çalıştığında tüm quantumta süresince CPU'yu 
     meşgul bırakabilirdi.
 
     Spinlock nesneleri "çok işlemcili ya da çok çekirdekli" sistemlerde anlamlı nesnelerdir. Tek işlemcili ya da tek 
@@ -5101,7 +5107,7 @@ module_exit(rcu_list_demo_exit);
     bulundurulmaktadır. Yani her işlemci ya da çekirdek kendi çalışma kuyruğundaki thread'leri çizelgelemektedir. Çalışma 
     kabaca "zaman paylaşımlı (time sharing)" biçimde yapılmaktadır. Yani sıradaki thread CPU'ya atanır. Belli bir süre 
     çalıştırılır, sonra thread'in çalışmasına ara verilir ve kuyruktaki yeni thread CPU'ya atanır. Bu işlem böyle devam
-    ettirilir. Bir thread'in parçalı çalışma süresine "quanta süresi (time quantum)" denilmektedir. Thread'lerin quanta 
+    ettirilir. Bir thread'in parçalı çalışma süresine "quantum süresi (time quantum)" denilmektedir. Thread'lerin quantum 
     süreleri aynı olmak zorunda değildir. Bu konunun ayrıntılarını çizelgeeyici alt sistemin ele alındaığı bölümde 
     açıklayacağız. Aşağıda güncel çekirdeklerdeki çizelgeleme işlemlerini bir şekille betimliyoruz:
 
@@ -5145,7 +5151,7 @@ module_exit(rcu_list_demo_exit);
     Bu süre dolduğunda bir sonraki turda kalınan yerden çalışmaya devam edebilmesi için thread çalışma kuyruğuna geri 
     bırakılır. Bir thread'in çalışmasına ara verilip çalışma kuyruğundaki diğer thread'in CPU'ya atanması sürecine işletim 
     sistemleri terminolojisinde "bağlamsal geçiş (context switch)" denilmektedir. Bağlamsal geçiş terimi yerine "task 
-    switch" terimi de kullanılabilmektedir. Thread'in quanta süresi bittiğinde CPU'dan kopartılması işlemine "preemption" 
+    switch" terimi de kullanılabilmektedir. Thread'in quantum süresi bittiğinde CPU'dan kopartılması işlemine "preemption" 
     da denilmektedir. "Preemption" İngilizcede "zorla ele geçirmek, el koymak" gibi anlamlara gelmektedir. Bağlamsal 
     geçiş donanım kesmeleriyle yapılmaktadır. Genel amaçlı bilgisayar donanımlarında periyodik kesme üreten zamanlayıcı 
     (timer) devreleri vardır. Zamanlayıcı devreleri yoluyla oluşturulan kesmeler belli bir sayıya geldiğinde çizelgeleyici 
@@ -5155,7 +5161,7 @@ module_exit(rcu_list_demo_exit);
     Thread'in o andaki tüm konumu aslında CPU yazmaçlarının içerisindeki değerlerden oluşmaktadır. Bağlamsal geçiş 
     sırasında CPU yazmaçlarının içerisindeki değerler thread'in task_struct alanına kaydedilmektedir. Thread CPU'ya
     atanırken de bu yazmaç bilgileri oradan alınarak yeniden CPU yazmaçlarına aktarılmaktadır. Tabii tüm bu işlemler 
-    bir zaman kaybına da yol açmaktadır. Eğer quanta süresi çok kısa tutulursa çok bağlamsal geçiş oluşur. Birim zamanda 
+    bir zaman kaybına da yol açmaktadır. Eğer quantum süresi çok kısa tutulursa çok bağlamsal geçiş oluşur. Birim zamanda 
     yapılan iş miktarı (throughput) düşer. Eğer bağlamsal geçiş çok uzun tutulursa bu durumda da interaktivite azalır.
     Bir thread işletim sistemi tarafından bir CPU'nun çalışma kuyruğuna atandığında hep onun hep o CPU'nun kuyruğunda 
     kalması garanti değildir. Zaman içerisinde (tıpkı süper marketlerdeki kasa kuyruklarında olduğu gibi) kuyruklar 
@@ -5181,7 +5187,7 @@ module_exit(rcu_list_demo_exit);
 
     Bir thread'in yaşam döngüsü yalın bir biçimde şöyle betimlenebilir:
 
-                            Quanta süresi bitti
+                            quantum süresi bitti
                       ┌─────────────────────────────┐
                       │                             │
                       ▼                             │
@@ -5204,7 +5210,7 @@ module_exit(rcu_list_demo_exit);
                   ▼
                   
     Buradaki "Running" thread'in CPU'ya atanmış ve çalışmakta olduğu anlamına gelmektedir. "Ready" ise thread'in çalışma 
-    kuyruğunda bulunduğunu ve sonraki quanta'yı beklediğini belirtmektedir. Thread dışsal bir olay nedeniyle bloka 
+    kuyruğunda bulunduğunu ve sonraki quantum'u beklediğini belirtmektedir. Thread dışsal bir olay nedeniyle bloka 
     olduğunda bekleme kuyruklarına alınır. Şeklimizdeki "Waiting" ise thread'in bekleme kuyruğunda beklediğini belirtmektedir.  
     Dışsal olay gerçekleştiğinde thread'in blokesi çözülüp yeniden çalışma kuyruğuna yerleştirilmektedir. Tabii buradaki
     şekil oldukça sadeleştirilmiş bir şekildir. Örneğin thread'in sonlanması başka biçimlerde de gerçekleşebilmektedir. 
@@ -5227,7 +5233,7 @@ module_exit(rcu_list_demo_exit);
     }
 
     Buradaki thread'in CPU kullanım oranı çok düşüktür. Çünkü biraz çalışıp hemen bloke olmaktadır. Eğer bir thread CPU'ya 
-    atandığında quanta süresinin büyük bölümünü hiç bloke olmadan kullanıyorsa bu tür thread'lere "CPU yoğun (CPU bound)" 
+    atandığında quantum süresinin büyük bölümünü hiç bloke olmadan kullanıyorsa bu tür thread'lere "CPU yoğun (CPU bound)" 
     thread'ler denilmektedir. Genellikle matematiksel hesaplar yapan thread'ler CPU yoğun olma eğilimindedir. Sistemde 
     çok sayıda CPU yoğun thread'in bulunması ciddi yavaşlıklara yol açabilmektedir. Örneğin:
 
@@ -5240,7 +5246,7 @@ module_exit(rcu_list_demo_exit);
 
     printf("%lld\n", count);
 
-    Buradaki thread CPU yoğundur. Çünkü kendisine verilen quanta sürsini hiç bloke olmadan sonuna kadar kullanmaktadır. 
+    Buradaki thread CPU yoğundur. Çünkü kendisine verilen quantum sürsini hiç bloke olmadan sonuna kadar kullanmaktadır. 
     Programınızdaki thread'lerin CPU kullanım sürelerini çeşitli utility programlarla gözlemleyebilirisniz. Örneğin 
     "htop" programı ("top" programının biraz daha gelişmiş bir versiyonudur) ve "perf" programı ile thread'lerinizin 
     CPU kullanımlarını görebilirsiniz.
@@ -7827,7 +7833,7 @@ clean:
 /*----------------------------------------------------------------------------------------------------------------------
     Futex mekanizmasının ana kullanımı şöyledir: Kullanıcı modundaki programcı ya da kütüphane (örneğin pthread_xxx 
     fonksiyonları) global bir değişken tanımlar. Bu değişken kilidin durumunu belirtir. Hiç çekirdek moduna geçmedne 
-    önce bu değişkenin içerisindekş değere bakarak senkronizasyon nesnesinin kilitli olup olmadığını "CAS (compe-and-swap)"
+    önce bu değişkenin içerisindeki değere bakarak senkronizasyon nesnesinin kilitli olup olmadığını "CAS (compe-and-swap)"
     makine komutlarıyla belirler. Eğer kilit açıksa bunu kilitler ve hiç çekirdek moduna geçiş yapmaz. Eğer kilit kapalıysa
     futex sistem fonksiyonunu çağırarak bloke oluşturur. Blokenin çözülmesi de yine futex sistem fonksiyonun çağrılmasıyla 
     yapılmaktadır. Bu mekanizmada çekirdek moduna gereksiz bir biçimde geçilmesinin engellendiğine dikkat ediniz. Eğer 
@@ -8716,7 +8722,7 @@ void exit_sys_errno(const char *msg, int eno)
     adres yoluyla o fiziksel sayfadan okuyabilmektedir. Örneğin 32 bit bir sistemde P1 ve P2 proseslerinin sayfa 
     tabloları şöyle olsun:
 
-            P1 Prosesinin Sayfa Tablosu                     P2 Prosesinin Sayfa Tablosu
+            P1 Prosesinin Sayfa Tablosu                       P2 Prosesinin Sayfa Tablosu
     ┌─────────────────────┬──────────────────────┐   ┌─────────────────────┬──────────────────────┐
     │   Sanal Sayfa No    │  Fiziksel Sayfa No   │   │   Sanal Sayfa No    │  Fiziksel Sayfa No   │
     ├─────────────────────┼──────────────────────┤   ├─────────────────────┼──────────────────────┤
@@ -8747,7 +8753,7 @@ void exit_sys_errno(const char *msg, int eno)
     tablosu girişlerinin (Page Table Entry) formatı şöyledir:
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-    │                              32-bit x86 Page Table Entry (PTE) — 4 KB Sayfa                               │
+    │                            32-bit x86 Page Table Entry (PTE) — 4 KB Sayfa                                 │
     ├─────────────────────────┬──────────────────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┤
     │     31      ..      12  │   11    10    9  │   8  │   7  │   6  │   5  │   4  │   3  │   2  │   1  │   0  │         
     ├─────────────────────────┼──────────────────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┤         
@@ -8880,12 +8886,12 @@ void exit_sys_errno(const char *msg, int eno)
     Önce sayfa tablolarının neden çok kademeli olduğunu açıklayalım. Daha sonra da mekanizmanın ayrıntılarına değinelim.
     
     4K sayfa kullanan 32 bit bir sistem söz konusu olsun. Sayfa büyüklüğünün de 4K olduğunu varsayalım. Her sayfa tablosu 
-    girişi de 4  byte olsun. Bu durumda sayfa tabloları 2²⁰ * 2² = 2²⁴ = 4MB büyüklüğünde olurdu. Her proses için ayrı 
+    girişi de 4 byte olsun. Bu durumda sayfa tabloları 2²⁰ * 2² = 2²⁴ = 4MB büyüklüğünde olurdu. Her proses için ayrı 
     sayfa tabloları  oluşturulduğunu anımsayınız. Bu durumda işletim sistemi her proses için fiziksel RAM'de 4MB büyüklüğünde 
     ayrı sayfa tabloları oluşturacaktır. Proseslerin sayfa tablolarının aslında pek çok yeri boştur. Ancak o boş yerlere 
     erişildiğinde "page fault" oluşması için o boş yerlere ilişkin sayfaların da P bitinin 0 yapılması gerekmektedir. 
     İşte çok kademeli sayfa tabloları bu sorunu ortadan kaldırmaktadır. Aynı zamanda çok kademeli sayfa tabloları sayfa 
-    tablolarının fiziksel bellekteki ardışıl olma zorunluluğunu ortadan kaldırmaktadır. 
+    tablolarının fiziksel bellekteki ardışıl olma zorunluluğunu da ortadan kaldırmaktadır. 
 
     Şimdi çok kademeli sayfa tablolarının organizasyonunu 32 bit Intel işlemcileri üzerinde örneklendirerek açıklayalım. 
     Çok kademeli sayfa tablolarında sanal adres ikiden fazla parçaya ayrılmaktadır. Örneğin 32 bit Intel işlemcileri 
@@ -9382,18 +9388,18 @@ void exit_sys_errno(const char *msg, int eno)
 /*----------------------------------------------------------------------------------------------------------------------
     Linux çekirdeğinin bellek yönetimine (memory management) ilişkin kaynak kodları kaynak kod ağacında "mm" dizini 
     içerisinde bulunmaktadır. Buradaki dosyaların include ettiği başlık dosyaları da diğer alt sistemlerde olduğu gibi
-    "icnlude/linux" dizininde yer almaktadır. 
+    "include/linux" dizininde yer almaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Anımsanacağı gibi çok işlemcili ya da çekirdekli sistemlerde iki mimari kullanılıyordu: SMP ve NUMA. SMP (UMA de 
+	Anımsanacağı gibi çok işlemcili ya da çekirdekli sistemlerde iki mimari kullanılıyordu: SMP ve NUMA. SMP (UMA da 
     denilebilmektedir) mimarisinde her işlemci ya da çekirdek aynı fiziksel RAM'e erişiyordu. Erişim sırasında diğerlerini 
-    durduruyordu. NUMA mimarisinde ise her işlemci ya da çekirdeğin daha hızlı erişitği bir bank (buna düğüm ("node") 
-    da denilmektedir) bulunmaktaydı. İşlemciler ya da çekirdekler kendi bank'larına daha hızlı erişiyordu, diğer bank'lara 
+    durduruyordu. NUMA mimarisinde ise her işlemci ya da çekirdeğin daha hızlı erişitği bir düğüm ("node") ("bank" da 
+    denilmektedir) bulunmaktaydı. İşlemciler ya da çekirdekler kendi düğümlerine daha hızlı erişiyordu, diğer düğümlere 
     göreli olarak daha yavaş erişiyordu. 
 
     Linux'un bellek yönetimi hem SMP hem de NUMA mimarilerinde çalışacak biçimde taarlanmıştır. Bu nedenle daha genel 
-    veri yapıları oluşturulmuştur. Linux çekirdeklerinde NUMA düğümler (yani bank'ları) pglist_data isimli bir yapı ile
+    veri yapıları oluşturulmuştur. Linux çekirdeklerinde NUMA düğümleri (yani bank'ları) pglist_data isimli bir yapı ile
     temsil edilmektedir. Bu yapı pg_data_t ismiyle de typedef edilmiştir. Güncel çekirdeklerde bu yapı "include/linux/mmzone.h" 
     dosyası içerisinde şöyle bildirilmiştir:
 
@@ -9540,7 +9546,7 @@ void exit_sys_errno(const char *msg, int eno)
     } pg_data_t;
     
     Yapının bazı elemanlarının çeşitli konfigürasyon parametreleri seçilmişse yapıya dahil edildiğine dikkat ediniz. 
-    Sistemdeki tüm NUMA düğümleri "mm/numa.c" dosyası içerisindeki node_data isimli global dizide saklanmaktadır:
+    Sistemdeki tüm NUMA düğümleri "mm/numa.c" dosyası içerisindeki node_data isimli global bir dizide saklanmaktadır:
     
     struct pglist_data *node_data[MAX_NUMNODES];
     EXPORT_SYMBOL(node_data);
@@ -9556,8 +9562,8 @@ void exit_sys_errno(const char *msg, int eno)
     yazılmaktadır. nr_node_ids toplan NUMA düğümlerinin sayısını nr_online_nodes ise çekirdek tarafından kullanılabilecek 
     NUMA düğümlerinin sayısını belirtmektedir. Çekirdek bellek önetiminde nr_online_nodes değerini dkkate almaktadır.
         
-    Linux çekirdeği SMP ve NUMA sistemleri için ayrı kodlar buundurmamaktadır. SMP sistemleri sanki tek düğümden oluşan 
-    NUMA sistemiymiş gibi ele almaktadır. Örneğin nr_node_ids ve nr_online_nodes global değişkenleri SMP sistemleri 
+    Linux çekirdeği SMP ve NUMA sistemleri için ayrı kodlar bulundurmamaktadır. SMP sistemleri sanki tek düğümden oluşan 
+    NUMA sistemiymiş gibi ele alınmaktadır. Örneğin nr_node_ids ve nr_online_nodes global değişkenleri SMP sistemleri 
     söz konusu olduğunda "include/linux/nodemask.h" dosyasında birer makroya dönüştürülmektedir:   
 
     #ifdef CONFIG_NUMA
@@ -9645,15 +9651,15 @@ void exit_sys_errno(const char *msg, int eno)
         __MAX_NR_ZONES
     };
 
-    Görüldüğü gibi bazı bölgeler bazı konfigürasyonyaparemtreleri aktifse enum içerisinde yer almaktadır. Örneğin 
+    Görüldüğü gibi bazı bölgeler bazı konfigürasyon parametreleri aktifse enum içerisinde yer almaktadır. Örneğin 
     64 bit sistemlerde ZONE_HIGHMEM yoktur. Çünkü 64 bit sistemlerde sayfa tablosu değiştirilmeden fiziksel belleğin 
-    her yerine erişmek mümkündür. 32 bit Linux çekirdeklerinin derlenmesinde kullanılan CONFIG_HIGHMEM konfigürasyon 
-    parametresi "y" biçimnde 64 bit Linux çekirdeklerinin derlenmesinde kullanılan CONFIG_HIGHMEM konfigürasyon 
+    her yerine erişilmesi mümkündür. 32 bit Linux çekirdeklerinin derlenmesinde kullanılan CONFIG_HIGHMEM konfigürasyon 
+    parametresi "y" biçiminde 64 bit Linux çekirdeklerinin derlenmesinde kullanılan CONFIG_HIGHMEM konfigürasyon 
     parametresi ise "n" biçimindedir. 
 
-    ZONE_DMA 24 bit fiziksel adres kullanabilen DMA'ların bulunduğu donanımlar için, ZONE_DMA32 ise 32 bit fiziksel 
-    adres kullanabilen DMA'ların bulunduğu donanımlar için tanımlı bölgelerdir. Genellikle konfigürasyon 
-    dosyalarında CONFIG_ZONE_DMA32=y ise aynı zamanda CONFIG_ZONE_DMA da "y" biçimindedir. 
+    ZONE_DMA, 24 bit fiziksel adres kullanabilen DMA'ların bulunduğu donanımlar için, ZONE_DMA32 ise 32 bit fiziksel 
+    adres kullanabilen DMA'ların bulunduğu donanımlar için tanımlı bölgelerdir. Genellikle konfigürasyon dosyalarında 
+    CONFIG_ZONE_DMA32=y ise aynı zamanda CONFIG_ZONE_DMA=y biçimindedir. 
 
     ZONE_NORMAL bölgesi çekirdeğin doğrudan adresleme yapabildiği en geniş bölgedir. 32 bit Linux sistemlerinde ileride
     açıklayacağımız gerekçeler nedeniyle ZONE_NORMAL bölgesi fiziksel belleğin 4GB alanının hesini değil yalnızca ilk 
@@ -10546,11 +10552,11 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de çekirdeğin fiziksel belleğe nasıl eriştiği üzerinde duralım. Bu komuya Linux çekirdek terminolojisinde 
-    "kernel direct mapping" de denilmektedir. Anımsanacağı gibi proseslerin sayfa tablolarında çekirdeğe ilişkin alanlar
-    aynıdır ve prosesler arası geçiş olsa bile çekirdek her zaman sanal belleğin aynı yerindedir. Örneğin 32 bit Linux
-    sistemlerinde sayfa tablolarının şuna benzediğini belirtmiştik (aslında bu sistemlerde sayfa tabloları iki kademelidir,
-    ancak biz algısal kolaylık sağlamak amacıyla sanki bunu tek kademeliymiş gibi gösteriyoruz):
+    Şimdi de çekirdeğin fiziksel belleğe nasıl eriştiği üzerinde duralım. Bu konuya Linux çekirdek terminolojisinde 
+    "doğrudan haritalama" ("kernel direct mapping") de denilmektedir. Anımsanacağı gibi proseslerin sayfa tablolarında 
+    çekirdeğe ilişkin alanlar aynıdır ve prosesler arası geçiş olsa bile çekirdek her zaman sanal belleğin aynı yerindedir. 
+    Örneğin 32 bit Linux sistemlerinde sayfa tablolarının şuna benzediğini belirtmiştik (aslında bu sistemlerde sayfa 
+    tabloları iki kademelidir, ancak biz algısal kolaylık sağlamak amacıyla sanki bunu tek kademeliymiş gibi gösteriyoruz):
 
                             Sayfa Tablosu
     0x00000000  ┌─────────────────────────────────────┐
@@ -10589,7 +10595,7 @@ void exit_sys_errno(const char *msg, int eno)
     fiziksel belleğe erişmektedir. İşte Linux çekirdeğinde sayfa tablosunun çekirdek alanı fiziksel belleğin başından 
     itibaren haritalanmıştır (map edilmiştir). Örneğin 32 bit bir sistemde sayfa tablosunda çekirdek alanının ilk 
     sayfası fiziksel 0 numaralı sayfaya, ikinci sayfası 1 numaralı sayfaya, üçüncü sayfası 2 numaralı sayfaya ve 
-    diğer sayfaları  da bu biçimde fiziksel belleğin diğer sayfalarına yönlendirilmiştir. Başka bir deyişle örneğin 
+    diğer sayfaları da bu biçimde fiziksel belleğin diğer sayfalarına yönlendirilmiştir. Başka bir deyişle örneğin 
     32 bit Linux sistemlerinde biz çekirdek modunda  0xC0000000 sanal adresini kullandığımızda aslında fiziksel 
     belleğin 0'ıncı adresine erişmiş oluruz. Bu durumda hesap oldukça basittir. Biz 32 bit bir sistemde çekirdek 
     modunda fiziksel belleğin paddr adresine erişmek için aslında 0xC0000000 + paddr adresini kullanırız. Ya da biz 
@@ -10614,7 +10620,7 @@ void exit_sys_errno(const char *msg, int eno)
     yalnızca ilk 896MB'lik kısım doğrudan haritalama için kullanılmaktadır. Çünkü 32 bit Linux çekirdekleri geri kalan 
     128MB'lik alanı başka yerlere erişmek için yani başka amaçlarla kullanmaktadır:
 
-    0 GiB   ┌─────────────────────────────────────────────────────┐
+    0 G B   ┌─────────────────────────────────────────────────────┐
             │                                                     │
             │                  U S E R   S P A C E                │
             │                       (3 GiB)                       │
@@ -10629,7 +10635,7 @@ void exit_sys_errno(const char *msg, int eno)
             │             │  Stack (grows downward ↓)        │    │
             │             └──────────────────────────────────┘    │
             │                                                     │
-    3 GiB   ├─────────────────────────────────────────────────────┤
+    3 G B   ├─────────────────────────────────────────────────────┤
             │                    K E R N E L   S P A C E          │
             │                           (1 GiB)                   │
             │  0xC0000000  ┌──────────────────────────────────┐   │
@@ -10646,21 +10652,21 @@ void exit_sys_errno(const char *msg, int eno)
             │  0xF8000000  ├──────────────────────────────────┤   │
             │              │  Kernel text, data, BSS          │   │
             │              └──────────────────────────────────┘   │
-    4 GiB   └─────────────────────────────────────────────────────┘
+    4 GB    └─────────────────────────────────────────────────────┘
 
     32 bit Linux sistemlerinde doğrudan haritalamada sanal adres ile fiziksel adres dönüştürmesi şöyle yapılmaktadır:
 
-    VA = PA + 0xC0000000    (PAGE_OFFSET)
-    PA = VA − 0xC0000000    (PAGE_OFFSET)
+    VA = PA + 0xC0000000 (PAGE_OFFSET)
+    PA = VA − 0xC0000000 (PAGE_OFFSET)
 
-    Şekilden de gördüğünüz gibi 896 MB'tın yukarsı başka amaçlarla kullanılmaktadır. 32 bit Linux sistemlerinde 
+    Şekilden de gördüğünüz gibi 896 MB'nin yukarsı başka amaçlarla kullanılmaktadır. 32 bit Linux sistemlerinde 
     fiziksel bellekteki ilk 896MB'nin yukarısına HIGMMEM denilmektedir. NUMA düğümleri içerisinde (SMP sistemleri 
     tek NUMA düğümü varmış gibi ele alınıyordu) ZONE_HIGMEM isimli bir bölgenin de olduğunu anımsayınız. Bu bölge 
     yalnızca 32 bit Linux sistemlerinde bulunmaktadır. İzleyen paragraflarda göreceğimiz gibi 64 bit Linux sistemlerinde 
     fiziksel belleğin her yeri zaten doğrudan haritalanabilmektedir. 
 
     Peki 32 Linux sistemlerinde çekirdek ya da aygıt sürücüler HIGMEM fiziksel bellek alanına nasıl erişmektedir? İşte
-    bu erişim ancak çekirdeğin sayfa tablosununun belli bölgesini (buraya "kmap bölgesi" de denmektedir) geçici biçimde 
+    bu erişim ancak çekirdeğin sayfa tablosunun belli kısmını (buraya "kmap alanı" da denmektedir) geçici biçimde 
     değiştirmesiyle sağlanabilmektedir. 
 
     0x00000000  ┌───────────────────────────────┐
@@ -10685,7 +10691,6 @@ void exit_sys_errno(const char *msg, int eno)
     
     Geçici eşleştirme için kmap, kmap_atomic ve kmap_local_page fonksiyonları kullanılmaktadır. Bu fonksiyonlar sayfa 
     tablosunun kmap alanını geçici olarak değiştirmektedir. 
-
 
         Fiziksel RAM                    Çekirdek Sanal Alanı (0xC0000000–0xFFFFFFFF)
     ─────────────────               ──────────────────────────────────────────
@@ -10794,10 +10799,10 @@ void exit_sys_errno(const char *msg, int eno)
 /*----------------------------------------------------------------------------------------------------------------------
     Bir kez daha bir noktayı vurgulamak istiyoruz. Burada açıkladığımız HIGMEM sorunu ve geçici haritalama yalnızca
     32 bit Linux sistemlerinde söz konusudur. 64 bit Linux sistemlerinde zaten sayfa tablosunun çekirdek alanındaki 
-    kısmı tüm fiziksel belleği haritalandırabilmektedir. Dolayısıyla ZONE_HIHMEM de yalnızca 32 bit sistemlerde bulunan 
+    kısmı tüm fiziksel belleği haritalayabilmektedir. Dolayısıyla ZONE_HIHMEM de yalnızca 32 bit sistemlerde bulunan 
     bir bölgedir. 64 bit Linux sistemlerinde proseslerin ve çekirdeğin sanal bellek alanı 128 TB olsa da bu sistemler 
     şimdilik ancak 64TB'lik fiziksel belleği kullanabilmektedir. 128 TB'lik çekirdek alanının sayfa tablosunda 
-    64TB'lik fiziksel bellek zaten doğrudan hartitalandırılabilmektedir. 
+    64TB'lik fiziksel bellek zaten doğrudan haritalanabilmektedir. 
 
     ┌────────────────────────────────────────────────────────────────────┐
     │              x86-64 Canonical Adres Uzayı (48-bit VA)              │
@@ -10829,7 +10834,7 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Linux çekirdeklerinde doğrudan haritalandırılan bölge için sanal adres ve fiziksel adres dönüştürmelerini yapan 
+	Linux çekirdeklerinde doğrudan haritalanan bölge için sanal adres ve fiziksel adres dönüştürmelerini yapan 
     __pa ve ve __va makroları bulundurulmuştur. Bu makrolar şöyle yazılmıştır:
 
     #define __pa(x)   ((unsigned long)(x) - PAGE_OFFSET)
@@ -10846,7 +10851,7 @@ void exit_sys_errno(const char *msg, int eno)
     │ x86-32          │ 0xC000_0000            │ 3 GB / 1 GB bölünmesi         │
     │ x86-64          │ 0xFFFF_8880_0000_0000  │ Direct map başlangıcı         │
     │ ARM32           │ 0xC000_0000            │ x86-32 ile aynı               │
-    │ ARM64 (48-bit)  │ 0xFFFF_0000_0000_0000  │ Kernel uzayı başlangıcı       │
+    │ ARM64 (48-bit)  │ 0xFFFF_0000_0000_0000  │ Kernel alanı başlangıcı       │
     │ RISC-V 64       │ 0xFF60_0000_0000_0000  │ Konfigürasyona göre değişir   │
     └─────────────────┴────────────────────────┴───────────────────────────────┘
 
@@ -10926,9 +10931,9 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    İkiz blok tahsisat sisteminde boş bloklar 2'nin kuvvetlerine ardışıl fiziksel sayfalardan oluşan bloklar biçiminde 
-    organize edilmektedir. Buradaki 2'nin kuvvetine ilişkin boş blok listelerine İngilizce "order" denilmektedir. Biz 
-    "order" sözcüğü yerine Türkçe "düzey" sözcüğünü kullanacağız. Aşağıda 5 düzeyli bir ikiz blok sisteminin çizimi 
+    İkiz blok tahsisat sisteminde boş bloklar 2'nin kuvvetlerine ilişkin ardışıl fiziksel sayfalardan oluşan bloklar 
+    biçiminde organize edilmektedir. Buradaki 2'nin kuvvetine ilişkin boş blok listelerine İngilizce "order" denilmektedir. 
+    Biz "order" sözcüğü yerine Türkçe "düzey" sözcüğünü kullanacağız. Aşağıda 5 düzeyli bir ikiz blok sisteminin çizimi 
     yapılmıştır:
 
     düzey-4: ┌────────────────────────────────┐ ┌────────────────────────────────┐     ┌────────────────────────────────┐
@@ -11099,8 +11104,8 @@ void exit_sys_errno(const char *msg, int eno)
     Linux çekirdeğinde maksimum düzey "include/linux/mmzone.h" dosyasındaki MAX_ORDER sembolik sabitiyle belirtiliyordu. 
     Ancak en son çekirdeklerde (>= 6.8) artık MAX_ORDER yerine aşağıdaki iki sembolik sabit kullanılmaya başlanmıştır:
 
-    #define MAX_PAGE_ORDER      10                        /* en yüksek order indeksi     */
-    #define NR_PAGE_ORDERS      (MAX_PAGE_ORDER + 1)      /* listw sayısı = 11  */
+    #define MAX_PAGE_ORDER      10                         /* en yüksek düzey indeksi */
+    #define NR_PAGE_ORDERS      (MAX_PAGE_ORDER + 1)       /* listelerin sayısı = 11  */
 
     MAX_PAGE_ORDER maksimum düzeyin indeks numarasını, NR_PAGE_ORDERS ise bunların sayısını belirtmektedir. Linux 
     çekirdeklerinde maksimum düzey 10'dur. (Yani toplam 11 tane düzey listesi bulunmaktadır.) 6.1 çekirdeği ve öncesinde
@@ -11338,16 +11343,16 @@ void exit_sys_errno(const char *msg, int eno)
     │                      │ __GFP_NORETRY | __GFP_NOWARN                           │
     └──────────────────────┴────────────────────────────────────────────────────────┘
 
-    Programcılar genellikle bu yüksek seviyeli bayrakları kullanmaktadır. Örneğin GSP_ATOMIC, GFP_KERNEL, GFP_USER, 
+    Programcılar genellikle bu yüksek seviyeli bayrakları kullanmaktadır. Örneğin GFP_ATOMIC, GFP_KERNEL, GFP_USER, 
     GFP_DMA, GFP_DMA2 en çok kullanılan yüksek seviyeli bayraklardır. Biz bu nayraklar hakkında izleyen paragraflarda 
     daha fazla bilgi vereceğiz. 
 
-    alloc_pages fonksiyonu başarı durumunda tahsis edilen sayfaların ilkine ilişkin page yapı nesnesinin adresiyle 
+    alloc_pages fonksiyonu başarı durumunda tahsis edilen sayfaların ilkine ilişkin page yapı nesnesinin adresiyle,  
     başarısızlık durumunda NULL adresle geri dönmektedir. Anımsanacağı gibi zaten çekirdek tüm sayfaları doğrudan 
     ya da dolaylı biçimde bir dizi içerisinde tutmaktadır. alloc_pages bize ilgili page nesnesinin bu dizi içerisindeki 
     adresini vermektedir. Burada bize verilen page adresini biz ileletirsek ilgili dizinin sonraki elemanına erişiriz. 
     İkiz blok tahsisat sisteminde her zaman fiziksel bellekte ardışıl fiziksel sayfaların tahsis edildiğini anımsayınız. 
-    Tabii alloca_pages fonksiyonun bize verdiği adres sanal adrestir. Anımsanacağı gibi bir page nesnesinin adresi 
+    Tabii alloc_pages fonksiyonun bize verdiği adres sanal adrestir. Anımsanacağı gibi bir page nesnesinin adresi 
     bilindiğinde bunun fiziksel bellekteki kaç numaralı sayfaya ilişkin olduğu page_to_pfn fonksiyonuyla elde edilebilmekteydi.  
     
     alloc_pages fonksiyonuyla tahsis edilen sayfaların __free_pages fonksiyonuyla serbest bırakılması gerekir:
@@ -11372,7 +11377,7 @@ void exit_sys_errno(const char *msg, int eno)
 
     alloc_pages fonksiyonun başında __ yokken yapılan tahsisatı serbest bırakan __free_pages fonksiyonun başında __
     olması bir uyumsuzluk oluşturmaktadır. Çekirdekte aslında free_pages isimli başka bir fonksiyon da vardır. Bu 
-    fonksiyon sayfaları onların sanal adreslerini alarak serbest bırakamaktadır. 
+    fonksiyon sayfaları onların sanal adreslerini (page adreslerini değil sanal adreslerini) alarak serbest bırakmaktadır. 
 
     alloc_pages ile tahsis edilen sayfaları farklı miktarlarda iade etmeye çalışmayınız. Bu durumda dilimli tahsisat 
     sistemini bozabilirsiniz:
@@ -11391,7 +11396,7 @@ void exit_sys_errno(const char *msg, int eno)
     Eğer tek sayfalık tahsisat yapılacaksa alloc_pages yerine alloc_page makrosu kullanılabilir. Bu makro  
     include/linux/gfp.h" dosyasında şöyle yazılmıştır:
 
-    #define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
+    #define alloc_page(gfp_mask)    alloc_pages(gfp_mask, 0)
 
     Yukarıda da belirttiğimiz gibi artık alloc_pages çekirdeklerde bir süredi makro olarak yazılmaktadır. Bu makronun 
     çağırma grafı şöyledir:
@@ -11728,15 +11733,15 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Çekirdekteki __get_free_pages fonksiyonu alloc_pages gibi sayfa tahsisatı yapmakla birlikte bize page nesnesinin 
-    adresini değil doğrudan tahsis edilen sayfanın sanal bellek adresini vermektedir. (Çekirdek alanındaki fiziksel 
-    sayfaların ardışıl biçimde sanal adrese map edildiğini anımsayınız.) __get_free_pages aslında  "include/linux/gfp.h"
+    adresini değil doğrudan tahsis edilen fiziksel sayfanın sanal bellek adresini vermektedir. (Çekirdek alanındaki fiziksel 
+    sayfaların ardışıl biçimde sanal adrese haritalandığını anımsayınız.) __get_free_pages aslında  "include/linux/gfp.h"
     dosyasında bir makro olarak yazılmıştır. Biz burada anlatımı kolaylaştırmak için ona fonksiyon diyeceğiz. Fonksiyonun 
     parametrik yapısı şöyledir:
 
     unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order);
 
-    Fonksiyon tahsis edilen sayfaların sanal adresine geri dönmektedir. Geri dönüş değerinin unsigned long türünden olması 
-    sizi şaşırtmasın. __get_free_pages fonksiyonu ile tahsis edilen sayfalar free_pages fonksiyonu ile serbest bırakılabilir. 
+    Fonksiyon tahsis edilen fiziksel sayfaların sanal adresine geri dönmektedir. Geri dönüş değerinin unsigned long türünden 
+    olması sizi şaşırtmasın. __get_free_pages fonksiyonu ile tahsis edilen sayfalar free_pages fonksiyonu ile serbest bırakılabilir. 
     (Bu fonksiyonu __free_pages fonksiyonu ile karıştırmayınız.) free_pages fonksiyonunun parametrik yapısı şöyledir:
     
     void free_pages(unsigned long addr, unsigned int order);
@@ -11784,8 +11789,8 @@ void exit_sys(const char *msg)
     Fonksiyonun birinci parametresi byte cinsinden büyüklük belirtmektedir. Fonksiyon parametresiyle belirtilen 
     büyüklüğü kapsayan en küçük sayfa miktarını tahsis eder. Ancak ikiz blok tahsisat sisteminde tahisisatlar 2'nin 
     kuvvetlerine göre yapıldığı için artan sayfalar oluşabilecektir. Bunlar fonksiyon tarafından geri bırakılmaktadır. 
-    Örneğin biz bu fonksiyonun birinci parametresine 25000 değerini girelim. 25000 byte'ı karşılayabilecek sayfa sayısı 
-    6'dır. Ancak ikiz blok tahsisat sisteminde 6 sayfa tahsis edilememektedir, ancak 8 sayfa tahsis edilebilmektedir. 
+    Örneğin biz bu fonksiyonun birinci parametresine 25000 değerini girmiş olalım. 25000 byte'ı karşılayabilecek sayfa 
+    sayısı 6'dır. Ancak ikiz blok tahsisat sisteminde 6 sayfa tahsis edilememektedir, ancak 8 sayfa tahsis edilebilmektedir. 
     İşte fonksiyon 8 sayfayı tahsis edip 2 sayfayı geri bırakmaktadır. Fonksiyonun doğrudan sanal adresle geri döndüğüne 
     dikkat ediniz. 
 
@@ -12326,31 +12331,1017 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+                                            80. Ders 06/06/2026 - Cumartesi						
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+	Biz Linux çerkirdeklerindeki bellek tahsisat sistemini iki kısma ayırmıştık: Sayfa düzeyinde tahsisat ve byte 
+    düzeyinde tahsisat. Sayfa düzeyinde tahsisatların "ikiz blok tahsisat sistemi (buddy allocator)" ile yapıldığını
+    gördük. Şimdi de çekirdeğin byte düzeyinde tahsisat sistemi üzerinde duracağız. Daha önceden de belirttiğimiz 
+    gibi çekirdeğin byte düzeyinde tahsisat sistemine "dilimli tahsisat sistemi (slab allocator)" denilmektedir. 
+    
+    Diliml tahsisat sistemi 1994 yılında Jeff Bonwick tarafından önerilmiştir. Bonwick'in orijinal makalesine aşağıdaki
+    bağlantıdan erişebilirsiniz:
+
+    https://people.eecs.berkeley.edu/~kubitron/courses/cs194-24-S14/hand-outs/bonwick_slab.pdf
+
+    Dilimli tahsisat sistemi ilk kez Solaris sistemlerinde kullanılmıştır. Bunu Free BSD sistemleri izlemiştir. Sonra 
+    da Linux'un 2.2 kararlı sürümüyle çekirdekte yerini almıştır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    Dilimli tahsisat sistemini açıklamadan önce klasik byte düzeyinde tahsisat işleminin (yani malloc gibi bir fonksiyonun)
+    nasıl gerçekleştirildiği üzerinde duralım. Klasik byte düzeyinde tahsisat algoritması oldukç basittir. Bellekte bir 
+    bölge heap olarak ayrılır. Bu bölgedeki "yalnızca boş alanlar" bir bağlı listede tutulur. Tahsis edilmiş alanlar 
+    için bir kayıt turulmaz. Tahisat yapılmak istendiğinde boş blokları tutan bağlı liste üzerinde istenilen uzunlukta
+    ilk blokla karşılaşılana kadar (buna İngilizce "first fit" yöntemi de denilmektedir) sıralı arama yapılır. Klasik 
+    tahsis algoritması D. Ritchie ve B. Kernighan'ın ünlü "The C Programming Language" kitabında "8.7 Example - A Storage 
+    Allocator (Sayfa 163)" başlığı altında da açıklanmıştır. Pek çok malloc/realloc/free benzeri tahsisat sistemi 
+    burada belirtilen algoritmayı temel almıştır. Örneğin Windows sistemlerindeki HeapAlloc, HeapFree gibi API 
+    fonksiyonlarının temeli de bu algoritmadır. Linux sistemlerinde malloc/realloc/free fonksiyonları da uzun süre 
+    bu klasik algoritmayı kullanmıştır. D. Ritchie ve B. Kernighan tarafından "The Programming Language" kitabında 
+    verilen örnek malloc ve free algoritmaları aşağıda verilmiştir. Bu klasik algoritmanın iki sorunu vardır:
+
+    - Uygun boş bloğun bulunması ve sisteme iade edilmesi O(N) karmaşıklıkta bir işlemdir. 
+    - Bellek bölünmesi (fragmentation) oluşabilmektedir. (Yani çok sayıda küçük blok olduğu halde büyük bir bloğun 
+    tahsis edilememesi durumu)
+
+    İşte dilimli tahsisat sistemi bu klasik tahsis algortimasının yukarıda belirttiğimiz olumsuzluklarını ortadan 
+    kaldırmak için geliştirilmiştir.
+----------------------------------------------------------------------------------------------------------------------*/
+
+#include <stddef.h>
+#include <unistd.h>
+
+typedef long Align;  /* alignment for longs */
+
+union header {
+    struct {
+        union header *ptr;   /* next block if on free list */
+        unsigned size;       /* size of this block */
+    } s;
+    Align x;                 /* force alignment of blocks */
+};
+
+typedef union header Header;
+
+static Header base;             /* empty list to get started */
+static Header *freep = NULL;    /* start of free list */
+
+void free(void *ap)
+{
+    Header *bp, *p;
+
+    bp = (Header *)ap - 1;    /* point to block header */
+
+    for (p = freep; !(bp > p && bp < p->s.ptr); p = p->s.ptr)
+        if (p >= p->s.ptr && (bp > p || bp < p->s.ptr))
+            break;  /* freed block at start or end of arena */
+
+    if (bp + bp->s.size == p->s.ptr) {    /* join to upper nbr */
+        bp->s.size += p->s.ptr->s.size;
+        bp->s.ptr = p->s.ptr->s.ptr;
+    } else
+        bp->s.ptr = p->s.ptr;
+
+    if (p + p->s.size == bp) {            /* join to lower nbr */
+        p->s.size += bp->s.size;
+        p->s.ptr = bp->s.ptr;
+    } else
+        p->s.ptr = bp;
+
+    freep = p;
+}
+
+#define NALLOC 1024  /* minimum #units to request */
+
+static Header *morecore(unsigned nu);
+
+void *malloc(unsigned nbytes)
+{
+    Header *p, *prevp;
+    unsigned nunits;
+
+    nunits = (nbytes + sizeof(Header) - 1) / sizeof(Header) + 1;
+
+    if ((prevp = freep) == NULL) {   /* no free list yet */
+        base.s.ptr = freep = prevp = &base;
+        base.s.size = 0;
+    }
+
+    for (p = prevp->s.ptr; ; prevp = p, p = p->s.ptr) {
+        if (p->s.size >= nunits) {       /* big enough */
+            if (p->s.size == nunits)     /* exactly */
+                prevp->s.ptr = p->s.ptr;
+            else {                       /* allocate tail end */
+                p->s.size -= nunits;
+                p += p->s.size;
+                p->s.size = nunits;
+            }
+            freep = prevp;
+            return (void *)(p + 1);
+        }
+        if (p == freep)                  /* wrapped around free list */
+            if ((p = morecore(nunits)) == NULL)
+                return NULL;             /* none left */
+    }
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Yukarıda açıkladığımız klasik tahsisat sistemindeki bağlı listede tutulan boş bloklar aynı y-uzunlukta olsaydı 
+    tahsisat ve serbest bırakma işlemleri O(1) karmaşıklıkta yapılabilirdi. Çünkü boş bağlı listedeki tüm bloklar
+    eşit uzunlukta olduğuna göre hemen listenin başındaki blok verilebilirdi. Benzer biçimde serbest bırakma işleminde 
+    hemen blok listenin başına eklenebilirdi. Ancak bu yöntemde bu blok uzunluğunun belirlenmesi sorunu vardır. Örneğin 
+    boş bağlı listedeki blokların 64 byte uzunlukta olduğunu düşünelim. Bu durumda biz 100 byte'lık bir tahsisat yapamayız. 
+    30 byte tahsisat yapmak istediğimizde de bloktaki 34 byte boşa gidecektir. (Blok içerisinde kullanılmayan alanların 
+    oluşması durumuna "içsel bölünme (internal fragmentation)" dendiğini anımsayınız.) Bu durumda ilk akla gelecek yöntem 
+    değişik uzunlukta birden fazla boş bağlı liste bulundurmaktır. Böylece tahsisat hangi uzunluğa en yakınsa o listeden 
+    yapılabilir. Tabii burada yine "içsel bölünme" kaçınılmazdır. 
+    
+    Çekirdekte pek çok nesne vardır. Örneğin bir proses yaratıldığında task_struct nesnesi tahsis edilmektedir. Bir 
+    dosya açıldığında file nesnesi tahsis edilir. Dentry nesneleri ve inode nesneleri de gerektiğinde tahsis edilmektedir. 
+    Bu yapıların uzunlukları farklıdır. İşte bu farklı uzunluktaki nesneler için tam o uzunlukta farklı listeler 
+    oluşturulursa hem bu nesnelerin tahsis edilmesi hızlandırılır hem de "içsel bölünme" ortadan kaldırılır. Modern 
+    işletim sistemlerinde bu teknik kullanılmaktadır. Dilimli tahsisat sistemi bu tekniğin ayrıntalarıyla gerçekleştirilmesini
+    sağlamaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+	Linux çekirdğeindeki dilimli tahsisat sistemi zaman içeisinde iyileştirilmiştir. İlk kulalnılan gerçekleştirime 
+    SLAB denilmektedir. Bunun iyileştirilmiş biçimine de SLUB denilmektedir. Bir noktaya kadar çekirdek kodlarında her iki 
+    gerçekleştirimde buluyordu ve konfigürasyon parametreleriyle bu gerçekleştirimler hangisinin kullanılacağı seçilebiliyordu.
+    Ancak çekirdeğin 6.5 sürümüyle birlikte ilk SLAB gerçekleştirimi çekirdek kodlarından atılmıştır. Yani bugünkü 
+    sistemler SLUB gerçekleştirimini kullanmaktadır. Ayrıca 6.2 versiyonuna kadar çekirdekte bir de SLOB gerçekleştirimi 
+    de bulunuyordu. Bu SLOB gerçekleştirimi yukarıda açıkladığımız klasik tahsisat algoritmasını kullanıyordu. Bellek 
+    kısıtı olan gömülü sistemlerde kullanılmak üzere çekirdekte bulundurulmuştur. Bu SLOB gerçekleştirimi de çekirdek 
+    kodlarından 6.2 versiyonuyla çıkartılmıştır. Yani güncel çekirdeklerde artık yalnızca SLUB gerçekleştirimi 
+    kullanılmaktadır. 
+
+    ┌────────┬───────────────────┬──────────────────────────────────────────────┐
+    │  İsim  │      Durum        │               Özellik                        │
+    ├────────┼───────────────────┼──────────────────────────────────────────────┤
+    │ SLAB   │ Kaldırıldı        │  İlk gerçekleştirim, karmaşık yapı           │
+    │        │ (6.5'te)          │  Per-CPU cache, per-node cache               │
+    ├────────┼───────────────────┼──────────────────────────────────────────────┤
+    │ SLUB   │ Varsayılan        │  Basitleştirilmiş, daha hızlı                │
+    │        │ (2.6.22'den beri) │  Per-CPU slab göstericisi, node partial list │
+    ├────────┼───────────────────┼──────────────────────────────────────────────┤
+    │ SLOB   │ Kaldırıldı        │  Gömülü sistemler için minimal               │
+    │        │ (6.2'de)          │  Çok küçük bellek footprint                  │
+    └────────┴───────────────────┴──────────────────────────────────────────────┘
+
+    Her ne kadar güncel gerçekleştirimin ismi SLUB olsa da sisteme genel olarak yine İngilizce "slab allocator" 
+    denilmektedir. SLUB ismi "Unqueued SLAB" sözcüklerinden, SLOB ismi ise "Simple List Of Blocks" sçzcüklerinden 
+    çağrışımla uydurulmuştur. 
+
+    Burada bir noktaya dikkatinizi çekmek istiyoruz. Çekirdek kaynak kodlarında var olan her şey derlemede çekirdek
+    imajına yansıtılamamaktadır. Konfügürasyon aşamasında "yalnızca seçilen özellikler" çekirdek imajına yansıtılmaktadır. 
+    Zaten konfügürasyon işleminin amaçlarından biri budur.
+
+    SLUB gerçekleştirimi oldukça ayrıntılıdır. Biz kurusumuzda bu gerçekleştiriminin ana hatları üzerinde duracağız. 
+    Ancak SLUB sözcüğü yerine "dilimli tahsisat sistemi (slab allocator)" ve "dilim (slab)" terimlerini kullanacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    Dilimli tahsisat sisteminde üç önemli kavram vardır: Önbellek (Cache), Dilim (Slab), Nesne (Object). Önbellek bu 
+    terminolojide tahsisat sistemini belirtmektedir. Önbellek dilimlerden, dilimler de nesnelerden oluşmaktadır. Tahsis 
+    edilecek öğeler nesnelerdir. Tabii nesneler eşit uzunluktadır. Buradaki önbellek ana taşıyıcıdır. Tahsisat sistemi
+    ile ilgili önemli bilgiler burada tutulmaktadır. Dilimler ardışıl sayfalardan oluşan bellek bloklarıdır. Nesneler 
+    dilimlerin içerisindedir. Tahsisat sistemi dilimleri bir bağlı listede tutmaktadır. SLUB gerçekleştiriminde her 
+    önbellek (slab cache) her nUMA düğümü için ayrı bir dilim listesi tutmaktadır. Yani aslında önbellek NUMA düğümlerinden, 
+    NUMA düğümleri dilimlerden, dilimler de nesnelerden oluşmaktadır. Bu sistemi şekille şöyle gösterebiliriz:
+
+    ┌────────────────────────────────────────────────────────────────────────────────┐
+    │                         kmem_cache  —  önbellek (cache)                        │
+    │               örn: task_struct, inode, dentry, skbuff, ...                     │
+    │                                                                                │
+    │  ┌─────────────────────────────────┐  ┌─────────────────────────────────────┐  │
+    │  │     kmem_cache_node  [node 0]   │  │      kmem_cache_node  [node 1]      │  │
+    │  │          CPU 0, CPU 1           │  │           CPU 2, CPU 3              │  │
+    │  │                                 │  │                                     │  │
+    │  │  ┌────────────────────────────┐ │  │  ┌───────────────────────────────┐  │  │
+    │  │  │   dilim (slab)             │ │  │  │   dilim  (slab)               │  │  │
+    │  │  │  ┌─────┐┌─────┐┌─────┐     │ │  │  │  ┌─────┐┌─────┐┌─────┐        │  │  │
+    │  │  │  │ obj ││ obj ││  —  │ ... │ │  │  │  │ obj ││  —  ││  —  │  ...   │  │  │
+    │  │  │  └─────┘└─────┘└─────┘     │ │  │  │  └─────┘└─────┘└─────┘        │  │  │
+    │  │  └────────────────────────── ─┘ │  │  └───────────────────────────────┘  │  │
+    │  │                                 │  │                                     │  │
+    │  │  ┌────────────────────────────┐ │  │  ┌───────────────────────────────┐  │  │
+    │  │  │   dilim (slab)             │ │  │  │   dilim  (slab)               │  │  │
+    │  │  │  ┌─────┐┌─────┐┌─────┐     │ │  │  │  ┌─────┐┌─────┐┌─────┐        │  │  │
+    │  │  │  │ obj ││ obj ││  —  │ ... │ │  │  │  │ obj ││  —  ││  —  │  ...   │  │  │
+    │  │  │  └─────┘└─────┘└─────┘     │ │  │  │  └─────┘└─────┘└─────┘        │  │  │
+    │  │  └────────────────────────── ─┘ │  │  └───────────────────────────────┘  │  │
+    └────────────────────────────────────────────────────────────────────────────────┘
+
+    Bu şekilde iki NUMA düğümü vardır. Her NUMA düğümünde dilimler bulunmaktadır. Dilimler de tahsis edilecek blokları
+    içermektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    Şimdi bu sistemin veri yapısını üzerinde duralım. Dilim önbelleği "mm/slab.h" dosyası içerisindeki kmem_cache 
+    yapısıyla temsil edilmiştir. Güncel çekirdeklerde bu yapı şöyledir:
+
+    struct kmem_cache {
+        struct slub_percpu_sheaves __percpu *cpu_sheaves;
+        /* Used for retrieving partial slabs, etc. */
+        slab_flags_t flags;
+        unsigned long min_partial;
+        unsigned int size;		        /* Object size including metadata */
+        unsigned int object_size;	    /* Object size without metadata */
+        struct reciprocal_value reciprocal_size;
+        unsigned int offset;		    /* Free pointer offset */
+        unsigned int sheaf_capacity;
+        struct kmem_cache_order_objects oo;
+
+        /* Allocation and freeing of slabs */
+        struct kmem_cache_order_objects min;
+        gfp_t allocflags;		        /* gfp flags to use on each alloc */
+        int refcount;			        /* Refcount for slab cache destroy */
+        void (*ctor)(void *object);	    /* Object constructor */
+        unsigned int inuse;		        /* Offset to metadata */
+        unsigned int align;		        /* Alignment */
+        unsigned int red_left_pad;	    /* Left redzone padding size */
+        const char *name;		        /* Name (only for display!) */
+        struct list_head list;		    /* List of slab caches */
+    #ifdef CONFIG_SYSFS
+        struct kobject kobj;		    /* For sysfs */
+    #endif
+    #ifdef CONFIG_SLAB_FREELIST_HARDENED
+        unsigned long random;
+    #endif
+
+    #ifdef CONFIG_NUMA
+        /*
+        * Defragmentation by allocating from a remote node.
+        */
+        unsigned int remote_node_defrag_ratio;
+    #endif
+
+    #ifdef CONFIG_SLAB_FREELIST_RANDOM
+        unsigned int *random_seq;
+    #endif
+
+    #ifdef CONFIG_KASAN_GENERIC
+        struct kasan_cache kasan_info;
+    #endif
+
+    #ifdef CONFIG_HARDENED_USERCOPY
+        unsigned int useroffset;	    /* Usercopy region offset */
+        unsigned int usersize;		    /* Usercopy region size */
+    #endif
+
+    #ifdef CONFIG_SLUB_STATS
+        struct kmem_cache_stats __percpu *cpu_stats;
+    #endif
+
+        struct kmem_cache_node *node[MAX_NUMNODES];
+    };	
+
+    Yapının pek çok elemanının çeşirli konfigürasyon parametreleri seçildiğinde yapıya dahil edildiğine dikkat ediniz. 		
+    Yapının object_size elemanı dilimlerde tutulan nesnelerin büyüklüğünü belirtmektedir. Ancak aslında sistem çeşitli 
+    konfügürasyon parametrelerine de bağlı olarak nesneler için metadata bilgileri nedeniyle daha büyük yer ayıranilmektedir. 
+    size elemanı nesneler için dilim içerisinde ayrılan gerçek alanı belirtmektedir. Nesneler için kullanılan ek metadata
+    bilgileri şunlardır:
+       
+    ┌─────────────────────────────┐  ← Nesne başlangıcı
+    │   red_left_pad              │  (CONFIG_SLUB_DEBUG)
+    ├─────────────────────────────┤
+    │                             │
+    │   Gerçek nesne verisi       │  ← object_size kadar
+    │   (kullanıcının gördüğü)    │
+    │                             │
+    ├─────────────────────────────┤
+    │   free pointer              │  ← offset ile işaret edilir
+    ├─────────────────────────────┤
+    │   red zone (sağ)            │  (CONFIG_SLUB_DEBUG)
+    ├─────────────────────────────┤
+    │   track / metadata          │  (CONFIG_SLUB_DEBUG)
+    ├─────────────────────────────┤
+    │   hizalama dolgusu          │  align'a göre
+    └─────────────────────────────┘  ← size kadar (bir sonraki nesne başlar)
+    
+    Buradaki flags elemanı tahsisat sırasındaki davranışı betimlemektedir. Bu eleman aşağıdkai bayrakların bileşimlerinden 
+    oluşabilmektedir:
+
+    ┌──────────────────────────┬─────────────────────────────────────────────────────────┐
+    │           Flag           │                       Anlamı                            │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_HWCACHE_ALIGN       │ Nesneleri CPU önbelleğine göre hizala                   │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_PANIC               │ Tahsisat başarısız olursa kernel panic yap              │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_POISON              │ Serbest nesneleri bilinen bir byte ile doldur (debug)   │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_RED_ZONE            │ Nesne etrafına kırmızı bölge ekle (debug)               │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_ACCOUNT             │ Tahsisatları cgroup'a say                               │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_RECLAIM_ACCOUNT     │ Dilimleri geri alınabilir (reclaimable) olarak işaretle │
+    ├──────────────────────────┼─────────────────────────────────────────────────────────┤
+    │ SLAB_TYPESAFE_BY_RCU     │ RCU grace period'u bitmeden slab'ı serbest bırakma      │
+    └──────────────────────────┴─────────────────────────────────────────────────────────┘
+
+    Yapının allocflags elemanı ise alloc_pages fonksiyonuyla tahsisat yapılırken ilgili bölgeyi belirten bayrakları 
+    içermektedir. Zaten bu bayraklar izleyene paragraflarda göreceğimiz kmem_cache_create fonksiyonuna argüman 
+    olarka verilemektedir. Her dilim önbelleğinin bir ismi vardır. Bu isim yapının name elemanında tutulmaktadır. 
+    Biz dilim önbelleğinin düğümlerden, düğümlerin dilimlerdne ve dilimlerin de nesneler oluştuğunu belirtmiştik. 
+    İşte dilimönbelleğineki düğümler yapının node elemanında tutulmaktadır. node elemanının dilim önbelleğindeki 
+    düğümleri belirten kmem_cache_node türünden nesnelerin adreslerini tutan bir dizi olduğuna dikkat ediniz:
+
+    struct kmem_cache_node *node[MAX_NUMNODES];
+
+    SLUB gerçekleştiriminde her nesneden sonra yukarıda açıkladığımız bazı metadata bilgileri tutulmaktadır. Yapının 
+    inuse elemanında "hangi offset'ten itibaren nesnelerin metada alanlarının başladığı" bilgisi bulundurulmaktadır. 
+    Aşaşağıdaki şekli inceleyiniz:
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │               Dilim için ayrılan sayfa                      │
+    │                                                             │
+    │  ┌───────────────────────┐  ← slab başlangıcı (page başı)   │
+    │  │   dilim yönetim alanı │    (struct slab / page metadata) │
+    │  ├───────────────────────┤                                  │
+    │  │                       │                                  │
+    │  │   · · ·               │    (önceki nesneler)             │
+    │  │                       │                                  │
+    │  ├───────────────────────┤                                  │
+    │  │   red_left_pad        │    (CONFIG_SLUB_DEBUG)           │
+    │  ├───────────────────────┤  ← nesne başlangıcı              │
+    │  │                       │    (align'a göre hizalı)         │
+    │  │   Gerçek nesne verisi │  ← object_size kadar             │
+    │  │                       │    (kullanıcının gördüğü alan)   │
+    │  │                       │                                  │
+    │  ├───────────────────────┤  ← inuse offseti                 │
+    │  │   free pointer        │  ← offset ile işaret edilir      │
+    │  ├───────────────────────┤                                  │
+    │  │   red zone (sağ)      │    (CONFIG_SLUB_DEBUG)           │
+    │  ├───────────────────────┤                                  │
+    │  │   track / metadata    │    (CONFIG_SLUB_DEBUG)           │
+    │  ├───────────────────────┤                                  │
+    │  │   hizalama dolgusu    │  ← align'a göre yuvarlama        │
+    │  ├───────────────────────┤  ← size kadar (stride sonu)      │
+    │  │                       │                                  │
+    │  │   · · ·               │    (sonraki nesneler)            │
+    │  │                       │                                  │
+    │  └───────────────────────┘  ← slab sonu (page sonu)         │
+    │                                                             │
+    └─────────────────────────────────────────────────────────────┘
+
+    Yapının align elemanı yukarıdaki şekilden de görüldüğü gibi nesneler için ayrılan alanın kaçın katlarına göre 
+    hizalanacağını belirtmektedir. Yapının min_partial elemanı dilimlerin sisteme iadesi için gereken minimum 
+    dilim sayısını belirtmektedir:
+
+    Dilim önbelleğindeki dilim sayısı > min_partial  →      boşalan dilimin sayfaları iade edilir
+    Dilim önbelleğindeki dilim sayısı <= min_partial  →     boşalan dilimin sayfaları iade edilmez
+
+    min_partial elemanının değeri şöyle tespit edilmektedir:
+
+    #define MIN_PARTIAL  5
+    #define MAX_PARTIAL  10
+
+    static inline unsigned long slub_min_partial(void)
+    {
+        return ilog2(nr_cpu_ids);
+    }
+
+    static void set_min_partial(struct kmem_cache *s, unsigned long min)
+    {
+        if (min < MIN_PARTIAL)
+            min = MIN_PARTIAL;
+        else if (min > MAX_PARTIAL)
+            min = MAX_PARTIAL;
+        s->min_partial = min;
+    }
+
+    min_partial bu algortimaya göre şu değerlerden biri olabilmektedir:
+
+    ┌─────────────────┬──────────────────┬──────────────────────────────┐
+    │   CPU Sayısı    │  ilog2(nr_cpus)  │        min_partial           │
+    ├─────────────────┼──────────────────┼──────────────────────────────┤
+    │       1         │        0         │  5  (MIN_PARTIAL alt sınırı) │
+    │       2         │        1         │  5  (MIN_PARTIAL alt sınırı) │
+    │       4         │        2         │  5  (MIN_PARTIAL alt sınırı) │
+    │       8         │        3         │  5  (MIN_PARTIAL alt sınırı) │
+    │      16         │        4         │  5  (MIN_PARTIAL alt sınırı) │
+    │      32         │        5         │  5  (MIN_PARTIAL alt sınırı) │
+    │      64         │        6         │  6                           │
+    │     128         │        7         │  7                           │
+    │     256         │        8         │  8                           │
+    │     512         │        9         │  9                           │
+    │    1024         │       10         │  10 (MAX_PARTIAL üst sınırı) │
+    │    2048+        │      11+         │  10 (MAX_PARTIAL üst sınırı) │
+    └─────────────────┴──────────────────┴──────────────────────────────┘
+
+    Bunun amacı dilim önbelleğinde hazır durumda tutulacak belli miktarda boş dilimlerin bulundurulmasını 
+    sağlamaktır. 
+
+    Yapının ctor elemanında aşağıdaki gibi bir fonksiyon göstericisi tutulmaktadır:
+
+    void (*ctor)(void *object);	 
+
+    Ne zaman sistemden bir nesne tahsis edilmek istense önce o nense fonksiyona verilir. Bu fonksiyon nesnenin 
+    içerisine ilkdeğerlerini verir, bu işlemden sonra nesne tahis edene iletilir. Bu elemanda NULL adres varsa 
+    böyle bir işlem yapılmamaktadır. Buraya yerleştirilecek fonksiyon kmem_cache_create fonksiyonuna argüman 
+    olarak girilmektedir. 
+-----------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                            81. Ders 07/06/2026 - Pazar							
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    Bir dilim önbelleğinin düğümlerden, düğümlerin dilimlerden ve dilimlerin de nesneler oluşturğunu söylemiştik. 
+    Dilim önbelleğinin düğümleri kmem_cache_node isimli yapıyla temsil edilmektedir. Bu yapı güncel çekirdeklere "mm/slab.h" 
+    dosyası içerisinde şöyle tanımlanmıştır:
+
+    struct kmem_cache_node {
+	    spinlock_t list_lock;
+
+    #ifdef CONFIG_SLAB
+        struct list_head slabs_partial;	/* partial list first, better asm code */
+        struct list_head slabs_full;
+        struct list_head slabs_free;
+        unsigned long total_slabs;	/* length of all slab lists */
+        unsigned long free_slabs;	/* length of free slab list only */
+        unsigned long free_objects;
+        unsigned int free_limit;
+        unsigned int colour_next;	/* Per-node cache coloring */
+        struct array_cache *shared;	/* shared per node */
+        struct alien_cache **alien;	/* on other nodes */
+        unsigned long next_reap;	/* updated without locking */
+        int free_touched;		/* updated without locking */
+    #endif
+
+    #ifdef CONFIG_SLUB
+        unsigned long nr_partial;
+        struct list_head partial;
+    #ifdef CONFIG_SLUB_DEBUG
+        atomic_long_t nr_slabs;
+        atomic_long_t total_objects;
+        struct list_head full;
+    #endif
+    #endif
+    };
+
+    Güncel çekirdekler derlenirken yalnızca CONFIG_SLUB define edilmiş durumdadır. Eski tip SLAB ve SLOB gerçekleştirimlerinin 
+    çekirdekten çıkartıldığını belirtmiştik. Dolayısıyla aslında yukarıdaki yapı güncel çekirdeklerde aşağıdaki hale 
+    gelmektedir:
+
+    struct kmem_cache_node {
+        spinlock_t list_lock;
+
+        /* CONFIG_SLUB */
+        unsigned long nr_partial;
+        struct list_head partial;
+
+    #ifdef CONFIG_SLUB_DEBUG
+        atomic_long_t nr_slabs;
+        atomic_long_t total_objects;
+        struct list_head full;
+    #endif
+    };
+
+    Yapının partial elemanı bu düğümdeki dilimlerin listesini, nr_partial elemanı ise bunların sayısını turmaktadır. 
+    SMP mimarisinde zaten tek bir düğümün olduğunu anımsayınız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Güncel çekirdeklerde dilimler "mm/slab.h" dosyası içerisindeki slab isimli yapıyla temsil edilmektedir. Ancak bir 
+    süre önceye kadar bu yapı yerine doğrudan dilim bilgileri page nesnelerinin içerisinde saklanıyordu. Güncel çekirdeklerdeki 
+    slab yapısı şöyle bildirilmiştir:
+
+    struct slab {
+        memdesc_flags_t flags;
+
+        struct kmem_cache *slab_cache;
+            union {
+                struct {
+                    struct list_head slab_list;
+                    /* Double-word boundary */
+                    struct freelist_counters;
+                };
+                struct rcu_head rcu_head;
+            };
+
+            unsigned int __page_type;
+            atomic_t __page_refcount;
+    #ifdef CONFIG_SLAB_OBJ_EXT
+        unsigned long obj_exts;
+    #endif
+    };
+
+    Buradaki elemanları ve işlevlerini aşağıdaki tabloda listeliyoruz:
+
+    ┌───────────────────┬──────────────────────┬──────────────────────────────────────────────────────────┐
+    │      Eleman       │        Tür           │                      Açıklama                            │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ __page_flags      │ memdesc_flags_t      │ Fiziksel sayfa bayrakları. struct page ile bellekte      │
+    │                   │                      │ örtüşür; PG_slab gibi bayraklar burada tutulur.          │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ slab_cache        │ struct kmem_cache *  │ Bu dilimin ait olduğu cache'e gösterici.                 │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ slab_list         │ struct list_head     │ kmem_cache_node.partial listesine bağlanan düğüm.        │
+    │                   │                      │ (rcu_head ile union içindedir)                           │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ rcu_head          │ struct rcu_head      │ Dilim RCU ile serbest bırakılırken kullanılır.           │
+    │                   │                      │ (slab_list ile union içindedir)                          │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ struct            │ struct               │ 7.x ile ayrı bir yapıya taşınan freelist+counters        │
+    │ freelist_counters │ freelist_counters    │ bloğu. Aşağıdaki alanları içerir:                        │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │  └─ freelist      │ void *               │ Dilim içindeki boş nesnelerin tek yönlü listesinin başı. │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │  └─ counters      │ unsigned long        │ inuse+objects+frozen'ı tek atomik işlemle güncellemek    │
+    │                   │                      │ için hepsini kapsayan union alanı.                       │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │  └─ inuse         │ unsigned (16 bit)    │ Şu an tahsis edilmiş nesne sayısı.                       │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │  └─ objects       │ unsigned (15 bit)    │ Dilimin toplam nesne kapasitesi.                         │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │  └─ frozen        │ unsigned (1 bit)     │ 1 → dilim bir CPU'nun per-CPU listesine "dondurulmuş".   │
+    │                   │                      │ SLUB_DEBUG açıksa: slab bozulma göstergesi olarak        │
+    │                   │                      │ yeniden kullanılır.                                      │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ __page_type       │ unsigned int         │ Sayfa tipi bilgisi; struct page ile örtüşür.             │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ __page_refcount   │ atomic_t             │ Fiziksel sayfanın referans sayacı. Doğrudan              │
+    │                   │                      │ erişilmez, page allocator yönetir.                       │
+    ├───────────────────┼──────────────────────┼──────────────────────────────────────────────────────────┤
+    │ obj_exts          │ unsigned long        │ Nesne uzantılarına gösterici. Yalnızca                   │
+    │                   │                      │ CONFIG_SLAB_OBJ_EXT ile derlenir; slab profiling         │
+    │                   │                      │ ve memory_failure gibi özellikler için kullanılır.       │
+    └───────────────────┴──────────────────────┴──────────────────────────────────────────────────────────┘
+
+    slab yapısının önemli elemanları freelist_counters yapısına taşınmıştır. Yani bir süre önceye kadar aslında bu
+    freelist_counters yapısının elemanları slab yapısının içindeydi. Fakat zaten yukarıdaki anonim birlik ve yapı 
+    bildirimi ile sanki bu yapının elemanları slab yapısının içerisindeymiş gibi ele alınmaktadır. Elemanlara 
+    erişim bakımından bir farklılık oluşmamaktadır. Fakat burada C standartları bağlamında bir noktaya dikkatnizi 
+    çekmek istiyoruz. C11'den sonra aşağıdaki gibi bir yapı bildirimi geçerlidir:
+
+    struct Sample {
+        union {
+            struct {
+                int x;
+                int y;
+            };
+            int z;
+        };
+        int k;
+    };
+
+    Burada birlik içerisindeki yapının elemanları sanki birliğin elemanları gibi, birliğinde elemanları da sanki
+    Sample yapısının elemanları gibi işlem görmektedir. Örneğin:
+
+    struct Sample s;
+
+    s.x = 10;       // geçerli
+    
+    Ancak yukarıdaki slab yapısında aşağıdakine benzer bir bildirim yapılmıştır:
+
+     struct S {
+        int x;
+        int y;
+    };
+
+    struct Sample {
+        union {
+            struct S;       /* C11'de geçersiz gcc eklentisi */
+            int z;
+        };
+        int k;
+    };
+
+    Burada anonim birliğin içerisinde S yapısına ilişkin bir değişken ismi belirtilmemiştir. Bu durum C11'de geçerli 
+    değildir. Ancak gcc'de bir eklenti olarak desteklenmektedir. gcc derleyicileri bu bildirimle öncekini eşdeğer 
+    gibi kabul etmektedir. 
+
+    slab yapısının slab_cache elemanı geri doğru  bu dilimin içinde bulunduğu kmem_cache nesnesini göstermektedir. 
+    Yapının slab_list elemanı dilimleri (yani slab nesnelerini) birbirine bağlayan bağlı liste düğümünü belirtmektedir. 
+    rcu_head elemanı dilim RCU mekanizmasıyla serbest bırakılırken kullanılmaktadır. Yukarıda da belirttiğimiz gibi 
+    aslında slab yapısının önemli elemanlarının çoğu yapının freelist_counters elemanına ilişkin yapının içerisindedir. 
+    Ancal anonim birlik ve yapı kuralları nedeniyle bunlara sanki slab yapısının elemanlarıymış gibi erişebilmektedir.  
+
+    freelist_counters yapısı şöyle bildirilmiştir:
+
+    struct freelist_counters {
+        union {
+            struct {
+                void *freelist;
+                union {
+                    unsigned long counters;
+                    struct {
+                        unsigned inuse:16;
+                        unsigned objects:15;
+                        /*
+                        * If slab debugging is enabled then the
+                        * frozen bit can be reused to indicate
+                        * that the slab was corrupted
+                        */
+                        unsigned frozen:1;
+    #ifdef CONFIG_64BIT
+                        /*
+                        * Some optimizations use free bits in 'counters' field
+                        * to save memory. In case ->stride field is not available,
+                        * such optimizations are disabled.
+                        */
+                        unsigned int stride;
+    #endif
+                    };
+                };
+            };
+    #ifdef system_has_freelist_aba
+            freelist_full_t freelist_counters;
+    #endif
+        };
+    };
+
+    Yapının freelist elemanı o dilimdeki ilk boş nesnesin adresi belirtmektedir. Dilim içerisindeki nesneler tek 
+    bağlı liste (single linked list) ile bribirine bağlanmıştır. Dolayısıyla dilimden bir nesne tahsis edilmek 
+    istendiğinde tahsisat fonksiyonu (kmem_cache_alloc) hemen bu göstericinin gösterdiği yerdeki nesneyi O(1) karmaşıklıkta
+    vermektedir. Yapının inuse elemanı ilgili dilimdeki tahsis edilmiş nesne sayısını belirtmektedir. objects elemanı 
+    ise dilim içerisinde toplam kaç nesne bulunduğunu belirtmektedir. Aşağıdaki veri slab veri yapısına ilişkin örnek 
+    bir çizim yapılmıştır:
+
+    struct slab bellek düzeni:
+    ┌─────────────────────────┐  ← slab
+    │ __page_flags            │
+    │ slab_cache              │
+    │ ┌─────────────────────┐ │
+    │ │ slab_list           │ │  ← union'ın ilk kolu
+    │ │ ┌─────────────────┐ │ │
+    │ │ │ freelist   ──── │─┼─┼──→ boş nesneler zinciri
+    │ │ │ counters        │ │ │
+    │ │ │ inuse:16        │ │ │
+    │ │ │ objects:15      │ │ │
+    │ │ │ frozen:1        │ │ │
+    │ │ └─────────────────┘ │ │
+    │ └─────────────────────┘ │
+    │ __page_type             │
+    │ __page_refcount         │
+    └─────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Şimdi de dilimli tahsisat sistemini kullanmayı kolaylaştıran export edilmiş çekirdek fonksiyonlarını inceleyelim.
+    
+    Bir dilim önbelleği oluşturmak için yani kmem_cache türünden bir nesne oluşturmak için kmem_cache_create isimli
+    çekirdek fonksiyonu kullanılmaktadır. kmem_cache_create fonksiyonunun parametrik yapısı şöyledir:
+
+    struct kmem_cache *kmem_cache_create(
+        const char *name, 
+        unsigned int size,  
+        unsigned int align,
+        slab_flags_t flags,
+        void (*ctor)(void *)
+    );					
+
+    Fonksiyonun birinci parametresi (name) yaratılacak dilim önbelleğinin ismini, ikinci parametresi (size) tahsis ,
+    edilecek nesnenin uzunluğunu belirtmektedir. Üçüncü parametre (align) nesnelerin hangi değerin katlarına hizalanacağını
+    belirtmektedir. BuDördüncü (flags) parametre yukarıda belirttiğimiz dilim bayraklarına ilişkindir. Son parametre 
+    ise (ctor) dilimden nesne tahsis edildiğinde o nesneye ilkdeğerlerinin verilmesi için kullanılacak fonksiyonun 
+    adresini belirtmektedir. Fonksiyonun üçüncü parametresi olan (align) hizalama parametresine 0 değeri girilebilir. 
+    Bu durumda o sisteme ilişkin default hizalama kullanılmaktadır. Çekirdek kodlarında bu default hizalama 
+    ARCH_KMALLOC_MINALIGN sembolik sabiti ile belirtilmektedir. Bu sembolik sabit de şu değerlerden biri olabilmektedir:
+
+    ┌──────────────┬───────────────────────────┐
+    │   Mimari     │   ARCH_KMALLOC_MINALIGN   │
+    ├──────────────┼───────────────────────────┤
+    │   x86_64     │        8 byte             │
+    │   arm64      │        8 byte             │
+    │   x86 (32)   │        8 byte             │
+    │   DMA varsa  │       64 byte             │
+    └──────────────┴───────────────────────────┘
+
+    Eskiden kmem_cache_crate fonksiyonu "mm/slab.c" dosyası içerisinde normal bir fonksiyon biçiminde tanımlanıyordu.
+    Çekirdeğin 6.12 vers,onu ile birlikte artık bu fonksiyon bir makro biçimine getirilmiştir. Çekirdğein 6.10 versiyonunda
+    kmem_cache_create fonksiyonu "mm/slab_common.c" dosyasında şöyle tanımlanmıştı:
+
+    struct kmem_cache *
+    kmem_cache_create(const char *name, unsigned int size, unsigned int align,
+            slab_flags_t flags, void (*ctor)(void *))
+    {
+        return kmem_cache_create_usercopy(name, size, align, flags, 0, 0,
+                        ctor);
+    }
+    EXPORT_SYMBOL(kmem_cache_create);
+
+    Buradaki kmem_cache_create_usercopy fonksiyonu asıl işlemi yapan fonksiyondur. Bu fonksiyon da şöyle tanımlanmıştır:
+
+    struct kmem_cache *
+    kmem_cache_create_usercopy(const char *name,
+            unsigned int size, unsigned int align,
+            slab_flags_t flags,
+            unsigned int useroffset, unsigned int usersize,
+            void (*ctor)(void *))
+    {
+        struct kmem_cache *s = NULL;
+        const char *cache_name;
+        int err;
+
+    #ifdef CONFIG_SLUB_DEBUG
+        /*
+        * If no slab_debug was enabled globally, the static key is not yet
+        * enabled by setup_slub_debug(). Enable it if the cache is being
+        * created with any of the debugging flags passed explicitly.
+        * It's also possible that this is the first cache created with
+        * SLAB_STORE_USER and we should init stack_depot for it.
+        */
+        if (flags & SLAB_DEBUG_FLAGS)
+            static_branch_enable(&slub_debug_enabled);
+        if (flags & SLAB_STORE_USER)
+            stack_depot_init();
+    #endif
+
+        mutex_lock(&slab_mutex);
+
+        err = kmem_cache_sanity_check(name, size);
+        if (err) {
+            goto out_unlock;
+        }
+
+        /* Refuse requests with allocator specific flags */
+        if (flags & ~SLAB_FLAGS_PERMITTED) {
+            err = -EINVAL;
+            goto out_unlock;
+        }
+
+        /*
+        * Some allocators will constraint the set of valid flags to a subset
+        * of all flags. We expect them to define CACHE_CREATE_MASK in this
+        * case, and we'll just provide them with a sanitized version of the
+        * passed flags.
+        */
+        flags &= CACHE_CREATE_MASK;
+
+        /* Fail closed on bad usersize of useroffset values. */
+        if (!IS_ENABLED(CONFIG_HARDENED_USERCOPY) ||
+            WARN_ON(!usersize && useroffset) ||
+            WARN_ON(size < usersize || size - usersize < useroffset))
+            usersize = useroffset = 0;
+
+        if (!usersize)
+            s = __kmem_cache_alias(name, size, align, flags, ctor);
+        if (s)
+            goto out_unlock;
+
+        cache_name = kstrdup_const(name, GFP_KERNEL);
+        if (!cache_name) {
+            err = -ENOMEM;
+            goto out_unlock;
+        }
+
+        s = create_cache(cache_name, size,
+                calculate_alignment(flags, align, size),
+                flags, useroffset, usersize, ctor, NULL);
+        if (IS_ERR(s)) {
+            err = PTR_ERR(s);
+            kfree_const(cache_name);
+        }
+
+    out_unlock:
+        mutex_unlock(&slab_mutex);
+
+        if (err) {
+            if (flags & SLAB_PANIC)
+                panic("%s: Failed to create slab '%s'. Error %d\n",
+                    __func__, name, err);
+            else {
+                pr_warn("%s(%s) failed with error %d\n",
+                    __func__, name, err);
+                dump_stack();
+            }
+            return NULL;
+        }
+        return s;
+    }
+    EXPORT_SYMBOL(kmem_cache_create_usercopy);
+
+    Burada kmem_cache nesnesinin asıl yaratımı create_cache fonksiyonunda yapılmaktadır. Bu fonksiyon da şöyle 
+    tanımlanmıştır:
+
+    static struct kmem_cache *create_cache(const char *name,
+		unsigned int object_size, unsigned int align,
+		slab_flags_t flags, unsigned int useroffset,
+		unsigned int usersize, void (*ctor)(void *),
+		struct kmem_cache *root_cache)
+    {
+        struct kmem_cache *s;
+        int err;
+
+        if (WARN_ON(useroffset + usersize > object_size))
+            useroffset = usersize = 0;
+
+        err = -ENOMEM;
+        s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
+        if (!s)
+            goto out;
+
+        s->name = name;
+        s->size = s->object_size = object_size;
+        s->align = align;
+        s->ctor = ctor;
+    #ifdef CONFIG_HARDENED_USERCOPY
+        s->useroffset = useroffset;
+        s->usersize = usersize;
+    #endif
+
+        err = __kmem_cache_create(s, flags);
+        if (err)
+            goto out_free_cache;
+
+        s->refcount = 1;
+        list_add(&s->list, &slab_caches);
+        return s;
+
+    out_free_cache:
+        kmem_cache_free(kmem_cache, s);
+    out:
+        return ERR_PTR(err);
+    }
+
+    Aşağıda bu versiyondaki kmem_cache_create fonksiyonunun çağrı özetini şekilsel olarak veriyoruz
+
+    kmem_cache_create
+        │
+        ▼
+    kmem_cache_create_usercopy()
+        │
+        ▼
+    create_cache() 
+        │
+        ▼
+    return kmem_cache_create object
+   
+   Peki çekirdek içerisindeki nesne tahsisatları dilimli tahsisat sistemiyle yapıldığına göre kmem_cache_create 
+   fonksiyonu kmem_cache nesnesini nasıl tahsis etmektedir. İşte kmem_cache nsneleri için de ayrı bir dilimli önbellek 
+   yaratılmıştır. Yukarıdaki kodlarda -henüz görmemiş olsak da- geri döndürülen nesne "kmem_cache" isimli bir dilimli 
+   önbellekten tahsis edilmektedir:
+
+   s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
+
+    Burada tahsisat çekirdek tarafından yaratılmış olan "kmem_cache" dilimli önbelliğinden yapılmaktadır. 
+
+    6.12 çekirdekleriyle birlikte kmem_cache_create fonksiyonu "include/linux/slab.h" dosyasında bir makro biçimine 
+    getirilmiştir:
+
+    #define kmem_cache_create(__name, __object_size, __args, ...)           \
+        _Generic((__args),                                                  \
+            struct kmem_cache_args *: __kmem_cache_create_args,	            \
+            void *: __kmem_cache_default_args,			\
+            default: __kmem_cache_create)(__name, __object_size, __args, __VA_ARGS__)
+
+    _Generic marosu bir çeşit "function overloading" mekanizmasının makro düzeyinde sağlanması için C11 ile C'ye eklenmiştir. 
+    Bu makro bir parametreye sahiptir. Bu parametrenin türüne göre açım yapar. Eğer parametrenin türü belirtilen türlerden
+    biri değilse default ile belirtilen açımı yapmaktadır. Örneğin:
+
+    define abs(x) _Generic((x),     \
+        int: abs_int,               \
+        long: abs_long,             \
+        float: abs_float,           \
+        double: abs_double,         \
+        default: abs_default        \
+    )(x)
+
+    Bu örnekte biz abs makrosunu int rüründen bir argümanla çağırmışsak bu duurmda aslında abs_int açımı yapılacaktır. 
+    Dolayısıyla abs_int çağrılmış olacaktır. Eğer biz abs makrosunu long bir parametreyle çağırırsak bu durumda aslında 
+    abs_long fonksiyonu çağrılmış olacaktır. Biz abs makrosunu int, long, float, double türlerinin dışında bir türden
+    argümanla çağırmışsak bu durumda abs_default fonksiyonu çağrılacaktır. 
+    
+    Şimdi yukarıdaki kmem_cache_create makrosuna yeniden dikat ediniz. _Generic makrosuna aktarılan parametre __args 
+    parametresidir. Bu parametre aslında eski biçimdeki align parametresidir. Biz bu align parametresi için gerçekten 
+    hizalama amaçlı int bir değer girersek (örneğin 0) bu durumda default kısım devreye girecek ve çağrı __kmem_cache_create
+    haline gelecektir. Güncel çekirdeklerde __kmem_cache_create de yukarıda vermiş olduğumuz 6.10'daki kmem_cache_create_usercopy
+    fonksiyonuna benzemektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdeğin task_struct gibi, file gibi, dentry gibi, inode gibi nesnesleri tahsis etmekte kullandığı önceden 
+    yaratılmış dilimli önbellek nesneleri (yani cache_create nesneleri) vardır. Aşağıda bunların isimlerini ve bunlara 
+    erişekte kullanılan kmem_cache türünden göstericilerin isimlerini veriyoruz:
+
+    ┌─────────────────────┬───────────────────────────┬────────────────────────┐
+    │      Nesne Tipi     │  kmem_cache Göstericisi   │           İsim         │
+    ├─────────────────────┼───────────────────────────┼────────────────────────┤
+    │ struct kmem_cache   │ kmem_cache                │ "kmem_cache"           │
+    │ struct task_struct  │ task_struct_cachep        │ "task_struct"          │
+    │ struct mm_struct    │ mm_cachep                 │ "mm_struct"            │
+    │ struct vm_area_     │ vm_area_cachep            │ "vm_area_struct"       │
+    │   struct            │                           │                        │
+    │ struct file         │ filp_cachep               │ "filp"                 │
+    │ struct dentry       │ dentry_cache              │ "dentry"               │
+    │ struct inode        │ (her fs kendi önbelleğini │ "ext4_inode_cache" vb. │
+    │                     │  yaratır)                 │                        │
+    │ struct socket       │ sock_inode_cachep         │ "sock_inode_cache"     │
+    │ struct sk_buff      │ skbuff_head_cache         │ "skbuff_head_cache"    │
+    │ struct sk_buff      │ skbuff_fclone_cache       │ "skbuff_fclone_cache"  │
+    │   (fclone)          │                           │                        │
+    │ struct sigqueue     │ sigqueue_cachep           │ "sigqueue"             │
+    │ struct cred         │ cred_jar                  │ "cred_jar"             │
+    │ struct pid          │ pid_cachep                │ "pid"                  │
+    │ struct fs_struct    │ fs_cachep                 │ "fs_struct"            │
+    │ struct files_struct │ files_cachep              │ "files_cache"          │
+    │ struct nsproxy      │ nsproxy_cachep            │ "nsproxy"              │
+    │ struct signal_      │ signal_cachep             │ "signal_cache"         │
+    │   struct            │                           │                        │
+    │ struct sighand_     │ sighand_cachep            │ "sighand_cache"        │
+    │   struct            │                           │                        │
+    │ struct bio          │ bio_slab (her queue için) │ "bio"                  │
+    │ struct request      │ request_cachep            │ "blkdev_requests"      │
+    │ struct buffer_head  │ bh_cachep                 │ "buffer_head"          │
+    │ struct anon_vma     │ anon_vma_cachep           │ "anon_vma"             │
+    └─────────────────────┴───────────────────────────┴────────────────────────┘
+
+    Peki yukarıdaki dilim önbellek nesneleri çekirdekte hangi aşamada yaratılmaktadır? Biz kurusumuzda çekirdğein 
+    başlatılma sürecini ayrı bir bölümde ele alacağız. Linux çekirdek imajı belleğe yüklendiğinde start_kernel isimli 
+    fonksiyon çağrılmaktadır. Bu fonksiyonu çekirdeğin main fonksiyonu gibi düşünebilirsiniz. Bu fonksiyon içerisinde 
+    pek çok alt sistem ilklendirilebilmektedir. İşte yukarıdaki dilim önbellekleri bu alt sistemlerin ilklendirildiği 
+    (initialize edildiği) yerlerde yaratılmaktadır. Bunların yaratıldığı yerleri aşağıdaki tabloda veriyoruz:
+
+    ┌─────────────────────┬────────────────────────────────────┐
+    │   Nesne Türü        │        Yaratan fonksiyon           │
+    ├─────────────────────┼────────────────────────────────────┤
+    │ struct pid          │ pidmap_init()                      │
+    │ struct anon_vma     │ anon_vma_init()                    │
+    │ struct buffer_head  │ buffer_init()                      │
+    │ struct vm_area_     │ mmap_init()  /  vma_init()         │
+    │   struct            │                                    │
+    │ struct mm_struct    │ mm_init() → mm_cache_init()        │
+    │ struct fs_struct    │ proc_caches_init()                 │
+    │ struct files_struct │ proc_caches_init()                 │
+    │ struct task_struct  │ proc_caches_init()  →  fork_init() │
+    │ struct signal_      │ proc_caches_init()                 │
+    │   struct            │                                    │
+    │ struct sighand_     │ proc_caches_init()                 │
+    │   struct            │                                    │
+    │ struct nsproxy      │ nsproxy_cache_init()               │
+    │ struct cred         │ cred_init()                        │
+    │ struct sigqueue     │ signals_init()                     │
+    └─────────────────────┴────────────────────────────────────┘
+
+    ┌─────────────────────┬───────────────────────────────────────────────┐
+    │   Nesne Türü        │          Yaratan fonksiyon                    │
+    ├─────────────────────┼───────────────────────────────────────────────┤
+    │ struct dentry       │ dcache_init()      (VFS)                      │
+    │ struct inode        │ inode_init()       (VFS — genel inode cache)  │
+    │ struct file         │ files_init()       (VFS)                      │
+    │ struct socket /     │ sock_init()        (ağ alt sistemi)           │
+    │   sock_inode        │                                               │
+    │ struct sk_buff      │ skb_init()         (ağ — net_dev_init içinde) │
+    │ struct bio          │ bio_init()         (blok katmanı)             │
+    │ struct request      │ blk_mq_init()  /  request_cachep yaratılır    │
+    │ struct inode (fs)   │ ext4_init_inodecache() vb. — modül yüklemede  │
+    └─────────────────────┴───────────────────────────────────────────────┘
+
+    Bu nesnelerin yaratıldığı yerlere ilişkin çağrı zincirini de aşağıda veriyoruz:
+
+    start_kernel()
+    │
+    ├── mm_init()
+    │   └── kmem_cache_init()         → [Aşama 1] kmem_cache
+    │
+    ├── proc_caches_init()            → [Aşama 2] task_struct, mm_struct,
+    │                                             fs_struct, files_struct,
+    │                                             signal, sighand
+    ├── cred_init()                   → [Aşama 2] cred
+    ├── fork_init()                   → [Aşama 2] task_struct (tamamlanır)
+    ├── signals_init()                → [Aşama 2] sigqueue
+    ├── pidmap_init()                 → [Aşama 2] pid
+    ├── anon_vma_init()               → [Aşama 2] anon_vma
+    ├── buffer_init()                 → [Aşama 2] buffer_head
+    │
+    └── do_initcalls()                → [Aşama 3]
+        ├── dcache_init()             → dentry
+        ├── inode_init()              → inode (genel)
+        ├── files_init()              → file
+        ├── sock_init()               → socket
+        ├── skb_init()                → sk_buff
+        ├── bio_init()                → bio
+        ├── blk_mq_init()             → request
+        └── ext4_init() vb.           → fs'e özel inode cache
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yaratıılmış olan bir dilim önbelleğinden tahsisat yapmak için aşağıdaki fonlsiyonlar kullanılmaktadır:
+
+    ┌─────────────────────────┬──────────────────────────────────┐
+    │       Fonksiyon         │         Temel Özellik            │
+    ├─────────────────────────┼──────────────────────────────────┤
+    │ kmem_cache_alloc()      │ Standart tekli tahsisat          │
+    │ kmem_cache_zalloc()     │ Sıfırlanmış tahsisat (GFP_ZERO)  │
+    │ kmem_cache_alloc_node() │ NUMA düğümüne özgü tahsisat      │
+    │ kmem_cache_alloc_lru()  │ LRU listesiyle birlikte tahsisat │
+    │ kmem_cache_alloc_bulk() │ Toplu (çok nesne) tahsisat       │   
+    └─────────────────────────┴──────────────────────────────────┘
+
+    kmem_cache_alloc fonksiyonu en çok kullanılan fonksiyondur. Belli bir dilim önbelleğinden nesne tahsis etmektedir. 
+    Fonksiyonun prototipi şöyledir:
+
+    void *kmem_cache_alloc(struct kmem_cache *cachep, int flags);
+
+    Fonksiyonun birinci parametresi tahsisatın hangi dilim önbelleğinden yapılacağını belirtmektedir. İkinci parametresi 
+    ise tahsisata ilişkin bayrakları belirtmektedir. 
+
+
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
