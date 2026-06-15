@@ -74,8 +74,8 @@
     Linux çekirdek nesnelerini incelediğinizde onları belirten yapıların elemanlarında senkronizasyon nesneleri 
     göreceksiniz. 
 
-    Kritik kodlar ancak özel makine komutları kullanılarak oluşturulabilmektedir. Aşağıdaki gibi basit bir mantıkla 
-    kritik kod oluşturulamaz:
+    Kritik kod blokları ancak özel makine komutları kullanılarak oluşturulabilmektedir. Aşağıdaki gibi basit bir mantıkla 
+    kritik kod blokları oluşturulamaz:
 
     int g_flag = 0;
     /* ... */
@@ -84,14 +84,14 @@
         ;
     g_flag = 1;
     .....
-    .....       <KRİTİK KOD>
+    .....       <KRİTİK KOD BLOĞU>
     .....
     g_flag = 0;
 
-    Bu biçimdeki manuel kritik kod oluşturmaya çalışmanın iki sorunu vardır:
+    Bu biçimdeki manuel kritik kod bloğu oluşturmaya çalışmanın iki sorunu vardır:
 
-    1) Bekleme bloke edilerek değil meşgul bir döngüde (busy loop) yapılmaktadır. Yani bir thread kritik kod içerisindeyse
-    diğeri CPU zamanı harcayarak meşgul bir döngüde sürekli bekler. 
+    1) Bekleme bloke edilerek değil meşgul bir döngüde (busy loop) yapılmaktadır. Yani bir thread kritik kod bloğu 
+    içerisindeyse diğeri CPU zamanı harcayarak meşgul bir döngüde sürekli bekler. 
     
     2) Yukarıdaki kodun diğer bir sorunu da kodda açık bir  pencerenin bulunmasıdır:
 
@@ -104,9 +104,9 @@
     .....
     g_flag = 0;
     
-    Burada ok belirtilen noktada thread'ler arası geçiş oluşursa birden fazla thread kritik koda girebilir. İşte 
+    Burada ok belirtilen noktada thread'ler arası geçiş oluşursa birden fazla thread kritik kod bloğuna girebilir. İşte 
     bu sakıncayı ortadan kaldırmak için özel makine komutlarından faydalanılmaktadır. Bugün bilgisayar sistemlerinde 
-    birden fazla işlemci ya da çekirdek bulunabildiği için kritik kod oluşturan sistem programcılarının bunlara 
+    birden fazla işlemci ya da çekirdek bulunabildiği için kritik kod bloğunu oluşturan sistem programcılarının bunlara 
     dikkat etmesi gerekir. Linux'un çekirdek kodlarında zaten çeşitli senaryolar için kullanılabilecek senkronizasyon 
     nesneleri hazır biçimde bulunmaktadır. Bu bölümde biz bu senkronizasyon nesnelerini ele alacağız. Bölümün sonlarına 
     doğru da bu senkronizasyon nesnelerinin oluşturulabilmesi için gereken makine komutları hakkında bilgiler vereceğiz. 
@@ -141,7 +141,7 @@
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Kritik kod oluşturmak için en çok kullanılan senkronizasyon nesnelerinden biri "mutex (mutual exclusion)" denilen 
+    Kritik kod bloğu oluşturmak için en çok kullanılan senkronizasyon nesnelerinden biri "mutex (mutual exclusion)" denilen 
     nesnelerdir. (UNIX/Linux sistemlerinde kullanıcı modundan kullanılabilecek mutex nesneleri de vardır. Yukarıda 
     belirttiğimiz gibi biz burada çekirdeğin içerisinde bulunan mutex nesneleri üzerinde duracağız.) Mutex nesneleri 
     Linux çekirdeğine 2.6 versiyonlarıyla eklenmiştir. Bundan önce mutex işlemleri ikili semaphore'larla yapılıyordu. 
@@ -151,27 +151,28 @@
     kuyruklarında bekletebilmektedir.
 
     Mutex mekanizması şöyle işletilmektedir: Önce global düzeyde ya da çekirdeğin heap sisteminde bir mutex nesnesi 
-    yaratılır. Kritik koda girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin ele 
+    yaratılır. Kritik kod bloğuna girişte bu mutex nesnesinin sahipliği ele geçirilmeye çalışılır. Mutex'in sahipliğinin 
+    ele 
     geçirilmesine "mutex'in kilitlenmesi (mutex lock)" de denilmektedir. Eğer mutex'in sahipliği ele geçirilirse (yani 
-    mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik koda giremez. 
+    mutex kilitlenirse) sahiplik bırakılana kadar (yani kilit bırakılana kadar) başka bir thread kritik kod bloğuna giremez. 
     Mutex'in sahipliğini almaya çalışan thread mutex kilitli ise bloke olarak mutex kilidi açılana kadar bekler. Mutex'in 
-    sahipliğini almış olan thread kritik koddan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). 
-    Böylece blokede bekleyen thread'lerden biri mutex'in sahipliğini alarak kritik koda girer. Kritik kod tipik olarak 
-    şöyle oluşturulmaktadır:
+    sahipliğini almış olan thread kritik kod bloğundan çıkarken mutex'in sahipliğini bırakır (yani mutex'in kilidini açar). 
+    Böylece blokede bekleyen thread'lerden biri mutex'in sahipliğini alarak kritik kod bloğuna girer. Kritik kod bloğu 
+    tipik olarak şöyle oluşturulmaktadır:
 
     mutex_lock(...);
     ...
-    ...    <KRİTİK KOD>
+    ...    <KRİTİK KOD BLOĞU>
     ...
     mutex_unlock(...);
 
-    Akışlardan biri mutex_lock fonksiyonuna geldiğinde eğer mutex kilitlenmemişse mutex'i kilitler ve kritik koda giriş 
-    yapar. Eğer mutex zaten kilitlenmişse mutex_lock fonksiyonunda thread bloke edilir ve bekleme kuyruğuna alınır. 
-    Kritik koda girmiş olan akış mutex_unlock fonksiyonu ile mutex nesnesinin kilidini bırakır. Böylece nesneyi bekleyen 
-    thread'lerden biri nesnenin sahipliğini alarak mutex'i kilitler. Birden fazla akışın mutex_lock fonksiyonunda 
-    bloke edilmesi durumunda mutex'in kilidi açıldığında bunlardan hangisinin mutex kilidini alarak kritik koda gireceği 
-    konusunda bir garanti verilmemektedir. (İlk bloke olan akışın mutex kilidini alarak kritik koda gireceğini 
-    düşünebilirsiniz, ancak bunun bir garantisi yoktur.)
+    Akışlardan biri mutex_lock fonksiyonuna geldiğinde eğer mutex kilitlenmemişse mutex'i kilitler ve kritik kod bloğuna 
+    giriş yapar. Eğer mutex zaten kilitlenmişse mutex_lock fonksiyonunda thread bloke edilir ve bekleme kuyruğuna alınır. 
+    Kritik kod bloğuna girmiş olan akış mutex_unlock fonksiyonu ile mutex nesnesinin kilidini bırakır. Böylece nesneyi 
+    bekleyen thread'lerden biri nesnenin sahipliğini alarak mutex'i kilitler. Birden fazla akışın mutex_lock fonksiyonunda 
+    bloke edilmesi durumunda mutex'in kilidi açıldığında bunlardan hangisinin mutex kilidini alarak kritik kod bloğuna 
+    gireceği konusunda bir garanti verilmemektedir. (İlk bloke olan akışın mutex kilidini alarak kritik kod bloğuna 
+    gireceğini düşünebilirsiniz, ancak bunun bir garantisi yoktur.)
 
     Çekirdekteki mutex mekanizmasının tipik gerçekleştirimi şöyledir:
 
@@ -291,8 +292,21 @@
 
     Aşağıda mutex mekanizmasının çalışmasına ilişkin bir örnek verilmiştir. Burada aygıt sürücü için iki ioctl kodu 
     oluşturulmuştur. IOCTL_TEST1 kodunda mutex'in sahipliği alınıp 30 saniye beklenmektedir. IOCTL_TEST2 kodunda ise 
-    bekleme yapılmadan mutex'in sahipliği alınmak istenmiştir. Test için önce "test-sync1" programını sonra da başka 
-    bir terminalde "test-sync2" programını çalıştırmalısınız. Mesajları "dmesg" komutuyla inceleyebilirsiniz. 
+    bekleme yapılmadan mutex'in sahipliği alınmak istenmiştir. Test için farklı terminallerde önce "test-sync1" programını 
+    sonra da başka "test-sync2" programını çalıştırmalısınız. Mesajları "dmesg" komutuyla inceleyebilirsiniz. 
+
+    Aygıt sürücüyü şöyle derleyebilirsiniz:
+
+    $ make file=test-driver
+
+    Aşağıdaki gibi yükleyebilirsiniz:
+
+    $ sudo ./load test-driver
+
+    Farklı terminallerden "test-sync1" ve "test-sync2" programlarını çalıştırdıktan sonra aygıt sürücüyü çekirdekten 
+    çıkarmalısınız:
+
+     $ sudo ./unload test-driver
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* test-driver.h */
@@ -502,7 +516,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
     perror(msg);
-
     exit(EXIT_FAILURE);
 }
 
@@ -535,7 +548,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
     perror(msg);
-
     exit(EXIT_FAILURE);
 }
 
@@ -551,7 +563,7 @@ void exit_sys(const char *msg)
     #endif
         struct list_head	wait_list;
     #ifdef CONFIG_DEBUG_MUTEXES
-        void			*magic;
+        void    *magic;
     #endif
     #ifdef CONFIG_DEBUG_LOCK_ALLOC
         struct lockdep_map	dep_map;
@@ -560,7 +572,7 @@ void exit_sys(const char *msg)
 
     Yapıya bazı elemanların konfigürasyon seçeneklerine bağlı olarak eklendiğine dikkat ediniz. Burada owner elemanı 
     mutex kilidi için kullanılmaktadır. wait_lock elemanı nesnenin bazı elemanlarına erişirken nesneyi korumak için 
-    bulundurulmuştur. Bloke olan thread'ler yapının wait_list elemanında kaydedilmemiktedir. mutex_lock fonksiyonu 
+    bulundurulmuştur. Bloke olan thread'ler yapının wait_list elemanına kaydedilmektedir. mutex_lock fonksiyonu 
     "kernel/locking/mutex.c" dosyasında şöyle tanımlanmıştır:
 
     void __sched mutex_lock(struct mutex *lock)
@@ -574,7 +586,7 @@ void exit_sys(const char *msg)
     #endif
 
     Buradaki might_sleep fonksiyonu eğer mutex nesnesi "atomik bir bağlamda (atomic context)" çağrılmışsa debug mesajları
-    oluşturmaktadır. Bunun dışında çaışma üzerinde bir etkisi yoktur.  __mutex_trylock_fast fonksiyonu kilide bakıp eğer 
+    oluşturmaktadır. Bunun dışında çalışma üzerinde bir etkisi yoktur.  __mutex_trylock_fast fonksiyonu kilide bakıp 
     eğer kilit açıksa hemen onu almaktadır. Kilit kapalı ise __mutex_lock_slowpath fonksiyonu çağrılmaktadır. Bu 
     fonksiyon kendi içerisinde yukarıda belirttiğimiz gibi önce spin yaparak kilidin açılmasını beklemekte eğer kilit 
     açılmazsa thread'i wait kuyruğuna yerleştirerek bloke olmaktadır. Linux çekirdeğinin ileri versiyonlarındaki bu 
@@ -594,41 +606,42 @@ void exit_sys(const char *msg)
     sözcüğü ile karıştırmayınız.) Eskiden Linux çekirdeklerinde mutex nesneleri yoktu. Mutex nesneleri yerine sonraki 
     paragraflarda açıklayacağımız ikili (binary) semaphore nesneleri kullanılıyordu. 
 
-    Semaphore'lar sayaçlı senkronizasyon nesneleridir. Kritik koda en fazla n tane thread'in girebilmesini sağlamaktadır. 
-    Örneğin biz kritik koda en fazla 3 thread'in girebilmesini isteyelim. Bu durumda birinci thread kritik koda girecektir. 
-    İkinci thread de üçüncü thread de girecektir. Ancak dördüncü ve beşinci thread'ler kritik koda giremeyecek ve bloke 
-    edilerek bekleme kuyruklarında bekletilecektir. Kritik kod içerisindeki üç thread'ten birinin kritik kodda çıktığını 
-    varsayalım. Bu durumda kritik koda girmek için bekleyen thread'lerden biri kritik koda girecektir. Görüldüğü gibi 
-    kritik kodun içerisinde en fazla 3 thread bulunabilmektedir. 
+    Semaphore'lar sayaçlı senkronizasyon nesneleridir. Kritik kod bloğuna en fazla n tane thread'in girebilmesini sağlamaktadır. 
+    Örneğin biz kritik kod bloğuna en fazla 3 thread'in girebilmesini isteyelim. Bu durumda birinci thread kritik kod
+    bloğuna girecektir. İkinci thread de üçüncü thread de girecektir. Ancak dördüncü ve beşinci thread'ler kritik kod 
+    bloğuna giremeyecek ve bloke edilerek bekleme kuyruklarında bekletilecektir. Kritik kod bloğu içerisindeki üç thread'ten 
+    birinin kritik kod bloğundan çıktığını varsayalım. Bu durumda kritik kod bloğuna girmek için bekleyen thread'lerden biri
+    kritik kod bloğuna girecektir. Görüldüğü gibi kritik kod bloğunun içerisinde en fazla 3 thread bulunabilmektedir. 
 
-    Kritik koda en fazla n tane thread'in girebilmesinin sağlanması size anlamsız gelebilir. Ne de olsa kritik koddaki 
-    iki thread bile paylaşılan kaynağı bozabilmektedir. Ancak semaphore'lar genellikle kaynak paylaştırmak için 
-    kullanılmaktadır. Örneğin elimizde üç kaynak olabilir. Her gelen thread'e bunlardan birini tahsis edebiliriz. 
-    Bu durumda ilk üç thread'e eldek, üç kaynak atanacaktır ancak kaynağı talep eden diğer thread'ler CPU zamanı harcamadan 
-    blokede bekletilecektir. İşte bu mekanizma semapore nesneleriyle oluşturulabilmektedir. 
+    Kritik kod bloğuna en fazla n tane thread'in girebilmesinin sağlanması size anlamsız gelebilir. Ne de olsa kritik 
+    kod bloğundaki iki thread bile paylaşılan kaynağı bozabilmektedir. Ancak semaphore'lar genellikle kaynak paylaştırmak 
+    için kullanılmaktadır. Örneğin elimizde üç kaynak olabilir. Her gelen thread'e bunlardan birini tahsis edebiliriz. 
+    Bu durumda ilk üç thread'e eldeki üç kaynak atanacaktır ancak kaynağı talep eden diğer thread'ler CPU zamanı 
+    harcamadan blokede bekletilecektir. İşte bu mekanizma semaphore nesneleriyle oluşturulabilmektedir. 
     
-    Semaphore nesnelerinin bir başlangıç sayaç değeri vardır. Bu başlangıç sayaç değeri kritik koda en fazla kaç thread'in 
-    girebileceğini belirtir. Kritik koda giren thread bu sayaç değerini azaltır, çıkan thread bu sayaç değerini artırır. 
-    Eğer semaphore'un sayacı 0 ise kritik koda girmek isteyen thread bloke edilerek bekletilir. Ta ki sayaç değeri 0'dan 
-    büyük olana kadar. Tabii sayacın artırılması ve azaltılması atomik bir biçimde yapılmaktadır. 
+    Semaphore nesnelerinin bir başlangıç sayaç değeri vardır. Bu başlangıç sayaç değeri kritik kod bloğuba en fazla kaç 
+    thread'in girebileceğini belirtir. Kritik koda giren thread bu sayaç değerini azaltır, çıkan thread bu sayaç değerini 
+    artırır. Eğer semaphore'un sayacı 0 ise kritik koda girmek isteyen thread bloke edilerek bekletilir. Ta ki sayaç 
+    değeri 0'dan büyük olana kadar. Tabii sayacın artırılması ve azaltılması atomik bir biçimde yapılmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Çekirdek semaphore nesnelerini şöyle kullanılmaktadır:
 
-    1) Semaphore nesnesi semaphore isimli bir yapıyla temsil edilmiştir. Güncel çekirdeklerede semaphore yapısı şöyledir:
+    1) Semaphore nesnesi semaphore isimli bir yapıyla temsil edilmiştir. Güncel çekirdeklerede semaphore yapısı şöyle
+    bildirilmiştir:
 
     struct semaphore {
         raw_spinlock_t		lock;
         unsigned int		count;
         struct list_head	wait_list;
 
-    #ifdef CONFIG_DETECT_HUNG_TASK_BLOCKER"
+    #ifdef CONFIG_DETECT_HUNG_TASK_BLOCKER
         unsigned long		last_holder;
     #endif
     };
 
-    Buradaki lock elemanı nesne üzerinde işlem yaparken kritik kod oluşturmak için kullanılmaktadır. count elemanı 
+    Buradaki lock elemanı nesne üzerinde işlem yaparken kritik kod bloğu oluşturmak için kullanılmaktadır. count elemanı 
     semaphore sayacının o anki değerini belirtmektedir. wait_list elemanı ise bloke olan thread'lerin saklandığı bekleme 
     kuyruğunu temsil etmektedir. last_holder elemanın konfigürasyon seçeneği ile yapıya eklendiğine dikkat ediniz. 
     Bu eleman semaphore'dan geçen son thread'e ilişkin bilgiyi tutmaktadır. 
@@ -645,7 +658,7 @@ void exit_sys(const char *msg)
     #define DEFINE_SEMAPHORE(_name, _n)	                        \
 	    struct semaphore _name = __SEMAPHORE_INITIALIZER(_name, _n)
 
-    Buaradaki __SEMAPHORE_INITIALIZER makrosu da şöyle tanımlanmıştır:
+    Buradaki __SEMAPHORE_INITIALIZER makrosu da şöyle tanımlanmıştır:
 
     #define __SEMAPHORE_INITIALIZER(name, n)				    \
     {									                        \
@@ -657,14 +670,14 @@ void exit_sys(const char *msg)
 
     DEFINE_SEMAPHORE makrosunun birinci parametresi semaphore değişkeninin ismini, ikinci parametresi ise başlangıç 
     semaphore sayacını belirtmektedir. Eskiden DEFINE_SEMAPHORE makrosu tek parametreliydi. Semaphore sayacı da default 
-    1 değeriyle olarak oluşturuluyordu. Bu makro 6.4 çeekirdeği ile birlikte iki parametreli hale getirilmiştir. 2.6 
+    1 değeriyle olarak oluşturuluyordu. Bu makro 6.4 çekirdeği ile birlikte iki parametreli hale getirilmiştir. 2.6 
     çekirdeği öncesinde bu makro yerine DECLARE_MUTEX makrosu kullanılıyordu. 
 
     Semaphore nesnelerine başlangıç değerlerini vermek için ayrıca sema_init isimli bir fonksiyon da bulundurulmuştur. 
     Çünkü bazen semaphore nesnelerine ilkdeğer vermek mümkün olmayabilir. (Örneğin semaphore nesnesi çekirdeğin 
     heap alanında yaratılıyor olabilir.) Fonksiyonun prototipi şöyledir:
 
-    #define <linux/semaphore.h>
+    #include <linux/semaphore.h>
     
     void sema_init(struct semaphore *sem, int val);
 
@@ -681,8 +694,8 @@ void exit_sys(const char *msg)
 
     Fonksiyonun içerisinde ilkdeğer verme işleminin "designated initializer" sentaksıyla yapıldığına dikkat ediniz. 
 
-    2) Kritik kod down ve up fonksiyonları arasına alınır. down"fonksiyonları sayacı bir eksilterek kritik koda 
-    giriş yapar. up fonksiyonu ise sayacı bir artırmaktadır. Fonksiyonların prototipleri şöyledir:
+    2) Kritik kod bloğu down ve up fonksiyonları arasına alınır. down fonksiyonları sayacı bir eksilterek kritik kod 
+    bloğuna  giriş yapar. up fonksiyonu ise sayacı bir artırmaktadır. Fonksiyonların prototipleri şöyledir:
 
     #define <linux/semaphore.h>
 
@@ -693,10 +706,10 @@ void exit_sys(const char *msg)
     int down_timeout(struct semaphore *sem, long jiffies);
     void up(struct semaphore *sem);
 
-    Kritik kod down fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılamamaktadır. Ancak kritik 
-    kod down_interruptible fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. 
-    (Örneğin biz kritik koda down fonksiyonuyla girmiş olalım. Therad'imizin bloke olduğunu varsayalım. Şimdi kullanıcı 
-    modunda Ctrl+C tuşuşla SIGINT sinyalini oluşturduğumuzda bu bloke çözülmeyecektir.) down_interruptible fonksiyonu 
+    Kritik kod bloğu down fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılamamaktadır. Ancak 
+    kritik kod down_interruptible fonksiyonu ile oluşturulduğunda thread bloke olursa sinyal yoluyla uyandırılabilmektedir. 
+    (Örneğin biz kritik kod bloğuna down fonksiyonuyla girmiş olalım. Thread'imizin bloke olduğunu varsayalım. Şimdi 
+    kullanıcı modunda Ctrl+C tuşuyla SIGINT sinyalini oluşturduğumuzda bu bloke çözülmeyecektir.) down_interruptible fonksiyonu 
     normal sonlanmada 0 değerine, sinyal yoluyla sonlanmada -ERESTARTSYS değeri ile geri döner. Normal uygulama eğer bu 
     fonksiyonlar -ERESTARTSYS ile geri dönerse aygıt sürücüdeki fonksiyonun da aynı değerle geri döndürülmesidir. Zaten 
     çekirdek bu -ERESTARTSYS geri dönüş değerini aldığında asıl sistem fonksiyonunu eğer sinyal için otomatik restart 
@@ -714,7 +727,7 @@ void exit_sys(const char *msg)
 
     up fonksiyonu yukarıda da belirttiğimiz gibi semaphore sayacını 1 artırmaktadır. 
 
-    Bu durumda semaphore nesneleri ile kritik kod tipik olarak şöyle oluşturulmaktadır:
+    Bu durumda semaphore nesneleri ile kritik kod bloğu tipik olarak şöyle oluşturulmaktadır:
 
     down_interruptible(&sem);
     .....
@@ -932,7 +945,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
     perror(msg);
-
     exit(EXIT_FAILURE);
 }
 
@@ -965,7 +977,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
     perror(msg);
-
     exit(EXIT_FAILURE);
 }
 
@@ -980,15 +991,15 @@ void exit_sys(const char *msg)
 
     2) Linux çekirdeğinde semaphore nesneleri spin yapmamaktadır. Bir kez semaphore sayacına bakılmakta, eğer sayaç 
     sıfırsa hemen thread bloke edilmektedir. Halbuki mutex nesnelerinde "optimistic spinning" işlemi yapılmaktadır. 
-    Yani "nesne belki açılır" diye bloke biraz ertelenmektedir. 
+    Yani "kilit belki açılır" diye bloke biraz ertelenmektedir. 
 
     3) Mutex nesnelerinin kilidi alındığında çekirdek yüksek öncelikli bloke olmuş thread'lerin önceliklerini biraz 
     yükseltmektedir. Ancak semaphore nesnelerinde bu yapılmamaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Linux çekirdeklerinde belki de en yoğun kullanılan senkronizasyon nesnesi "spinlock" denilen nesnedir. Spinlock 
-    nesneleri hiçbir zaman blokeye yol açmamaktadır. Bu nesnelerde lock yapılmak istendğinde eğer kilit başka bir akış 
+    Linux çekirdeklerinde belki de en yoğun kullanılan senkronizasyon nesneleri "spinlock" denilen nesnelerdir. Spinlock 
+    nesneleri hiçbir zaman blokeye yol açmamaktadır. Bu nesnelerde lock yapılmak istendiğinde eğer kilit başka bir akış 
     tarafından zaten alınmışsa bir döngü içerisinde sürekli "acaba kilit açıldı mı?" diye kilide bakılmaktadır. Spinlock 
     nesnelerinin "meşgul döngü (busy loop)" oluşturduğuna dikkat ediniz. İlk bakışta bu nesnelerin kullanılmasının 
     önemli bir CPU zamanının harcanmasına yol açacağını düşünebilirsiniz. Ancak bu nesneler çekirdek tasarımcıları 
@@ -1003,21 +1014,21 @@ void exit_sys(const char *msg)
     Spinlock nesnelerinde kilit alındığında aynı zamanda ilgili CPU'da ya da çekirdekte threadler arası geçiş (context 
     switch) kapatılmaktadır. Böylece kilit bırakılana kadar kodun kesilmemesi garanti edilmiş olur. (Tabii birden çok 
     CPU ya da çekirdek söz konusu olduğunda yalnızca ilgili CPU'daki ya da çekirdekteki thread'ler arası geçiş 
-    kapatılmaktadır.) Eğer ilgili CPU ya da çekirdek thread'ler arası geçişe kapatılmasaydı bu durumda başka bir thread 
-    işlemi kesebilir ve başka thread'ler aynı spinlock nesnesini kilitlemeye çalıştığında tüm quantumta süresince CPU'yu 
+    kapatılmaktadır.) Eğer ilgili işlemci ya da çekirdek thread'ler arası geçişe kapatılmasaydı bu durumda başka bir thread 
+    işlemi kesebilir ve başka thread'ler aynı spinlock nesnesini kilitlemeye çalıştığında tüm quantum'da süresince CPU'yu 
     meşgul bırakabilirdi.
 
     Spinlock nesneleri "çok işlemcili ya da çok çekirdekli" sistemlerde anlamlı nesnelerdir. Tek işlemcili ya da tek 
     çekirdekli sistemlerde spin yapmanın hiçbir anlamı yoktur. Örneğin tek işlemcili ya da tek çekirdekli bir sistem 
     söz konusu olsun. Bu sistemlerde hiçbir zaman zaten bir thread spinlock nesnesini kilitli göremez. Çünkü spinlock'a
-    girildiğinde zaten işlemci ya da çekirdek thread'ler arası geçişe kapatılmaktadır. spinlock ile korunan kritik kod da 
-    zaten hiç kesilmeden çalıştırılmaktadır. Bu durumda her zaman zaten spinlock kilidini alan thread'in onu bırakacağı
-    garanti edilmektedir. O halde spinlock kullanımından asıl amaç başka bir işlemci ya da çekirdek kritik koda girmişse
-    o çıkana kadar spin yapmaktır. Peki aşağıdaki açıklayacağımız çekirdek fonksiyonları hem tek işlemcili ya da 
-    çekirdekli hem de çok işlemcili ya da çekirdekli sistemlerde çalıştığına göre tek işlemcili ya da tek çekirekli 
-    sistemlerde spin işlemi nasıl devre dışı bırakılmaktadır? İşte çekirdek kodları bu durumda CONFIG_SMP konfigürasyon
-    parametresine bakmaktadır. Sembolik kod olarak çok işlemcili ya da çok çekirdekli sistemlerde spinlock fonksiyonarı 
-    şu yapıdadır:
+    girildiğinde zaten işlemci ya da çekirdek thread'ler arası geçişe kapatılmaktadır. spinlock ile korunan kritik kod 
+    bloğu da zaten hiç kesilmeden çalıştırılmaktadır. Bu durumda her zaman zaten spinlock kilidini alan thread'in onu 
+    bırakacağı garanti edilmektedir. O halde spinlock kullanımından asıl amaç başka bir işlemci ya da çekirdek kritik 
+    kod bloğuna girmişse o çıkana kadar spin yapmaktır. Peki aşağıdaki açıklayacağımız çekirdek fonksiyonları hem tek 
+    işlemcili ya da çekirdekli hem de çok işlemcili ya da çekirdekli sistemlerde çalıştığına göre tek işlemcili ya da 
+    tek çekirdekli sistemlerde spin işlemi nasıl devre dışı bırakılmaktadır? İşte çekirdek kodları bu durumda CONFIG_SMP 
+    konfigürasyon parametresine bakmaktadır. Sembolik kod olarak çok işlemcili ya da çok çekirdekli sistemlerde spinlock 
+    fonksiyonları şu yapıdadır:
 
     spin_lock(...) 
     {
@@ -1124,17 +1135,17 @@ void exit_sys(const char *msg)
     void spin_lock_bh(spinlock_t *lock);
 
     spin_lock fonksiyonu klasik spin yapan fonksiyondur. Bu fonksiyon thread'ler arası geçişi (preemption mekanizmasını) 
-    kapatır, ancak kesmeleri kapatmaz. Preemption işleminin kapatılması IRQ'ların (yani donnaım kesmelerinin) kapatıldığı 
+    kapatır, ancak kesmeleri kapatmaz. Preemption işleminin kapatılması IRQ'ların (yani donanım kesmelerinin) kapatıldığı 
     anlamına gelmemektedir. İşte spin_lock_irq fonksiyonu o anda çalışılan işlemcideki IRQ'ları da (yani donanım kesmelerini 
     de) kapatarak kilidi almaktadır. Yani biz bu fonksiyonla kilidi almışsak kilidi bırakana kadar donanım kesmeleri o 
     işlemcide oluşmayacaktır. (Ancak diğer işlemcilerde aynı IRQ oluşabilir ve kesme kodu aynı kilidi almaya çalışırsa 
-    spin işlemi yapılabilir.) spin_lock_irqsave fonksiyonu ise hem o anda çılışılan işlemcideki kesmeleri kapatır hem de 
+    spin işlemi yapılabilir.) spin_lock_irqsave fonksiyonu ise hem o anda çalışılan işlemcideki kesmeleri kapatır hem de 
     işlemcinin bayrak yazmacını da saklar. Aslında bu fonksiyonların bazıları makro olarak yazılmıştır. Örneğin 
     spin_lock_irqsave aslında bir makrodur. Biz bu fonksiyonun ikinci parametresine nesne adresini geçmiyor olsak da 
     bu bir makro olduğu için ikinci parametrede verdiğimiz nesnenin içerisine IRQ durumları yazılmaktadır. spin_lock_irqsave 
     fonksiyonu ile IRQ durumunun flags değişkenine kaydedilmesinin nedeni kilit bırakılırken IRQ durumunun kilit alınmadan 
-    önceki biçimde bırakılmasının sağlanması içindir. (Örneğin spin_lock_irqsave donksiyonundan önce zaten yerel kesmeler 
-    disable edilmişse kilidi bırakırken yerek kesmelerin enable edilmemesi gerekir.) spin_lock_bh fonksiyonu ise yalnızca 
+    önceki biçimde bırakılmasının sağlanması içindir. (Örneğin spin_lock_irqsave fonksiyonundan önce zaten yerel kesmeler 
+    disable edilmişse kilidi bırakırken yerel kesmelerin enable edilmemesi gerekir.) spin_lock_bh fonksiyonu ise yalnızca 
     yazılım kesmelerini kapatmaktadır. 
 
     3) Spinlock kilidini bırakmak için spin_unlock fonksiyonları kullanılmaktadır:
@@ -1147,12 +1158,12 @@ void exit_sys(const char *msg)
     void spin_unlock_bh(spinlock_t *lock);
 
     lock fonksiyonlarının hepsinin birer unlock karşılığının olduğunu görüyorsunuz. Biz kilidi hangi lock fonksiyonu ile 
-    almışsak o unlock fonksiyonu ile bırakmalıyız. Kritik kod spin_lock ile spin_unlock fonksiyonları arasında alınmalıdır. 
+    almışsak o unlock fonksiyonu ile bırakmalıyız. Kritik kod bloğu spin_lock ile spin_unlock fonksiyonları arasında alınmalıdır. 
     Örneğin:
 
     spin_lock(&g_spinlock);
     ...
-    ... <KRİTİK KOD>
+    ...     <KRİTİK KOD BLOĞU>
     ...
     spin_unlock(&g_spinlock);
 
@@ -1163,7 +1174,7 @@ void exit_sys(const char *msg)
 
     spin_lock_irqsave(&g_spinlock, irqstate);
     ...
-    ... <KRİTİK KOD>
+    ...     <KRİTİK KOD BLOĞU>
     ...
     spin_unlock_irqrestore(&g_spinlock, irqstate);
 
@@ -1175,7 +1186,7 @@ void exit_sys(const char *msg)
     int spin_trylock_bh(spinlock_t *lock);
 
     Bu fonksiyonlar eğer spinlock kilitliyse spin yapmazlar ve 0 ile geri dönerler. Eğer kilidi alırlarsa sıfır dışı bir 
-    değerle geri dönerler. Böylece çekirdek programcısı eğer spinlock kilidi başka bir işlemci tarafndan alınmışsa 
+    değerle geri dönerler. Böylece çekirdek programcısı eğer spinlock kilidi başka bir işlemci tarafından alınmışsa 
     başka işlemler yapabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -1184,7 +1195,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Biz simplfs dosya sistemimizde kendi süper blok nesnemize yaptığımız eşzamanlı (concurrent) erişimlerde kodumuz 
+	Biz simplefs dosya sistemimizde kendi süper blok nesnemize yaptığımız eşzamanlı (concurrent) erişimlerde kodumuz 
     zarar görmesin diye spinlock nesnesi kullanmıştık. Çağırdığımız çekirdek fonksiyonları ise zaten çekirdek nesnelerine 
     erişirken kendi içlerinde spinlock nesnelerini kullanıyordu. Dolayısıyla bizim simplefs dosya sisteminde yalnızca 
     kendimize ilişkin nesneleri korumamız yetiyordu. Kodumuzun bu kısmını anımsatmak istiyoruz:
@@ -1223,13 +1234,13 @@ void exit_sys(const char *msg)
     }
 
     spinlock nesnesini bir fonksiyon içerisinde kilitlediyseniz fonksiyondan geri dönmeden önce onun kilidini açmayı
-    unutmayınız. Yukarıdakş fonksiyonda da fonksiyondan çıkmadan önce spinlock kildinin açıldığına dikkat ediniz.
+    unutmayınız. Yukarıdaki fonksiyonda da fonksiyondan çıkmadan önce spinlock kilidinin açıldığına dikkat ediniz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Spinlock nesnelerinin "kısa sürecek kritimk kodlar için" kullanılması uygundur. Aksi takdirde diğer işlemci ya da 
+    Spinlock nesnelerinin "kısa sürecek kritik kod blokları için" kullanılması uygundur. Aksi takdirde diğer işlemci ya da 
     çekirdekteki kilidin bekleyen thread'ler meşgul döngüde spin yaparak uzun süre beklerler bu da gereksiz CPU zamanının
-    harcanmasına yok açar. Spinlock kilidi alındıktan sonra akışın bloke olmadan hızlı bir biçimde kilidi geri bırakması 
+    harcanmasına yol açar. Spinlock kilidi alındıktan sonra akışın bloke olmadan hızlı bir biçimde kilidi geri bırakması 
     gerekir. Spinlock kilidi alındıktan sonra bloke oluşması pek çok soruna yol açabilmektedir. IRQ bağlamında (yani 
     IRQ kesme kodları içerisinde) mutex gibi semaphore gibi blokeye yol açabilecek senkronizasyon nesneleri kullanılmamalıdır.
     Bu tür durumlarda spinlock kullanılmalıdır. Aşağıdaki tabloda spinlock kullanımı ile mutex kullanımı çeşitli bakımlardan
@@ -1282,25 +1293,26 @@ void exit_sys(const char *msg)
     kaynakta (burada bağlı liste) bir durum değişikliğine yol açmadığı için farklı thread'lerden aynı anda yürütülebilmektedir. 
     Ancak bağlı listeye eleman ekleyen thread bu işlem sırasında bağlı listenin düğümlerini değiştirdiği için tam o 
     sırada başka bir thread de aynı bağlı listeye ekleme yaparsa ya da ondan arama yaparsa bu durum çökmeye yol açabilir. 
-    Burada bağlı listeye eleman eklemek bir "yazma (write)" işlemi olarak düşünülebilir. O halde bizim öyle bir kritik kod 
-    oluşturmamız gerekir ki birden fazla okuma yapan thread bu kritik koda nekleme yapmadan girebilsin ancak bir thread 
-    okuma yaparken yazma yapan bir thread okuma yapan thread kritik koddan çıkana kadar beklesin. Benzer biçimde eğer yazma 
-    yapan bir thread kritik koda girmişse bu işlem bitene kadar okuma yapan bir thread de kritik koda giremesin. Aşağıda 
-    Thread-1 kritik koda girmişse Thread-2'nin kritik koda girip girmeyeceği bir tablo biçiminde verilmiştir:
+    Burada bağlı listeye eleman ekleme bir "yazma (write)" işlemi olarak ele alınabilir. O halde bizim öyle bir kritik kod 
+    bloğu oluşturmamız gerekir ki birden fazla okuma yapan thread bu kritik kod bloğuna bekleme yapmadan girebilsin ancak 
+    bir thread okuma yaparken yazma yapan bir thread okuma yapan thread kritik kod bloğundan çıkana kadar beklesin. Benzer 
+    biçimde eğer yazma yapan bir thread kritik kod bloğuna girmişse bu işlem bitene kadar okuma yapan bir thread de kritik 
+    kod bloğuna giremesin. Aşağıda Thread-1 kritik kod bloğuna girmişse Thread-2'nin kritik kod bloğuna girip girmeyeceği 
+    bir tablo biçiminde verilmiştir:
 
-    ┌────────────┬────────────┬────────────────────────────────────┐
-    │  Thread-1  │  Thread-2  │ Thread-2 Kritik Koda Girebilir mi? │
-    ├────────────┼────────────┼────────────────────────────────────┤
-    │   Okuma    │   Okuma    │               Evet                 │
-    ├────────────┼────────────┼────────────────────────────────────┤
-    │   Okuma    │   Yazma    │               Hayır                │
-    ├────────────┼────────────┼────────────────────────────────────┤
-    │   Yazma    │   Okuma    │               Hayır                │
-    ├────────────┼────────────┼────────────────────────────────────┤
-    │   Yazma    │   Yazma    │               Hayır                │
-    └────────────┴────────────┴────────────────────────────────────┘
+    ┌────────────┬────────────┬───────────────────────────────────────────┐
+    │  Thread-1  │  Thread-2  │ Thread-2 Kritik Kod Bloğuna Girebilir mi? │
+    ├────────────┼────────────┼───────────────────────────────────────────┤
+    │   Okuma    │   Okuma    │                  Evet                     │
+    ├────────────┼────────────┼───────────────────────────────────────────┤
+    │   Okuma    │   Yazma    │                  Hayır                    │
+    ├────────────┼────────────┼───────────────────────────────────────────┤
+    │   Yazma    │   Okuma    │                  Hayır                    │
+    ├────────────┼────────────┼───────────────────────────────────────────┤
+    │   Yazma    │   Yazma    │                  Hayır                    │
+    └────────────┴────────────┴───────────────────────────────────────────┘
     
-    Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalar için kritik koda girilmesine izin vermektedir. 
+    Görüldüğü gibi bu mekanizma yalnızca eş zamanlı okumalar için kritik kod bloğuna girilmesine izin vermektedir. 
 
     Böyle bir mekanizma tek başına mutex ya da semaphore nesneleriyle sağlanamaz. Aşağıdaki temsili koda (pseudo code) 
     dikkat ediniz:
@@ -1322,15 +1334,15 @@ void exit_sys(const char *msg)
     }
 
     Burada birden fazla okuma işlemi de blokeye yol açacaktır. Halbuki bizim istediğimiz birden fazla okumanın kilide 
-    yakalanmadan kritik koda yapılabilmesidir.
+    yakalanmadan yapılabilmesidir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Linux çekirdeğinde readers/writer lock nesneleri spinlock mekanizmasıyla çalışmaktadır. Yani bu nesneler thread'i 
     bloke ederek uykuya yatırmazlar. Thread'ler arası geçişi (preemption) kapatarak meşgul bir döngüde kilidin açılmasını 
     beklerler. Yine bu nesnelerin de tek işlemcili ya da tek çekirdekli sistemlerde bir kullanımı yoktur. Bu sistemlerde 
-    bu kilit fonksiyonları yalnızca thread'ler arası geçişi kapatıp açmaktadır. (Yani kritik kodun kesilmeden çalıştırılmasını
-    sağlamaktadır.)
+    bu kilit fonksiyonları yalnızca thread'ler arası geçişi kapatıp açmaktadır. (Yani kritik kod bloğunun kesilmeden 
+    çalıştırılmasını sağlamaktadır.)
     
     Okuma yazma kilitleri rwlock_t türünden bir yapıyla temsil edilmektedir. Bu yapı güncel çekirdeklerde şöyle bildirilmiştir:
 
@@ -1360,15 +1372,13 @@ void exit_sys(const char *msg)
 
     #define DEFINE_RWLOCK(x)	rwlock_t x = __RW_LOCK_UNLOCKED(x)
 
-    wrlock_init fonksiyonunun parametrik yapısı da şöyledir:
+    rwlock_init fonksiyonunun parametrik yapısı da şöyledir:
 
     #include <linux/rwlock.h>
 
     void rwlock_init(rwlock_t *lock);
 
     Okuma yazma kilitlerinin kilidini alan ve kilidini bırakan fonksiyonlar şunlardır:
-
-    #include <linux/rwlock.h>
 
     void read_lock(rwlock_t *lock);
     void read_lock_irq(rwlock_t *lock);
@@ -1391,24 +1401,24 @@ void exit_sys(const char *msg)
     void write_unlock_irqrestore(rwlock_t *lock, unsigned long flags);
     void write_unlock_bh(rwlock_t *lock);
 
-    Nesne read_lock fonksiyonlarıyla kilitlenmişse nesnenin açılması read_unlock fonksiyonlarıyla, nesne write_lock 
-    fonksiyonlarıyla kilitlenmişse nesnenin açılması write_unlock fonksiyonlarıyla yapılmalıdır. Örneğin okuma amaçlı 
-    krtik kod şöyle oluşturulabilir:
+    Nesne read_lock fonksiyonlarıyla kilitlenmişse kilidin bırakılması read_unlock fonksiyonlarıyla, nesne write_lock 
+    fonksiyonlarıyla kilitlenmişse kilidin bırakılması write_unlock fonksiyonlarıyla yapılmalıdır. Örneğin okuma amaçlı 
+    kritik kod bloğu şöyle oluşturulabilir:
 
     static DEFINE_RWLOCK(g_rwlock);
     /* ... */
 
     read_lock(&g_rwlock);
     ...
-    ...         <KRİTİK KOD>
+    ...         <KRİTİK KOD BLOĞU>
     ...
     read_unlock(&g_rwlock);
 
-    Yazma amaçlı kritik kod da şöyle oluşturulabilir:
+    Yazma amaçlı kritik kod bloğu da şöyle oluşturulabilir:
 
     write_lock(&g_rwlock);
     ...
-    ...        <KRİTİK KOD>
+    ...        <KRİTİK KOD BLOĞU>
     ...
     write_unlock(&g_rwlock);
 
@@ -1431,7 +1441,7 @@ void exit_sys(const char *msg)
     }
 
     Burada artık okuma yapmak isteyen thread read_lock fonksiyonu ile spinlock kilidini aldığında başka bir thread bu 
-    kilidi write_lock ile alamaz ve spin yapmaya başlar. Ancak başka bir thread kilidi yine read_lock ile kilidi alabilr. 
+    kilidi write_lock ile alamaz ve spin yapmaya başlar. Ancak başka bir thread kilidi yine read_lock ile alabilr. 
     Eğer bir thread kilidi write_lock ile almışsa başka bir thread kilidi read_lock ile de write_lock ile de alamaz ve 
     spin yaparak bekler.
 
@@ -1465,12 +1475,11 @@ void exit_sys(const char *msg)
     
     SMP sisteminde bir CPU ya da çekirdek DRAM belleğe eriştiği zaman diğeri nano saniyeler mertebesinde beklediği 
     için tam bir paralel çalışma mümkün olamamaktadır. Tabii işlemcilerin ya da çekirdeklerin içsel önbellekleri DRAM 
-    erişimini azaltmayı hedeflemektedir. Ancak işelmci içerisindeki önbellek mekanizmasının da "önbellek tutarlılığı 
+    erişimini azaltmayı hedeflemektedir. Ancak işlemci içerisindeki önbellek mekanizmasının da "önbellek tutarlılığı 
     (cache coherency)" denilen sorunları vardır. Örneğin bir işlemci ya da çekirdek DRAM bellekten belli bir yeri içsel 
-    önbelleğine çekmiş olsun. Şimdi o işelemci ya da çekirdek oraya bir şey yazdığında diğer işlemcilerin ya da çekirdeklerin 
+    önbelleğine çekmiş olsun. Şimdi o işlemci ya da çekirdek oraya bir şey yazdığında diğer işlemcilerin ya da çekirdeklerin 
     onu fark etmesi gerekmektedir. İşte bunu sağlamak için "önbellek tutarlılığına" ilişkin bazı mekanizmalar işletilmektedir. 
-    Biz burada önbellek 
-    protokolleri üzerinde durmayacağız. Bunlar hakkındaki bilgileri başka kaynaklardan edinebilirsiniz. 
+    Biz burada önbellek protokolleri üzerinde durmayacağız. Bunlar hakkındaki bilgileri başka kaynaklardan edinebilirsiniz. 
 
     NUMA mimarisinde DRAM bellek bank'lara ayrılmıştır. Her işlemcinin ya da çekirdeğin ayrı bir bank'ı vardır. Bunlar 
     kendi bank'larına diğer bank'lardan daha hızlı erişebilmektedir. Çünkü bunlar kendi bank'larına erişirken diğer CPU 
@@ -1485,7 +1494,7 @@ void exit_sys(const char *msg)
     │    └───┬───┘    │        │    └───┬───┘    │
     │        │        │        │        │        │
     │  ┌─────▼─────┐  │        │  ┌─────▼─────┐  │
-    │  │  Bank 0   │  │        │  │  Yerel    │  │
+    │  │  Bank 0   │  │        │  │  Bank 1   │  │
     │  └───────────┘  │        │  └───────────┘  │
     └─────────────────┘        └─────────────────┘
 
@@ -1547,7 +1556,7 @@ void exit_sys(const char *msg)
     Linux çekirdeği hem SMP hem de NUMA mimarisini destekleyecek biçimde gerçekleştirilmiştir. Yani biz SMP içeren 
     sistemlerde de NUMA içeren sistemlerde de Linux'u kurduğumuzda Linux bunu fark etmekte ve o mimariye özgü çalışmayı 
     desteklemektedir. Genel olarak Linux çekirdeği (konfigürasyona da bağlıdır) SMP sistemlerini sanki tek düğümden 
-    (bank'tan) oluşan NUMA sistemleri ele almaktadır.
+    oluşan NUMA sistemleri ele almaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1562,7 +1571,7 @@ void exit_sys(const char *msg)
     Ancak Intel gibi bazı mimarilerde bu durdurma bazı durumlarda tüm makine komutu süresince yapılmamaktadır. Intel ve 
     64 bit ARM işlemcileri bazı koşullarda belleğe erişim yapan makine komutunu çalışırken veri yolunu birden fazla kez 
     tutup bırakabilmektedir. Örneğin 32 bit Intel işlemcilerinde aslında işlemci fiziksel belleğe hep 32 bit genişliğinde 
-    erişmektedidr. Bu işlemciler bellekten 1 byte bile okuyacak olsalar aslında 4 byte okuyup o 4 byte içerisinden o byte'ı 
+    erişmektedir. Bu işlemciler bellekten 1 byte bile okuyacak olsalar aslında 4 byte okuyup o 4 byte içerisinden o byte'ı 
     ayrıştırmaktadır. İşte bu işlemcilerde eğer 4 byte'lık nesneler hizalanmamışsa makine komutunun başından sonuna kadar 
     veri yolu tutulmamaktadır. Aşağıdaki gibi bir bellek içeriğinde işlemcinin 4'ün katlarına hizalanmamış olan yyyy byte'larına 
     tek bir makine komutuyla yazmak istediğini varsayalım:
@@ -1612,22 +1621,26 @@ void exit_sys(const char *msg)
 
     Çünkü 32 bit Intel işlemcileri bellek okumalarını 4'ün katlarından dörder byte'lık verileri çekerek yapmaktadır.
     Benzer biçimde 64 bit Intel işlemcileri de 4'ün katları yerine 8'in katlarıyla okuma ve yazma yapmaktadır. 
-
     Tabii bildiğiniz gibi C/C++ derleyicileri zaten default ayarlarında hizalama uygulamaktadır. Bu nedenle yukarıda 
-    bahsettiğimiz sorun genellikle ortaya çıkmayacaktır. Peki Intel'de hizalanmamış olan yukarıdaki gibi durumlarda 
-    sistem programcısının ne yapması gerekir? İşte Intel işlemcilerini tasarlayanlar komutların önüne getirilebilen 
-    1 byte'lık LOCK önek komutu bulndurmuşlardır. Eğer erişim bu LOCK önekiyle yapılırsa ilgili işlemci ya da çekirdek 
-    makine komutunun sonuna kadar veri yolunu (data bus) diğer işlemciler ya da çekirdekler erişmesin diye tutmaktadır. 
-    Tabii C'de ve C++'ta biz makine komutlarını doğrudan kullanamayız ancak sembolik makine dilinde yazılmış fonksiyonları 
-    çağırabiliriz ya da derleyicilerin sunduğu "inline assembly" özelliği ile taşınabilir olmayan bir biçimde C/C++ kodları 
-    ile makine kodlarını bir arada kullanabiliriz. Linux çekirdeğinde mümkün olduğunca gcc derleyicisinin "inline assmebly"
-    özelliği kullanılmıştır.  
+    bahsettiğimiz sorun genellikle ortaya çıkmayacaktır. 
+    
+    Intel gibi CISC tarzı işlemcilerde read-modify-write içeren makine komutları da vardır. Örneğin INC mem makine komutu
+    önce bellekteki değeri CPU içerisine çeker, artırımı orada yapıp sonucu belleğe geri yazar. read-modify-write komutları
+    birden fazla işlemci ya da çekirdeğin bulunduğu sistemlerde diğer işlemci ya da çekirdekler bağlamında atomik değildir.
+    
+    Peki Intel'de hizalanmamış olan ya da read-modify-write içeren makine komutlarında  sistem programcısının ne yapması 
+    gerekir? İşte Intel işlemcilerini tasarlayanlar komutların önüne getirilebilen 1 byte'lık LOCK önek komutu bulundurmuşlardır. 
+    Eğer erişim bu LOCK önekiyle yapılırsa ilgili işlemci ya da çekirdek makine komutunun sonuna kadar veri yolunu (data 
+    bus) diğer işlemciler ya da çekirdekler erişmesin diye tutmaktadır. Tabii C'de ve C++'ta biz makine komutlarını doğrudan 
+    kullanamayız ancak sembolik makine dilinde yazılmış fonksiyonları çağırabiliriz ya da derleyicilerin sunduğu "inline 
+    assembly" özelliği ile taşınabilir olmayan bir biçimde C/C++ kodları ile makine kodlarını bir arada kullanabiliriz. 
+    Linux çekirdeğinde mümkün olduğunca gcc derleyicisinin "inline assembly" özelliği kullanılmıştır.  
 
     32 bit ARM işlemcilerinde (ARM V7) zaten bellek erişimlerinin hizalanmış olması zorunludur. Aksi takdirde işlemci 
     exception oluşturmaktadır. Ancak daha sonra 64 bit ARM işlemcileri (ARM V8) de hizalanmamış nesneler üzerinde 
     exception oluşturmadan işlem yapabilir hale getirilmiştir. 64 bit ARM işlemcilerinde bu durumu ortadan kaldırmak 
     için Intel'in LOCK önekinin işlevinin bir bakıma benzerini yapan özel LDREX (load exclusive) ve STREX (store exclusive) 
-    makine komutları bulunmaktadır.
+    makine komutları bulunmaktadır. Ayrıca ARMV8 ile ARM'a da bazı read-modify-write komutları da eklenmiştir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1638,7 +1651,7 @@ void exit_sys(const char *msg)
     LOAD reg1, [mem1]
     LOAD reg2, [mem2]
 
-    Burada belleğin iki farklı bölgesindeki değerler işlemcinin farklı iki yazmacına çekilmiştir. Bu makine komutlarınn 
+    Burada belleğin iki farklı bölgesindeki değerler işlemcinin farklı iki yazmacına çekilmiştir. Bu makine komutlarının 
     hangisinin önce yapıldığı sonuç üzerinde etkili olmayacaktır. İşte modern işlemciler kodun çalışmasını hızlandırmak 
     için bu komutları derleyicinin yazdığı sırada değil farklı sıralarda yapabilmektedir. Bu duruma İngilizce "out of order 
     execution" denilmektedir. Örneğin yukarıdaki makine komutları işlemci tarafından aşağıdaki sırada da yapılabilecektir:
@@ -1646,7 +1659,7 @@ void exit_sys(const char *msg)
     LOAD reg2, [mem2]
     LOAD reg1, [mem1]
    
-    Tabii işlemciler biibirleriyle ilişkili olan makine komutlarının sırasını değiştirmezler. örneğin:
+    Tabii işlemciler biribirleriyle ilişkili olan makine komutlarının sırasını değiştirmezler. örneğin:
     
     LOAD reg1, [mem]
     LOAD reg2, reg1
@@ -1662,7 +1675,7 @@ void exit_sys(const char *msg)
     çok çekirdekli sistemlerde ortaya çıkmaktadır. Bu konunun ayrıntılarını "bellek bariyerleri (memory barriers)" komusu
     içerisinde ele alacağız.
 
-    Burada "medemki çalışan kodu etkilemiyor o zaman sorun nerede?" diye düşünebilirsiniz. Ancak işte "birden fazla 
+    Burada "mademki çalışan kodu etkilemiyor o zaman sorun nerede?" diye düşünebilirsiniz. Ancak işte "birden fazla 
     işlemci ya da çekirdeğin bulunduğu sistemlerde bu komut yer değiştirmesi (daha doğru bir ifadeyle görünürlüğün 
     yer değiştirmesi) bazı sorunlara yol açabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -1674,7 +1687,7 @@ void exit_sys(const char *msg)
 /*----------------------------------------------------------------------------------------------------------------------
     Komutların yer değiştirmesi (instruction reordering) aslında derleyici tarafından da yapılan br optimizasyon 
     etkinliğidir. Derleyiciler de komutlar daha hızlı çalışsın diye birbirleriyle ilişkisi olmayan makine komutlarının 
-    yerlerini değiştirebilmektedir. Ancak senkronizasyon sorunlarını oluşturan ana unsur derleyicden ziyade işlemci 
+    yerlerini değiştirebilmektedir. Ancak senkronizasyon sorunlarını oluşturan ana unsur derleyiciden ziyade işlemci 
     tarafından yapılan komut yer değiştirmesidir. Zaten bildiğiniz gibi derleyiciler optimizasyon aşamasında programcının 
     yazdığı deyimleri de eğer mümkünse elimine edebilmektedir. Örneğin:
 
@@ -1682,7 +1695,7 @@ void exit_sys(const char *msg)
     a = 20;
 
     Burada derleyici a = 10 deyimini tamamen elimine edebilir. Çünkü bu deyim kaldırıldığında programın gözlemlenebilir 
-    davranışında bir değişiklik oluşmayacaktır. Ancak işlemciler böyle bir eleminasyonu yapmazlar. İşlemciler yalnızca 
+    davranışında bir değişiklik oluşmayacaktır. Ancak işlemciler böyle bir eliminasyonu yapmazlar. İşlemciler yalnızca 
     komut çalıştırması sırasında basit birtakım iyileştirmeler yapabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -1690,7 +1703,7 @@ void exit_sys(const char *msg)
 	İşlemciler aslında makine komutlarını sırasıyla çalıştırmaktadır. Ancak makine komutlarının çalışması "boru hattı 
     (pipeline) mekanizması" nedeniyle tek bir cycle'da yapılmamaktadır. İşlemci komutları boru hattı kuyruğuna göndermekte, 
     bu kuyrukta işlemler daha küçük evrelere (phases) ayrılmakta ve bu evreler mümkün olduğu kadar eşzamanlı biçimde 
-    yapılmaktadır. Dolayısıyla bu mekanizma nedeniyle diğerinden daha önce kuyruğua gönderilmiş makine komutları diğerinden 
+    yapılmaktadır. Dolayısıyla bu mekanizma nedeniyle diğerinden daha önce kuyruğa gönderilmiş makine komutları diğerinden 
     daha sonra işlemini bitirebilmektedir. İşlemcilerin boru hattı mekanizması oldukça ilginç ve detaylı bir mekanizmadır. 
     Biz burada bu mekanizmanın ayrıntıları üzerinde durmayacağız. Ancak bütün bunların bir sonucu olarak birbirleriyle 
     ilişkili olmayan makine komutları sanki farklı sıralarda yapılıyormuş gibi bir etki oluşabilmektedir. Makine komutları 
@@ -1698,7 +1711,7 @@ void exit_sys(const char *msg)
     tarafından farklı sıralarda yapılıyormuş gibi görünebilmektedir. 
 
     İşlemciler komutları evrelere bölüp çalıştırırken genel olarak her cycle'da bir evreyi çalıştırmaktadır. Böylece her 
-    cycle'da boru hattında sonraki komutlarının evreleri de yapılmaktadır. Bu durum öcellikle RISC işlemcilerinde her 
+    cycle'da boru hattında sonraki komutlarının evreleri de yapılmaktadır. Bu durum özellikle RISC işlemcilerinde her 
     cycle'da bir makine komutunun tamamlanmasını sağlayabilmektedir. 
 
     Ayrıca işlemciler daha karmaşık komutları kendi içerisinde de parçalara ayırabilmektedir. Bunlara da işlemci 
@@ -1716,7 +1729,7 @@ void exit_sys(const char *msg)
 
     Mikrokodlar daha çok CISC işlemcilerine özgüdür. RISC işlemcileri komutları mikrokodlara bölerek işlem yapmaz. 
     Tek bir lojik devreyle bütünsel bir biçimde işlemleri yapar. Tabii bu sırada komutlar evrelere ayrılarak yukarıda 
-    belirttiğimiz gibi kemdi içlerinde pipeline mekanizması eşliğinde çalıştırışmaktadır.
+    belirttiğimiz gibi kendi içlerinde pipeline mekanizması eşliğinde çalıştırılmaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -1727,19 +1740,20 @@ void exit_sys(const char *msg)
     hizalanmamış bellek bölgelerine yapılan erişimler atomik değildir. Çünkü bu işlemler yapılırken araya başka bir işlemci 
     ya da çekirdek girip yapılan işlemi kararsız bir biçimde görebilmektedir. Çok işlemcili ya da çok çekirdekli sistemlerde
     atomiklik "bir işlem bir CPU'da yapılırken diğer CPU'ların da bu işlemin yan etkisini ya tamamen görmeleri ya da hiç 
-    görmemeleri" biçiminde tanımlanabilir. Peki yukarıdaki hizlanmamış bellek erişimleri dışında makine komutları bu 
+    görmemeleri" biçiminde tanımlanabilir. Peki yukarıdaki hizalanmamış bellek erişimleri dışında makine komutları bu 
     yaptığımız tanıma göre atomik midir? Evet istisnai başka birkaç durum dışında makine komutları genel olarak atomiktir. 
 
-    Intel gibi CISC işlemlerinde doğrudan bellek üzerinde işlem yapan makine komutları bulunmaktadır.  Örneğin bu 
-    işlemcilerde aşağıdaki gibi tek bir makine komutuyla belli bir adresteki değer 1 artırılabilmektedir:
+    Yukarıda da belirttiğimiz gibi Intel gibi CISC işlemcilerinde doğrudan bellek üzerinde işlem yapan "read-modfy-write" 
+    makine komutları bulunmaktadır. Örneğin bu işlemcilerde aşağıdaki gibi tek bir makine komutuyla belli bir adresteki 
+    değer 1 artırılabilmektedir:
 
     INC mem
 
     Peki Intel ailesine ilişkin bir işlemcide bu işlem atomik midir? İşte bu tür işlemcilerde "read-modify-write" biçiminde 
     gerçekleştirilen işlemlerde ilgili bellek adresi hizalanmış olsa bile işlem birden fazla işlemci ya da çekirdek söz 
-    konusu olduğunda atomik değildir. Biz atomikliği yukarıda "bir işlemcinin ya da çekirdeğn yaptığı işlemi diğeri ya tam 
+    konusu olduğunda atomik değildir. Biz atomikliği yukarıda "bir işlemcinin ya da çekirdeğin yaptığı işlemi diğeri ya tam 
     olarak görecek ya da görmeyecek" biçimde tanımlamıştık. Bu makine komutunu örneğin iki işlemci aynı zaman dilimi içerisinde 
-    yapmaya çalışırsa birinin belleğe yazdığı artırılmış değer diğeri tarafından ezilebilmektedir. Bu durumda da bellekdeki 
+    yapmaya çalışırsa birinin belleğe yazdığı artırılmış değer diğeri tarafından ezilebilmektedir. Bu durumda da bellekteki 
     değer iki kez değil sanki bir kez artırılmış gibi bir durum oluşabilmektedir. İşte bu tür durumlar işlemcilerin makine 
     komutu bitene kadar veri yolunu kilitlemesiyle ya da buna benzer bir mekanizmayla engellenmektedir. Intel işlemcilerinde 
     LOCK öneki bu işlemi yapmaktadır:
@@ -1788,9 +1802,9 @@ void exit_sys(const char *msg)
 
     _Atomic(int) g_count;
 
-    C11 ile C'ye sokulan _Atomic niteleyicisi ve tür belirleyicisi "isteğe bağlı (optional)" bir özelliktir. Derleyicierin
-    bunu desteklemesi zorunlu değildir. Derlyicinin bu özelliği destekleyip desteklemediği derleme aşamasında __STDC_NO_ATOMICS__
-    öneden tanımlanmış sembolik sabitiyle belirlenebilmektedir. 
+    C11 ile C'ye sokulan _Atomic niteleyicisi ve tür belirleyicisi "isteğe bağlı (optional)" bir özelliktir. Derleyicilerin
+    bunu desteklemesi zorunlu değildir. Derleyicinin bu özelliği destekleyip desteklemediği derleme aşamasında __STDC_NO_ATOMICS__
+    önceden tanımlanmış sembolik sabitiyle belirlenebilmektedir. 
 
     Artık biz ++g_count gibi bir işlemi yaptığımızda derleyici bunu yapacak atomik kodu kendisi üretecektir. Ayrıca 
     C11 ile eklenen <stdatomic.h> dosyasında aşağıdaki typedef bildirimleri de bulunmaktadır:
@@ -1810,7 +1824,7 @@ void exit_sys(const char *msg)
     ...
 
     _Atomic tür niteleyicisi Microsoft C derleyicileri tarafından desteklenmemektedir. C11 standartlarına göre _Atomic 
-    niteleyicisi geçek sayı türleriyle, göstericilerle ve yapı türleriyle de kullanılabilmektedir. Ancak derleyici atomikliği 
+    niteleyicisi gerçek sayı türleriyle, göstericilerle ve yapı türleriyle de kullanılabilmektedir. Ancak derleyici atomikliği 
     tek bir makine komutuyla sağlayamadığı durumda kendi içerisindeki senkronizasyon nesnelerini de kullanabilmektedir. 
     Derleyiciler arasında bu konuda işlevsel farklılıklar ve birtakım kusurlar bulunabilmektedir. 
 
@@ -1832,7 +1846,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Linux çekrdeklerinde atomik işlemler için atomic_t, atomic64_t ve atomic_long_t isimli türler kullanılarak yapılmaktadır.
+	Linux çekirdeklerinde atomik işlemler için atomic_t, atomic64_t ve atomic_long_t isimli türler kullanılarak yapılmaktadır.
     Bu türler birer yapı belirtir. Bu yapılar "include/linux/types.h" içerisinde şöyle bildirilmiştir:
 
     /* include/linux/types.h */
@@ -1863,7 +1877,7 @@ void exit_sys(const char *msg)
     #endif
 
     atomic_t türündeki atomik değişken int türünden, atomic64_t türündeki atomik değişken ise long long türündendir. 
-    atomic_long_t türündeki atomik değikenin türü de o sistemdeki long türünün uzunluğuna bağlı olarak değişebilmektedir. 
+    atomic_long_t türündeki atomik değişkenin türü de o sistemdeki long türünün uzunluğuna bağlı olarak değişebilmektedir. 
     Bu türlerin neden yapılarla sarmalandığını merak edebilirsiniz. Bunun en önemli nedeni atomik işlemler yapan çekirdek 
     fonksiyonlarına yanlışlıkla başka bir türün parametre olarak geçilmesinin engellenmek istenmesidir. Örneğin eğer 
     atomic_t türü int olarak typedef edilseydi atomic_t türünden bir değişkene doğrudan int bir değer atanabilirdi. 
@@ -1951,7 +1965,7 @@ void exit_sys(const char *msg)
     
     Nesne hizalanmamışsa yukarıdaki atama tek makine komutuyla yapılsa bile atomik olmaz. Ancak Linux çekirdeğindeki 
     tüm nesneler her zaman zaten hizalıdır. Yani bu garanti zaten vardır. Yukarıdaki volatile erişim için gcc'nin 
-    tek makine makine komutu üreteceği de bilinmektedir. gcc volatile atama işlemlerini her zaman tek makine komutuyla 
+    tek makine komutu üreteceği de bilinmektedir. gcc volatile atama işlemlerini her zaman tek makine komutuyla 
     yapmaktadır. Ayrıca yukardaki işlemde ileride ele alacağımız bir bellek bariyerinin kullanılmadığına dikkatinizi 
     çekmek istiyoruz. Bellek bariyerleri bir grup makine komutunun sıralamasını garanti etmek için kullanılmaktadır. 
     Atomiklik ise ise bir işlemin araya girilmeden, kesilmeden tek parça bir işlem olarak yapılması anlamına gelmektedir. 
@@ -1961,7 +1975,7 @@ void exit_sys(const char *msg)
     devreye girer. Bazen yalnızca bazı işlemciler için özel işlemlerin yapılması söz konusu olabilmektedir. Bu durumda 
     ilgili fonksiyonlar ya da makrolar o işlemciler için yazılır, diğerleri için de "generic" bir tanımlama yapılır. Bu 
     tür kodlarda, isminde "generic" geçen dosyalar görürseniz şaşırmayınız. Bunlar adeta "geri kalan işlemcilerin hepsi 
-    için" anlamına gelmektedir. Atomik fonksiyonlardaki çağırma dizgesi tipik olarka şöyledir:
+    için" anlamına gelmektedir. Atomik fonksiyonlardaki çağırma dizgesi tipik olarak şöyledir:
 
     atomic_xxx ---> raw_atomic_xxx ---> arch_atomic_xxx (işlemciye özgü fonksiyon ya da makro)
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -2192,7 +2206,7 @@ void exit_sys(const char *msg)
     #endif
     }
         
-    Buradaki arch_atomic_xchg fonksiyonu da Intel x86 işlemcileri için şöye yazılmıştır:
+    Buradaki arch_atomic_xchg fonksiyonu da Intel x86 işlemcileri için şöyle yazılmıştır:
 
     static __always_inline int arch_atomic_xchg(atomic_t *v, int new)
     {
@@ -2202,9 +2216,9 @@ void exit_sys(const char *msg)
     Bundan sonra da Intel'deki XCHG makine komutu kullanılarak işlem yapılmıştır. 
     
     ARM gibi RISC işlemcilerinde atomik işlemlerin nasıl yapıldığını izleyen paragraflarda açıklayacağız. atomic_set 
-    fonksiyonlarının bir değer geri döndürmedğine, atomic_xchg fonksiyonlarının ise eski değeri geri döndürdüğüne dikkat 
+    fonksiyonlarının bir değer geri döndürmediğine, atomic_xchg fonksiyonlarının ise eski değeri geri döndürdüğüne dikkat 
     ediniz. Ayrıca atomic_xchg fonksiyonları işlemlerin başına ve sonuna bellek bariyerleri de yerleştirmektedir. (Intel 
-    x86 işlemcilerinde XCHG makine komutu zaten atomiktir yani LOCK uygulanmış gibidir. Dolayısıyşa bu işlemcilerde 
+    x86 işlemcilerinde XCHG makine komutu zaten atomiktir yani LOCK uygulanmış gibidir. Dolayısıyla bu işlemcilerde 
     bellek bariyerine gerek kalmamaktadır.)
     
     Aslında çekirdekte atomik xchg fonksiyonun dışında herhangi bir nesneye atomik değer atayan genel bir xchg makrosu 
@@ -2217,7 +2231,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Özellikle senkronizasyon nesnelerinin gerçekleşleştirilmesinde kullanılan İnglizce genellikle "compare-exchange" 
+    Özellikle senkronizasyon nesnelerinin gerçekleştirilmesinde kullanılan İngilizce genellikle "compare-exchange" 
     ya da "compare-and-swap (CAS)" biçiminde ifade edilen önemli bir mekanizma vardır. İşlemciler bu mekanizmanın 
     gerçekleştirilebilmesi için özel makine komutları bulundurmaktadır. Bu mekanizma Linux çekirdeğinde atomik fonksiyonlar 
     biçiminde oluşturulmuştur:
@@ -2264,14 +2278,14 @@ void exit_sys(const char *msg)
         ;
     atomic_set(&g_flag , 1);    
     ...
-    ... <KRİTİK KOD>
+    ...     <KRİTİK KOD BLOĞU>
     ...
     atomic_set(&g_flag, 0);    
 
     preempt_enable()
 
     Buradaki sorun g_flag değişkeni 0 ise onun 1 yapılması sırasında başka bir işlemcideki kodun açık pencere bularak 
-    kritik koda girebilmesidir:
+    kritik kod bloğuna girebilmesidir:
 
     while (atomic_read(&g_flag) == 1)
         ;
@@ -2287,7 +2301,7 @@ void exit_sys(const char *msg)
     while (atomic_cmpxchg(&g_flag, 0, 1) != 0)
         ;
     ...
-    ... <KRİTİK KOD>
+    ... <KRİTİK KOD BLOĞU>
     ...
     atomic_set(&g_flag, 0);  
 
@@ -2338,10 +2352,10 @@ void exit_sys(const char *msg)
     Bu gerçekleştirim biraz daha gerçeğe uygundur. smp_mb bariyer fonksiyonunu izleyen paragraflarda ele alacağız. 
     cpu_relax işlemi CPU'da bir pause yaratmaktadır. Bu sürekli dönme durumlarında CPU'nun güç tüketimini azaltıcı 
     bir etki yaratmaktadır. Intel x86 mimarisinde bu fonksiyon PAUSE makine komutunu, ARM işlemcilerinde ise YIELD 
-    makine komutnu oluşturmaktadır. Eski sistemlerde NOP komutları da benzer etkileri yaratabilmektedir. 
+    makine komutunu oluşturmaktadır. Eski sistemlerde NOP komutları da benzer etkileri yaratabilmektedir. 
 
     Peki "compare-exchange" biçiminde bir mekanizma olmasaydı ne olurdu? İşte bu tür durumlarda çok işlemcili ya da çok 
-    çekirdekli sistemlerdeki senkronizasyon nesnelerinin gerçekleştirilmesi mümkün olmazdı. "Compare-exchnage" işlemleri 
+    çekirdekli sistemlerdeki senkronizasyon nesnelerinin gerçekleştirilmesi mümkün olmazdı. "Compare-exchange" işlemleri 
     işlemcilerdeki özel makine komutlarıyla gerçekleştirilmektedir. Bu makine komutlarına sahip olmayan işlemcilerde
     bu mekanizma oluşturulamamaktadır.  
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -2364,7 +2378,7 @@ void exit_sys(const char *msg)
         atomic_add(a, v);
         return 1;               /* Başarılı */
     }
-    return 0;  /                * Değer u idi, ekleme yapılmadı */
+    return 0;                   /* Değer u idi, ekleme yapılmadı */
 
     Tabii yukarıda kod yalnızca temsili bir koddur. Yukarıdaki işlemler başka bir işlemci araya girmeden atomik bir 
     biçimde yapılmaktadır. 
@@ -2413,7 +2427,7 @@ void exit_sys(const char *msg)
 
     atomic_dec_and_test fonksiyonu atomik değişkendeki değeri 1 eksiltir ve sonucun 0 olup olmadığına bakar. Eğer değer 
     0 olmuşsa 1, olmamışsa 0 geri döndürmektedir. atomic_inc_and_test fonksiyonu ise atomic değişkendeki değeri 1 artırır, 
-    eğer artırılmış değer sıfırsa 1, sıfır değilse 0 geri döndürür. Bu foksiyon negatif değerden sıfıra geçişi tespit 
+    eğer artırılmış değer sıfırsa 1, sıfır değilse 0 geri döndürür. Bu fonksiyon negatif değerden sıfıra geçişi tespit 
     etmek için kullanılmaktadır. atomic_sub_and_test değişkendeki değeri belli miktarda eksiltip sonucun 0 olup olmadığına 
     bakmaktadır. Eğer eksiltilmiş değer 0 ise fonksiyon 1 değerine, değilse 0 değerine geri dönmektedir. atomic_add_negative 
     fonksiyonu ise atomik değişkene belli bir değeri ekleyip sonucun hala negatif olup olmadığına bakmaktadır. Eğer 
@@ -2422,10 +2436,10 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Linux çekirdeklerinde atomik bir biçimde bir nesnenin bitleri üzerinde işlem yapan fonksiyonlar da bulundurulmuştur. 
-    Bu fonksiyonlar ilgili işlemcideki özel makine komutlarınıda  kullanmaktadır. Bu işlemler "read-modify-write" 
+    Bu fonksiyonlar ilgili işlemcideki özel makine komutlarında  kullanmaktadır. Bu işlemler "read-modify-write" 
     biçimindedir. Intel işlemcilerinin bellek üzerinde doğrudan bit işlemlerini yapan  makine komutlarına sahip olduğunu
     anımsayınız. Intel işlemcilerinde bu makine komutlarının başına LOCK öneki getirilmesi yeterli olmaktadır. Ancak 
-    ARM gibi RISC işlemcilerinde bu tür işlemler izleyen paragraflarda açıklayacağıız gibi özel load/store komutlarını 
+    ARM gibi RISC işlemcilerinde bu tür işlemler izleyen paragraflarda açıklayacağımız gibi özel load/store komutlarını 
     kullanarak bir döngü ile yapılabilmektedir. Atomik bit işlemleri için güncel çekirdeklerde farklı mimarilerde farklı 
     inline fonksiyonlar ya da makrolar bulundurulmuştur. Bu fonksiyonların ya da makroların parametrik yapıları şöyledir:
 
@@ -2504,7 +2518,7 @@ void exit_sys(const char *msg)
     Atomik bit fonksiyonları bit maskelerinden oluşan bayraklı nesnelerdeki bit bayraklarını set ya da clear etmek 
     için kullanılmaktadır. Örneğin:
 
-    unsigned long *flags_addr = <bellek tabalı aygıt adresi>;
+    unsigned long *flags_addr = <bellek tabanlı aygıt adresi>;
 
     /* Flag bit pozisyonları */
 
@@ -2543,7 +2557,7 @@ void exit_sys(const char *msg)
     etmektedir. Tabii bu aygıta "bellek tabanlı (memory mapped)" biçimde erişilmektedir. Yukarıdaki fonksiyonlar da bu 
     aygıtın çeşitli bitleriyle atomik işlemler yapmaktadır. 
 
-    test_and_xxxx fonksiyonları genellikle bitleri kilit olarak ele alındaığı spinlock işlemlerinde kullanılmaktadır. 
+    test_and_xxxx fonksiyonları genellikle bitleri kilit olarak ele alındığı spinlock işlemlerinde kullanılmaktadır. 
     Örneğin:
 
     #define LOCK_BIT    0
@@ -2577,7 +2591,7 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Şimdi de çok işlemcili ya da çok çekirdekli sistemlerdeki bellek bariyerleri (memory barriers) üzerinde duralım. 
-    Konuya girişte işlemcilerin birbirileriyle ilişki olmayan makine komutlarının yerlerini değiştirebildiğini belirtmiştik. 
+    Konuya girişte işlemcilerin birbirleriyle ilişki olmayan makine komutlarının yerlerini değiştirebildiğini belirtmiştik. 
     Örneğin:
 
     a = 10;
@@ -2593,7 +2607,7 @@ void exit_sys(const char *msg)
     (instruction reordering) hem derleyici tarafından hem de işlemci tarafından yapılabilen bir optimizasyon işlemidir. 
     Biz burada sürecin işlemciyle ilgili kısımları üzerinde duracağız. Çok işlemcili ya da çok çekirdekli sistemlerde 
     sistem programcısının (örneğin çekirdek geliştiricilerinin) bu sorunu bilip bazı önlemleri alması gerekebilmektedir.
-    İşlemciler birbirine bağlı olan makine komutlarının sırasını tek akışşlı davranışı korumak için değiştirmemektedir. 
+    İşlemciler birbirine bağlı olan makine komutlarının sırasını tek akışlı davranışı korumak için değiştirmemektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3917,7 +3931,7 @@ void exit_sys(const char *msg)
 
     Burada bir noktaya dikkat ediniz. Global gösterici okunduktan sonra araya bir yazıcı girip eski alanı serbest 
     bırakırsa tanımsız davranış oluşur. Bu nedenle eski değerin alınması ve yeni değerin yerleştirilmesi kısmı spinlock 
-    ile kritik kod oluşturularak ele alınmıştır. 
+    ile kritik kod bloğu oluşturularak ele alınmıştır. 
 
     Sonra da tüm okuyanlar okuma işlemini biterene kadar "grace period" süresince beklenmiştir:
 
@@ -9670,7 +9684,7 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Yukarıda belirttiğimiz diziksel bellek bölgelerine ilişkin bilgiler güncel çekirdeklerede  "include/linux/mmzone.h"
+	Yukarıda belirttiğimiz diziksel bellek bölgelerine ilişkin bilgiler güncel çekirdeklerde  "include/linux/mmzone.h"
     dosyası içerisinde bildirilmiş olan zone yapısı içerisinde tutulmaktadır:
 
     struct zone {
@@ -11727,7 +11741,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
     perror(msg);
-
     exit(EXIT_FAILURE);
 }
 
@@ -11856,24 +11869,30 @@ void exit_sys(const char *msg)
     └── free_area[10]  (düzey-10, 4 MB bloklar)
         └── ...
 
-    Aslında sayfa tahsisatları "belli bir düğümün, belli bölgesinin, bellli bir göç türünü" hedef alarak süreci 
+    Aslında sayfa tahsisatları "belli bir düğümün, belli bölgesinin, belli bir göç türünü" hedef alarak süreci 
     başlatmaktadır. İşte alloc_pages gibi fonksiyonların birinci parametresindeki bayraklar bu tespitin yapılmasını 
     sağlamaktadır. Aşağıda hangi bayraklar kullanıldığında işlemerin hangi bölgeden ve hangi göç türünden başlatılacağı 
     bilgisi bir tablo halinde verilmiştir:
 
-    ┌──────────────────────────────┬───────────────┬─────────────────────┬──────────────────────────────────┐
-    │      GFP Kombinasyonu        │  Hedef Zone   │   Migration Type    │          Tipik Kullanım          │
-    ├──────────────────────────────┼───────────────┼─────────────────────┼──────────────────────────────────┤
-    │ GFP_KERNEL                   │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ kmalloc, kzalloc, genel kernel   │
-    │ GFP_ATOMIC                   │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ IRQ handler, spinlock tutan kod  │
-    │ GFP_USER                     │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ bazı kullanıcı alanı tahsisatları│
-    │ GFP_HIGHUSER_MOVABLE         │  ZONE_NORMAL  │ MIGRATE_MOVABLE     │ anonim kullanıcı sayfaları       │
-    │ GFP_NOFS                     │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ FS kritik yol (deadlock önlemi)  │
-    │ GFP_NOIO                     │  ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ I/O kritik yol (deadlock önlemi) │
-    │ GFP_TRANSHUGE_MOVABLE        │  ZONE_NORMAL  │ MIGRATE_MOVABLE     │ transparent huge page (THP)      │
-    │ GFP_KERNEL |                 │               │                     │                                  │
-    │   __GFP_RECLAIMABLE          │  ZONE_NORMAL  │ MIGRATE_RECLAIMABLE │ slab cache (kmem_cache)          │
-    └──────────────────────────────┴───────────────┴─────────────────────┴──────────────────────────────────┘
+    ┌────────────────────────────────┬──────────────┬─────────────────────┬───────────────────────────────────┐
+    │           GFP Kombinasyonu     │ Hedef Zone   │   Migration Type    │          Tipik Kullanım           │
+    ├────────────────────────────────┼──────────────┼─────────────────────┼───────────────────────────────────┤
+    │ GFP_KERNEL                     │ ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ kmalloc, kzalloc, genel kernel    │
+    │ GFP_ATOMIC                     │ ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ IRQ handler, spinlock tutan kod   │
+    │ GFP_USER                       │ ZONE_NORMAL  │ MIGRATE_MOVABLE     │ kullanıcı alanı tahsisatları      │
+    │ GFP_HIGHUSER_MOVABLE           │ ZONE_HIGHMEM │ MIGRATE_MOVABLE     │ anonim kullanıcı sayfaları        │
+    │ GFP_NOFS                       │ ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ FS kritik yol (deadlock önlemi)   │
+    │ GFP_NOIO                       │ ZONE_NORMAL  │ MIGRATE_UNMOVABLE   │ I/O kritik yol (deadlock önlemi)  │
+    │ GFP_TRANSHUGE_MOVABLE          │ ZONE_NORMAL  │ MIGRATE_MOVABLE     │ transparent huge page (THP)       │
+    │ GFP_KERNEL | __GFP_RECLAIMABLE │ ZONE_NORMAL  │ MIGRATE_RECLAIMABLE │ slab cache (kmem_cache)           │
+    ├────────────────────────────────┼──────────────┼─────────────────────┼───────────────────────────────────┤
+    │ GFP_KERNEL | __GFP_DMA         │ ZONE_DMA     │ MIGRATE_UNMOVABLE   │ eski ISA/legacy DMA aygıtları     │
+    │ GFP_ATOMIC | __GFP_DMA         │ ZONE_DMA     │ MIGRATE_UNMOVABLE   │ IRQ ctx'te DMA tamponu            │
+    │ GFP_KERNEL | __GFP_DMA32       │ ZONE_DMA32   │ MIGRATE_UNMOVABLE   │ 32-bit DMA aygıtları (PCIe vs.)   │
+    │ GFP_ATOMIC | __GFP_DMA32       │ ZONE_DMA32   │ MIGRATE_UNMOVABLE   │ IRQ ctx'te 32-bit DMA tamponu     │
+    │ GFP_DMA                        │ ZONE_DMA     │ MIGRATE_UNMOVABLE   │ GFP_KERNEL | __GFP_DMA kısayolu   │
+    │ GFP_DMA32                      │ ZONE_DMA32   │ MIGRATE_UNMOVABLE   │ GFP_KERNEL | __GFP_DMA32 kısayolu │
+    └────────────────────────────────┴──────────────┴─────────────────────┴───────────────────────────────────┘
 
     Bileşke bayrakların nasıl oluşturulduğunu daha önce vermiştik. Anımsatmak istiyoruz:
 
@@ -13012,6 +13031,21 @@ void *malloc(unsigned nbytes)
     │   DMA varsa  │       64 byte             │
     └──────────────┴───────────────────────────┘
 
+    kmem_cache_create fonksiyonunun kullanımına şöyle bir örnek verebiliriz:
+
+    struct myobject {
+        int a;
+        int b;
+        char name[64];
+    };
+    /* ... */
+
+    if ((g_myobject_cachep = kmem_cache_create("myobject_cache", sizeof(struct myobject), 
+			0, SLAB_HWCACHE_ALIGN, NULL)) == NULL) {
+        /* ... */
+        return -ENOMEM;
+    }
+
     Eskiden kmem_cache_crate fonksiyonu "mm/slab.c" dosyası içerisinde normal bir fonksiyon biçiminde tanımlanıyordu.
     Çekirdeğin 6.12 vers,onu ile birlikte artık bu fonksiyon bir makro biçimine getirilmiştir. Çekirdğein 6.10 versiyonunda
     kmem_cache_create fonksiyonu "mm/slab_common.c" dosyasında şöyle tanımlanmıştı:
@@ -13321,7 +13355,11 @@ void *malloc(unsigned nbytes)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Yaratıılmış olan bir dilim önbelleğinden tahsisat yapmak için aşağıdaki fonlsiyonlar kullanılmaktadır:
+		                              82. Ders 13/06/2026 - Cumartesi							
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yaratlılmış olan bir dilim önbelleğinden tahsisat yapmak için aşağıdaki fonksiyonlar kullanılmaktadır:
 
     ┌─────────────────────────┬──────────────────────────────────┐
     │       Fonksiyon         │         Temel Özellik            │
@@ -13333,21 +13371,135 @@ void *malloc(unsigned nbytes)
     │ kmem_cache_alloc_bulk() │ Toplu (çok nesne) tahsisat       │   
     └─────────────────────────┴──────────────────────────────────┘
 
-    kmem_cache_alloc fonksiyonu en çok kullanılan fonksiyondur. Belli bir dilim önbelleğinden nesne tahsis etmektedir. 
-    Fonksiyonun prototipi şöyledir:
+    kmem_cache_alloc ve kmem_cache_zalloc fonksiyonları en çok kullanılan fonksiyonlardır. Bu fonksiyonlar belli bir 
+    dilim önbelleğinden nesne tahsis etmektedir. Fonksiyonların prototipleri şöyledir:
 
     void *kmem_cache_alloc(struct kmem_cache *cachep, int flags);
+    void *kmem_cache_zalloc(struct kmem_cache *k, gfp_t flags);
 
-    Fonksiyonun birinci parametresi tahsisatın hangi dilim önbelleğinden yapılacağını belirtmektedir. İkinci parametresi 
-    ise tahsisata ilişkin bayrakları belirtmektedir. 
+    Fonksiyonların birinci parametreleri tahsisatın hangi dilim önbelleğinden yapılacağını belirtmektedir. Yani bu 
+    parametreye kmem_cache_create fonksiyonundan elde edilen kmem_cache nesnesinin adresi geçirilmelidir. Fonksiyonların 
+    ikinci parametreleri alloca_pages çağrısı için gereken bayrakları belirtmektedir. Yani bu parametre aslında 
+    alloc_pages fonksiyonuna geçirilen birinci parametreyle aynıdır. Yukarıda da belirttiğimiz gibi aslında dilimli 
+    tahsisat sistemi arka planda ikiz blok tahsisat sistemini kullanmaktadır. Yani dilimli tahsisat sistemindeki dilimler
+    alloc_pages fonksiyonu ile ikiz blok tahsisat sisteminden elde edilmektedir. Biz alloc_pages fonksiyonunu anlatırken 
+    bu bayrakların anlamlarını açıklamıştık. Bu bayraklar hem "tahsisatın hangi bölgeden (zone)" yapılacağını hem de 
+    göç türünün fallback mekanizması için nereden başlatılacağını belirtiyordu. En çok kullanılan kullanılan bayrağın 
+    GFP_KERNEL olduğunu anımsayınız. Bu bayrak ZONE_NORMAL bölgesinden MIGRATE_UNMOVABLE göç türünden hareketle sayfa 
+    tahsisatını yapmaktadır. Anımsanacağı gibi GFP_ATOMIC bayrağı da ZONE_NORMAL bölgesinden tahsisat yapmaya çalışır.
+    Ancak bu bayrak ilgili thread'in uykuya yatırılmasını engellemtedir. Kesme kodlarında ve örneğin spinlock nesnelerinin
+    kilitlendiği durumlarda GFP_KERNEL yerine GFP_ATOMIC bayrağını tercih etmelisiniz. kmem_cache_zallof fonksiyonu
+    aynı zamanda tahsis edilen alanı sıfırlamaktadır. Aslında bu fonksiyon "include/linux/slab.h" dosyasında aşağıdaki 
+    gibi bir makro biçiminde yazılmıştırç 
 
+    #define kmem_cache_zalloc(_k, _flags)		kmem_cache_alloc(_k, (_flags)|__GFP_ZERO)
 
+    Anımsayacağınız gibi __GFP_ZERO bayrağı zaten ikiz blok tahsisat sisteminde tahsis edilen sayfaların sıfırlanması 
+    için kullanılmaktadır. 
+
+    Dilimli tahsisat sistemlerindeki tahsisat fonksiyonarı başarısızlık durumunda NULL adresle geri dönmektedir. Dilimli 
+    tahsisat sisteminde nesne kalmadığı zaman alloc_pages ile ikiz blok tahsisat sisteminden sayfa tahsis edilmektedir. 
+    İkiz blok tahsis sisteminde "fallback" mekanizmasının da devreye girdiğini anımsayınız. Sayfa tahsis edilemedeğinde
+    zaten çekirdeğin reclaim yapan thread'leri uyandırıldığı için bufonksiyonların bellek yetersizliğinde başaısız olmaları
+    düşük bir olasılıktır. Ancak mutlaka bu fonksiyonların başarı kontrolleri yapılmaldır. Bu fonksiyonların başarısız 
+    olma nedenlerini aşağıdaki tabloda açıklıyoruz:
+
+    ┌─────────────────────────────┬──────────────────┬──────────────────────┐
+    │       Başarısızlık Nedeni   │  NULL Döner mi?  │       Açıklama       │
+    ├─────────────────────────────┼──────────────────┼──────────────────────┤
+    │ Bellek baskısı (GFP_KERNEL) │  Bazen           │ Önce reclaim denenir │
+    │ Bellek baskısı (GFP_ATOMIC) │  Evet, hemen     │ Reclaim yapılmaz     │
+    │ NUMA + __GFP_THISNODE       │  Evet            │ Fallback yok         │
+    │ Memcg limit aşımı           │  Evet            │ Cgroup zorlaması     │
+    └─────────────────────────────┴──────────────────┴──────────────────────┘
+
+    Eğer bu fonksiyonlar başka fonksiyonların içerisinde çağrılmışsa başarısızlık durumunda çağrımın yapıldığı 
+    fonksiyonun -ENOMEM hata koduyla geri döndürülmesi uygun olur. 
+
+    Güncel çekirdeklerde kmem_cache_alloc fonksiyonunun çağrı grafı kabaca şöyledir:
+
+    kmem_cache_alloc(cache, gfp_flags)
+│
+└── slab_alloc()
+    │   [memcg_slab_pre_alloc hook]
+    │   [trace_kmem_cache_alloc tracepoint]
+    │
+    └── slab_alloc_node()
+        │   [NUMA node seçimi]
+        │
+        ├── [per-CPU freelist dolu?] ──Evet──→ OBJ DÖNER    ← hızlı yol
+        │
+        └── Hayır → __slab_alloc()                          ← yavaş yol
+                    │   [preempt disable]
+                    │
+                    ├── [partial slab var?] ──Evet──→ get_partial()
+                    │                                  │   [kmem_cache_node]
+                    │                                  └──→ OBJ DÖNER
+                    │
+                    └── Hayır → new_slab()
+                                │
+                                └── allocate_slab()
+                                    │
+                                    └── alloc_pages(gfp_flags, order)
+                                        │                   ← reclaim buradan tetiklenir
+                                        │
+                                        └── __alloc_pages()
+                                            │
+                                            ├── [fast path: watermark OK?] ──Evet──→ sayfa döner
+                                            │
+                                            └── Hayır → __alloc_pages_slowpath()
+                                                        │
+                                                        ├── [GFP_ATOMIC?] ──Evet──→ NULL DÖNER
+                                                        │                            (reclaim yok)
+                                                        │
+                                                        └── Hayır (GFP_KERNEL vs.)
+                                                            │
+                                                            ├── wake_all_kswapd()
+                                                            │   │   [async reclaim başlatılır]
+                                                            │   │   [çağıran thread bloklanmaz]
+                                                            │   │
+                                                            │   └── hızlı tahsisat tekrar denenir
+                                                            │       │
+                                                            │       └── [başarılı?] ──Evet──→ sayfa döner
+                                                            │
+                                                            ├── [hâlâ yetersiz?]
+                                                            │   └── direct reclaim
+                                                            │       (try_to_free_pages)
+                                                            │           [thread bloklanır ← burada]
+                                                            │           [sync, çağıran task temizler]
+                                                            │
+                                                            ├── [hâlâ yetersiz?]
+                                                            │   └── memory compaction
+                                                            │       (compact_zone)
+                                                            │
+                                                            ├── [hâlâ yetersiz?]
+                                                            │   └── OOM killer
+                                                            │       (out_of_memory)
+                                                            │           [kurban seç + öldür]
+                                                            │
+                                                            └── [yine de yok?]
+                                                                └──→ NULL DÖNER
+                                                                     ← setup_slab() çağrılmaz
+
+    Tabii bu çağrı dizgesinde ayrıntıları bir yana bırakırsak kabaca olanlar şunlardır:
+
+    - Nesne tahsis edilmeye çalışılır
+    - Dilimlerde uygun nesne yoksa ikiz blok tahsisat sisteminden dilim tahsis edilmeye çalışılır
+    - İkiz blok tahsisat sisteminde "fallback" mekanizmaları uygulanır.
+    - Eğer hala sayfa yoksa "kswapd" çekirdek thread'i uyandırılır.
+    - Bir kez daha doğrudan reclaim denenir. Doğrudan reclaim başarısız olursa ve eğer GF_ATOMIC kullanılmamışsa 
+    thread uykuya yaırılır ve reclaim sonrasında uyandırılır. 
+    - Eğer hala sayfa tahsisatı yapılamıyorsa fonksiyon başarısız olur. 
+
+    Tahsis edilmiş olan nesne kmem_cache_free fonksionuyla dilim önbelleğine iade edilmektedir. Fonksiyon prototipi 
+    şöyledir:
+
+    void kmem_cache_free(struct kmem_cache *s, void *x);
+
+    Fonksiyonun birinci parametresi dilim önbelleeğine ilişkin nesne adresini, ikinci parametresi serbest bırakılacak 
+    nesnenin adresini almaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-									
-----------------------------------------------------------------------------------------------------------------------*/
-
+          
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
