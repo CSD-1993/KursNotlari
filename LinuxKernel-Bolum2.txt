@@ -3211,11 +3211,11 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	rmb, wmb ve mb makroları çift yönlü bariyer oluşturmaktadır. Bu bariyerler modern işlemcilerdeki pipeline mekanizması 
+	rmb, wmb ve mb makroları çift yönlü bariyer oluşturmaktadır. Bu bariyerler modern işlemcilerdeki boru hattı mekanizması 
     üzerinde olumsuz etkiler oluşturduğu için çalışmayı göreli biçimde yavaşlatmaktadır. İşte mb ile genel bir bariyer 
-    oluşturmak yerine pipeline mekanizmasını bozmadan istenilen bellek erişimlerinin güvenle yapılabilmesi için 
+    oluşturmak yerine boru hattı mekanizmasını bozmadan istenilen bellek erişimlerinin güvenle yapılabilmesi için 
     "acquire/release semantics" denilen mekanizmalar da bulundurulmuştur. Ancak acquire/release mekanizması her işlemci 
-    tarafından desteklenmemektedir. Çünkü Intel gibi bazı işlemcilerde zaten komut yer değiştirmesi çok gevşek değildir. 
+    tarafından desteklenmemektedir. Çünkü Intel gibi bazı işlemcilerde zaten komut yer değiştirmesi gevşek değildir. 
     Ancak ARM gibi RISC işlemcileri için bu mekanizmalar önemlidir. Bu mekanizmalar bazı programlama dillerinin standart 
     kütüphaneleri içerisinde de "bellek sıralaması (memory order)" adı altında bulundurulmaktadır.
 
@@ -3224,7 +3224,7 @@ void exit_sys(const char *msg)
     smp_load_acquire(p)
 
     Bu makro parametre olarak okuma yapılacak nesnenin adresini almaktadır. smp_load_acquire makrosu tek yönlü bir 
-    biçimde işlemcinin komut sıralamsı üzerinde etki oluşturmaktadır. Bu makronun aşağısındaki bellek erişimleri 
+    biçimde işlemcinin komut sıralaması üzerinde etki oluşturmaktadır. Bu makronun aşağısındaki bellek erişimleri 
     (hem load hem de store erişimleri) bu çağrıdaki erişimin yukarısına taşınamaz. Ancak yukarısındaki bellek erişimleri 
     aşağısına taşınabilir. Örneğin:
 
@@ -3238,7 +3238,7 @@ void exit_sys(const char *msg)
     makrolarının hepsi çift yönlü bariyer oluşturmaktadır. Peki bu tek yönlü bariyerin anlamı nedir? İşte bazen önce 
     bir bellek okuması yapılıp sonra ona göre başka yerlerden okumalar yapılabilir. Bunlar bağımsız işlemler olduğu 
     için ARM gibi RISC işlemcileri komutları yer değiştirebilmektedir. Bu tür durumlarda çift yönlü bariyer uygulamak 
-    yerine tek yönlü bariyer uygulanması modern işlemcilerdeki performası artırabilmektedir. smp_load_acquire makrosunun 
+    yerine tek yönlü bariyer uygulanması modern işlemcilerdeki performansı artırabilmektedir. smp_load_acquire makrosunun 
     bir erişim yaptığına ve bu erişimin aşağısındaki kodların bu erişimin yukarısına taşınmasının engellediğine dikkat 
     ediniz. Bu makronun kullanım amacı dikkate alındığında zaten makronun yukarısındaki erişimlerin makrodaki erişimin 
     aşağısına alınmasında bir sorun oluşturmayacağı görülecektir. Örneğin birden fazla thread paylaşılan bir alandan 
@@ -3249,120 +3249,73 @@ void exit_sys(const char *msg)
         int flag;     /* 0 = boş, 1 = dolu */
     };
     
-    Okuyan taraf yeni bilginin geldiğini flag değişkenine bakarak tespit nediyor olsun. Bu durumda okuyan tarafın önce 
-    flag değişkenine bakarak payload elemanına başvurması gerekir. Bu işlemin aşağıdaki yapılması çok işlemcili ya da 
-    çok çekirdekli sistemlerde soruna yol açacaktır:
+    Okuyan taraf yeni bilginin gelip gelmediğini flag elemanına bakarak tespit ediyor olsun. Bu durumda okuyan
+    tarafın önce flag elemanına bakarak payload elemanına başvurması gerekir. Bu işlemin aşağıdaki biçimde yapılması 
+    çok işlemcili ya da çok çekirdekli sistemlerde soruna yol açacaktır:
 
-    int consumer(void)
-    {
-        int val;
-
-        if (READ_ONCE(sd.flag) == 1) {              /* Dikkat! Sorun oluşabilir! */
-            val = READ_ONCE(sd.payload);        
-            WRITE_ONCE(sd.flag, 0);
-            return val;
-        }
-        return -1;
+     if (READ_ONCE(sd.flag) == 1) {          /* Dikkat! Sorun oluşabilir! */
+        val = READ_ONCE(sd.payload);
+        WRITE_ONCE(sd.flag, 0);
+        use(val);
     }
+    /* ... */
 
-    Burada eğer diğer işlemci ya da çekirdek sd.payload okumasını sd.flag karşılaştırmasının yukarısında görürse  (başka 
-    bir deyişle bu işlem daha önce yapılırsa) kod hatalı çalışacaktır:
+    Burada işlemci ya da çekirdek ``sd.payload`` okumasını ``sd.flag`` okumasının yukarısına taşıyabilecektir.
+    İşlemcinin ``sd.payload`` okumasını yukarıya taşımasını ve işleme sokmasını sembolik kodlarla şöyle gösterebiliriz:
 
-    val = READ_ONCE(sd.payload);
+   <rob tamponu> = sd.payload;
     if (READ_ONCE(sd.flag) == 1) {
         WRITE_ONCE(sd.flag, 0);
-        return val;
+        <yazmaç> = <rob tamponu>;
+        val = <yazmaç>;
+        use(val);
     }
-    
-    /* dikkat! Koşul sağlanmıyorsa val işlemi yapılmamış gibi durum yaratılır */
+    /* koşul sağlanmaza rob tamponundaki değer yazmaca yansıtılmayacak */
 
-    Burada sd.payload ile sd.flag birbirleriyle ilgisiz bellek adreslerinde bulunduğu için işlemci bunların sırasısnı 
-    yer değiştirebilir. Tabii burada siz "işlemci bunu yukarıya taşıyamaz, çünkü o zaman kodun anlamı değişir" diye 
-    düşünebilirsiniz. Çünkü işlemci eğer payload okumasını yukarı taşırsa bu artık if içerisinde olmaktan çıkacaktır. 
-    Ancak işlemciler bu yukarı taşıma işlemini koşul altında bile yapabilmektedir. Buna "speculative load" işlemi 
-    denilmektedir. "Spekucative load" işleminde işlemci koşul altında bile olsa bellek erişimlerini koşulun yukarısına
-    taşıyabilmekte ancak koşul sağlanmıyorsa onun etkisini ortadan kaldırabilmektedir. İşte buradaki sorun başka bir 
-    işlemci ya da çekirdeğin koşul sağlanmadığında bu işlem henüz ortadan kaldırılmadan onun etkisini görebilmesidir. 
-    Yukarıdaki işlem işlemci tarafından adeta şöyle yapılabilmektedir:
+    Buradaki "<rob tamponu>" işlemcinin "reorder tamponunu (reorder buffer)" belirtmektedir. İşlemci reorden tmponundaki
+    okunmuş olan değeri yazamaca aktaralabilir ya da onun etkisini ortadan kaldırabilir (geri alabilir).  Tabii burada siz 
+    "işlemci bu okumayı yukarıya taşıyamaz, çünkü o zaman kodun anlamı değişir" diye düşünebilirsiniz. Çünkü işlemci eğer 
+    payload okumasını yukarı taşırsa bu artık if içerisinde olmaktan çıkacaktır. Ancak işlemciler bu yukarı taşıma işlemini 
+    koşul altında bile yapabilmektedir. Buna "speculative load" işlemi denilmektedir. Speculative load işleminde işlemci 
+    koşul altında bile olsa bellek erişimlerini koşulun yukarısına taşıyabilmekte ancak koşul sağlanmıyorsa onun etkisini 
+    geri alabilmektedir. Peki buradaki sorun nedir? İşte başka bir işlemci ya da çekirdek aşağıda ok ile gösterilen noktada 
+    sd.payload değişkenine değer yazıp sonra sd.flag değişkenini" set ederse yanlış bilgi okunabilecektir:
 
-    val = READ_ONCE(sd.payload);
+    <rob tamponu> = sd.payload;
+            <--- Dikkat! bu noktada sd.payload değeri değiştirilirse bu kod istenildiği gibi çalışmaz
     if (READ_ONCE(sd.flag) == 1) {
         WRITE_ONCE(sd.flag, 0);
-        return val;
+        <yazmaç> = <rob tamponu>;
+        val = <yazmaç>;
+        use(val);
     }
-    else 
-        <sanki val = READ_ONCE(sd.payload) işlemi hiç yapılmamış gibi durum oluştur>
+    /* koşul sağlanmaza rob tamponundaki değer yazmaca yansıtılmayacak */
 
-    İşte işlemci kendi yaptığı speculative load işlemini ortadan kaldıramadan başka bir işlemci aynı nesneye erişirse 
-    koşul ihlal edilmiş gibi burum oluşabilmektedir:
+    Biz yukarıdaki işlemi bellek bariyeri ile de yapabiliriz:
+
+     if (READ_ONCE(sd.flag) == 1) {  
+        smp_rmb();        
+        val = READ_ONCE(sd.payload);
+        WRITE_ONCE(sd.flag, 0);
+        use(val);
+    }
+    /* ... */
+
+    Burada aşağıdaki iki işlem arasında bir bariyer uygulamaya gerek yoktur:
 
     val = READ_ONCE(sd.payload);
-    ---> Bu sırada diğer işlemci payload değerini değiştirirse burada eski değer gözükebilir 
-    if (READ_ONCE(sd.flag) == 1) {
-        WRITE_ONCE(sd.flag, 0);
-        return val;
-    }
-    else 
-        <sanki val = READ_ONCE(sd.payload) işlemi hiç yapılmamış gibi durum oluştur>
-    
-    Burada diğer bir işlemcide ya da çekirdekte çalışan kod sd.payload değişkenini ok ile belirtilen yerde değiştirip
-    sd.flag değişkenini 1 yaparsa eski değerin okunması gibi bir durum oluşabilecektir. Şimdi kodumuzun bu kısmını 
-    düzeltelim:
+    WRITE_ONCE(sd.flag, 0);
+     
+    Bunlar zaten birbirinden bağımsız işlemlerdir. İşlemci bağımlılık nedeniyle WRITE_ONCE(sd.flag, 0) ataması 
+    zaten if deyiminin yukarısına taşınamaz. Speculative store biçiminde bir işlem de yoktur.
 
-    int consumer(void) 
-    {
-        int val;
-
-        if (smp_load_acquire(&sd.flag) == 1) {      /* olması gereken biçim */
-            val = READ_ONCE(sd.payload);
-            WRITE_ONCE(sd.flag, 0);  
-            return val;
-        }
-        return -1;
-    }
-    
-    Burada artık sd.flag okumasının aşağısındaki bellek erişimleri bu okumanın yukarısına taşınmayacaktır. Ancak hala 
-    burada bir sorun daha vardır. READ_ONCE okumasıyla WRITE_ONCE okuması da işlemci tarafından farklı sıralarda 
-    yapılabilir:
-
-    int consumer(void) 
-    {
-        int val;
-
-        if (smp_load_acquire(&sd.flag) == 1) {      /* olması gereken biçim */
-            val = READ_ONCE(sd.payload);
-            ---->                                   /* dikkat burada yer değiştirme yapılabilir!
-            WRITE_ONCE(sd.flag, 0);  
-            return val;
-        }
-        return -1;
-    }
-    
     İşte bu yer değiştirmenin de engellenmesi için izleyen paragrafta açıklayacağımız smp_store_release ile atamanın 
-    yapılması gerekmektedir. 
-    
-    Biz yukarıdaki işlemi bellek bariyeri ile de yapabilirdik:
-
-    int consumer(void) 
-    {
-        int val;
-
-        if (READ_ONCE(sd.flag) == 1) {
-            smp_mb();                                   /* bellek bariyeri uygulanabilir ancak maliyeti yüksek */
-            val = READ_ONCE(sd.payload);
-            smp_mb();                                   /* bellek bariyeri uygulanabilir ancak maliyeti yüksek */
-            WRITE_ONCE(sd.flag, 0);   
-            return val;
-        }
-        return -1;
-    }
-
-    Ancak bu biçimdeki bellek bariyerleri yukarıda da belirttiğimiz gibi pipeline mekanizmasını bozması nedeniyle 
-    yavaşlamaya yol açmaktadır. 
+    yapılması gerekmektedir. Ancak bu biçimdeki bellek bariyerleri daha önce de belirttiğimiz gibi boru hattı mekanizmasını 
+    bozması nedeniyle yavaşlamaya yol açmaktadır.
 
     Intel işlemcilerinde yalnızca Store/Load işlemlerinde komut yer değiştirmesinin uygulandığını anımsayınız. Bu nedenle 
-    Intel işlemcilerinde yukarıdaki önlem alınmasa bir sorun oluşmayacaktır. Ancak ARM gibi RISC işlemcilerinde bu 
-    önlemin mutlaka alınması gerekmektedir.  
+    Intel işlemcilerinde yukarıdaki önlem alınmasa bile bir sorun oluşmayacaktır. Ancak ARM gibi RISC işlemcilerinde bu 
+    önlemin mutlaka alınması gerekmektedir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -5686,7 +5639,7 @@ module_exit(rcu_list_demo_exit);
 /*----------------------------------------------------------------------------------------------------------------------
                                             64. Ders 15/03/2026 - Pazar			
 ----------------------------------------------------------------------------------------------------------------------*/
-<BURADA KALDIM>
+
 /*----------------------------------------------------------------------------------------------------------------------
 	wait_event_interruptible ve wait_event_killable makroları aslında taban ___wait_event makrosunu çağırmaktadır. 
     Bunlar thread'in durumunu da uygun biçimde ayarlamaktadır. wait_event_interruptible makrosu "include/linux/wait.h" 
@@ -11459,8 +11412,8 @@ void exit_sys_errno(const char *msg, int eno)
     include/linux/gfp.h
     #define alloc_pages(gfp, order)  alloc_pages_noprof(gfp, order)
                         │
-            ┌─────────┴──────────┐
-    CONFIG_NUMA                !CONFIG_NUMA
+              ┌─────────┴──────────┐
+        CONFIG_NUMA                !CONFIG_NUMA
             │                        │
             ▼                        ▼
     ┌─────────────────────┐   ┌──────────────────────────────┐
@@ -12254,13 +12207,15 @@ void exit_sys(const char *msg)
             [2]: zone=&node0.zone[DMA],     zone_idx=ZONE_DMA
             [3]: zone=NULL
 
-    Eğer bu bölgenin göz fallback listesinin hiçbir yerinde talep edilen miktarda boş sayfa bulunamazsa bundan sonra 
+    Eğer bu bölgenin göç fallback listesinin hiçbir yerinde talep edilen miktarda boş sayfa bulunamazsa bundan sonra 
     arama 0'ıncı düğümün ZONE_DMA bölgesinden devam edecek, orada da bulunamazsa 1'inci düğümün ZONE_NORMAL bölgesinden 
     devam edecektir. 
 
     Siz bölgelerde fallback yapılırken NUMA düğümlerine hangi sırada bakılacağının nasıl belirlendiğini merak edebilirsiniz. 
     NUMA mimarisini kullanan donanmımlar hakkında bazı bilgiler verelim. NUMA mimarisi donanım düzeyinde biraz ayrıntılıdır. 
-    
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
     Bilgisyar ana kartında CPU'lar için soketler bulunmaktadır. Bu soketlere takılan entegre deverelere "paket (package)" 
     denilmektedir. Biz bu kaketlere "işlemci paketleri" de diyeceğiz.  Bu paketler içerisinde İngilizce "die" denilen 
     silikon  kalıplar bulunmaktadır. Bu slikon kalıplar üzerinde de çekirdekler vardır. Her çekirdek bağımız bir işlemci 
@@ -13289,6 +13244,106 @@ void *malloc(unsigned nbytes)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Dilimn önbelleiği yaratılırken "birleştirme (merge)" denilen bir işlem de yapılabilmektedir. Çekirdek bir dilim 
+    önbelleği yaratılmak istendiğinde zaten o uzunlukta (bazıyarıntıları var) daha önce yaratılmış olan bir dilim 
+    önbelleği varsa gerçekte yeni bir dilim önbelleği yaratmamakta daha önce yaratılmış olanı sanki yeni yaratılmış 
+    gibi vermektedir. Birleştirme (merge) işlemi kmem_cache_create fonksiyonunun çağırdığı find_mergeable fonksiyonu 
+    tarafından yapılmaktadır. 
+
+    kmem_cache_create("my_cache", size, align, flags, ctor)
+        │
+        ▼
+    find_mergeable(size, align, flags, name, ctor)
+            │
+            ├─── [1] Erken çıkış koşulları
+            │         slab_nomerge global değişkeni set mi?  → NULL döner
+            │         flags & SLAB_NEVER_MERGE var mı?       → NULL döner
+            │         ctor != NULL mı?                       → NULL döner
+            │
+            ├─── [2] Boyut ve hizalamayı normalize et
+            │         size  = ALIGN(size, sizeof(void *))
+            │         size  = ALIGN(size, align)
+            │
+            ├─── [3] slab_caches listesini dolaş
+            │         list_for_each_entry_reverse(s, &slab_caches, list)
+            │              │
+            │              ├─ s->size < size?            → atla
+            │              ├─ s->size > size + slub_max_order_waste?  → atla
+            │              ├─ s->ctor != NULL?           → atla
+            │              ├─ flags uyumsuz?             → atla  (bkz. flag tablosu)
+            │              └─ s->align < align?          → atla
+            │
+            └─── [4] Uygun aday bulundu → mevcut kmem_cache döner
+                    Bulunamadı          → NULL döner
+
+    Yenş yaratılmak istenen bir dilim önbelleğinin zaten yaratılmış olana referans etmesinin (yani birleştirme işleminin)
+    bazı koşulları vardır:
+
+    ┌────────────────────────────┬────────────────────────────────────────────────────┐
+    │         Ölçüt              │                    Açıklama                        │
+    ├────────────────────────────┼────────────────────────────────────────────────────┤
+    │ Boyut uyumu                │ Mevcut dilim önbelleğinin size değeri yeni dilim   │
+    │                            │ önbelleğinin normalize edilmiş size değerine eşit  │
+    │                            │ ya da küçük bir tolerans payı kadar büyük olmalı   │
+    ├────────────────────────────┼────────────────────────────────────────────────────┤
+    │ Constructor yok            │ Her iki dilim önbelleğinde de ctor == NULL olmalı. │
+    │                            │ Constructor olan dilim önbellekleri hiçbir zaman   │
+    │                            │ merge edilmez; her nesne farklı başlatma           │
+    │                            │ gerektirebilir                                     │
+    ├────────────────────────────┼────────────────────────────────────────────────────┤
+    │ SLAB_MERGE_SAME bayrakları │ Aşağıdaki bayraklar her iki dilim önbelleğinde de  │
+    │                            │ aynı olmalıdır (bkz. ayrıntı tablosu)              │
+    ├────────────────────────────┼────────────────────────────────────────────────────┤
+    │ SLAB_NEVER_MERGE yok       │ Yeni dilim önbelleğinde birleştirmeyi engelleyen   │
+    │                            │ flag olmamalı                                      │
+    ├────────────────────────────┼────────────────────────────────────────────────────┤
+    │ Hizalama uyumu             │ Mevcut dilim önbelleğinin align değeri yeni dilim  │
+    │                            │ önbelleğinin align değerinden küçük olmamalı       │
+    └────────────────────────────┴────────────────────────────────────────────────────┘
+
+    Aşağıdaki bayrakların her hangi biri iki dilim önbelleğinde farklıysa birleştirme yapılmamaktadır:
+
+    ┌──────────────────────┬────────────────────────────────────────────┐
+    │         Bayrak       │              Neden Merge'ü Engeller        │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ SLAB_RECLAIM_ACCOUNT │ Biri reclaimable diğeri unreclaimable ise  │
+    │                      │ /proc/meminfo SReclaimable sayacı bozulur  │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ SLAB_CACHE_DMA       │ DMA cache ile normal cache birleşemez;     │
+    │                      │ farklı zone'lardan tahsis yapılır          │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ SLAB_CACHE_DMA32     │ ZONE_DMA32 ile diğer zone'lar aynı cache'i │
+    │                      │ paylaşamaz                                 │
+    ├──────────────────────┼────────────────────────────────────────────┤
+    │ SLAB_ACCOUNT         │ memcg (memory cgroup) takibi farklıysa     │
+    │                      │ accounting bozulur                         │
+    └──────────────────────┴────────────────────────────────────────────┘
+
+    Birleştirmeyi kesin engelleyen bayraklar da şunlardır:
+
+    ┌──────────────────────┬──────────────────────────────────────────────────┐
+    │         Bayrak       │                    Neden                         │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SLAB_RED_ZONE        │ Nesne layout'u değiştirir; debug baytları        │
+    │                      │ başka cache'in nesnelerini bozar                 │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SLAB_POISON          │ Poison deseni tüm nesne alanına uygulanır;       │
+    │                      │ merge edilmiş cache'de yanlış alarmlar üretir    │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SLAB_STORE_USER      │ Her nesneye stack trace saklanır; layout uyumu   │
+    │                      │ bozulur                                          │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SLAB_TRACE           │ Her alloc/free için ayrı log tutulur;            │
+    │                      │ merge edilince hangi cache'e ait olduğu belirsiz │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SLAB_TYPESAFE_BY_RCU │ RCU grace period serbest bırakma semantiği       │
+    │                      │ tüm cache genelinde tutarlı olmalı               │
+    ├──────────────────────┼──────────────────────────────────────────────────┤
+    │ SLAB_NO_MERGE        │ Kullanıcının açıkça merge'ü engellediği durum    │
+    └──────────────────────┴──────────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
     Çekirdeğin task_struct gibi, file gibi, dentry gibi, inode gibi nesnesleri tahsis etmekte kullandığı önceden 
     yaratılmış dilimli önbellek nesneleri (yani cache_create nesneleri) vardır. Aşağıda bunların isimlerini ve bunlara 
     erişekte kullanılan kmem_cache türünden göstericilerin isimlerini veriyoruz:
@@ -13399,16 +13454,15 @@ void *malloc(unsigned nbytes)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Yaratlılmış olan bir dilim önbelleğinden tahsisat yapmak için aşağıdaki fonksiyonlar kullanılmaktadır:
+    Yaratlılmış olan bir dilim önbelleğinden tahsisat yapmak için kullanılan temelfonksiyonlar şunlardır:
 
     ┌─────────────────────────┬──────────────────────────────────┐
     │       Fonksiyon         │         Temel Özellik            │
     ├─────────────────────────┼──────────────────────────────────┤
-    │ kmem_cache_alloc()      │ Standart tekli tahsisat          │
-    │ kmem_cache_zalloc()     │ Sıfırlanmış tahsisat (GFP_ZERO)  │
-    │ kmem_cache_alloc_node() │ NUMA düğümüne özgü tahsisat      │
-    │ kmem_cache_alloc_lru()  │ LRU listesiyle birlikte tahsisat │
-    │ kmem_cache_alloc_bulk() │ Toplu (çok nesne) tahsisat       │   
+    │ kmem_cache_alloc        │ Standart tekli tahsisat          │
+    │ kmem_cache_zalloc       │ Sıfırlanmış tahsisat (GFP_ZERO)  │
+    │ kmem_cache_alloc_node   │ NUMA düğümüne özgü tahsisat      │
+    │ kmem_cache_alloc_bulk   │ Toplu (çok nesne) tahsisat       │   
     └─────────────────────────┴──────────────────────────────────┘
 
     kmem_cache_alloc ve kmem_cache_zalloc fonksiyonları en çok kullanılan fonksiyonlardır. Bu fonksiyonlar belli bir 
@@ -13445,7 +13499,7 @@ void *malloc(unsigned nbytes)
     olma nedenlerini aşağıdaki tabloda açıklıyoruz:
 
     ┌─────────────────────────────┬──────────────────┬──────────────────────┐
-    │       Başarısızlık Nedeni   │  NULL Döner mi?  │       Açıklama       │
+    │     Başarısızlık Nedeni     │  NULL Döner mi?  │       Açıklama       │
     ├─────────────────────────────┼──────────────────┼──────────────────────┤
     │ Bellek baskısı (GFP_KERNEL) │  Bazen           │ Önce reclaim denenir │
     │ Bellek baskısı (GFP_ATOMIC) │  Evet, hemen     │ Reclaim yapılmaz     │
@@ -13454,72 +13508,73 @@ void *malloc(unsigned nbytes)
     └─────────────────────────────┴──────────────────┴──────────────────────┘
 
     Eğer bu fonksiyonlar başka fonksiyonların içerisinde çağrılmışsa başarısızlık durumunda çağrımın yapıldığı 
-    fonksiyonun -ENOMEM hata koduyla geri döndürülmesi uygun olur. 
+    fonksiyonun -ENOMEM hata koduyla geri döndürülmesi uygun olur. Bu fonksiyonlarla yapılan tahsisatlar kmem_cache_free
+    fonksiyonu ile serbest bırakılmaktadır.
 
     Güncel çekirdeklerde kmem_cache_alloc fonksiyonunun çağrı grafı kabaca şöyledir:
 
     kmem_cache_alloc(cache, gfp_flags)
-│
-└── slab_alloc()
-    │   [memcg_slab_pre_alloc hook]
-    │   [trace_kmem_cache_alloc tracepoint]
     │
-    └── slab_alloc_node()
-        │   [NUMA node seçimi]
+    └── slab_alloc()
+        │   [memcg_slab_pre_alloc hook]
+        │   [trace_kmem_cache_alloc tracepoint]
         │
-        ├── [per-CPU freelist dolu?] ──Evet──→ OBJ DÖNER    ← hızlı yol
-        │
-        └── Hayır → __slab_alloc()                          ← yavaş yol
-                    │   [preempt disable]
-                    │
-                    ├── [partial slab var?] ──Evet──→ get_partial()
-                    │                                  │   [kmem_cache_node]
-                    │                                  └──→ OBJ DÖNER
-                    │
-                    └── Hayır → new_slab()
-                                │
-                                └── allocate_slab()
+        └── slab_alloc_node()
+            │   [NUMA node seçimi]
+            │
+            ├── [per-CPU freelist dolu?] ──Evet──→ OBJ DÖNER    ← hızlı yol
+            │
+            └── Hayır → __slab_alloc()                          ← yavaş yol
+                        │   [preempt disable]
+                        │
+                        ├── [partial slab var?] ──Evet──→ get_partial()
+                        │                                  │   [kmem_cache_node]
+                        │                                  └──→ OBJ DÖNER
+                        │
+                        └── Hayır → new_slab()
                                     │
-                                    └── alloc_pages(gfp_flags, order)
-                                        │                   ← reclaim buradan tetiklenir
+                                    └── allocate_slab()
                                         │
-                                        └── __alloc_pages()
+                                        └── alloc_pages(gfp_flags, order)
+                                            │                   ← reclaim buradan tetiklenir
                                             │
-                                            ├── [fast path: watermark OK?] ──Evet──→ sayfa döner
-                                            │
-                                            └── Hayır → __alloc_pages_slowpath()
-                                                        │
-                                                        ├── [GFP_ATOMIC?] ──Evet──→ NULL DÖNER
-                                                        │                            (reclaim yok)
-                                                        │
-                                                        └── Hayır (GFP_KERNEL vs.)
+                                            └── __alloc_pages()
+                                                │
+                                                ├── [fast path: watermark OK?] ──Evet──→ sayfa döner
+                                                │
+                                                └── Hayır → __alloc_pages_slowpath()
                                                             │
-                                                            ├── wake_all_kswapd()
-                                                            │   │   [async reclaim başlatılır]
-                                                            │   │   [çağıran thread bloklanmaz]
-                                                            │   │
-                                                            │   └── hızlı tahsisat tekrar denenir
-                                                            │       │
-                                                            │       └── [başarılı?] ──Evet──→ sayfa döner
+                                                            ├── [GFP_ATOMIC?] ──Evet──→ NULL DÖNER
+                                                            │                            (reclaim yok)
                                                             │
-                                                            ├── [hâlâ yetersiz?]
-                                                            │   └── direct reclaim
-                                                            │       (try_to_free_pages)
-                                                            │           [thread bloklanır ← burada]
-                                                            │           [sync, çağıran task temizler]
-                                                            │
-                                                            ├── [hâlâ yetersiz?]
-                                                            │   └── memory compaction
-                                                            │       (compact_zone)
-                                                            │
-                                                            ├── [hâlâ yetersiz?]
-                                                            │   └── OOM killer
-                                                            │       (out_of_memory)
-                                                            │           [kurban seç + öldür]
-                                                            │
-                                                            └── [yine de yok?]
-                                                                └──→ NULL DÖNER
-                                                                     ← setup_slab() çağrılmaz
+                                                            └── Hayır (GFP_KERNEL vs.)
+                                                                │
+                                                                ├── wake_all_kswapd()
+                                                                │   │   [async reclaim başlatılır]
+                                                                │   │   [çağıran thread bloklanmaz]
+                                                                │   │
+                                                                │   └── hızlı tahsisat tekrar denenir
+                                                                │       │
+                                                                │       └── [başarılı?] ──Evet──→ sayfa döner
+                                                                │
+                                                                ├── [hâlâ yetersiz?]
+                                                                │   └── direct reclaim
+                                                                │       (try_to_free_pages)
+                                                                │           [thread bloklanır ← burada]
+                                                                │           [sync, çağıran task temizler]
+                                                                │
+                                                                ├── [hâlâ yetersiz?]
+                                                                │   └── memory compaction
+                                                                │       (compact_zone)
+                                                                │
+                                                                ├── [hâlâ yetersiz?]
+                                                                │   └── OOM killer
+                                                                │       (out_of_memory)
+                                                                │           [kurban seç + öldür]
+                                                                │
+                                                                └── [yine de yok?]
+                                                                    └──→ NULL DÖNER
+                                                                        ← setup_slab() çağrılmaz
 
     Tabii bu çağrı dizgesinde ayrıntıları bir yana bırakırsak kabaca olanlar şunlardır:
 
@@ -13540,6 +13595,593 @@ void *malloc(unsigned nbytes)
     nesnenin adresini almaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
           
+/*----------------------------------------------------------------------------------------------------------------------
+				                            83. Ders 20/06/2026 - Cumartesi					
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	kmem_cache_alloc_node fonksiyonu belli bir NUMA düğümündne tahsisat yapmaktadır. Başka bir deyişle tahsisat için 
+    ilgili NUMA düğümünün bölgelerindeki dilim önbelleklerinden tahsisat yapılmaktadır. Ancak fonksiyonda belirtilen 
+    NUMA düğümününe ilişkin bölgelerdeki dilim önbelleklerinde boş yer kulunamazsa düğüm temelinde fallback yapılmamaktadır. 
+    Fonksiyonun prototipi şöyledir:
+
+    void *kmem_cache_alloc_node(struct kmem_cache *s, gfp_t gfpflags, int node);
+
+    Fonksiyonun birinci parametresi dilim önbelleğine ilişkin kmem_vavhe nesnesinin adresini, ikinci parametresi 
+    tahsisat bayraklarını ve üçüncü parametresi de NUMA düğümünün numarasını almaktadır. 
+
+    kmem_cache_alloc_bulk fonksiyonu dilim önbelleğindne bir nesne değil birden fazla nesne tahsis etmek için 
+    kullanılmaktadır. Fonksiyonun prototipi şöyledir:
+
+    int kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t nr, void **p);
+
+    Fonksiyonun son iki parametresine dikkat ediniz. Son parametre (p) tahsis edilen nesnelerin adreslerinin yerleştirileceği 
+    gösterici dizisinin adresini almaktadır. Sondna bir önceki parametre (nr) toplam kaç nesnenin tahsis edileceğini 
+    belirtmektedir. Fonksiyon "ya hep ya hiç" biçiminde tahsisat yapmaktadır. Yani burada belirtilen sayıdaki tahsisatın
+    hepsi yapılamazsa hiçbir tahsisat yapılmamış gibi geri dönmektedir. Fonksiyonun iç işleyişi şöyledir:
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Dilimli tahsisat sisteminin amacının belli uzunluklardaki nesneleri hızlı bir biçimde tahsis etmek olduğunu söylemiştik.
+    Ancak her farklı uzunluktaki nesne için yeni bir dilim önbelleği oluşturmak zahmetlidir. Örneğin biz çekirdek 
+    kodlamasında 25 byte'lık bir tahaisat yapmak isteyelim. Bunun için 25 byte'lık nesnelerden oluşan bir dilim önbelleği 
+    yaratmak oldukça zahmetlidir. İşte Linux çekirdeğinde bu zahmetten kurtulmak için belli uzunluklarda hazır dilim 
+    önbellekleri de oluşturulmuştur. Bu hazır dilim önbelleklerinin nesne uzunlukları şöyledir:
+
+    ┌────┬──────────────────┬────────────────┬────────────────┬─────────────────┐
+    │ #  │  Nesne Boyutu    │ KMALLOC_NORMAL │ KMALLOC_CGROUP │  KMALLOC_DMA    │
+    ├────┼──────────────────┼────────────────┼────────────────┼─────────────────┤
+    │  1 │        8 B       │ kmalloc-8      │ kmalloc-cg-8   │ dma-kmalloc-8   │
+    │  2 │       16 B       │ kmalloc-16     │ kmalloc-cg-16  │ dma-kmalloc-16  │
+    │  3 │       32 B       │ kmalloc-32     │ kmalloc-cg-32  │ dma-kmalloc-32  │
+    │  4 │       64 B       │ kmalloc-64     │ kmalloc-cg-64  │ dma-kmalloc-64  │
+    │  5 │       96 B  (*)  │ kmalloc-96     │ kmalloc-cg-96  │ dma-kmalloc-96  │
+    │  6 │      128 B       │ kmalloc-128    │ kmalloc-cg-128 │ dma-kmalloc-128 │
+    │  7 │      192 B  (*)  │ kmalloc-192    │ kmalloc-cg-192 │ dma-kmalloc-192 │
+    │  8 │      256 B       │ kmalloc-256    │ kmalloc-cg-256 │ dma-kmalloc-256 │
+    │  9 │      512 B       │ kmalloc-512    │ kmalloc-cg-512 │ dma-kmalloc-512 │
+    │ 10 │      1024 B (1k) │ kmalloc-1k     │ kmalloc-cg-1k  │ dma-kmalloc-1k  │
+    │ 11 │      2048 B (2k) │ kmalloc-2k     │ kmalloc-cg-2k  │ dma-kmalloc-2k  │
+    │ 12 │      4096 B (4k) │ kmalloc-4k     │ kmalloc-cg-4k  │ dma-kmalloc-4k  │
+    │ 13 │      8192 B (8k) │ kmalloc-8k     │ kmalloc-cg-8k  │ dma-kmalloc-8k  │
+    └────┴──────────────────┴────────────────┴────────────────┴─────────────────┘
+   
+    Burada nesne uzunlukları 2'nin kuvvetine ilişkin olsa da (*) ile gösterilen iki istisna bulunmaktadır. Bu dilim 
+    önbellekleri çekirdek imajı belleğe yüklenip initialize edilirken bellek yönetim işlevlerine ilişkin ilkdeğerlerin 
+    verildiği mm_init fonksiyonu içerisinde yaratılmaktadır:
+
+    start_kernel()                          [init/main.c]
+    └─► mm_init()
+        └─► kmem_cache_init()               [mm/slub.c]
+
+    Tablodaki KMALLOC_CGROUP "docker" gibi "container" teknolojilerinin kullanıını daha etkin hale getirmek için 
+    Linux çekirdeine sokulmuş olan "memcg (memory cgroup)" kavramı ile ilgilidir. kmalloc-cg-* önbellekleri, memcg (memory cgroup) 
+    tarafından izlenmesi gereken tahsisatlar için bulundurulmuştur. KMALLOC_DMA ise GFP_DMA bayrağıyla tahsisat 
+    yapıldığında kullanılan dilim önbellekleridir. 
+
+    Örneğin biz hiç yeni bir diilim önbelleği yaratmadan 12 byte tahsisat yapmak isteyelim. Tabloda 12 byte'lık hazır 
+    bir dilim önbelleği olmadığı için tahsisat 16 byte'lık dilim önbelleğinden yapılacaktır. Tabii bu durumda 4 byte 
+    boşa harcanmış olacaktır. Yani bu hazır dilim önbelleklerini kullanmanın bir "içsel bölünme (internal fragmentation)"
+    bedeli vardır. 
+
+    Yukarıdaki genel dilim önbelleklerinden tahsisat yapan genel tahsisat fonksiyonları da bulundurulmuştur. Şimdi 
+    onları açıklayacağız. 
+
+    kmalloc fonksiyonu özellikle çekirdek modülleri ve aygıt sürücüleri yazanlar tarafından sıkça kullanılmaktadır. 
+    Bu fonksiyon yukarıdaki hazır dilim önbelleklerinin hangisi talep edilen uzunluk için uygunsa tahsiatı oradan 
+    yapmaktadır. Dolayısıyla fonksiyonun kullanımı oldukça kolaydır. kmalloc fonksiyonunu adeta C'nin malloc fonksiyonuna 
+    benzetebilirsiniz. Fonksiyonun prototipi şöyledir:
+
+    void *kmalloc(size_t size, gfp_t flags);
+
+    Fonksiyonun birinci paranetresi tahsis edilecek nensnenin uzunluğunu, ikinci parametre ise yine tahsisat 
+    bayraklarını belirtmektedir. Bu ikinci parametre ilgili dilim önbelleğinde sayfa bulunamadığında alloc_pages 
+    fonksiyonu ile ikiz blok tahsisat sistemindne sayfa istenirken kullanılmaktadır. Bu ikinci parametreye tipik
+    olarak GFP_KERNEL geçilmektedir.  
+
+    kmalloc fonksiyonun gerçekleştirimi eski çekirdeklerde oldukça basitti. Örneğin Çekirdeğin 2.4 versiyonunda kmalloc 
+    şöyle yazılmıştı:
+
+    void *kmalloc (size_t size, int flags)
+    {
+        cache_sizes_t *csizep = cache_sizes;
+
+        for (; csizep->cs_size; csizep++) {
+            if (size > csizep->cs_size)
+                continue;
+            return __kmem_cache_alloc(flags & GFP_DMA ?
+                csizep->cs_dmacachep : csizep->cs_cachep, flags);
+        }
+        return NULL;
+    }
+
+    Bu versiyonda tüm dilim önbelleklerinin uzunlukları cache_sizes isimli bir dizide toplanmıştır. Sonra dönü içerisinde 
+    talep edilen tahsisata en uygun dilim önbelleği tespti edilmiştir. Sonra da __kmem_cache_alloc fonksiyonu ile 
+    o dilim önbelleğindne tahsisat yapılmıştır. Güncel çekirdeklerde "memcg (memory cgroup)" gibi kavramların çekirdeğe
+    dahil edilmesiyle fonksiyon karmaşık bir hale gelmiştir. Güncel çekirdeklerdekşi çağrı grafı şöyledir:
+
+
+    kmalloc(size, flags)                        [slab.h — makro]
+        │
+        │  alloc_hooks(__kmalloc_noprof(...))
+        │
+        ├─[size > KMALLOC_MAX_CACHE_SIZE (~8 KiB)]
+        │       │
+        │       ▼
+        │   kmalloc_large_noprof()              [slab_common.c]
+        │       │
+        │       ▼
+        │   alloc_pages()                       [Buddy Allocator — SLUB devre dışı]
+        │
+        └─[size ≤ KMALLOC_MAX_CACHE_SIZE]
+                │
+                ▼
+            __do_kmalloc_node()                 [slab_common.c]
+                │
+                ▼
+            kmalloc_slab(size, flags)
+                │  kmalloc_type() → NORMAL / CGROUP / RECLAIM / DMA
+                │  kmalloc_index() → boyuta göre indeks
+                │
+                ▼
+            kmalloc_caches[type][idx]           ── kmem_cache seçildi
+                │
+                ▼
+            slab_alloc_node()                   [slub.c]
+                │
+                ├─────────────────────────────────────────────────┐
+                │                                                 │
+                ▼  [HIZLI YOL — lockless]              [YAVAŞ YOL]
+                                                                │
+        c->freelist != NULL                        ___slab_alloc()
+        this_cpu_cmpxchg_double()                      │
+        nesne döner                      ┌─────────────┼──────────────────┐
+                                         │             │                  │
+                                     [1] per-CPU    [2] node         [3] yeni sayfa
+                                     partial        partial          gerekiyor
+                                     listesi        listesi               │
+                                     (c->partial)   (kmem_cache_node      │
+                                         │          ->partial)           │
+                                         │             │          new_slab()
+                                         │             │                 │
+                                         └──────┬──────┘          alloc_pages()
+                                                │                [Buddy Allocator]
+                                                ▼
+                                            nesne döner ✓
+
+    kmalloc fonksiyonu başarıszlık durumunda NULL adrese geri dönmektedir. Örneğin:
+
+    if ((obj = kmalloc(12, GFP_KERNEL)) == NULL) {
+        /* ... */
+    }
+
+    kmalloc ailesinden başka çekirdek fonksiyonları da vardır. kzalloc fonksiyonu tahsis edilen alanı aynı zamanda 
+    sıfırlamaktadır. Yani aşağıdaki işlemi yapmaktadır:
+    
+    void *kzalloc(size_t size, gfp_t flags)
+    {
+        return kmalloc(size, flags | __GFP_ZERO);
+    }
+
+    kmalloc_array fonksiyonu iki parametresinin çarpımı kadar alanı tahsis etmektedir. Fonksiyonun prototipi şöyledir:
+    
+    void *kmalloc_array(size_t n, size_t size, gfp_t flags);
+    
+    Tabii bu iki parametreyi programcı kendi çarpıp kmalloc fonksiyonuna verebilir. Ancak bazen n ve size değerleri
+    başka bir yerden örneğin kullanıcı alanından geliyor olabilir. Bu durumda taşma kontrolünün yapılması gerekebilir. 
+    (iki büyük büyük işaretsiz tamsayı çarıldığında taşmadan dolayı küçük bir işaretsiz tamsayının elde edilebileceğine
+    dikkat ediniz.)
+
+    kcalloc fonksiyonu C'deki calloc fonksiyonuna benzetilebilir. kmalloc_array gibi iki uzunluk parametresi almaktadır, 
+    ancak tahsis edilen alanı da sıfırlamaktadır. Fonksiyonun prototipi şöyledir:
+
+    void *kcalloc(size_t n, size_t size, gfp_t flags);
+
+    krealloc fonksiyonu C'nin realloc fonksiyonu gibi düşünülebilir. Daha önce tahsis edilmiş olan bloğu büyütmek 
+    ya da küçültmek için kullanılmaktadır. Fonksiyonun prototipi şöyledir
+
+    void *krealloc(const void *p, size_t new_size, gfp_t flags);
+
+    Fonksiyonun birinci parametresi daha önce kmalloc ve türevleri tarafından tahsis edilmiş olan bloğun adresini, 
+    ikinci parametresi bu bloğun toplam yeni uzunluğunu ve üçüncü parametresi de tahsisat bayraklarını belirtmektedir. 
+    Fonksiyon zaten daha önce tahsis edilmiş olan blokta dilim büyüklüğüne kadar yeteri boşluğu bulursa hiç dilim 
+    yer değiştirmesi yapmaz. Ancak bunu bulamazsa toplam yeni uzunluğu içecek başka bir dilim önbelleğindne yeni bir 
+    dilim tahsis edip eskisini serbest bırakmaktadır. Fonksiyonun davranışını aşağıdaki tabloda özetliyoruz:
+
+    ┌───────────────────────────┬─────────────────────────────────────────┐
+    │          Durum            │              Davranış                   │
+    ├───────────────────────────┼─────────────────────────────────────────┤
+    │ p == NULL                 │ kmalloc(new_size, flags) ile eşdeğer    │
+    │ new_size == 0             │ kfree(p); ZERO_SIZE_PTR döner           │
+    │ Aynı önbelleğe sığıyor    │ Yerinde işlem; yeni tahsis yapmaz       │
+    │ Farklı önbellek gerekiyor │ Yeni tahsis + memcpy + eski bloğu kfree │
+    └───────────────────────────┴─────────────────────────────────────────┘
+
+    krealloc_array fonksiyonu 6.1 çekirdekleriyle eklenmiştir. kmalloc_array fonksiyonunun realloc biçimi gibidir:
+
+    void *krealloc_array(void *p, size_t new_n, size_t new_size, gfp_t flags);
+
+    kmalloc türevi fonksiyonlarla tahsis edilen alanlar kfree fonksiyonu ile serbest bırakılmaktadır. kfree fonksiyonunun 
+    prototipi şöyledir:
+
+    void kfree(const void *objp);
+
+    Fonksiyonun yalnızca blok adresini parametre olarak aldığına dikkat ediniz. Peki bu fonksiyon ilgili dilim önbelleğini 
+    nasıl bulmaktadır? Eskiden eğer bir sayfa dilimli tahsisat sistemi tarafından kullanılıyorsa ona ilişkin kmem_cache 
+    nesnesinin adresi de sayfayı temsil eden page yapısının içerisinde  tutuluyordu. Böylece eskiden herhangi bir nesnenin
+    içinde bulunduğu sayfaya ilişkin page nesnesinden hareketle geriye doğru kmem_cache nesesi elde edilebiliyordu. 
+    Çekirdeğin 5.17 versiyonuyla birlikte ayrı bir slab yapısı oluşturuldu (biz bu yapıyı incelemiştik) ve bu yapı 
+    page yapısının üstüne bindirildi. Yani yeni çekirdeklerde artık biz nesnenin adresini biliyorsak oradan onun bulunduğu 
+    sayfaya ilişkin page nesnesinin adresini elde edebiliriz. Ancak bu page nesnesi aslında slab nesnesi durumundadır. 
+    Dolayısıyla elde edilen struct page * göstericisi struct slab * türüne dönüştürülerek erişim yapılmaktadır. Zaten 
+    bu slab yapısının içerisinde geriye doğur kmem_cache nesnesine erişilebildiğini anımsayınız. Yani yeni çekirdeklerde
+    erişim şu yoldan geçilerek yapılmaktadır:
+
+    Nesne adresi (void *obj)
+            │
+            │  virt_to_page(obj)   veya   virt_to_folio(obj)
+            ▼
+    struct page *page             ← mem_map[] girdisi
+            │
+            │  page_slab(page)
+            │    └─► (struct slab *)page   [cast — aynı bellek]
+            ▼
+    struct slab *slab
+            │
+            │  slab->slab_cache
+            ▼
+    struct kmem_cache *s          ← cache bulundu
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çalışan bir sistemde dilimli tahsisat sistemleri hakkındaki bilgiler "proc dosya sistemi" ve "sys dosya sistemi" 
+    yoluyla elde edilebilmektedir. Bu dosya sistemlerine ilişkin ilgili girişler şunlardır:
+
+    "/proc/slabinfo"
+    "/proc/meminfo" (slab alanları)
+    "/sys/kernel/slab/<cache-adı>/" 
+
+    "/proc/slabinfo" dosyası yaratılmış olan tüm dilim önbellekleri (yani kmem_cache nesneleri) hakkında bilgileri 
+    bulundurmaktadır. Normal proseslerin bu dosyaya "r" hakkı olmadığı için dosyayı okurken sudo uygulanması
+    gerekir. Dosya aşağıdaki gibi bir görünüme sahiptir:
+
+    $ sudo cat proc/slabinfo
+    [sudo] kaan için parola:              
+    slabinfo - version: 2.1
+    # name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> 
+    <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail>
+    
+    isofs_inode_cache     56     72    664   24    4 : tunables    0    0    0 : slabdata      3      3      0
+    QIPCRTR               56     78    832   39    8 : tunables    0    0    0 : slabdata      2      2      0
+    AF_VSOCK              48     50   1280   25    8 : tunables    0    0    0 : slabdata      2      2      0
+    ext4_groupinfo_4k    960    962    152   26    1 : tunables    0    0    0 : slabdata     37     37      0
+    btrfs_delayed_node     0      0    312   26    2 : tunables    0    0    0 : slabdata      0      0      0
+    btrfs_ordered_extent   0      0    416   39    4 : tunables    0    0    0 : slabdata      0      0      0
+    bio-328               28     42    384   21    2 : tunables    0    0    0 : slabdata      2      2      0
+    bio-392               28     36    448   36    4 : tunables    0    0    0 : slabdata      1      1      0
+    btrfs_extent_buffer    0      0    240   34    2 : tunables    0    0    0 : slabdata      0      0      0
+    bio-408               28     36    448   36    4 : tunables    0    0    0 : slabdata      1      1      0
+    btrfs_inode            0      0   1008   32    8 : tunables    0    0    0 : slabdata      0      0      0
+    bio-424               28     36    448   36    4 : tunables    0    0    0 : slabdata      1      1      0
+    fsverity_info          0      0    272   30    2 : tunables    0    0    0 : slabdata      0      0      0
+    fscrypt_inode_info     0      0    128   32    1 : tunables    0    0    0 : slabdata      0      0      0
+    ...
+
+    Buradaki sütunlarda dilim önbelleğinin ismi, oradaki toplam nesne sayısı, nesnelerin uzunlukları gibi önemli bilgiler
+    bulunmaktadır. Tabii liste çok uzun olabileceği için grep yardımıyla ilgili satırı görüntüleyebilirsiniz.
+    "proc/slabinfo" dosyasındaki sütunların anlamları şöyledir:
+
+    ┌────────────────┬─────────┬─────────────────────────────────────────────────────────────────┐
+    │     Alan       │  Kolon  │                          Açıklama                               │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ name           │    1    │ kmem_cache->name değeri. Ör: "task_struct", "kmalloc-64"        │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ active_objs    │    2    │ Şu an kullanımda olan nesne sayısı                              │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ num_objs       │    3    │ Toplam ayrılmış nesne kapasitesi (kullanımda + boşta)           │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ objsize        │    4    │ Her nesnenin kullanıcıya sunulan boyutu (bayt). Red zone        │
+    │                │         │ dahil edilmez. kmem_cache->object_size ile eşleşir              │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ objperslab     │    5    │ Her slab'da kaç nesne bulunduğu. SLUB'da "objs_per_slab"        │
+    │                │         │ sysfs alanıyla örtüşür                                          │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ pagesperslab   │    6    │ Her slab'ın kaç page'den oluştuğu (2^order adet page)           │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ limit          │    7    │ SLUB'da her zaman 0. Eski SLAB'ın per-CPU cache limiti idi      │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ batchcount     │    8    │ SLUB'da her zaman 0. Eski SLAB'ın per-CPU transfer batch sayısı │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ sharedfactor   │    9    │ SLUB'da her zaman 0. Eski SLAB'da shared cache çarpanı          │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ active_slabs   │   10    │ En az bir nesnesi kullanımda olan slab sayfalarının sayısı      │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ num_slabs      │   11    │ Toplam slab sayısı (boş + kısmi + dolu)                         │
+    ├────────────────┼─────────┼─────────────────────────────────────────────────────────────────┤
+    │ sharedavail    │   12    │ SLUB'da her zaman 0. Eski SLAB'ın shared cache havuzundaki      │
+    │                │         │ boş nesne sayısı idi                                            │
+    └────────────────┴─────────┴─────────────────────────────────────────────────────────────────┘
+
+    Örneğin:
+
+    $ sudo cat /proc/slabinfo | grep "myobject_cache"
+    myobject_cache        60     64    128   32    1 : tunables    0    0    0 : slabdata      2      2      0
+
+    Buradaki kendi yarattığımız dilim önbelleği için değerleri tablo halinde veriyoruz:
+
+    ┌────────────────┬────────┬─────────────────────────────────────────────────────────────────┐
+    │     Alan       │ Değer  │                          Açıklama                               │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ name           │myobject│ kmem_cache->name. Cache bağımsız oluşturulmuş;                  │
+    │                │ _cache │ merge edilmemiş (aksi halde bu isimle görünmezdi).              │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ active_objs    │   60   │ Şu an kmem_cache_alloc() ile tahsis edilmiş,                    │
+    │                │        │ henüz kmem_cache_free() yapılmamış nesne sayısı.                │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ num_objs       │   64   │ Tüm dilimlerdeki toplam nesne kapasitesi.                       │
+    │                │        │ 2 dilim × 32 nesne/slab = 64. active_objs ≤ num_objs.           │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ objsize        │  128   │ kmem_cache->object_size = 128 bayt.                             │
+    │                │        │ sizeof(struct myobject) = 72 bayt olmasına karşın               │
+    │                │        │ SLUB bunu 128'e yuvarlıyor (bkz. aşağıdaki hesap).              │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ objperslab     │   32   │ Her dilim'de 32 nesne barınıyor.                                │
+    │                │        │ 1 page = 4096 bayt → 4096 / 128 = 32.                           │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ pagesperslab   │    1   │ Her dilim 1 page'den oluşuyor (order = 0).                      │
+    │                │        │ Slab boyutu = PAGE_SIZE << 0 = 4096 bayt.                       │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ limit          │    0   │ SLUB'da kullanılmaz. SLAB uyumluluğu için 0.                    │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ batchcount     │    0   │ SLUB'da kullanılmaz. SLAB uyumluluğu için 0.                    │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ sharedfactor   │    0   │ SLUB'da kullanılmaz. SLAB uyumluluğu için 0.                    │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ active_slabs   │    2   │ En az bir nesnesi kullanımda olan slab sayısı.                  │
+    │                │        │ Her iki slab da aktif: 60 nesne 2 slab'a dağılmış.              │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ num_slabs      │    2   │ Toplam dilim sayısı. active_slabs = num_slabs → boş slab yok.   │
+    ├────────────────┼────────┼─────────────────────────────────────────────────────────────────┤
+    │ sharedavail    │    0   │ SLUB'da kullanılmaz. SLAB uyumluluğu için 0.                    │
+    └────────────────┴────────┴─────────────────────────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                            84. Ders 21/06/2026 - Pazar							
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	"/proc/meminfo" dosyası aslında bellek kullanımı hakkında genel bilgi veren bir dosyadır. Bu dosyanın içeriği 
+    yazdırıldığında örnek çıktısı aşağıdaki biçimdedir:
+
+    $ cat /proc/meminfo
+    MemTotal:        8081824 kB
+    MemFree:         2802508 kB
+    MemAvailable:    6072932 kB
+    Buffers:          372700 kB
+    Cached:          3021924 kB
+    SwapCached:            0 kB
+    Active:          3296008 kB
+    Inactive:        1342872 kB
+    Active(anon):    1292996 kB
+    Inactive(anon):        0 kB
+    Active(file):    2003012 kB
+    Inactive(file):  1342872 kB
+    Unevictable:          64 kB
+    Mlocked:              64 kB
+    SwapTotal:       3991548 kB
+    SwapFree:        3991548 kB
+    Zswap:                 0 kB
+    Zswapped:              0 kB
+    Dirty:               132 kB
+    Writeback:             0 kB
+    AnonPages:       1244544 kB
+    Mapped:           452140 kB
+    Shmem:             48732 kB
+    KReclaimable:     229804 kB
+    Slab:             398272 kB
+    SReclaimable:     229804 kB
+    SUnreclaim:       168468 kB
+
+    ...
+
+    Buradaki "Slab" satırı dilimli tahsisat sistemlerinin toplamda fiziksel RAM'de ne kadar yer kapladıpını belirtmektedir. 
+    "SReclaimable" çekirdek tarafındna geri alınabilen dilim önbelleklerinin büyüklüğünü, "SUnreclaim" ise geri alınamayan 
+    dilim önbelleklerinin büyüklüğünü belirtmektedir. 
+
+    Aslında "sys" dosya sistemindeki ""/sys/kernel/slab/<cache-adı>/" dizini belli bir dilim önbelleği hakkında oldukça 
+    ayrıntılı bilgiler vermektedir. Bu dizizinin içeriği şöyledir:
+
+    $ ls /sys/kernel/slab/myobject_cache/
+    aliases      ctor            object_size      poison                    sheaf_capacity     slab_size      validate
+    align        destroy_by_rcu  objects_partial  reclaim_account           shrink             store_user
+    cache_dma    hwcache_align   objs_per_slab    red_zone                  skip_kfence        total_objects
+    cpu_partial  min_partial     order            remote_node_defrag_ratio  slabs              trace
+    cpu_slabs    objects         partial          sanity_checks             slabs_cpu_partial  usersize
+
+    Bu dosyaların içerdiği bilgileri aşağıdaki tabloda veriyoruz:
+
+    ┌───────────────────┬─────────────────────────────────────────────────────────────┐
+    │        Dosya      │                       Açıklama                              │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ object_size       │ Kullanıcıya sunulan nesne boyutu (bayt).                    │
+    │                   │ kmem_cache->object_size ile birebir eşleşir.                │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ slab_size         │ Dilimli tahsisat sisteminin dahili olarak her nesne için    │
+    │                   │ ayırdığı gerçek alan (hizalama + red zone dahil).           │
+    │                   │ kmem_cache->size ile eşleşir.                               │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ align             │ Nesne hizalaması (bayt cinsinden).                          │
+    │                   │ kmem_cache->align alanından okunur.                         │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ order             │ Bir dilimi oluşturan page bloğunun order değeri.            │
+    │                   │ Dilim boyutu = PAGE_SIZE << order.                          │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ objs_per_slab     │ Her dilimde kaç nesne barınabileceği.                       │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ objects           │ Şu an dilim önbelleğinde yaşayan toplam nesne sayısı        │
+    │                   │ (NUMA node'larına göre N0=x şeklinde de gösterilir).        │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ total_objects     │ Tüm dilimlerdeki toplam nesne kapasitesi.                   │
+    │                   │ objects ≤ total_objects olmalıdır.                          │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ objects_partial   │ Kısmi dilimlerde (partial list) bulunan nesne sayısı.       │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ slabs             │ Toplam dilim sayısı. NUMA bilgisi N0=x formatında eklenir.  │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ partial           │ Per-node partial listesindeki dilim sayısı.                 │
+    │                   │ kmem_cache_node->nr_partial ile eşleşir.                    │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ cpu_slabs         │ Şu an per-CPU yapısı (kmem_cache_cpu->page) tarafından      │
+    │                   │ tutturulan aktif dilim sayısı (per-CPU kırılımıyla).        │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ aliases           │ Bu dilim önbelleğinin kaç isimle takma ad (alias)           │
+    │                   │ verildiği. kmem_cache_create_usercopy() ile                 │
+    │                   │ birleştirme yapıldıysa > 0 olur.                            │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ ctor              │ Dilim önbelleği bir constructor ile oluşturulduysa          │
+    │                   │ fonksiyon adresi burada görünür; yoksa boştur.              │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ usersize          │ Kullanıcıya copyable olarak işaretlenen bayt sayısı.        │
+    │                   │ kmem_cache_create_usercopy() ile belirlenir; copy_to_user() │
+    │                   │ güvenlik kontrollerinde kullanılır.                         │
+    ├───────────────────┼─────────────────────────────────────────────────────────────┤
+    │ slabs_cpu_partial │ Per-CPU partial listesindeki dilim ve nesne sayısı.         │
+    │                   │ Format: "dilim_sayısı(toplam_nesne_sayısı)"                 │
+    └───────────────────┴─────────────────────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Biz şimdiye kadar "fiziksel RAM'de ardışıl olan" tahsisat üzerinde durduk. Çekirdeğin sayfa düzeyinde tahsisat yapan
+    "ikin blok tahsisat sistemi (buddy allocator)" fiziksel RAM'de ardışıl sayfaları tahsis ediyordu. Dilimli tahsisat 
+    sistemi de arka planda ikiz blok tahsisat sistemini kullanıyordu. Ancak fiziksel RAM'deki ardışıl sayfa tahsisatları 
+    fiziksel RAM'in bölünmesine (fragmente olmasına) yol açabilmektedir. İşte bazı durumlarda fiziksel RAM'de ardışıl 
+    olmayabilen ancak sanal adres alanında (yani sayfa tablosunda) ardışıl olan tahsisatların da yapılması gerekebilmektedir. 
+    Linux çekirdeğinde fiziksel RAM'de ardşıl olmayan ancak sanal adres alanında ardışıl olan tahsisatlar vmalloc ailesi
+    fonksiyonlarla yapılmaktadır. Biz önce çekirdekteki vmalloc ailesi fonksiyonları ele alacağız sonra da bu fonksiyonların 
+    tahsisatları nasıl yaptığı üzerinde duracağız.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Günncel çekirdeklerde vmalloc ailesi fonksiyonlar makrolar yoluyla oluşturulmuştur. Ancak biz burada fonksiyonun 
+    anlaşılabilir parametrik yapısı için eski çekirdeklerdeki gibi prototoipleri kullanacağız. 
+    
+    vmalloc fonksiyonun prototipi şöyledir:
+
+    void *vmalloc(unsigned long size);
+
+    Görüldüğü gibi fonksiyon tıpkı C'nin malloc fonksiyonunda olduğu gibi byte cinsinden tahsis edilecek bellek miktarını 
+    parametre olarak almaktadır. Tahsis edilen alanın sanal bellek adresiyle geri dönmektedir. vmalloc ile tahsis edilen 
+    alan vfree ve vfree_atomic fonksiyonlarıyla ile serbest bırakılmaktadır:
+
+    void vfree(const void *addr);
+    void vfree_atomic(const void *addr);  /* Linux 4.3 */
+
+    vfree_atomic fonksiyonu kesme kodlarında da çağrılabilmektedir. 
+
+    vzalloc fonksiyonu tahsis edilen alanı aynı zamanda sıfırlamaktadır. Tabii bu sıfırlama işlemi aslında ikiz blok
+    tahsisat sisteminde __GFP_ZERO bayrağı kullanılarka yapılmaktadır:
+
+    void *vzalloc(unsigned long size);
+
+    vmalloc_node fonksiyonu belli bir NUMA düğümünü hedef alarak tahsisatı yapnaktadır:
+
+    void *vmalloc_node(unsigned long size, int node);
+
+    Ancak bu tahsisatlara ilişkin sayfaların hepsi fallback nedeniyle istenilen NUMA düğümünden karşılanmak zorunda 
+    değildir. (Düğümler arasında fallback işlemininin engellenmesi için alloc_pages gibi sayfa tahsisat
+    fonksiyonlarında __GFP_THISNODE özel bayrağı kullanılabilmektedir.)
+
+    vmalloc_user isimli çekirdek fonksiyonu kullanıcı alanına haritalanabilen (map edilebilen) tahsisatlar yapmaktadır. 
+    Bu konuyu ileride ele alacağız. 
+
+    Yukarıda da belirttiğimiz gibi vmalloc ailesi fonksiyonlar arka planda ikinz blok tahsisat sistemini kullanmaktadır.
+    Aşağıdaki tabloda fonksiyonların ikiz blok tahsisat sisteminden sayfa tahsis ederken hangi bayrakları kullandığı 
+    belirtilmektedir:
+
+    ┌──────────────────────────┬────────────────────────────────────────────────────────┐
+    │   vmalloc Türevi         │         Kullanılan GFP Bayrakları                      │
+    ├──────────────────────────┼────────────────────────────────────────────────────────┤
+    │ vmalloc()                │ GFP_KERNEL | __GFP_HIGHMEM                             │
+    │ vzalloc()                │ GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO                │
+    │ vmalloc_user()           │ GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO                │
+    │ vmalloc_node()           │ GFP_KERNEL | __GFP_HIGHMEM (+ NUMA node kısıtı)        │
+    └──────────────────────────┴────────────────────────────────────────────────────────┘
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Peki ne zaman dilim önbelleği yolu ile (örneğin kmalloc ile), ne zaman vmalloc ile ve ne zaman sayfa düzeyinde (örneğin
+    alloc_pages ile) tahsisat yapmalıyız? vmalloc ailesi fonksiyonu ile fiziksel RAM'de çok büyük alanlar tahsis edilebilmektedir. 
+    Çünkü vmalloc ailesi sayfaların fiziksel RAM'de ardışıl bulunmasını zorunlu tutmamaktadır. alloc_pages fonksiyonyla en fazla
+    8MB (order 11) kadar tahsisatın tek hamlede yapılabildiğini anımsayınız. Öte yandan dilimli tahsisat sistemi de temel 
+    olarak küçük miktardaki byte tahsisatları için düşünülmüştür. vmalloc ailesi fonksiyonlar toplamda daha fazla bellek 
+    kullanma eğilimindedir. İzleyen paragraflarda açıklanacağı gibi her vmalloc çağrısında çekirdek alanı yönetmek için 
+    ayrı bir nesne oluşturmaktadır. vmalloc ailesi çağrılar bir döngü içerisinde sürekli olarak 0'ıncı düzeyde (order 0) 
+    sayfa tahsisatlarıyla sağlanmaktadır. Bu işlem de göreli bir zaman kaybına yol açmaktadır. Aynı zamanda vmalloc ailesi 
+    çağrılar sayfa tablosunda da güncelleme yapmaktadır. Bu da ek bir maliyete yol açmaktadır. Aşağıdaki tabloda üç tahsisat
+    yöntemi birbirileriyle karşılaştırılmıştır:
+
+    ┌──────────────────────────┬──────────────────────────────┬────────────────────────────────┬──────────────────────────────────────┐
+    │           Özellik        │          kmalloc()           │          vmalloc()             │          alloc_pages()               │
+    ├──────────────────────────┼──────────────────────────────┼────────────────────────────────┼──────────────────────────────────────┤
+    │ Fiziksel bitişiklik      │ Garantili                    │ Garantisiz (dağınık olabilir)  │ Garantili (2^order ardışık sayfa)    │
+    │ Sanal bitişiklik         │ Evet (physmap üzerinden)     │ Evet (vmalloc bölgesi)         │ Evet (physmap'te fiziksel ardışıklık │
+    │                          │                              │                                │ sanal ardışıklığa da yansır)         │
+    │ Döndürülen değer         │ void* (sanal adres)          │ void* (sanal adres)            │ struct page* (sayfa tanımlayıcısı)   │
+    │ Sanal adres edinme       │ Doğrudan                     │ Doğrudan                       │ page_address(): physmap aritmetiği   │
+    │                          │                              │                                │ PAGE_OFFSET + pfn<<PAGE_SHIFT        │
+    │                          │                              │                                │ Yeni PTE/TLB işlemi gerekmez         │
+    │                          │                              │                                │ (64-bit; kmap() 32-bit HIGHMEM'e     │
+    │                          │                              │                                │ özgüdür, 64-bit'te page_address'e    │
+    │                          │                              │                                │ indirgenir)                          │
+    │ DMA uyumluluğu           │ Evet (GFP_DMA ile)           │ Hayır (genel vmalloc)          │ Evet (GFP_DMA / GFP_DMA32 ile)       │
+    │ Maksimum boyut           │ ~8 MB (order 11)             │ Yüzlerce GB                    │ MAX_ORDER'a bağlı (~4 MB / ~8 MB)    │
+    │ Tahsisat birimi          │ Byte (slab hizalamasıyla)    │ Byte (PAGE_SIZE katına yuvarla │ 2^order sayfa (4 KB çarpanı)         │
+    │ İç tahsisat mekanizması  │ SLUB → buddy (büyükse)       │ Buddy (order-0 döngüsü)        │ Buddy (doğrudan)                     │
+    │ TLB etkisi               │ Minimal (physmap PTE mevcut) │ Yüksek (vmalloc fault mümkün)  │ Yok (PTE yoktur; kmap gerekirse var) │
+    │ Tahsisat hızı            │ Hızlı (slab önbelleği)       │ Yavaş (RB tree + PTE yazımı)   │ Orta (buddy doğrudan; PTE yok)       │
+    │ Atomik bağlamda kullanım │ GFP_ATOMIC ile mümkün        │ Mümkün değil                   │ GFP_ATOMIC ile mümkün                │
+    │ Parçalanmaya duyarlılık  │ Yüksek (fiziksel bitişiklik) │ Düşük (sanal esneklik)         │ Çok yüksek (2^order ardışık şart)    │
+    │ NUMA node kontrolü       │ kmalloc_node() ile           │ vmalloc_node() ile (tercih)    │ alloc_pages_node() ile (tercih)      │
+    │ __GFP_THISNODE desteği   │ Evet                         │ Manuel (__vmalloc_node ile)    │ Evet                                 │
+    │ Başka düğümden fallback  │ Evet (varsayılan)            │ Evet (varsayılan)              │ Evet (varsayılan)                    │
+    │ Bellek zone esnekliği    │ ZONE_NORMAL / DMA            │ Herhangi bir zone              │ Herhangi bir zone (GFP ile seçilir)  │
+    │ Serbest bırakma          │ kfree()                      │ vfree()                        │ __free_pages() / put_page()          │
+    │ Guard page               │ Hayır (SLUB redzone var)     │ Evet (varsayılan 1 sayfa)      │ Hayır                                │
+    │ Hata ayıklama desteği    │ KASAN, SLUB debug            │ KASAN, vmalloc_debug           │ KASAN (page granularity)             │
+    │ Tipik kullanım yeri      │ Genel çekirdek yapıları      │ Büyük yazılım tamponları       │ Sayfa tablosu, DMA, dosya sistemi    │
+    └──────────────────────────┴──────────────────────────────┴────────────────────────────────┴──────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+	Şimdi de vmalloc ailesi fonksiyonların gerçekleştirimleri üzerinde duralım. Biz burada anlatını vmalloc üzerinden 
+    yapacağız. vmalloc fonksiyonu her çağrıda vm_struct isimli bir nesne tahsis etmektedir. Güncel çekirdeklerde 
+    vm_struct yapısı "include/linux/vmalloc.h" içerisinde şöyle bildirilmiştir:
+   
+    struct vm_struct {
+        union {
+            struct vm_struct *next;	  /* Early registration of vm_areas. */
+            struct llist_node llnode; /* Asynchronous freeing on error paths. */
+        };
+
+        void			*addr;
+        unsigned long		size;
+        unsigned long		flags;
+        struct page		**pages;
+    #ifdef CONFIG_HAVE_ARCH_HUGE_VMALLOC
+        unsigned int		page_order;
+    #endif
+        unsigned int		nr_pages;
+        phys_addr_t		phys_addr;
+        const void		*caller;
+        unsigned long		requested_size;
+    };
+
+    Bu nesne için çekirdek tarafından oluşturulmuş bir dilim önbelleği yoktur. ÇÖünkü zaten bu yapı 64 byte uzunluktadır
+    ve kmalloc ailesi için 64 byte'lık bir dilim önbelleği bulunmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
 /*----------------------------------------------------------------------------------------------------------------------
 									
 ----------------------------------------------------------------------------------------------------------------------*/
