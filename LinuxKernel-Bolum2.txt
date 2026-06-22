@@ -3233,14 +3233,14 @@ void exit_sys(const char *msg)
     bellek okuması - 2
     bellek yazması - 3
 
-    Burada 1, 2, 3 numaralı bellek erişimleri işlemci tarafından smp_load_acquire() çağrısının yukarına taşınamaz. Ancak 
-    yukarısındakiler aşağısına taşınabilir. Görüldüğü gibi burada tek yönlü bir bariyer söz konusudur. rmb, wmb ve mb 
-    makrolarının hepsi çift yönlü bariyer oluşturmaktadır. Peki bu tek yönlü bariyerin anlamı nedir? İşte bazen önce 
-    bir bellek okuması yapılıp sonra ona göre başka yerlerden okumalar yapılabilir. Bunlar bağımsız işlemler olduğu 
-    için ARM gibi RISC işlemcileri komutları yer değiştirebilmektedir. Bu tür durumlarda çift yönlü bariyer uygulamak 
-    yerine tek yönlü bariyer uygulanması modern işlemcilerdeki performansı artırabilmektedir. smp_load_acquire makrosunun 
-    bir erişim yaptığına ve bu erişimin aşağısındaki kodların bu erişimin yukarısına taşınmasının engellediğine dikkat 
-    ediniz. Bu makronun kullanım amacı dikkate alındığında zaten makronun yukarısındaki erişimlerin makrodaki erişimin 
+    Burada 1, 2, 3 numaralı bellek erişimleri işlemci tarafından smp_load_acquire() çağrısının yukarına taşınamaz. 
+    Ancak yukarısındakiler aşağısına taşınabilir. Görüldüğü gibi burada belli bir adrese dayalı tek yönlü bir bariyer 
+    söz konusudur. rmb, wmb ve mb  makrolarının hepsi çift yönlü bariyer oluşturmaktadır. Peki bu tek yönlü bariyerin anlamı 
+    nedir? İşte bazen önce bir bellek okuması yapılıp sonra ona göre başka yerlerden okumalar yapılabilir. Bunlar bağımsız 
+    işlemler olduğu için ARM gibi RISC işlemcileri komutları yer değiştirebilmektedir. Bu tür durumlarda çift yönlü bariyer 
+    ygulamak yerine tek yönlü bariyer uygulanması modern işlemcilerdeki performansı artırabilmektedir. smp_load_acquire 
+    makrosunun bir erişim yaptığına ve bu erişimin aşağısındaki kodların bu erişimin yukarısına taşınmasının engellediğine 
+    dikkat ediniz. Bu makronun kullanım amacı dikkate alındığında zaten makronun yukarısındaki erişimlerin makrodaki erişimin 
     aşağısına alınmasında bir sorun oluşturmayacağı görülecektir. Örneğin birden fazla thread paylaşılan bir alandan 
     bilgi okuyup yazacak olsun:
 
@@ -3293,7 +3293,7 @@ void exit_sys(const char *msg)
 
     Biz yukarıdaki işlemi bellek bariyeri ile de yapabiliriz:
 
-     if (READ_ONCE(sd.flag) == 1) {  
+    if (READ_ONCE(sd.flag) == 1) {  
         smp_rmb();        
         val = READ_ONCE(sd.payload);
         WRITE_ONCE(sd.flag, 0);
@@ -3301,7 +3301,7 @@ void exit_sys(const char *msg)
     }
     /* ... */
 
-    Burada aşağıdaki iki işlem arasında bir bariyer uygulamaya gerek yoktur:
+    Burada aşağıdaki iki işlem arasında bir bariyer uygulamaya gerek olmadığına dikkat ediniz:
 
     val = READ_ONCE(sd.payload);
     WRITE_ONCE(sd.flag, 0);
@@ -3309,9 +3309,16 @@ void exit_sys(const char *msg)
     Bunlar zaten birbirinden bağımsız işlemlerdir. İşlemci bağımlılık nedeniyle WRITE_ONCE(sd.flag, 0) ataması 
     zaten if deyiminin yukarısına taşınamaz. Speculative store biçiminde bir işlem de yoktur.
 
-    İşte bu yer değiştirmenin de engellenmesi için izleyen paragrafta açıklayacağımız smp_store_release ile atamanın 
-    yapılması gerekmektedir. Ancak bu biçimdeki bellek bariyerleri daha önce de belirttiğimiz gibi boru hattı mekanizmasını 
-    bozması nedeniyle yavaşlamaya yol açmaktadır.
+    Daha önce de belirttiğimiz gibi yukarıdaki sorunda smp_rb bellek bariyeri işlemcinin boru hattı mekanizmasını 
+    bozduğundan dolayı göreli bir performans kaybına yol açmaktadır. İşte bu performans kaybı büyük ölçüde smp_load_acquire
+    makrosu ile ortadan kaldırılabilmektedir. Bu tür tek yönlü okuma bariyerleri için smp_load_acquire tercih 
+    edilmelidir:
+
+    if (smp_load_acquire(&sd.flag) == 1) {
+        val = READ_ONCE(sd.payload);
+        WRITE_ONCE(sd.flag, 0);
+        use(val);
+    }
 
     Intel işlemcilerinde yalnızca Store/Load işlemlerinde komut yer değiştirmesinin uygulandığını anımsayınız. Bu nedenle 
     Intel işlemcilerinde yukarıdaki önlem alınmasa bile bir sorun oluşmayacaktır. Ancak ARM gibi RISC işlemcilerinde bu 
@@ -3323,7 +3330,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Diğer önemli acquire/release makrosu da smp_store_release isimli makrodur. Bu makro smp_load_acquire makrosunun 
+    Diğer önemli acquire/release makrosu da smp_store_release isimli makrodur. Bu makro smp_load_acquire makrosunun 
     ters yönlüsüdür. Bu makro erişilecek nesnenin adresini ve ona yerleştirilecek değeri parametre olarak almaktadır:
 
     smp_store_release(ptr, val)
@@ -3338,77 +3345,43 @@ void exit_sys(const char *msg)
 
     Burada 1, 2 ve 3 numaralı bellek erişimlerini işlemci smp_store_release çağrısının aşağısına taşıyamaz. Genellikle 
     üretici-tüketici problemi tarzındaki kalıplarda tüketici smp_load_acquire fonksiyonunu kullanırken üretici de 
-    smp_store_release fonksiyonunu kullanmaktadır. Yukarıdaki shared_data örneğimizde tüketici fonksiyonu şöyle 
-    yazmıştık:
+    smp_store_release fonksiyonunu kullanmaktadır. Yukarıdaki shared_data örneğimizde tüketici kodunu şöyle yazmıştık:
 
-    int consumer(void) 
-    {
-        int val;
-
-        if (smp_load_acquire(&sd.flag) == 1) {
-            val = READ_ONCE(sd.payload);
-            ---->                                   /* dikkat burada yer değiştirme yapılabilir!
-            WRITE_ONCE(sd.flag, 0);  
-            return val;
-        }
-        return -1;
+    if (smp_load_acquire(&sd.flag) == 1) {
+        val = READ_ONCE(sd.payload);
+        WRITE_ONCE(sd.flag, 0);
+        use(val);
     }
 
-    Üretici tarafın da önce yapının payload elemanına yerleştirme yapıp ondan sonra flag değişkeni 1 yapması gerekir. 
-    Bu işlemi aşağıdaki gibi yaparsa sorun oluşur:
+    Üretici tarafın da önce yapının payload elemanına yerleştirme yapıp ondan sonra flag değişkeni set etmesi gerekir. 
+    Üretici bu işlemi aşağıdaki gibi yapmaya çalışırsa sorun oluşur:
 
-    void producer(int val)
-    {
-        WRITE_ONCE(sd.payload, val);            /* dikkat! sorun oluşabilir */
-        WRITE_ONCE(sd.flag, 1);
-    }
+    WRITE_ONCE(sd.payload, val);                   
+    WRITE_ONCE(sd.flag, 1);
 
-    Bradaki sorun işlemcinin yukarıdaki iki erişimin sırasını değiştirebilmesidir. Bu durumda diğer işlemcideki kod 
-    sd.flag değişkenini 1 gördüğünde sd.payload değişkenin önceki değerini okuyabilecektir. Tam bariyer kullanmadan bu 
-    işlem daha maliyetsiz smp_store_release makrosuyla yapılabilir:
+    Buradaki sorun işlemcinin yukarıdaki iki erişimin sırasını değiştirebilmesidir. Bu durumda diğer işlemcideki kod 
+    sd.flag değişkenini 1 gördüğünde sd.payload değişkenin önceki değerini okuyabilecektir. Bu durumu engellemek için 
+    bellek bariyeri kullanabiliriz:
 
-    void producer(int val)
-    {
-        WRITE_ONCE(sd.payload, val);            
-        smp_store_release(&sd.flag, 1);
-    }
-
-    smp_store_release makrosunun yukarısındaki erişimler (örneğimizdeki payload elemanına değerin aktarılması işlemimi)
-    makronun aşağısına taşınmamaktadır. İşte aynı nedenelrden dolayı consumer fonksiyonunda da sd.flag değişkenine 0 
-    değerinin smp_restore_release fonksiyonuyla yapılması gerekmektedir. Bu fonksiyonun da düzeltilmiş biçimini veriyoruz:,
+    WRITE_ONCE(sd.payload, val);
+    smp_wmb();                              /* store → store bariyeri */
+    WRITE_ONCE(sd.flag, 1);
     
-    int consumer(void) 
-    {
-        int val;
+    Ancak bu işlem smp_wmb kullanmadan daha maliyetsiz bir biçimde smp_store_release makrosuyla da yapılabilmektedir:
 
-        if (smp_load_acquire(&sd.flag) == 1) {
-            val = READ_ONCE(sd.payload);
-            smp_store_release(&sd.flag, 0); 
-            return val;
-        }
-        return -1;
-    }
+    WRITE_ONCE(sd.payload, val);
+    smp_store_release(&sd.flag, 1);         /* store + release bariyeri */
 
     Yukarıdaki üretici-tüketici probleminde bir noktaya daha dikkatinizi çekmek istiyoruz. Burada üretici yalnızca bir 
     kez yerleştirme yapıp tüketici de yalnızca bir kez okuma yapıyorsa bir sorun oluşmaz. Ancak bu işlemler birden fazla 
     kez yapılırsa iç içe geçmeden dolayı sorun oluşabilir. Bu tür durumlarda işlemler blokesiz yapılacaksa spinlock, blokeli 
     yapılacaksa semaphore nesneleri tercih edilmelidir. Örneğin spinlock ile koruma şöyle sağlanabilir:
-    
-    spinlock ile koruma şöyle sağlanabilir:
-
-    struct shared_data {
-        int payload;
-        int flag;
-        spinlock_t lock;
-    };
 
     void producer(int val)
     {
         spin_lock(&sd.lock);
-
-        WRITE_ONCE(sd.payload, val);
-        WRITE_ONCE(sd.flag, 1);
-
+        sd.payload = val;
+        sd.flag = 1;
         spin_unlock(&sd.lock);
     }
 
@@ -3417,16 +3390,18 @@ void exit_sys(const char *msg)
         int val;
 
         spin_lock(&sd.lock);
-        if (READ_ONCE(sd.flag) == 1) {
-            val = READ_ONCE(sd.payload);
-            WRITE_ONCE(sd.flag, 0);
+        if (sd.flag == 1) {
+            val = sd.payload;
+            sd.flag = 0;
             spin_unlock(&sd.lock);
             return val;
         }
         spin_unlock(&sd.lock);
-
         return -1;
     }
+
+    spinlock fonksiyonları kendi içerisinde barrier() çağrısı ile derleyici bariyeri de oluşturduğu için artık 
+    READ_ONCE ve WRITE_ONCE ile volatile erişimi de gerek kalmamaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -3436,7 +3411,7 @@ void exit_sys(const char *msg)
 
     Burada sd.flag değişkenine 1 atanmıştır. Ancak ARM gibi RISC işlemcilerinde bu işlem tek bir makine komutuyla 
     yapılamamaktadır. Dolayısıyla yukarıdaki çağrı komut yer değiştirmesi üzerinde etkili olsa da atomiklik sağlamamaktadır. 
-    İşte acquire/release işlemlerinin atomik yapılabilmesi için ayrı fonksiyonlar bulunudurulmuştur:
+    İşte atomik işlemlerin acquire/release semantiği ile yapılabilmesi için aşağıdaki fonksiyonlar bulundurulmuştur:
 
     atomic_read_acquire(v)              /* atomic_t için acquire load */
     atomic_set_release(v, i)            /* atomic_t için release store */
@@ -3447,8 +3422,8 @@ void exit_sys(const char *msg)
     atomic_long_read_acquire(v)         /* long için */
     atomic_long_set_release(v, i)
 
-    Bu fonksiyonlar gördüğünüz gibi atomic_t, atomic64_t ve atomic_long türleri üzerinde acquire ve release işlemlerini 
-    yapmaktadır. Bu fonksiyonların işlem yapıp eski değeri döndüren fetch'li biçimleri de vardır:
+    Bu fonksiyonlar gördüğünüz gibi atomic_t, atomic64_t ve _t türleri üzerinde acquire ve release işlemlerini 
+    yapmaktadır. Bu fonksiyonların işlem yapıp önceki değeri döndüren fetch'li biçimleri de vardır:
 
     atomic_fetch_add_acquire(i, v)    /* add ve eski değeri döndür, acquire */
     atomic_fetch_add_release(i, v)    /* add ve eski değeri döndür, release */
@@ -3467,7 +3442,7 @@ void exit_sys(const char *msg)
 
     Bu fonksiyonların compare-exchange biçimleri de bulunmaktadır:
 
-    /* Her iki durum için acquire */
+    /* Her iki durum için relaxed */
     atomic_cmpxchg_relaxed(v, old, new)  /* her iki durum için relaxed */
 
     /* Gösterici versiyonları */
