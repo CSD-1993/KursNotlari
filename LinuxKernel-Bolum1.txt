@@ -16,6 +16,8 @@
                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
+                    Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
+
                                     Son Güncelleme: 30/05/2026 - Cumartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -7051,143 +7053,80 @@ unsigned int hash_func(unsigned int key)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Biz radix arama ağacını ve XArray gerçekleştirimini daha sonra başka bir bölümde ele alacağız. Burada yalnızca radix 
-    arama ağacının temel mekanizması üzerinde açıklamalar yapacağız. Radix arama ağaçları için "dijital arama ağaçları 
-    (digital search tree)", "önek arama ağacı (prefix search tree)", "sıkıştırılmış arama ağaçları (compresses search 
-    trie)" gibi isimler de kullanılmaktadır. Bu arama ağaçlarında düğümlerde anahtar olarak anahtarın hepsi değil onun 
-    ön kısımları kullanılmaktadır. Böylece ağaç bir leksigrafik sıralama ağacı gibi de kullanılabilmektedir. Tipik 
-    anlatım sayısal değerlerden oluşan ve öneklerin bit belirttiği anahtarlar üzerinde yapılmaktadır. Ağacın kökünden 
-    girilir. Her kademede bir bit daha anahtara eklenir. Örneğin 4 bitlik sayıların radix ağacına yerleştirilmek istendiğini 
-    düşünelim. Bu sayılar şunlar olsun:
+    arama ağacının temel mekanizması üzerinde açıklamalar yapacağız. Radix arama ağaçları için "sayısal arama ağaçları 
+    (digital search tree)", "önek arama ağacı (prefix search tree)", "sıkıştırılmış arama ağaçları (compressed search tree)" 
+    gibi isimler de kullanılmaktadır.
 
-    1100
-    1010
-    0101
-    1011
-    0010
-    0111
-    0000
-    1000
+    Bu arama ağaçlarında düğümlerde anahtar olarak anahtarın tamamı değil onun ön kısımları bulundurulmaktadır. Böylece 
+    ağaç bir leksikografik sıralama ağacı gibi de kullanılabilmektedir. Örneğin 4 bitlik şu sayıların radix ağacına 
+    yerleştirilmek istendiğini düşünelim: 1100, 1010, 0101, 1011, 0010, 0111, 0000, 1000. Burada bitler 0 ya da 1 değeri 
+    elabildiği için Radix ağacı da ikili ağaç görünümünde olacaktır. Ağacın her adımında yüksek anlamlı bitten başlanarak 
+    0 için sola 1 için de sağa dallanma yapılır. Aşağıdaki diyagram bu sekiz anahtarın ağaca yerleştirilmesi sonucundaki 
+    durumu göstermektedir:
 
-    Ağacın kökünün boş olduğunu düşünelim. Aslında ağaca yerleştirilecek ilk değer de kök yapılabilir. İlk değer için 
-    ilk bit bite bakılır. 0 olan bitler için sola, 1 olan bitler için sağa yerleştirme yapılmaktadır:
+    Kök
+        ├── 0
+        │    ├── 1
+        │    │    ├── 0
+        │    │    │    └── 1 (0101 son)
+        │    │    └── 1
+        │    │         └── 1 (0111 son)
+        │    └── 0
+        │         ├── 1
+        │         │    └── 0 (0010 son)
+        │         └── 0
+        │              └── 0 (0000 son)
+        └── 1>>
+            ├── 1
+            │    └── 0
+            │         └── 0 (1100 son)
+            └── 0
+                ├── 1
+                │    ├── 0 (1010 son)
+                │    └── 1 (1011 son)
+                └── 0
+                        └── 0 (1000 son)
 
-                                Kök
-                                        1100
+        Aynı ağacı şöyle de gösterebiliriz:
 
-    Şimdi ikinci değeri ağaca yerleştirelim. Bu durumda 1010 değeri kökün sağına ancak 1100 deüğümn soluna yerleştirilir:
+                        ┌───────────────────────────┐
+                        |           Kök             |
+                        └───────────────────────────┘
+                        /                             \
+                    ┌───┐                            ┌───┐
+                    | 0 |                            | 1 |
+                    └───┘                            └───┘
+                /        \                       /         \
+            ┌───┐           ┌───┐             ┌───┐           ┌───┐
+            | 0 |           | 1 |             | 0 |           | 1 |
+            └───┘           └───┘             └───┘           └───┘
+        /    \          /      \          /     \            |
+    ┌───┐    ┌───┐    ┌───┐    ┌───┐    ┌───┐   ┌───┐      ┌───┐
+    | 0 |    | 1 |    | 0 |    | 1 |    | 0 |   | 1 |      | 0 |
+    └───┘    └───┘    └───┘    └───┘    └───┘   └───┘      └───┘
+        |        |        |        |       |      /   \        |
+    ┌───┐    ┌───┐    ┌───┐    ┌───┐   ┌───┐  ┌───┐ ┌───┐  ┌───┐
+    | 0 |    | 0 |    | 1 |    | 1 |   | 0 |  | 0 | | 1 |  | 0 |
+    └───┘    └───┘    └───┘    └───┘   └───┘  └───┘ └───┘  └───┘
 
-                                Kök
-                                             1100
-                                      1010
-
-    Üçüncü değer olan 0101 kökün soluna yerleşecektir:
-
-                                Kök
-                   0101                           1100
-                                      1010
-
-    Dördüncü değer olan 1011'i yerleştirdikten sonra ağaç şu görünümde olacaktır:
-
-                                 Kök
-                   0101                            1100
-                                      1010
-                                            1011
-
-    Şimdi de 0010 değerini yerleştirelim:
-
-                                    Kök
-                        0101                          1100
-                0010                1010
-                                          1011
-
-    Şimdi de 0111 değerini yerleştirelim:
-
-                                    Kök
-                         0101                          1100
-                   0010        0111       1010
-                                                1011
-
-    Şimdi de 0000 değerini yerleştirelim:
-
-                                      Kök
-                        0101                         1100
-                0010          0111        1010
-         0000                                   1011
-
-    Nihayet 1000 değerini de ağaca yerleştirelim:
-
-                                      Kök
-                        0101                            1100
-                0010         0111            1010
-         0000                          1000       1011
-
-    Peki bu ağaçta arama nasıl yapılır? İşte arama için kökten girilir. Her bit pozisyonu için bir aşağıya inilir. 
-    Örneğin 0000 değerini arayacak olalım. İlk bit 9 olduğu için kökten sola ineriz. Oradaki değer 0101'dir. Bulamadığızdan 
-    dolayı ikinci bite bakarız. İkinci bit de 0 olduğu için oradan da sola gideriz. Oradaki değer 0010'dır. Bulamadığımız 
-    için üçüncü bite bakarız. Üçüncü bit de 0 olduğu için sola gideriz. Artık değeri buluruz.
+    Peki bu ağaçta arama nasıl yapılır? İşte arama için kökten girilir. Her bit pozisyonu için bir aşağıya
+    inilir. Örneğin 0000 değerini arayacak olalım: ilk bit 0 olduğu için kökten sola ineriz, ikinci bit
+    de 0 olduğu için sola devam ederiz, üçüncü bit de 0 olduğu için sola, dördüncü bit de 0 olduğu için
+    sola gideriz. Artık değeri buluruz. Radix ağaçlarını enlemesine (breadth-first gibi) dolaştığımızda
+    anahtarların sıralı bir biçimde elde edilebildiğine dikkat ediniz.
 
     Burada biz yüksek anlamlı bitten hareketle dallanmaları yaptık. Ancak bunun tersini de yapabilirdik. Radix ağaçlarını 
     enlemesine (breadt-first gibi) dolaştığımızda anahtarların sıralı bir biçimde elde edilebildiğine dikkat ediniz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-										21. Ders 27/09/2025 - Cumartesi
+										    21. Ders 27/09/2025 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Biz yukarıdaki anlatımda düğümlerde anahtarların turulduğunu varsaydık. Aslında düğümlerde anahtarların tutulmasına 
-    da gerek yoktur. Zaten her kademede bir bit ilerlendiğinde göre arama yaprağa gelindiğinde sonlandırılabilir. Bir 
-    yaprağa gelindiğinde ya ilgili değer bulunmuştur ya da ilgili değer bulunamamıştır. Eğer bütün bitler tüketilerek 
-    yaprağa gelinmişse ilgili anahtar bulunmuş, bütün bitler tüketilmeden yaprağa gelinmişse ilgili değer bulunamamıştır.
-
-    Kök
-    ├── 0
-    │    ├── 1
-    │    │    ├── 0
-    │    │    │    └── 1 (0101 son)
-    │    │    └── 1
-    │    │         └── 1 (0111 son)
-    │    └── 0
-    │         ├── 1
-    │         │    └── 0 (0010 son)
-    │         └── 0
-    │              └── 0 (0000 son)
-    └── 1
-        ├── 1
-        │    └── 0
-        │         └── 0 (1100 son)
-        └── 0
-            ├── 1
-            │    ├── 0 (1010 son)
-            │    └── 1 (1011 son)
-            └── 0
-                    └── 0 (1000 son)
-
-    Aynı ağacı şöyle de gösterebiliriz:
-
-                     ┌───────────────────────────┐
-                     |           Kök             |
-                     └───────────────────────────┘
-                    /                             \
-                 ┌───┐                            ┌───┐
-                 | 0 |                            | 1 |
-                 └───┘                            └───┘
-              /        \                       /         \
-        ┌───┐           ┌───┐             ┌───┐           ┌───┐
-        | 0 |           | 1 |             | 0 |           | 1 |
-        └───┘           └───┘             └───┘           └───┘
-       /    \          /      \          /     \            |
-   ┌───┐    ┌───┐    ┌───┐    ┌───┐    ┌───┐   ┌───┐      ┌───┐
-   | 0 |    | 1 |    | 0 |    | 1 |    | 0 |   | 1 |      | 0 |
-   └───┘    └───┘    └───┘    └───┘    └───┘   └───┘      └───┘
-     |        |        |        |       |      /   \        |
-   ┌───┐    ┌───┐    ┌───┐    ┌───┐   ┌───┐  ┌───┐ ┌───┐  ┌───┐
-   | 0 |    | 0 |    | 1 |    | 1 |   | 0 |  | 0 | | 1 |  | 0 |
-   └───┘    └───┘    └───┘    └───┘   └───┘  └───┘ └───┘  └───┘
-
-    Görüldüğü gibi bu tasarımda hiç anahtarlar saklanmadan yaprak görülene kadar ilerlenirse ya ilgili anahtar bulunmuş 
-    olur ya da bulunmamış olur. Peki her düğümde anahtarı tutmakla yalnızca yapraklarda değeri (anahtarı değil) tutmanın 
-    hangisi daha iyi bir yöntemdir? İşte her iki yöntemin de avantajları ve dezavantajları vardır:
+    Görüldüğü gibi bu tasarımda hiç anahtar saklanmadan yaprak görülene kadar ilerlenirse ya ilgili anahtar
+    bulunmuş olur ya da bulunamamış olur. Aslında Radix ağaçlarında anahtar ve değerler düğümlerde de turulabilir. 
+    Peki her düğümde anahtar ve değeri tutmakla yalnızca yapraklarda değeri tutmanın hangisi daha iyi bir yöntemdir?
 
     1. Her Düğümde Anahtar Saklama Yöntemi
 
