@@ -16,7 +16,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                          Son Güncelleme: 29/04/2026 - Çarşamba
+                                          Son Güncelleme: 23/06/2026 - Salı
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -3280,6 +3280,8 @@ int main(void)
             *str = '\0';
 
         parse_cmd_line(cmdline);
+        if (g_nparams == 0)
+            continue;
         if (!strcmp(g_params[0], "exit"))
             break;
 
@@ -3817,7 +3819,7 @@ void exit_sys(const char *format, ...)
     getty / agetty    diğer servisler
     (TTY bekler)      (sshd, cron …)
         │                │
-        │ (lokal giriş)  │ (SSH bağlantısı)
+        │ (yerel giriş)  │ (SSH bağlantısı)
         │                │
         ▼                ▼
     login          sshd (child)
@@ -3826,8 +3828,8 @@ void exit_sys(const char *format, ...)
         └───────┬────────┘
                 │
                 ▼
-            bash
-            (kullanıcı kabuğu)
+              bash
+        (kullanıcı kabuğu)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -3863,7 +3865,7 @@ void exit_sys(const char *format, ...)
 /*---------------------------------------------------------------------------------------------------------------------------
     UNIX/Linux sistemlerinde her prosesin bir "gerçek kullanıcı id'si (real user id)", "gerçek grup id'si (real group id)", 
     "etkin kullanıcı id'si (effective user id)" ve "etkin grup id'si (effective group id)" vardır. "Prosesin kullanıcı id'si"
-    denildiğnde varsayılan olarak "gerçek kullanıcı id'si", "prosesin grup id'si" denildiğinde de varsayılan olarak "gerçek 
+    denildiğinde varsayılan olarak "gerçek kullanıcı id'si", "prosesin grup id'si" denildiğinde de varsayılan olarak "gerçek 
     grup id'si" anlaşılmaktadır. Peki gerçek id'lerle etkin id'ler arasında ne farklılık vardır? Alında prosesin "gerçek 
     kullanıcı id'si" ile "etkin kullanıcı id'si", "gerçek grup id'si" ile de "etkin grup id'si" çoğu kez aynı değerdedir. 
     Bunlar özel durumlarda farklılaşmaktadır. Biz bu konuyu ileride ele alacağız". Ancak dosyalarda erişim işlemlerinde 
@@ -4275,6 +4277,10 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
+                                                13. Ders 18/06/2026 - Perşembe
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
     Prosesin çalışma dizini chdir isimli POSIX fonksiyonuyla değiştirilmektedir. Fonksiyonun prototipi şöyledir:
 
     #include <unistd.h>
@@ -4331,44 +4337,61 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Daha önce yazmış olduğumuz kabuk programına cd komutunu aşağıdaki gibi ekleyebiliriz. Bu örnekteki getenv fonksiyonunu 
-    henüz görmedik.
+    Şimdi daha önce yazmış olduğumuz kabuk ptogramımıza cd komutunu ekleyelim. Örneğimizde kabuğumuzun çalışma diznini g_cwd 
+    global dizisinde tuttuk. Her "cd" komutu girildiğinde getcwd uygulayarak yeni çalışma dizinini bu diziye yerleştirdik:
+
+    void cd_proc(void)
+    {
+        if (g_nparams != 2) {
+            printf("wrong number of command parameters!..\n");
+            return;
+        }
+
+        if (chdir(g_params[1]) == -1) {
+            printf("%s: \"%s\"\n", strerror(errno), g_params[1]);
+            return;
+        }
+
+        if (getcwd(g_cwd, PATH_SIZE) == NULL)
+            exit_sys("fatal error");
+    }
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+/* myshell.c */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <limits.h>
 #include <unistd.h>
 
-#define MAX_CMD_LINE        4096
-#define MAX_CMD_PARAMS        128
+#define MAX_CMD_LINE            4096
+#define MAX_CMD_PARAMS          1024
+#define PATH_SIZE               4096
 
-typedef struct tagCMD {
-    char *name;
+struct cmd {
+    const char *name;
     void (*proc)(void);
-} CMD;
+};
 
 void parse_cmd_line(char *cmdline);
-void dir_proc(void);
-void clear_proc(void);
-void pwd_proc(void);
+void rm_proc(void);
+void cp_proc(void);
+void mv_proc(void);
 void cd_proc(void);
-
 void exit_sys(const char *msg);
 
-char *g_params[MAX_CMD_PARAMS];
-int g_nparams;
-char g_cwd[PATH_MAX];
-
-CMD g_cmds[] = {
-    {"dir", dir_proc},
-    {"clear", clear_proc},
-    {"pwd", pwd_proc},
+struct cmd g_cmds[] = {
+    {"rm", rm_proc},
+    {"cp", cp_proc},
+    {"mv", mv_proc},
     {"cd", cd_proc},
     {NULL, NULL}
 };
+
+char *g_params[MAX_CMD_PARAMS];
+int g_nparams;
+char g_cwd[PATH_SIZE];
 
 int main(void)
 {
@@ -4376,27 +4399,32 @@ int main(void)
     char *str;
     int i;
 
-    if (getcwd(g_cwd, PATH_MAX) == NULL)
-        exit_sys("fatal error (getcwd)");
+    if (getcwd(g_cwd, PATH_SIZE) == NULL)
+        exit_sys("fatal error");
 
     for (;;) {
-        printf("CSD:%s>", g_cwd);
+
+        printf("CSD:%s$ ", g_cwd);
+        fflush(stdout);
+
         if (fgets(cmdline, MAX_CMD_LINE, stdin) == NULL)
             continue;
         if ((str = strchr(cmdline, '\n')) != NULL)
             *str = '\0';
+
         parse_cmd_line(cmdline);
         if (g_nparams == 0)
             continue;
         if (!strcmp(g_params[0], "exit"))
             break;
+
         for (i = 0; g_cmds[i].name != NULL; ++i)
-            if (!strcmp(g_params[0], g_cmds[i].name)) {
+            if (!strcmp(g_cmds[i].name, g_params[0])) {
                 g_cmds[i].proc();
                 break;
             }
-        if (g_cmds[i].name == NULL)
-            printf("bad command: %s\n", g_params[0]);
+        if (g_cmds[i].name == NULL) 
+            printf("command not found: %s\n", g_params[0]);
     }
 
     return 0;
@@ -4404,50 +4432,57 @@ int main(void)
 
 void parse_cmd_line(char *cmdline)
 {
-    char *str;
+    char *arg;
 
     g_nparams = 0;
-    for (str = strtok(cmdline, " \t"); str != NULL; str = strtok(NULL, " \t"))
-        g_params[g_nparams++] = str;
+    for ((arg = strtok(cmdline, " \t")); arg != NULL; arg = strtok(NULL, " \t"))
+        g_params[g_nparams++] = arg;
+    g_params[g_nparams] = NULL;
 }
 
-void dir_proc(void)
+void rm_proc(void)
 {
-    printf("dir command executing...\n");
+    if (g_nparams == 1) {
+        printf("too few command parameters!...\n");
+        return;
+    }
+    printf("rm command...\n");
 }
 
-void clear_proc(void)
+void cp_proc(void)
 {
-    system("clear");
+    if (g_nparams != 3) {
+        printf("wrong number of command parameters!...\n");
+        return;
+    }
+
+    printf("cp command...\n");
 }
 
-void pwd_proc(void)
+void mv_proc(void)
 {
-    printf("%s\n", g_cwd);
+    if (g_nparams != 3) {
+        printf("wrong number of command parameters!...\n");
+        return;
+    }
+
+    printf("mv command...\n");
 }
 
 void cd_proc(void)
 {
-    char *dir;
-
-    if (g_nparams > 2) {
-        printf("too many arguments!\n");
-        return;
-    }
-    if (g_nparams == 1) {
-        if ((dir = getenv("HOME")) == NULL)
-            exit_sys("fatal error (getenv");
-    }
-    else
-        dir = g_params[1];
-
-    if (chdir(dir) == -1) {
-        printf("%s\n", strerror(errno));
+    if (g_nparams != 2) {
+        printf("wrong number of command parameters!..\n");
         return;
     }
 
-    if (getcwd(g_cwd, PATH_MAX) == NULL)
-        exit_sys("fatal error (getcwd)");
+    if (chdir(g_params[1]) == -1) {
+        printf("%s: \"%s\"\n", strerror(errno), g_params[1]);
+        return;
+    }
+
+    if (getcwd(g_cwd, PATH_SIZE) == NULL)
+        exit_sys("fatal error");
 }
 
 void exit_sys(const char *msg)
@@ -4458,114 +4493,264 @@ void exit_sys(const char *msg)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     Dizinler de işletim sistemi tarafından birer dosyaymış gibi ele alınmaktadır. Gerçekten de dizinleri sanki "içerisinde 
-    dosya bilgilerini tutan dosyalar" gibi düşünebiliriz. Dolayısıyla UNIX/Linux sistemlerinde bir dosyayı silmek için, 
-    bir dosya yaratmak için, bir dosyanın ismini değiştirmek için prosesin o dizine "w" hakkının olması gerekir. Yukarıda 
-    belirttiğimiz üç işlem de aslında dizine yazma yapma anlamına gelmektedir. Yani bizim bir dosyayı silebilmek için dosyaya 
-    "w" hakkına sahip olmamız gerekmez, dosyanın içinde bulunduğu dizine "w" hakkına sahip olmamız gerekir. Bir dizin için 
-    "r" hakkı demek o dizinin içeriğinin okunabilmesi hakkı demektir. Yani bizim bir dizinin içeriğini elde edebilmemiz 
-    (ya da ls gibi bir komutla görüntüleyebilmemiz) için o dizine "r" hakkına sahip olmamız gerekir. 
+    dosya bilgilerini tutan dosyalar" gibi düşünebiliriz. Yani dizinler "dizin giriş bilgilerinden" oluşmaktadır. Her dizin 
+    girişi bir dosya ya da dizin hakknda bilgi tutmaktadır. Bir dizini temsili olarak şöyle bir dosya gibi düşünebilirsiniz:
+
+    <dizin_girişi>
+    <dizin_girişi>
+    <dizin_girişi>
+    ...
+
+    Dizinler ileride göreceğimiz gibi opendir POSIX fonksiyonuyla açılıp içindeki girişler readdir POSIX fonksiyonuyla 
+    okunmaktadır. Örneğin "ls" komutu da bu fonksiyonları kullanmaktadır. 
+
+    Bir dizine "r" hakkının olması o dizinin içeriğinin "ls" gibi bir komutla görüntülenebileceği anlamına gelmektedir. 
+    (Aslında bu kontrol opendir POSIX fonksiyonunda yapılmaktadır.) Bir dizin içersinde bir dosyanın ya da dizinin yaratılması 
+    için dizine "w" hakkının olması gerekir. Çünkü dizin içerisinde dosya ya da dizin yaratmak aslında dizin dosyasına yeni 
+    bir giriş eklemek (bunun bir yazma işlemi olduğna dikkate ediniz) anlamına gelmektedir. 
+
+    Bir dizin içerisindeki bir dosyayı ya da dizini silmek için tek gereken şey o dosya ya da dizininin içinde bulunduğu 
+    dizine "w" hakkının olmasıdır. Silinecek dosya ya da dizine "w" hakkının olup olmadığının hiçbir önemi yoktur. Ancak 
+    bazı kabuk programları dizine "w" hakkı varsa ancak silinmek istenen dosya ya da dizine "w" hakkı yoksa bir uyarı 
+    mesajı da verebilmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Dizinlerde "x" hakları farklı bir anlama gelmektedir. İşletim sistemi, bir yol ifadesi verildiğinde yol ifadesinde hedeflenen 
-    dizin girişi için bilgileri elde etmek isteyecektir. Örneğin:
+    Dizinlerde "x" hakları farklı bir anlama gelmektedir. İşletim sistemi, bir yol ifadesi verildiğinde yol ifadesinde 
+    hedeflenen dizin girişi için bilgileri elde etmek ister. Buna "yol ifadesinin çözümlenmesi (pathname resolution)" 
+    denilmektedir Örneğin:
 
     "/home/kaan/Study/C/sample.c" 
 
-    Burada hedeflenen dosya "sample.c" dosyasıdır. Ancak işletim sistemi bu dosyanın yerini bulabilmek için yol ifadesindeki 
-    bileşenlerin üzerinden geçer. Bu işleme "pathname resolution" denilmektedir. İşte "pathname resolution" işleminde dizin 
-    geçişleriyle hedefe ulaşılabilmesi için prosesin yol ifadesine ilişkin dizin bileşenlerinin "x" hakkına sahip olması gerekir. 
-    Yani dizinlerdeki "x" hakkı "içinden geçilebilirlik" gibi bir anlama gelmektedir. Biz bir dizinimizdeki "x" hakkını kaldırırsak, 
-    işletim sistemi "pathname resolution" işleminde başarısız olur. Dolayısıyla "pathname resolution" işleminin başarılı olabilmesi 
-    için yol ifadesindeki dizin bileşenlerinin hepsine (son bileşen de dahil olmak üzere) prosesin "x" hakkına sahip olması gerekir. 
-    Yukarıdaki örnekte "pathname resolution işleminin" bitirilebilmesi için prosesin "home" dizini "kaan" dizini "Study" dizini ve 
-    "C" dizini için "x" hakkına sahip olması gerekir. "x" hakkı bir dizin ağacında bir noktaya duvar örmek için kullanılabilmektedir. 
-    mkdir gibi kabuk komutları dizin yaratırken zaten "x" hakkını default durumda vermektedir. Proses id'si 0 olan "root prosesler" 
-    her zaman pathname resolution sırasında dizinler içerisinden geçebilirler. "x" hakkı göreli yol ifadelerinde de aynı biçimde
-    uygulanmaktadır. Örneğin biz kendi dizinimizde bulunan "test.txt" dosyasını open ile "test.txt" yol ifadesini vererek açmak 
-    isteyelim. Eğer içinde bulunduğumuz dizine "x" hakkına sahip değilsek yine "pathname resolution" işlemi başarısız olacaktır.
-    Başka bir deyişle "test.txt" yol ifadesi sanki "./test.txt" gibi ele alınmaktadır.
+    Burada hedeflenen dosya "sample.c" dosyasıdır. İşletim sistemi bu dosyanın yerini bulabilmek için yol ifadesindeki bileşenlerin 
+    üzerinden geçmek ister. İşte "yol ifadesinin çözümenmesi işleminde" dizin geçişleriyle hedefe ulaşılabilmesi için prosesin 
+    yol ifadesine ilişkin tüm dizinlrt için "x" hakkına sahip olması gerekir. Yani dizinlerdeki "x" hakkı "içinden geçilebilirlik" 
+    gibi bir anlama gelmektedir. Biz bir dizindeki "x" hakkını kaldırırsak, işletim sistemi "yol ifadesinin çözümlenmesi" işleminde 
+    başarısız olur. Yukaırda da belirttiğimiz gibi yol ifadesinin başarılı bir biçimde çözümlenmesi için yol ifadesindeki dizin 
+    belirten tüm yol bileşenleri için erişim yapan prosesin "x" hakkına sahip olması gerekir. Yukarıdaki örnekte "yol ifadesinin 
+    çözümlenmesi işleminin" başarıyla bitirilebilmesi için prosesin "home" dizinine, "kaan" dizinine, "Study" dizinine ve "C" 
+    dizinine "x" hakkına sahip olması gerekir. "x" hakkı göreli yol ifadelerinde de aynı biçimde uygulanmaktadır. Örneğin biz 
+    "test.txt" dosyasını open fonksiyonu ile "test.txt" yol ifadesini vererek açmak isteyelim. Eğer içinde bulunduğumuz dizin
+    için x" hakkına sahip değilsek yine yol ifadesi başarılı bir biçimde çözümlenemeyecektir. Başka bir deyişle "test.txt" 
+    yol ifadesi sanki "./test.txt" gibi ele alınmaktadır. Örneğin "a/b/c/test.txt" gibi bir yol ifadesinin başarılı bir biçimde 
+    çözülmesi için prosesin çalışma dizini de dahil olmak üzere "a", "b" ve "c" dizinlerine "x" hakkının olması gerekir. 
+    
+    "x" hakkı dizin ağacında bir noktaya duvar örmek için kullanılabilmektedir. mkdir gibi kabuk komutları dizin yaratırken 
+    zaten "x" hakkını default durumda vermektedir. Proses id'si 0 olan "root prosesler" her zaman yol ifadesinin çözümlenmesi 
+    sırasında dizinlerin içerisinden geçebilirler.
+
+    Yol ifadesinin çözümlenmesi sırasında prosesin dizinlere "r" hakkının bulunması gerekmemektedir. Örneğin "a/b/c/test.txt"
+    gibi bir yol ifadesinde prosesin "a" diznine, "b" dizinine ve "c" dizinine "r" hakkı olmasa bile "test.txt" dosyasına
+    gerekli erişim izni varsa bu dosya açılabilir. Yani bir dizinin içeriğini görüntüleyemedeiğimiz halde eğer bir dosyanın 
+    o dizinin içerisinde bulunduğunu biliyorsak o dosyayı yine de kullanabiliriz. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bir işletim sisteminin dosyalarla uğraşan kısmına "dosya sistemi (file system)" denilmektedir. Dosya sisteminin iki yönü 
-    vardır: Disk ve Bellek. İşletim sistemi dosya organizasyonu için diskte belli bir biçim kullanmaktadır. Ancak bir dosya 
-    açıldığında işletim sistemi çekirdek alanı içerisinde bazı veri yapıları oluşturur bu da dosya sisteminin bellek tarafı 
-    ile ilgilidir.
+    Dosya işlemleri UNIX/Linux sistemlerinde en önemli konulardan biridir. Çünkü bu sistemlerde pek çok olgu bir dosya gibi 
+    ele alınmaktadır. UNIX/Linux sistemlerinde sistem programalama için ilk öğrenilecek temel konu dosya işlemleri olmalıdır.
+    Bu bölümde UNIX/Linux sistemlerindeki dosya işlemleri üzerinde duracağız. UNIX/Linux sistemlerinde dosya sistemi işletim 
+    sisteminin kalbi gibidir. 
+---------------------------------------------------------------------------------------------------------------------------*/
 
-    Pek çok POSIX uyumlu işletim sistemi dosya işlemleri için 5 sistem bulundurmaktadır:
+/*---------------------------------------------------------------------------------------------------------------------------
+    İşletim sistemleririnin dosya işlemleriyle ilgili alt sistemlerine "dosya sistemi (file system)" denilmektedir. Dosya 
+    sisteminin iki yönü vardır: Disk ve Bellek. İşletim sistemi dosyaların kalıcı olarak diskte saklanması için diski bölümlere
+    ayırır ve belli biçimlerde organize eder. Ancak bir dosya açıldığında işletim sistemi çekirdek alanı içerisinde o dosyayı 
+    yönetebilmek için bazı veri yapıları de oluşturmaktadır. 
 
-    - Dosya açmak için gereken sistem fonksiyonu (Linux'ta sys_open)
-    - Dosya kapatmak için gereken sistem fonksiyonu (Linux'ta sys_close)
+    Pek çok POSIX uyumlu işletim sistemi dosya işlemleri için 5 sistem fonksiyonu bulundurmaktadır:
+
+    - Dosyayı açmak için gereken sistem fonksiyonu (Linux'ta sys_open)
+    - Dosyayı kapatmak için gereken sistem fonksiyonu (Linux'ta sys_close)
     - Dosyadan okuma yapmak için gereken sistem fonksiyonu (Linux'ta sys_read)
     - Dosyaya yazma yapmak için gereken sistem fonksiyonu (Linux'ta sys_write)
     - Dosya göstericisini konumlandırmak için gereken sistem fonksiyonu (Linux'ta sys_lseek)
 
-    Bu 5 sistem fonksiyonunu çağıran 5 POSIX fonksiyonu bulunmaktadır: open, close, read, write ve lseek
+    Bu 5 sistem fonksiyonunu çağıran 5 POSIX fonksiyonu bulunmaktadır: open, close, read, write ve lseek. Dosya işlemleri 
+    temelde bu 5 POSIX fonksiyonuyla yapılmaktadır.
 
     Biz bir UNIX/Linux sisteminde hangi düzeyde çalışıyor olursak olalım eninde sonunda dosya işlemleri bu 5 POSIX fonksiyonu 
-    ile yapılmaktadır. Programlama dili ne olursa olsun durum böyledir. 
+    çağrılarak gerçekleştirilmektedir. Bu POSIX fonksiyonları da yukarıda belirttiğimiz gibi işletim sisteminin ilgili 
+    sistem fonksiyonlarını çağırmaktadır. Programla dili ne olursa olsun bu sistemlerde tüm dosya işlemleri eninde sonunda 
+    bu temel POSIX fonksiyonları çağrılarak yapılmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bir dosya açıldığında işletim sistemi açılacak dosyanın bilgilerini pathname resolution işlemi sonucunda diskte bulur. 
-    Dosyanın bilgilerini kernel alanı içerisinde bir alana çeker. Bu alana "dosya nesnesi (file object)" denilmektedir. Buradaki 
-    "nesne (object)" terimi tahsis edilmiş yapı alanları için kullanılmaktadır. Dosya nesnesi Linux'un kaynak kodlarında "struct 
-    file" ile temsil edilmiştir. İşletim sistemi, bir proses bir dosyayı açtığında açılan dosyayı o proses ile ilişkilendirir. 
-    Yani dosya nesnelerine proses kontrol blokları yoluyla erişilmektedir. Güncel Linux çekirdeklerinde bu durum biraz karmaşıktır:
+    Bir dosya açıldığında işletim sistemi açılacak dosyanın bilgilerini yol ifadesini çözümleyerek diskten elde eder. Bu  
+    dosya bilgilerini çekirdek alanı içerisine çeker. Diskteki dosya bilgilerinin çekirdek alanında yerleştirildiği yere dosya 
+    nesnesleri (file objects) denilmektedir. Buradaki "nesne (object)" terimi tahsis edilmiş yapı alanları için kullanılmaktadır. 
+    Nesne yönelimli programlama tekniğindeki "nesne" terimi ile doğrudan bir ilgisi yoktur. Dosya nesnesi Linux'un kaynak kodlarında 
+    file isimli bir yapıyla temsil edilmektedir. Güncel çekirdeklere file yapısı Linux kaynak kodlarında "include/linux/fs.h" 
+    dosyasında şöyle bildirilmiştir:
 
-    task_struct (files) ---> files_struct (fdt) ---> fdtable (fd) ---> file * türünden bir dizi ---> file
+    struct file {
+        spinlock_t			f_lock;
+        fmode_t				f_mode;
+        const struct file_operations	*f_op;
+        struct address_space		    *f_mapping;
+        void				    *private_data;
+        struct inode			*f_inode;
+        unsigned int			f_flags;
+        unsigned int			f_iocb_flags;
+        const struct cred		*f_cred;
+        struct fown_struct		*f_owner;
+        /* --- cacheline 1 boundary (64 bytes) --- */
+        union {
+            const struct path	f_path;
+            struct path		    __f_path;
+        };
+        union {
+            /* regular files (with FMODE_ATOMIC_POS) and directories */
+            struct mutex		f_pos_lock;
+            /* pipes */
+            u64			        f_pipe;
+        };
+        loff_t				    f_pos;
+    #ifdef CONFIG_SECURITY
+        void				    *f_security;
+    #endif
+        /* --- cacheline 2 boundary (128 bytes) --- */
+        errseq_t			    f_wb_err;
+        errseq_t			    f_sb_err;
+    #ifdef CONFIG_EPOLL
+        struct hlist_head	    *f_ep;
+    #endif
+        union {
+            struct callback_head	f_task_work;
+            struct llist_node	    f_llist;
+            struct file_ra_state	f_ra;
+            freeptr_t		        f_freeptr;
+        };
+        file_ref_t		f_ref;
+        /* --- cacheline 3 boundary (192 bytes) --- */
+    } __randomize_layout
+    __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
+    
+    Yapının elemanlarını anlamlandıramayabilirsiniz. Bu yapının pek çok elemanını anlamlandırmak için başka bilgilere sahip 
+    olmak gerekir. 
+    
+    İşletim sistemi bir proses bir dosyayı açtığında açılan dosyayı o proses ile ilişkilendirmektedir. Yani dosya nesnelerine 
+    proses kontrol blokları yoluyla erişilmektedir. Güncel Linux çekirdeklerinde bu durum biraz karmaşıktır:
 
-    Linux'ta proses kontrol bloktan dosya nesnesine erişim birkaç yapıdan geçilerek yapılmaktadır. Ancak biz bu durumu 
-    şöyle basitleştirerek ifade edebiliriz: "proses kontrol blokta bir eleman bir diziyi göstermektedir. Bu diziye "dosya betimleyici 
-    tablosu (file descriptor table)" denilmektedir. Dosya betimleyici tablosunun her elemanı bir dosya nesnesini göstermektedir. 
-    Yani biz yukarıdaki yapıyı aşağıdaki gibi sadeleştirerek kavramsallaştırıyoruz:
+    task_struct (files) ---> files_struct (fdt) ---> fdtable (fd) ---> file * türünden bir dizi ---> file nesnesi
+
+    Linux'ta proses kontrol bloğundan dosya nesnesine erişim birkaç yapıdan geçilerek yapılmaktadır. Ancak biz bu durumu 
+    şöyle basitleştirerek ifade edebiliriz: "proses kontrol bloğunda bir eleman bir diziyi göstermektedir. Bu diziye 
+    "dosya betimleyici tablosu (file descriptor table)" denilmektedir. Dosya betimleyici tablosunun her elemanı bir dosya 
+    nesnesini göstermektedir. Yani biz yukarıdaki yapıyı aşağıdaki gibi sadeleştirerek kavramsallaştırıyoruz:
 
     proses kontrol block ---> betimleyici tablosu --> dosya nesneleri 
 
-    Dosya betimleyici tablosu (file descriptor table) açık dosyalara ilişkin dosya nesnelerinin adreslerini tutan bir gösterici 
-    dizisidir. Dosya betimleyici tablosuna proses kontrol bloktan hareketle erişilmektedir. Her prosesin ayrı bir dosya 
-    betimleyici tablosu vardır. İşletim sistemi her açılan dosya için bir dosya nesnesi tahsis etmektedir. Aynı dosya ikinci 
-    kez açıldığında o dosya için yine yeni bir dosya nesnesi oluşturulur. Dosya göstericisinin konumu da dosya nesnesinin 
-    içerisinde saklanmaktadır. 
+    Dosya betimlyeci tablosu (file descriptor table) dosya nesnelerinin adreslerini ttran bir gösterici dizisidir:
+
+                  Dosya Betimleyici Tablosu
+    --------->      ┌──────────────────┐
+                0   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                1   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                2   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                3   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                4   │      NULL        │
+                    ├──────────────────┤
+                5   │      NULL        │
+                    ├──────────────────┤
+                ... │      ...         │
+                    ├──────────────────┤
+               1023 │      NULL        │
+                    └──────────────────┘
+
+    Dosya betimleyici tablosu prosese özgüdür ve ona o prosesin proses kontrol bloğu (Linux'ta task_struct yapısı) yoluyla 
+    erişilmektedir. Görüldüğü gibi dosya betimleyici tablosu aslında dosya nesnelerinin (struct file türünden nesnelerin) 
+    adreslerini tutmaktadır. Bir dosya açıldığında işletim sistemi dosyanın bilgilerini diskten elde eder, bir dosya nesnesi 
+    tahsis edip o dosyanın bilgilerini dosya nesnesinin içerisine yerleştirir ve dosya betimleyicisinin bir slotuna (dizinin 
+    elmanına) o adresi yazar. 
+
+    Yukarıda da belirttiğimiz gibi dosya betimleyici tablosu prosese özgüdür, thread'e özgü değildir. Prosesin tüm thread'leri 
+    aynı dosya betimleyici tablosunu kullanmaktadır. İşletim sistemi o anda çalışan thread'in ilişkin olduğu prosesin dosya 
+    betimleycici tablosunu kullanmaktadır.
+
+    Dosya nesnelerinin içerisinde açış bayrakları gibi, dosya göstericisinin konumu gibi pek çok bilgi doğrudan ve pek çok 
+    bilgi de dolaylı bir biçimde saklanmaktadır. Yani dosya nesnesi diskteki dosya üzerinde işlem yapmak için gereken 
+    tüm bilgileri doğrudan ya da dolaylı biçimde bulundurmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    UNIX/Linux sistemlerinde dosyayı açmak için open isimli POSIX fonksiyonu kullanılmaktadır. (Örneğin fopen standart C fonksiyonu 
-    da UNIX/Linux sistemlerinde aslında open fonksiyonunu çağırmaktadır.) Fonksiyonun prototipi şöyledir:
+                                                14. Ders 23/06/2026 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    UNIX/Linux sistemlerinde dosyayı açmak için open isimli POSIX fonksiyonu kullanılmaktadır. (Örneğin fopen standart C 
+    fonksiyonu da UNIX/Linux sistemlerinde aslında open fonksiyonunu çağırmaktadır.) Fonksiyonun prototipi şöyledir:
 
     #include <fcntl.h>
 
     int open(const char *path, int flags, ...);
 
-    open fonksiyonu isteğe bağlı (optional) olarak bir üçüncü argüman alabilmektedir. Eğer fonksiyon 3 argümanla çağrılacaksa 
-    üçüncü argüman mode_t türünden olmalıdır. Her ne kadar prototipteki "..." "istenildiği kadar argüman girilebilir" anlamına 
-    geliyorsa da open ya iki argümanla ya da üç argümanla çağrılmalıdır. open fonksiyonunu daha fazla argümanla çağırmak "tanımsız 
-    davranışa (undefined behavior)" yol açmaktadır.
+    open fonksiyonu duruma göre üçüncü bir argüman da alabilmektedir. Eğer fonksiyon üç argümanla çağrılacaksa üçüncü 
+    argüman mode_t türünden olmalıdır. Her ne kadar prototipteki "..." atomu "istenildiği kadar argüman girilebilir" anlamına 
+    geliyorsa da open ya iki argümanla ya da üç argümanla çağrılmalıdır. open fonksiyonunu daha fazla argümanla çağırmak 
+    "tanımsız davranışa (undefined behavior)" yol açmaktadır. Biz daha açıklayıcı olacak biçimde bu prototipi şöyle de 
+    yazabiliriz:
 
-    Fonksiyonun birinci parametresi açılacak dosyanın yol ifadesini belirtir. İkinci parametre açış bayraklarını (modlarını) 
-    belirtmektedir. Bu parametre O_XXX biçiminde isimlendirilmiş sembolik sabitlerin "bit OR" işlemine sokulmasıyla oluşturulur. 
-    Açış sırasında aşağıdaki sembolik sabitlerden yalnızca biri belirtilmek zorundadır.
+    int open(const char * path , int flags , ... /* mode_t modu */ );
+
+    Başka bir gösterim de şöyle olabilir:
+
+    int open(const char *path, int flags);
+    int open(const char *path, int flags, mode_t);
+
+    Tabii C'de aynı isimli birden fazla fonksiyon bulunamaz. Yukarıdaki gösterim yalnızca kullanımın nasıl olabileceğini 
+    açıklamaktadır. 
+
+    open fonksiyonunun birinci parametresi açılacak dosyanın yol ifadesini belirtir. İkinci parametre açış bayraklarını 
+    (modlarını) belirtmektedir. Bu parametre O_XXX biçiminde isimlendirilmiş sembolik sabitlerin "bit OR" işlemine sokulmasıyla 
+    oluşturulur. Açış sırasında aşağıdaki sembolik sabitlerden en azından yalnızca birinin belirtilmesi zorunludur:
 
     O_RDONLY
     O_WRONLY
     O_RDWR
-    O_SEARCH (at'li fonksiyonlar için bulundurulmuştur, ileride ele alınacaktır)
-    O_EXEC (fexecve fonksiyonu için bulundurulmuştur, ileride ele alınacaktır)
+    O_SEARCH 
+    O_EXEC 
 
-    Buradaki O_RDONLY "yalnızca okuma yapma amacıyla", O_WRONLY "yalnızca yazma yapma amacıyla" ve O_RDWR "hem okuma hem de yazma yapma amacıyla"
-    dosyanın açılmak istendiği anlamına gelmektedir. İşletim sistemi, prosesin etkin kullanıcı id'sine ve etkin grup id'sine ve dosyanın kullanıcı ve grup 
-    id'lerine bakarak prosesin dosyaya "r", "w" hakkının olup olmadığını kontrol eder. Eğer proses bu hakka sahip değilse open fonksiyonu başarısız olur. 
-    Buradaki O_SEARCH bayrağı bazı POSIX fonksiyonlarının "at"li versiyonları için, O_EXEC bayrağı ise "fexecve" fonksiyonu için bulundurulmuştur. Bu bayraklar
-    ileride ele alınacaktır.
+    Bu bayraklara başka bayraklar da eşlik edebilir ancak yukarıdaki bayrakların yalnızca bir tanesi kullanılmak zorundadır. 
 
-    open fonksiyonu yalnızca olan dosyayı açmak için değil aynı zamanda yeni bir dosya yaratmak için de kullanılmaktadır. O_CREAT bayrağı 
-    dosya varsa etkili olmaz. Ancak dosya yoksa dosyanın yaratılmasını sağlar. Yani O_CREAT bayrağı "dosya varsa olanı aç, yoksa yarat ve aç"
-    anlamına gelmektedir. Bir dosya yaratılırken dosyanın erişim haklarını, dosyayı yaratan kişi open fonksiyonun üçüncü parametresinde vermek zorundadır. 
-    Yani dosyanın erişim haklarını dosyayı yaratan kişi belirlemektedir. Biz O_CREAT bayrağını açış moduna eklemişsek bu durumda "dosya yaratılabilir" 
-    fikri ile erişim haklarını open fonksiyonun üçüncü parametresinde belirtmemiz gerekir. Erişim hakları tüm bitleri sıfır tek biti 1 olan sembolik sabitlerin 
-    "bit OR" işlemine sokulmasıyla oluşturulmaktadır. Bu sembolik sabitlerin hepsi S_I öneki başlar. Bunu R, W ya da X harfi izler. Bunu da USR, GRP ya da OTH 
-    harfleri izlemektedir. Böylece 9 tane erişim hakkı şöyle isimlendirilmiştir:
+    Buradaki O_RDONLY "yalnızca okuma yapma amacıyla", O_WRONLY "yalnızca yazma yapma amacıyla" ve O_RDWR "hem okuma hem de 
+    yazma yapma amacıyla" dosyanın açılmak istendiği anlamına gelmektedir. İşletim sistemi prosesin etkin kullanıcı id'sine 
+    ve etkin grup id'sine ve dosyanın kullanıcı ve grup id'sine bakarak prosesin dosyaya "r", "w" hakkının olup olmadığını 
+    kontrol eder. Eğer proses bu hakka sahip değilse open fonksiyonu başarısız olur. Yani erişim kontrolleri dosyadan okurken 
+    ya da dosyaya yazarken değil open ile açış sırasında yapılmaktadır. Örneğin biz dosyayı şöyle açmak isteyelim:
+
+    fd = open("test.txt, O_RDONLY);
+
+    Burada işletim sistemi prosesin dosyaya "r" hakkı hakkı olup olmadığını kontrol edecektir. Örneğin:
+
+    fd = open("test.txt, O_WRONLY);
+    
+    Burada işletim sistemi prosesin dosyya "w" hakkı olup olmadığını kontrol edecektir. Örneğin:
+
+    fd = open("test.txt, O_RDWR);
+
+    Burada işletim sistemi prosesin dosyaya hem "r" hem de "w" hakkı olup olmadığını kontrol edecektir. 
+    
+    Zorunlu açış bayraklarından O_SEARCH bayrağı bazı POSIX fonksiyonlarının "at"li versiyonları için, O_EXEC bayrağı ise 
+    fexecve fonksiyonu için bulundurulmuştur. Bu bayraklar ileride ele alınacaktır.
+
+    open fonksiyonu yalnızca olan dosyayı açmak için değil aynı zamanda yeni bir dosya yaratmak için de kullanılmaktadır. 
+    O_CREAT bayrağı dosya varsa etkili olmaz, dosya yoksa dosyanın yaratılmasını sağlar. Yani O_CREAT bayrağı "dosya varsa 
+    olanı aç, yoksa yarat ve aç" anlamına gelmektedir. Bir dosya yaratılırken dosyanın erişim haklarını, dosyayı yaratan kişi 
+    open fonksiyonun üçüncü parametresinde vermek zorundadır. Yani dosyanın erişim haklarını dosyayı yaratan kişi belirlemektedir. 
+    Biz O_CREAT bayrağını açış moduna eklemişsek bu durumda "dosya yaratılabilir" fikri ile erişim haklarını open fonksiyonun 
+    üçüncü parametresinde belirtmemiz gerekir. Erişim hakları <sys/stat.h> dosyası içeisinde tüm bitleri sıfır tek biti 1 olan 
+    sembolik sabitlerin "bit OR" işlemine sokulmasıyla oluşturulmaktadır. Bu sembolik sabitlerin hepsi S_I öneki başlar. Bunu 
+    R, W ya da X harfi izler. Bunu da USR, GRP ya da OTH harfleri izlemektedir. Yani bu sembolik sabitlerinin oluşturulma biçimi 
+    şöyledir:
+
+    S_I[RWX][USR GRP OTH]
+        
+    Böylece 9 tane erişim hakkı şöyle isimlendirilmiştir:
 
     S_IRUSR
     S_IWUSR
@@ -4577,7 +4762,9 @@ void exit_sys(const char *msg)
     S_IWOTH
     S_IXOTH
 
-    Örneğin S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH erişim hakları "rw-r--r--" anlamına gelmektedir.
+    Örneğin S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH erişim hakları "rw-r--r--" anlamına gelmektedir. Örneğin S_IRUSR|S_IWUSR|S_IRGRP|
+    S_WGRP|S_IROTH erişim hakları "rw-rw-r" anlamına gelmektedir. Burada "owner" sözcüğü yerine "user" sözcüğünün kullanıldığına 
+    dikkat ediniz.
 
     Ayrıca <sys/stat.h> içerisinde aşağıdaki sembolik sabitler de bildirilmiştir:
 
@@ -4593,13 +4780,13 @@ void exit_sys(const char *msg)
 
     Bu durumda örneğin S_IRWXU|S_IRWXG|S_IRWXO işlemi "rwxrwxrwx" anlamına gelmektedir.
 
-    Yukarıdaki S_IXXX biçimindeki sembolik sabitlerin değerlerinin eskiden sistemden sisteme değişebileceği dikkate alınmıştır. Bu nedenle 
-    POSIX standartları başlarda bu sembolik sabitlerin sayısal değerlerini işletim sistemlerini oluşturanların belirlemesini istemiştir. 
-    Ancak daha sonraları (2008 ve sonrasında, SUS 4) bu sembolik sabitlerin değerleri POSIX standartlarında açıkça belirtilmiştir. Dolayısıyla 
-    programcılar artık bu sembolik sabitleri kullanmak yerine bunların sayısal karşılıklarını da kullanabilir duruma gelmiştir. Ancak eski 
-    sistemler dikkate alındığında bunların sayısal karşılıkları yerine yukarıdaki sembolik sabitlerin kullanılması tavsiye edilmektedir. Bu 
-    sembolik sabitler aynı zamanda okunabilirliği de artırmaktadır. POSIX standartları belli bir sürümden sonra bu sembolik sabitlerin sayısal 
-    değerlerini aşağıdaki gibi belirlemiştir:
+    Yukarıdaki S_IXXX biçimindeki sembolik sabitlerin değerlerinin eskiden sistemden sisteme değişebileceği varsayılmıştır. 
+    Bu nedenle  POSIX standartları başlarda bu sembolik sabitlerin sayısal değerlerini işletim sistemlerini oluşturanların 
+    belirlemesini istemiştir. Ancak daha sonraları (2008 ve sonrasında, SUS 4 ve sonrasında) bu sembolik sabitlerin değerleri 
+    POSIX standartlarında açıkça belirtilmiştir. Dolayısıyla programcılar artık bu sembolik sabitleri kullanmak yerine bunların 
+    sayısal karşılıklarını da kullanabilir duruma gelmiştir. Ancak eski sistemler dikkate alındığında bunların sayısal karşılıkları 
+    yerine yukarıdaki sembolik sabitlerin kullanılması tavsiye edilmektedir. Bu sembolik sabitler aynı zamanda okunabilirliği 
+    de artırmaktadır. POSIX standartları 2008 ve sonrasında bu sembolik sabitlerin sayısal değerlerini aşağıdaki gibi belirlemiştir:
 
     S_IRWXU             0700
     S_IRUSR             0400
@@ -4617,10 +4804,10 @@ void exit_sys(const char *msg)
     S_ISGID             02000
     S_ISVTX             01000
 
-    Yani belli bir süreden sonra artık rwxrwxrwx biçiminde owner, group ve other bilgilerine ilişkin S_IXXX biçimindeki sembolik sabitler 
-    gerçekten yukarıdaki sıraya göre bitleri temsil eder hale gelmiştir. Örneğin S_IWGRP sembolik sabiti 000010000 bitlerinden oluşmaktadır. 
-    Bu durumda belli bir süreden sonra örneğin S_IRUSR|S_IWURS|S_IRGRP|S_IROTH bir erişim hakkını biz 0644 octal değeri ile edebiliriz. 
-    Bu sembolik sabitlerin binary karşılıklarını da vermek istiyoruz.
+    Yani belli 2008 ve sonrasında artık "rwxrwxrwx" biçiminde owner, group ve other bilgilerine ilişkin S_IXXX biçimindeki 
+    sembolik sabitler gerçekten yukarıdaki sıraya göre bitleri temsil eder hale gelmiştir. Örneğin S_IWGRP sembolik sabiti 
+    000010000 bitlerinden oluşmaktadır. Bu durumda 2008 ve sonrasında örneğin S_IRUSR|S_IWURS|S_IRGRP|S_IROTH bir erişim 
+    hakkını biz doğrudan 0644 octal değeri ile de verebiliriz. Bu sembolik sabitlerin binary karşılıklarını da vermek istiyoruz.
 
     S_IRUSR        100 000 000
     S_IWUSR        010 000 000
@@ -4634,68 +4821,165 @@ void exit_sys(const char *msg)
     S_IWOTH        000 010 010
     S_IXOTH        001 001 001
 
+    Örneğin:
+
+    fd = open("test.txt", O_RDWR|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+
+    çağrısı ile aşağıdaki eşdeğerdir:
+
+    fd = open("test.txt", O_RDWR|O_CREAT, 0644);
+
     open fonksiyonunda O_CREAT bayrağı belirtilmemişse erişim haklarının girilmesinin hiçbir anlamı yoktur. Kaldı ki 
-    O_CREAT bayrağı girildiğinde dosya varsa erişim hakları yine dikkate alınmayacaktır.
+    O_CREAT bayrağı girildiğinde de dosya varsa erişim hakları yine dikkate alınmamaktadır. Ancak biz open fonksiyonun 
+    ikinci parametresinde O_CREAT bayrağını girmiş isek "dosya yaratılabilir" düşüncesiyle dosyanın erişim haklarını da 
+    open fonksiyonun üçüncü parametresi için girmeliyiz.
 
     POSIX sistemlerinde yukarıdaki S_IXXX biçimindeki sembolik sabitler mode_t türüyle temsil edilmiştir. mode_t türü 
-    <sys/types.h> ve bazı başlık dosyalarında sistemi oluşturanların belirlediği bir tamsayı türü olarak typedef edilmiştir.
+    <sys/types.h> ve bazı başlık dosyalarında (örneğin <sys/stat.h>) sistemi oluşturanların belirlediği bir "tamsayı türü 
+    olarak" typedef edilmiştir. Linux'ta <sys/types.h> dosyası içerisinde mode_t türü unsigned int biçiminde typedef edilmiştir.
 
-    O_TRUNC açış bayrağı "eğer dosya varsa onu sıfırlayarak aç" anlamına gelmektedir. Ancak O_TRUNC ancak yazma modunda açılan
+    O_TRUNC açış bayrağı "eğer dosya varsa onu sıfırlayarak aç" anlamına gelmektedir. Ancak O_TRUNC yazma modunda açılan
     dosyalarda kullanılabilmektedir. Yani O_TRUNC bayrağını kullanabilmek için O_WRONLY ya da O_RDWR bayraklarından birinin de 
-    belirtilmiş olması gerekmektedir. Örneğin O_WRONLY|O_CREAT|O_TRUNC açış modu "dosya yoksa yarat ancak varsa sıfırlayarak aç" 
-    anlamına gelmektedir. O_TRUNC bayrağı için dosyanın yaratılıyor olması gerekmez. O_WRONLY|O_TRUNC geçerli bir açış modudur. 
-    Bu durumda dosya yoksa open başarısız olur. Ancak dosya varsa sıfırlanarak açılır.
+    belirtilmiş olması gerekmektedir. Örneğin O_WRONLY|O_CREAT|O_TRUNC açış modu "dosya yoksa yarat ancak dosya varsa 
+    içini sıfırlayarak aç" anlamına gelmektedir. O_TRUNC bayrağı için dosyanın yaratılıyor olması gerekmez (zaten dosya 
+    yaratılırken içinde bir şey olmayacaktır). O_WRONLY|O_TRUNC geçerli bir açış modudur. Bu durumda dosya yoksa open başarısız 
+    olur. Ancak dosya varsa sıfırlanarak açılır.
 
     O_APPEND bayrağı yazma işlemlerinin dosyanın sonuna yapılacağı anlamına gelmektedir. Yani bu bayrak kullanılırsa tüm yazma 
     işlemlerinde işletim sistemi dosya göstericisini dosyanın sonuna çekip sonra yazmayı yapmaktadır. Bu açış modu da O_WRONLY
-    ya da O_RDWR için anlamlıdır. Örneğin O_RDWR|O_APPEND burada dosyaya her yazılan sona eklenecektir. Ancak dosyanın herhangi bir yerinden 
-    okuma yapılabilecektir.
+    ya da O_RDWR için anlamlıdır. Örneğin O_RDWR|O_APPEND burada dosyaya her yazılan sona eklenecektir. Ancak dosyanın herhangi
+    bir yerinden okuma yapılabilecektir.
 
     O halde standart C'nin fopen fonksiyonundaki açış modlarının POSIX karşılıkları şöyle oluşturulabilir:
 
-    Standart C fopen                    POSIX
+    Standart C           POSIX
 
-    "w"                                 O_WRONLY|O_CREAT|O_TRUNC
-    "w+"                                O_RDWR|O_CREAT|O_TRUNC
-    "r"                                 O_RDONLY
-    "r+"                                O_RDWR
-    "a"                                 O_WRONLY|O_CREAT|O_APPEND
-    "a+"                                O_RDWR|O_CREAT|O_APPEND
+    "w"                  O_WRONLY|O_CREAT|O_TRUNC
+    "w+"                 O_RDWR|O_CREAT|O_TRUNC
+    "r"                  O_RDONLY
+    "r+"                 O_RDWR
+    "a"                  O_WRONLY|O_CREAT|O_APPEND
+    "a+"                 O_RDWR|O_CREAT|O_APPEND
 
-    O_EXCL bayrağı "exclusive" açım kullanılmaktadır. Bu bayrak O_CREAT ile birlikte kullanılmalıdır. O_CREAT|O_EXCL biçiminde 
-    açış modu "dosya yoksa yarat, varsa yaratma başarısız ol" anlamına gelmektedir. O_EXCL bayrağının O_CREAT olmadan kullanılması 
+    O_EXCL bayrağı "exclusive" açım için kullanılmaktadır. Bu bayrak tek başına değil O_CREAT ile birlikte kullanılmak zorundadır. 
+    O_CREAT|O_EXCL biçimindeki açış modu "dosya yoksa yarat, varsa yaratma başarısız ol" anlamına gelmektedir. Yani bu modu 
+    kullanan programcı "mutlaka dosyanın sıfırdan yaratılasını" istemektedir. O_EXCL bayrağının O_CREAT olmadan kullanılması 
     "tanımsız davranışa" yol açmaktadır.
 
-    O_DIRECTORY bayrağının tek işlevi açılmak istenen dosya bir dizin dosyası değilse açımın başarısız olmasını sağlamak içindir.
+    O_DIRECTORY bayrağı açılmak istenen dosya bir dizin dosyası değilse açımın başarısız olmasını sağlamaktadır. Dizin dosyaları 
+    da open fonksiyonuyla bu bayrak kullanılarak açılabilmektedir. 
 
-    open fonksiyonunun diğer açış modları ileride başka konular içerisinde ele alınacaktır.
+    open fonksiyonunun diğer açış modları ileride başka konular içerisinde ele alınacaktır. Bazı modları görmemiş olsak da açış 
+    modlarının hepsini aşağıda bir tablo halinde veriyoruz:
 
-    Erişim hakları open fonksiyonu tarafından (yani open fonksiyonunun çağırdığı sistem fonksiyonu tarafından) kontrol edilmektedir. 
-    Örneğin biz dosyayı O_RDWR modunda açmak isteyelim bu durumda prosesimizin dosyaya "r" ve "w" haklarına sahip olması gerekir. Eğer 
-    prosesimiz dosya için bu haklara sahip değilse open başarısız olur ve errno EACCESS değeri ile set edilir. Burada önemli olan nokta
-    kontrolün en başta open tarafından yapılmasıdır. Yani O_RDWR modunda açma istendiğinde eğer proses bu haklara sahip değilse
-    açma başarılı olup read ya da write fonksiyonlarındaki hatadan dolayı başarısız olma söz konusu değildir. Direkt açmanın kendisi 
-    başarısız olmaktadır.
+    ┌─────────────┬───────────────────────────────────────────────────────────────────────┬──────────────┐
+    │     Bayrak  │                            İşlev                                      │   Standart   │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_RDONLY    │ Dosyayı yalnızca okuma modunda aç.                                    │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_WRONLY    │ Dosyayı yalnızca yazma modunda aç.                                    │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_RDWR      │ Dosyayı hem okuma hem yazma modunda aç.                               │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_CREAT     │ Dosya yoksa oluştur. mode argümanıyla izin bitleri verilir.           │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_EXCL      │ O_CREAT ile birlikte: dosya zaten varsa hata döndür (EEXIST).         │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_TRUNC     │ Dosya varsa ve yazma modundaysa içeriğini sıfırla.                    │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_APPEND    │ Her write() çağrısından önce dosya göstericisini sona taşı;           │    POSIX     │
+    │             │ atomik ekleme garantisi verir.                                        │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_NONBLOCK  │ G/Ç işlemlerini bloke etmeyen (non-blocking) modda gerçekleştir.      │    POSIX     │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_NOCTTY    │ Dosya bir terminal aygıtıysa sürecin kontrol terminali                │    POSIX     │
+    │             │ (controlling terminal) olarak atanmasını engeller.                    │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_CLOEXEC   │ Dosya tanımlayıcısına FD_CLOEXEC bayrağı atar; exec() sonrası         │    POSIX     │
+    │             │ fd otomatik kapanır. fork()+exec() yarış koşulunu önler.              │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_DSYNC     │ Her write(), yalnızca veriyi diske flush edene kadar bloke eder;      │    POSIX     │
+    │             │ meta veri (erişim zamanı vs) beklenmez.                               │  (2008'den)  │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_SYNC      │ Her write(), veri ve meta veriyi diske flush edene kadar bloke eder.  │    POSIX     │
+    │             │ O_DSYNC + meta veri garantisi; __O_SYNC | O_DSYNC olarak tanımlıdır.  │  (2008'den)  │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_RSYNC     │ read() çağrıları, bekleyen write() I/O'larının tamamlanmasını         │    POSIX     │
+    │             │ bekler. Linux'ta O_SYNC ile eş anlamlı davranır.                      │  (2008'den)  │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_NDELAY    │ O_NONBLOCK ile eş anlamlı; eski BSD uyumluluğu için korunur.          │ Linux'a Özgü │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_DIRECTORY │ Yol bir dizin dosyası değilse ENOTDIR döndür; yalnızca dizin          │ Linux'a Özgü │
+    │             │ dosyası açmak için kullanılır.                                        │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_NOFOLLOW  │ Yolun son bileşeni sembolik bağsa (symlink) ELOOP döndür;             │ Linux'a Özgü │
+    │             │ symlink takibini engeller.                                            │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_NOATIME   │ read() çağrılarında inode'un atime (erişim zamanı) alanını            │ Linux'a Özgü │
+    │             │ güncelleme. Yedekleme ve dizin dosyası tarama araçlarında kullanılır. │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_PATH      │ Dosya içeriğine değil yalnızca dosya sistemi konumuna referans için   │ Linux'a Özgü │
+    │             │ fd aç. Okuma/yazma yapılamaz; fstatat(), openat() vs için kullanılır. │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_TMPFILE   │ İsimsiz geçici bir dosya oluştur; fd kapanınca dosya otomatik         │ Linux'a Özgü │
+    │             │ silinir. linkat() ile kalıcı hale getirilebilir.                      │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_LARGEFILE │ 32-bit sistemlerde 2 GB'ı aşan dosyaların açılmasına izin ver.        │ Linux'a Özgü │
+    │             │ 64-bit sistemlerde örtük olarak etkindir.                             │              │
+    ├─────────────┼───────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_ASYNC     │ Dosya üzerinde G/Ç hazır olduğunda SIGIO sinyali gönder               │ Linux'a Özgü │
+    │             │ (sinyal güdümlü G/Ç). fcntl() ile de ayarlanabilir.                   │              │
+    └─────────────┴───────────────────────────────────────────────────────────────────────┴──────────────┘
+
+    Yukarıda da belirttiğimiz gibi erişim hakları open fonksiyonu tarafından (yani open fonksiyonunun çağırdığı sistem fonksiyonu 
+    tarafından) kontrol edilmektedir. Örneğin biz dosyayı O_RDWR modunda açmak isteyelim bu durumda prosesimizin dosyaya "r" 
+    ve "w" haklarına sahip olması gerekir. Eğer prosesimiz dosya için bu haklara sahip değilse open başarısız olur ve errno 
+    EACCESS ("Permission denied") değeri ile set edilir. Burada önemli olan nokta kontrolün en başta open fonksiyonu tarafından 
+    yapılmasıdır. 
 
     open fonksiyonu başarı durumunda int türden "dosya betimleyicisi (file descriptor)" denilen bir değerle geri dönmektedir. 
-    Dosya betimleyicisi bir handle olarak diğer fonksiyonlar tarafından istenmektedir. open başarısız olursa -1 ile geri döner ve errno 
-    uygun biçimde set edilir. open fonksiyonunun başarısız olması için pek çok neden söz konusudur. Bundan dolayı açma işleminin başarısı 
-    kesinlikle test edilmelidir. 
+    Dosya betimleyicisi bir handle olarak diğer fonksiyonlar tarafından istenmektedir. open başarısızlık durumunda -1 ile geri 
+    döner ve errno uygun biçimde set edilir. open fonksiyonunun başarısız olması için pek çok neden söz konusudur. Bundan 
+    dolayı açma işleminin başarısı kesinlikle test edilmelidir. Örneğin:
+
+    int fd;
+    /* ... */
+
+    if ((fd = open("test.txt", O_RDONLY)) == -1)
+        exit_sys("open");   
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                                10. Ders 26/11/2022 - Cumartesi
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
     open fonksiyonu işletim sisteminin dosya açan sistem fonksiyonunu (Linux'ta sys_open) çağırmaktadır. Bu sistem fonksiyonu
-    açılacak dosyaya ilişkin bilgileri diskten bulur ve o bilgileri "dosya nesnesi (file object)" denilen bir yapının içerisine 
-    yerleştirir. Dosya nesnesi Linux'un kaynak kodlarında "struct file" türü ile temsil edilmiştir. İşletim sistemi dosya nesnesinin 
-    içini doldurduktan sonra dosya betimleyici tablosunda boş bir slot bulur ve o slota dosya nesnesinin adresini yazar. Anımsanacağı gibi 
-    dosya betimleyici tablosu dosya nesnelerinin adreslerini tutan bir gösterici dizisi biçiminde organize edilmiştir. Dosya betimleyici tablosunun 
-    yeri prosesin kontrol bloğundan hareketle elde edilmektedir. İşte open fonksiyonunun bize geri döndürdüğü dosya betimleyicisi aslında
-    dosya betimleyici tablosunda (yani gösterici dizisinde) bir indeks belirtmektedir.
+    açılacak dosyaya ilişkin bilgileri diskten bulur ve o bilgileri daha önceden de belirttiğimiz gibi "dosya nesnesi (file 
+    object)" denilen bir yapının içerisine yerleştirir. Dosya nesnesinin Linux'un kaynak kodlarında struct file türü ile temsil 
+    edildiğini söylemiştik. İşletim sistemi dosya nesnesinin içini doldurduktan sonra dosya betimleyici tablosunda boş bir slot 
+    bulur ve o slota dosya nesnesinin adresini yazar. Anımsanacağı gibi dosya betimleyici tablosu dosya nesnelerinin adreslerini 
+    tutan bir gösterici dizisi biçiminde organize edilmiştir. Dosya betimleyici tablosunun yeri prosesin kontrol bloğundan 
+    hareketle elde edilmektedir. İşte open fonksiyonunun bize geri döndürdüğü dosya betimleyicisi aslında dosya betimleyici 
+    tablosunda (yani gösterici dizisinde) bir indeks belirtmektedir. Örneğin open fonksiyonu dosya nesnesinin adresini dosya
+    betimleyici tablosunun 3'üncü indeskli slotuna yerleştirmiş olsun:
+
+                 Dosya Betimleyici Tablosu
+    --------->      ┌──────────────────┐
+                0   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                1   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                2   │      adres       │──────────►  dosya nesnesi
+                    ├──────────────────┤
+                3   │      adres       │──────────► Açtığımız dosyaya ilişkin dosya nesnesi
+                    ├──────────────────┤
+                4   │      NULL        │
+                    ├──────────────────┤
+                5   │      NULL        │
+                    ├──────────────────┤
+                ... │      ...         │
+                    ├──────────────────┤
+               1023 │      NULL        │
+                    └──────────────────┘
+
+    Bu durumda open fonksiyonu 3 değeri ile geri dönecektir. 
 
     Bir program çalıştığında genellikle dosya betimleyici tablosunun ilk üç betimleyicisi dolu diğerleri boştur. Dosya betimleyici tablosunun 
     0'ıncı slotu (yani 0 numaralı betimleyici) terminal aygıt sürücüsü için oluşturulmuş dosya nesnesini göstermektedir. Buna stdin 
