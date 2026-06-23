@@ -26,7 +26,7 @@
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-  GPIO (General Purpose Input Output) sistemlerinin elektronik (yani donanımsal) kısmı Gürbüz Hoca (Gürbüz Aslan) tarafından 
+    GPIO (General Purpose Input Output) sistemlerinin elektronik (yani donanımsal) kısmı Gürbüz Hoca (Gürbüz Aslan) tarafından 
     anlatılmıştı. Bu bölümde biz GPIO sisteminin gömülü Linux sistemlerindeki yazılımsal kullanımı üzerinde duracağız. Önce BBB 
     üzerinde sonra Raspberry Pi üzerinde çalışacağız. 
 -----------------------------------------------------------------------------------------------------------------------------*/
@@ -16412,7 +16412,7 @@ void exit_sys(const char *msg)
 
     $ nano meta-myproject/recipes-core/images/my-bbb-image.bb
 
-    Biz tarif dosyaalrının içeriğini ayrrı bir başlıkta ele alacağız. Ancak burada aşağıdaki gibi bir içerik kullanılabilir:
+    Biz tarif dosyaalrının içeriğini ayrı bir başlıkta ele alacağız. Ancak burada aşağıdaki gibi bir içerik kullanılabilir:
                       
     SUMMARY = "BeagleBone Black için özel image"
     DESCRIPTION = "picocom ve temel araçları içeren BBB image'ı"
@@ -16439,35 +16439,449 @@ void exit_sys(const char *msg)
 
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                                183. Ders 02/05/2026 - Salı
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+    "Gömülü Lilux Sistemleri - Geliştirme ve Uygulamaları" kurs notlarının "ReadTheDocs" ortamına aktarılması konusu ele alındı.
 -----------------------------------------------------------------------------------------------------------------------------*/
 
-
+/*-----------------------------------------------------------------------------------------------------------------------------
+                                                183. Ders 04/06/2026 - Periembe   
+-----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-  
-
+    Şimdi de Poky için kendimize ilişkin bir katman oluşturalım. Bu katmanın içeriisne kendi paketlerimizi yerleştirelim. 
+    Yeni bir katman oluşturma işlemini aslında paket eklerken de yapmıştık. Yeni bir ktamanın yaratılması için sırasıyla şunlar
+    yapılmalıdır:
     
+    1) Önce yine script çalıştırılır:
+
+    $ source poky/oe-init-build-env build-bbb
+
+    Bu script bizi ana dizinin altında yaratılmış olan "build-bbb" dizinine sokacaktır. Tabii birtakım çevre değişkenleri de 
+    set edilmiş olacaktır. 
+
+    2) Yeni bir katmanın yaratılması ana dizinin içerisinde "bitbake-layers create-layer" komutuyla yapılmaktadır. Örneğin:
+
+    $ bitbake-layers create-layer meta-mylayer
+
+    Katman isimlerinin "meta-" ile başlatılması gelenekseldir ve şiddetle tavsiye edilmektedir. Biz de yukarıdaki örnekte 
+    katmanımıza "meta-mylayer" ismini verdik. Komutu uyguladığımızda aşağıdaki gibi bir dizin yapısı elde edilecektir:
+
+    meta-mylayer
+    ├── conf
+    │   └── layer.conf
+    ├── COPYING.MIT
+    ├── README
+    └── recipes-example
+        └── example
+            └── example_0.1.bb
+
+    Buradaki "recipes-example" dizini örnek bir tarif oluşturmak için yaratılmıştır. Bu dizini silebiliriz:
+
+    $ rm -r recipes-example
+
+    3) Oluşturulan katman ile ilgili ayarlamalar "conf/layer.conf" dosyasında yapılmaktadır. Biz bu dosyanın içeriğini izleyen 
+    paragraflarda ele alacağız. Ancak katman yaratıldığında default "conf/layer.conf" dosyası şu biçimdedir:
+
+    # We have a conf and classes directory, add to BBPATH
+    BBPATH .= ":${LAYERDIR}"
+
+    # We have recipes-* directories, add to BBFILES
+    BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+                ${LAYERDIR}/recipes-*/*/*.bbappend"
+
+    BBFILE_COLLECTIONS += "meta-mylayer"
+    BBFILE_PATTERN_meta-mylayer = "^${LAYERDIR}/"
+    BBFILE_PRIORITY_meta-mylayer = "6"
+
+    LAYERDEPENDS_meta-mylayer = "core"
+    LAYERSERIES_COMPAT_meta-mylayer = "scarthgap"
+
+    4) Katmanların içerisinde tipik olarak paketler bulunmaktadır. (Her katmanın amacı paket oluşturmal değildir.) Her paket 
+    katman dizinin altında ayrı bir dizin içerisinde bulundurulmaktadır. Örneğin oluşturduğumuz katmanda "app1" ve "app2" 
+    isminde iki paket bulunacak olsun. Dizin yapısı şöyle olabilir:
+
+    meta-mylayer/
+    ├── conf/
+    │   └── layer.conf
+    ├── recipes-app1/
+    │   └── app1/
+    │       ├── app1_1.0.bb
+    │       └── files/
+    │           ├── app1.c
+    │           └── Makefile
+    └── recipes-app2/
+        └── app2/
+            ├── app2_1.0.bb
+            └── files/
+                ├── app2.c
+                └── Makefile
+
+    Aslında her ne kadar yaygın bir biçimse de paketler için "recipe-xxx" dizininin oluşturulması zorunlu değildir. Yani 
+    katman dizin yapısı şöyle de olabilir:
+    
+    meta-mylayer/
+    ├── conf/
+    │   └── layer.conf
+    ├── app1/
+    │   ├── app1_1.0.bb
+    │   └── files/
+    │       ├── app1.c
+    │       └── Makefile
+    └── app2/
+        ├── app2_1.0.bb
+        └── files/
+            ├── app2.c
+            └── Makefile  
+
+    Biz örneğimizde standart olan birinci dizin yapısını kullanacağız. Paket dizinlerinin içerisinde "tarif dosyaları 
+    (yani ".bb" dosyaları)" bulundurulmaktadır. Tarif dosyaları paketin nasıl indirileceğini, nasıl derleneceğini belirten 
+    belirten dosyalardır. Yocto'daki ana unsurlardan biridir. (Bu tarif dosyalarının aslında "open-embedded" projesinden 
+    geldiğini anımsayınız.) Paketteki derleme işlemine sokulacak dosyalar tipik olarak paketin "files" dizini içerisinde 
+    bulundurulmaktadır. Bu dizine bitbake tarafından otomatik olarak bakılmaktadır. Ancak dosyaların bu dizin yerine başka 
+    bir dizine yerleştirilemsi de 
+    mümkündür.
+
+    5) Paketteki kaynak dosyalar bir Makefile tarafından derlenebilir. Ya da derleme manuel bir biçimde de yapılabilir. 
+    Aslında derlemenin nasıl yapılacağı tarif dosyalarında belirtilmektedir. Biz örneğimizde önce Makefile kullanmadan sonra 
+    da Makefile kullanarak derleme işlemlerimizi yapalım. Yukarıdaki iki paketin "files" dizilerinde aşağıdaki gibi temsili 
+    C dosyaları bulunsun:
+
+    /* app1.c */
+
+    #include <stdio.h>
+
+    int main(void)
+    {
+        printf("app1\n");
+
+        return 0;
+    }
+
+    /* app2.c */
+
+    #include <stdio.h>
+
+    int main(void)
+    {
+        printf("app2\n");
+
+        return 0;
+    }
+
+    Katmanımızın dizin yapısı şu hale gelmiştir:
+
+    meta-mylayer/
+    ├── conf
+    │   └── layer.conf
+    ├── COPYING.MIT
+    ├── README
+    ├── recipe-app1
+    │   └── app1
+    │       └── files
+    │           └── app1.c
+    └── recipe-app2
+        └── app2
+            └── files
+                └── app2.c
+
+    Buradaki katmanın bu iki paketi içerdiği bilgisi bir kalıp biçiminde "conf/layer.conf" dosyası içerisinde belirtilmektedir. 
+    Biz bu dosyayı zaten izleyen paragraflarda açıklayacağız. Yukarıda biz paketteki dosyaların derlenmesinden "tarif dosyalarının"
+    sorumlu olduğunu belirtmiştik. O halde paketlerimize paket dizini içerisinde ".bb" uzantılı tarif dosyaları yerleştirmeliyiz. 
+    Tarif dosyaları herhangi bir biçimde isimlendirilebilmektedr. Ancak bunun için bir isimlendirme geleneği de (convention)
+    vardır:
+
+    <paketadi>_<versiyon>.bb
+
+    Örneğin:
+
+    app1_1.0.bb 
+    
+    ┌──────────────────┬──────────────┬──────────────────────────────────┐
+    │    Bileşen       │    Örnek     │            Açıklama              │
+    ├──────────────────┼──────────────┼──────────────────────────────────┤
+    │ paketadi         │ app1         │ Küçük harf, tire kullanılabilir  │
+    │ _                │ _            │ Ad ve versiyonu ayıran alt çizgi │
+    │ versiyon         │ 1.0          │ Sayısal, nokta ile ayrılmış      │
+    │ .bb              │ .bb          │ BitBake recipe uzantısı          │
+    └──────────────────┴──────────────┴──────────────────────────────────┘
+
+    Bu dosyalar oluşturulduktan sonra katman dizininin görünümü şöyle olacaktır:
+
+    meta-mylayer
+    ├── conf
+    │   └── layer.conf
+    ├── COPYING.MIT
+    ├── README
+    ├── recipe-app1
+    │   └── app1
+    │       ├── app1_1.0.bb
+    │       └── files
+    │           └── app1.c
+    └── recipe-app2
+        └── app2
+            ├── app2_1.0.bb
+            └── files
+                └── app2.c
+
+    Peki tarif dosyalarının içeriği nasıl oluşturulmaktadır? Biz tarif dosyalarını izleyen paragraflarda ele alacağız. Ancak 
+    burada ayrıntıya girmeden derleme işlemini yapabilecek tarif dosyann nasıl oluşturulduğuna ilişkin bir fikir vermek 
+    istiyoruz. app1_1.0.bb paketi için tipik bir tarif dosyası şöyle oluşturulabilir:
+
+    SUMMARY = "app1 Uygulaması"
+    DESCRIPTION = "app1 Uygulaması"
+    LICENSE = "MIT"
+    LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+    SRC_URI = "file://app1.c"
+
+    S = "${WORKDIR}"
+
+    do_compile() {
+        ${CC} ${CFLAGS} ${LDFLAGS} -o app1 app1.c 
+    }
+
+    do_install() {
+        install -d ${D}${bindir}
+        install -m 0755 app1 ${D}${bindir}/app1
+    }
+
+    Burada iki önemli beetik fonksiyonu vardır: do_compile ve do_install. do_compile fonksiyonu build işlemi sırasında derleme
+    amacıyla çağrılmaktadır. Biz burada derleme işlemini yapan kabuk komut koutlarını yerleştirmeliyiz. Buradaki CC çevre 
+    değişkeni derleyiciyi, CFLAGS çevre değişkeni derleme işlemi yapılırken kullanılacak derleyici seçeneklerini, LDFLAGS 
+    çevre değişkeni ise bağlama sırasında kullanılacak bağlama seçeneklerini belirtmektedir. Bu çevre değişkenleri zaten Poky 
+    tarafından set edilmiş durumdadır. Örneğin CC çevre değişkeni çapraz derleme yapılıyorsa çapran derleyiciye referans 
+    etmektedir. Buradaki CFLAGS ve LDFLAGS bayraklarına ekleme yapabilirsiniz. Ya da doğrudan ekleyeceğiniz seçenekleri buradaki 
+    derleme satırında belirtebilirsiniz. Ekleme için bitbake'in append direktifini kullanabilirsiniz. Örneğin:
+
+    CFLAGS:append = " -DDEBUG_LEVEL=2 -Wall -Wextra"
+
+    Burada başta boşluk önemlidir. Eğer bu boşluk verimezse önce bayraklarla bu bayraklar bitişik hale gelir. Derleme 
+    değişkenlerinin önemli olanlarını aşağıda bir tablo biçiminde veriyoruz:
+
+    ┌─────────────┬────────────────────────┬───────────────────────────────┐
+    │  Değişken   │      Açıklama          │        Örnek Değer            │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${CC}       │ C derleyici            │ arm-poky-linux-gnueabi-gcc    │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${CXX}      │ C++ derleyici          │ arm-poky-linux-gnueabi-g++    │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${AR}       │ Statik kütüphane aracı │ arm-poky-linux-gnueabi-ar     │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${LD}       │ Linker                 │ arm-poky-linux-gnueabi-ld     │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${CFLAGS}   │ C derleme bayrakları   │ -march=armv7-a -mfpu=neon ... │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${CXXFLAGS} │ C++ derleme bayrakları │ -march=armv7-a -mfpu=neon ... │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${LDFLAGS}  │ Linker bayrakları      │ -Wl,-O1 -Wl,--hash-style=gnu  │
+    ├─────────────┼────────────────────────┼───────────────────────────────┤
+    │ ${STRIP}    │ Debug sembol kaldırma  │ arm-poky-linux-gnueabi-strip  │
+    └─────────────┴────────────────────────┴───────────────────────────────┘
+
+    do_install betik fonksiyonu kurulum sırasında bu paketteki öğelerin hedefe kopyalanması için kullanılmaktadır. "install" 
+    komutu aslında "cp" komutuna oldukça benzeyen bir Linux komudur. Ancak "cp" komutundan bazı farklılıkları da vardır. 
+    "install" komutu ile "cp" komutu arasındaki farklılıkları aşağıdaki tabloda listeliyoruz:
+
+    ┌──────────────────────────────────┬─────────────────────────────────────────┬──────────────────────────────────────────┐
+    │          Özellik                 │                 cp                      │              install                     │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Temel amaç                       │ Genel amaçlı dosya kopyalama            │ Yazılım kurulumu için dosya yerleştirme  │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ İzin ayarlama                    │ Yok (ayrıca chmod gerekir)              │ Var (-m seçeneği, örn. -m 0755)          │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Sahiplik ayarlama                │ Yok (ayrıca chown gerekir)              │ Var (-o ve -g seçenekleri)               │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Dizin oluşturma                  │ Yok (ayrıca mkdir gerekir)              │ Var (-d seçeneği, mkdir -p benzeri)      │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Üzerine yazma davranışı          │ Mevcut dosyayı yerinde değiştirir       │ Önce siler (unlink), sonra oluşturur     │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Çalışan binary üzerine yazma     │ Sorun çıkarabilir (text file busy)      │ Güvenlidir                               │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Strip desteği                    │ Yok                                     │ Var (-s seçeneği)                        │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Zaman damgası (varsayılan)       │ Korunabilir (-p ile)                    │ Kopyalama anı (koruma için -p gerekir)   │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Özyinelemeli (recursive) kopya   │ Var (-r / -R seçeneği)                  │ Yok                                      │
+    ├──────────────────────────────────┼─────────────────────────────────────────┼──────────────────────────────────────────┤
+    │ Yocto do_install içinde kullanım │ Önerilmez (izinler belirsiz kalır)      │ Standart ve önerilen yöntem              │
+    └──────────────────────────────────┴─────────────────────────────────────────┴──────────────────────────────────────────┘
+
+    Özetle "install" komutu aslında "cp" ve bazı komutların yaptığı işlemleri tek hamlede yapabilmek için kullanılmaktadır. 
+    Örneğin biz bu komutla hem "mkdir -p" komutunda olduğu gibi bir grup dizini yaratabiliriz hem de oraya kopyalama yapabiliriz:
+
+    $ install -D -m 0644 sample.c a/b/c/d/sample.c
+
+    do_install fonksiyonuna dikkat ediniz:
+
+    do_install() {
+        install -d ${D}${bindir}
+        install -m 0755 app1 ${D}${bindir}/app1
+    }
+
+    Burada D çevre değişkeni Yocto tarafından belirlenen geçici kök dizindir. "bindir" çevre değişkeni ise çalıştırılabilen 
+    dosyaların yerleştirileceği hedef dizini belirtmektedir. Tipik olarak "bindir" çevre dğeişkeni "/usr/bin" biçimindedir.  
+    Böylece ${D}${bindir} bu ifade aslında geçici kök dizindeki (fake root directory) "/usr/bin" dizini olmaktadır. Burada 
+    Buradaki birinci install  komutunun aslında bu dizini yarattığına ikinci install komutunun ise çalıştırılabilen dosyayı 
+    bu dizine kopyaladığına dikkat ediniz. app2_1.0.bb tarif dosyası da şöyle oluşturulabilir:
+
+    SUMMARY = "app2 Uygulaması"
+    DESCRIPTION = "app2 Uygulaması"
+    LICENSE = "MIT"
+    LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+    SRC_URI = "file://app2.c"
+
+    S = "${WORKDIR}"
+
+    do_compile() {
+        ${CC} ${CFLAGS} ${LDFLAGS} -o app2 app2.c 
+    }
+
+    do_install() {
+        install -d ${D}${bindir}
+        install -m 0755 app2 ${D}${bindir}/app2
+    }
+
+
+    do_compile ve do_install fonksiyonlarında kullanılan önemli değişkenlerin lsitesini de aşağıdaki tabloda veriyoruz:
+
+    ┌────────────────────┬───────────────────────────┬────────────────────────┐
+    │    Değişken        │ Hedef Cihazdaki Karşılığı │      Ne İçin           │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${bindir}          │ /usr/bin                  │ Kullanıcı binary'leri  │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${sbindir}         │ /usr/sbin                 │ Sistem binary'leri     │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${libdir}          │ /usr/lib                  │ Kütüphaneler           │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${includedir}      │ /usr/include              │ Header dosyaları       │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${sysconfdir}      │ /etc                      │ Config dosyaları       │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${datadir}         │ /usr/share                │ Paylaşılan veriler     │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${localstatedir}   │ /var                      │ Değişken veriler       │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${systemd_unitdir} │ /lib/systemd              │ Systemd unit dosyaları │
+    ├────────────────────┼───────────────────────────┼────────────────────────┤
+    │ ${docdir}          │ /usr/share/doc            │ Dokümantasyon          │
+    └────────────────────┴───────────────────────────┴────────────────────────┘
+
+    Yukardaki tarif dosyalarında geçen öğelerin anlamını özet biçiminde aşağıdaki tabloda veriyoruz:
+
+    ┌─────────────────────┬─────────────────────────────────────────────────────┐
+    │ Değişken / Direktif │                 Açıklama                            │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ SUMMARY             │ Tek satırlık kısa açıklama                          │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ DESCRIPTION         │ Daha uzun açıklama metni                            │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ LICENSE             │ SPDX formatında lisans adı                          │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ LIC_FILES_CHKSUM    │ Lisans dosyasının md5 hash doğrulaması — zorunludur │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ SRC_URI             │ Kaynak dosyaların nereden alınacağı                 │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ S                   │ Kaynak kodun bulunduğu dizin                        │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ do_compile()        │ Derleme görevi                                      │
+    ├─────────────────────┼─────────────────────────────────────────────────────┤
+    │ do_install()        │ Kurulum görevi                                      │
+    └─────────────────────┴─────────────────────────────────────────────────────┘
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
-
+                                            185. Ders 11/06/2026 - Perşembe
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    6) Oluşturdupumuz katmanı "git" versiyon takip sistemine dahil etmek zorunlu olmasa da tavsiye edilir. Bu işlemi komut 
+    satırından birkaç komutla yapabiliriz:
 
+    $ cd meta-mylayer
+    $ git init
+    $ git add .
+    $ git commit -m "Initial commit of meta-mylayer"
+    
+    7) Oluşturduğumuz katmanı projemizin katmanlarına eklememiz gerekir. Aslında biz bu işlemi "var olan bir paketi" eklerken 
+    daha önce yapmıştık. Bunun için pratik yöntem "bitbake-layers aad-layer" komurunu kullanmaktı. Bu işlemi şöyle yapabiliriz:
+
+    $ bitbake-layers add-layer meta-mylayer
+
+    8) Biz burada ilgili katmanı da projemize dahil etmiş olduk. Ancak anımsayacağınız gibi bu katmandaki paketlerin de hedefe 
+    ayrıca aktarılması sağlanmalıdır. Biz bir katmandaki pajketlerin hedefe aktarılması için üç yöntemi tanıtmıştık. Burada 
+    basit olduğu gerekçesiyle "local.conf" yöntemini kullanalım. "conf/local.conf" dosyasını editöre çekip "app1" ve "app2" 
+    paketlerini ekleyelim:
+
+    IMAGE_INSTALL:append = " app1 app2"
+
+    9) Artık tüm aşamaları tamamladık. Build işlemine geçebiliriz:
+
+    $ bitbake core-image-minimal
+
+    Artık imajımız "app1" ve "app2" paketlerini içerecek biçimde oluşturulmuştur. Kök dosya sistemini açıp "chroot" uygulayıp 
+    testimizi yapabiliriz:
+
+    $ cd build-bbb/tmp/deploy/images/beaglebone-yocto
+    $ mkdir RootDir
+    $ tar -xjvf core-image-minimal-beaglebone-yocto.rootfs.tar.bz2 -C RootDir
+    $ sudo chroot RootDir /bin/sh
+
+    Artık oluşturduğumuz dağıtımın kök dizinine geçmiş olduk. "app1" ve "app2" komutlarını çalıştırarak deneme yapabiliriz:
+
+    / # app1
+    app1
+    / # app2
+    app2
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Şimdi bazı önemli dosyaların içerikleri üzerinde biraz daha ayrıntılı duralım. Öncelikle bir katmanın temel bilgilerini 
+    barındıran "layer.conf" dosyasının içeriğini inceleyelim. Biz yukarda oluşturduğumuz "meta-mylayer" katmanında "layer.conf"
+    dosyasını şöyle oluşturmuştuk:
 
------------------------------------------------------------------------------------------------------------------------------*/
+    # We have a conf and classes directory, add to BBPATH
+    BBPATH .= ":${LAYERDIR}"
 
-/*-----------------------------------------------------------------------------------------------------------------------------
+    # We have recipes-* directories, add to BBFILES
+    BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+                ${LAYERDIR}/recipes-*/*/*.bbappend"
 
+    BBFILE_COLLECTIONS += "meta-mylayer"
+    BBFILE_PATTERN_meta-mylayer = "^${LAYERDIR}/"
+    BBFILE_PRIORITY_meta-mylayer = "6"
+
+    LAYERDEPENDS_meta-mylayer = "core"
+    LAYERSERIES_COMPAT_meta-mylayer = "scarthgap"
+
+    - BBPATH değişkeni katman dizinini bitbake'e bildirmek için kullanılmaktadır. Bu sayede bitbake önemli dosyaların yerlerini
+    tespit edebilmektedir. Genellikle "layer.conf" dosyaları içerisinde BBPATH değişkeni şöyle oluşturulmaktadır:
+
+    BBPATH .= ":${LAYERDIR}"
+
+    Buradaki LAYERDIR değişkeni katmanın ana dizinini belirtmektedir. Kullanılan operatörün .= olduğuna dikkat ediniz. 
+    .= ve += operatörleri değişkenin sonuna ekleme yapmak amacıyla kullanılmaktadır. Ancak .= sonuna boşluk karakteri olmadan 
+    ekleme yaparken += bir boşluk karakteriile ekleme yapmaktadır. İki operatör arasındaki farkı şu örnekle açıklayabiliriz:
+
+    VAR = "abc"
+    VAR += "def"     # "abc def"
+
+    VAR = "abc"
+    VAR .= "def"     # "abcdef"
+
+    Bitbake BBPATH depişkenindeki katman yol şfadelerini ':' karakterşyle ayırmaktadır. 
+
+    - BBFILES değişkeni düzenli ifade kalıplarından oluşmaktadır. Bu değişkende tarif dosyalarının yerleri düzenli ifade 
+    kalıplarıyla belirtilmektedir. Bizim de kullandığımız tipik BBFILES kalıbı öyledir:
+
+     BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+                ${LAYERDIR}/recipes-*/*/*.bbappend"
+
+    Bu kalıplar Bitbake'e şunu söylemektedir: "Katman dizinin altında başı recipes- ile başlayan dizinlerin hepsinin altındaki
+    tüm dizinlerin içlerinde bulunan .bb uzuntılı ve .bbappend uzantılı dosyaları tarif dosyası olarak kullan"
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
