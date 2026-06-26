@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                      Son Güncelleme: 24/06/2026 - Çarşamba
+                                      Son Güncelleme: 26/06/2026 - Cuma
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -5446,7 +5446,8 @@ module_exit(test_driver_exit);
     {
         size_t esize;
 
-        wait_event_interruptible(g_wq, atomic_read(&g_len) > 0);       
+        if (wait_event_interruptible(g_wq, atomic_read(&g_len) > 0) != 0)
+            return -ERESTARTSYS;       
 
         esize = size < atomic_read(&g_len) ? size : atomic_read(&g_len);
         if (copy_to_user(buf, g_buf, esize) != 0)
@@ -5464,6 +5465,13 @@ module_exit(test_driver_exit);
     yapmalısınız. Kodda koşulun atomic bir biçimde oluşturulduğuna da dikkat ediniz. Aslında pek çok durumda atomic_read 
     yerine READ_ONCE gibi volatile erişim yeterli olmaktadır. Ancak eğer birden fazla thread uyandırılıyorsa güvenli 
     olan yaklaşım durum koşulun atomik bir biçimde oluşturulmasıdır. 
+
+    Burada bir noktaya daha dikkatinizi çekmek istiyoruz. wait_event_interruptible makrosu sinyal dolayısıyla başarısız 
+    olabilir. Bu durumda sistem fonksiyonlarının yeniden çalıştırılabilirliğini sağlamak için onun çağrıldığı fonksiyonu 
+    -ERESTARTSYS errno değeri ile geri döndürmek gerekir:
+
+    if (wait_event_interruptible(g_wq, atomic_read(&g_len) > 0) != 0)
+        return -ERESTARTSYS;   
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -5659,9 +5667,9 @@ module_exit(test_driver_exit);
     bekleme yapan thread'i uyandırdıktan sonra wake_up_all_locked ise tüm thread'leri uyandırdıktan sonra işlemini 
     sonlandırmaktadır.
 
-    wake_up_sync makrosu uyandırma işlemi sırasında uyandırılan thread'in bu uyandırmayı yapan thread'i kopararak (preemption 
-    ile) kesmemesini sağlamaktadır. Uyandırılan thread'ler eğer yüksek bir önceliğe sahipse hemen kopararak (preemption' 
-    yol açarak) CPU'ya atanabilmektedir. Bu makro bunu engellemektedir.  Makro şöyle yazılmıştır: 
+    wake_up_sync makrosu uyandırma işlemi sırasında uyandırılan thread'in bu uyandırmayı yapan thread'i CPU'dan koparmasını 
+    engellemektedir. (Uyandırılan thread'ler eğer yüksek bir önceliğe sahipse hemen kopararak (preemption'a yol açarak) 
+    CPU'ya atanabilmektedir. Bu makro bunu engellemektedir.)  Makro şöyle yazılmıştır: 
 
     #define wake_up_sync(x)			__wake_up_sync(x, TASK_NORMAL)
 
@@ -5699,7 +5707,7 @@ module_exit(test_driver_exit);
     #define wake_up_interruptible_all(x)	    __wake_up(x, TASK_INTERRUPTIBLE, 0, NULL)
     #define wake_up_interruptible_sync(x)	    __wake_up_sync((x), TASK_INTERRUPTIBLE)
 
-    Bu makrolar aslında __wake_up ve __wake_up_sync fonksiyonlarını TASK_INTERRUPTIBLE thread durum argümanuyla 
+    Bu makrolar aslında __wake_up ve __wake_up_sync fonksiyonlarını TASK_INTERRUPTIBLE thread durum argümanıyla 
     çağırmaktadır. Thread'in durumunu belirten TASK_XXX bayraklarını çizelgeleyiciyi anlattığımız bölümde ele alacağız. 
     interruptible wake_up makrolarının diğerlerinden tek farkı thread durum bilgisi yalnızca TASK_INTERRUPTIBLE olanları 
     uyandırmasıdır. Halbuki interruptible olmayan wake_up makroları hem TASK_UNINTERRUPTIBLE hem de TASK_INTERRUPTIBLE
@@ -5707,13 +5715,13 @@ module_exit(test_driver_exit);
     yatırılmışsa uyandırılmasının da interruptible wake_up fonksiyonlarıyla yapılması uygun olur. Çünkü bu durumda 
     eğer bekleme kuyruğunda TASK_UNINTERRUPTIBLE thread'ler varsa onlar uyandırılmayacaktır. interruptible olarak 
     uyutulan thread'lerin interruptible olmayan wake_up makrolarıyla uyandırılmasında bir sorun oluşmaz ancak amaç 
-    dikkate alındığında gereksiz uyandırmalar da yapılacaktır .
+    dikkate alındığında gereksiz uyandırmalar da yapılacaktır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de thread'in uyutulması ve uyandırılması işlemine bir aygıt sürücü yoluyla basit bir örnek verelim. Aygıt 
-    dürücümüzde bir tampon olsun. Eğe rbu tampon boşsa read işlemini yapan thread uygukda bekletilsin. Bu tampona
-    write fonksiyonu ile yazma yapan thread uyuyan thread'leri uyandırsın. Buradaki aygıt sürücünün read fonksiyonu 
+    Şimdi de thread'lerin uyutulması ve uyandırılması işlemine bir aygıt sürücü yoluyla basit bir örnek verelim. Aygıt 
+    sürücümüzde bir tampon olsun. Eğer bu tampon boşsa read işlemini yapan thread uykuda bekletilsin. Bu tampona
+    write fonksiyonu ile yazma yapan thread uyuyan thread'leri uyandırsın. Böyle bir aygıt sürücünün read fonksiyonu 
     şöyle yazılabilir:
 
     static wait_queue_head_t g_wq;
@@ -5725,7 +5733,9 @@ module_exit(test_driver_exit);
     {
         size_t esize;
 
-        wait_event_interruptible(g_wq, atomic_read(&g_len) > 0);       
+        if (wait_event_interruptible(g_wq, atomic_read(&g_len) > 0) != 0)
+            return -ERESTARTSYS;   
+
         esize = size < atomic_read(&g_len) ? size : atomic_read(&g_len);
         if (copy_to_user(buf, g_buf, esize) != 0)
             return -EFAULT;
@@ -5735,16 +5745,16 @@ module_exit(test_driver_exit);
     }
 
     Burada interruptible biçimde bloke oluşturulmuştur. Blokenin çözülme koşulu g_len > 0 biçimindedir. İşin başında 
-    g_len = 0 olduğu için read fonksiyonunda bloke oluşacaktır. Bloke çözüldüğünde okunmak istenen miktarla tampondaki
-    miktar karşılaştırılmış bunlardan hangisi küçükse o miktarda okuma yapılmıştır. copy_to_user fonksiyonun çekirdek 
-    modundan prosesin bellek alanına kopyalama yaptığını anımsayınız. Aktarm sonrasında g_len değişkeni yine 0 değerine
-    çekilmiştir. Böylece sonraki read işleminde tampon tüketildiği için yeniden bloke oluşacaktır. Ancak bu kod birden
-    fazla read işleminin aynı anda yapıldığı durumda karasız bir duruma da yol açabilecektir. Birden fazla thread
-    uykudan uyandırıldığında birden fazlası tamponu okuyabilecektir. Eğer tamponun tek bir thread tarafından tüketilmesi 
-    fakat diğer thread'lerin bekletilmesi gerekiyorsa mutex gibi ek bir kilit mekanizmasının da sağlanması gerekir. 
-    İzleyen paragraflarda bu sorunun üzerinde duracağız. 
+    g_len = 0 olduğu için read fonksiyonunda bloke oluşacaktır. Bloke çözüldüğünde okunmak istenen miktarla tampondaki 
+    miktar karşılaştırılmış, bunlardan hangisi küçükse o miktarda okuma yapılmıştır. copy_to_user fonksiyonunun çekirdek 
+    modundan prosesin bellek alanına kopyalama yaptığını anımsayınız. Aktarım sonrasında g_len değişkeni yine 0 değerine 
+    çekilmiştir. Böylece sonraki read işleminde tampon tüketildiği için yeniden bloke oluşacaktır. Ancak bu kod birden 
+    fazla read işleminin aynı anda yapıldığı durumda ya da read işlemi ile write işleminin eşzamanlı yapıldığı durumda 
+    senkronizasyon sorununa yol açabilecektir. Eğer tamponun tek bir thread tarafından tüketilmesi fakat diğer thread'lerin 
+    bekletilmesi gerekiyorsa mutex gibi (spinlock da olabilir) ek bir kilit mekanizmasının da kullanılması gerekir. İzleyen 
+    paragraflarda bu sorunun üzerinde duracağız.
 
-    Aygıt sürücünün read fonksiyonunda bloke olan thread'lerin blokesi aygıt sürücücünün write fonksiyonunda çözülmektedir:
+    Aygıt sürücünün read fonksiyonunda bloke olan thread'lerin blokesi aygıt sürücünün write fonksiyonunda çözülmektedir:
 
     static ssize_t generic_write(struct file *filp, const char *buf, size_t size, loff_t *off)
     {
@@ -5762,10 +5772,27 @@ module_exit(test_driver_exit);
     } 
 
     Burada önce tampona yazma yapılmış daha sonra tamponu bekleyen thread'ler wake_up_interruptible makrosuyla 
-    uyandırılmıştır. Uynadırma işlemindne önce koşulun sağlanması gerektiğine dikkat ediniz. Bu nedenle örneğimizde 
+    uyandırılmıştır. Uyandırma işleminden önce koşulun sağlanması gerektiğine dikkat ediniz. Bu nedenle örneğimizde 
     önce g_len değişkenine atama yapılıp sonra uyandırma işlemi yapılmıştır. 
 
-    Aygıt sürücünün kodlarını bütünsel biçimde aşağıda veriyoruz.
+    Aygıt sürücünün kodlarını bütünsel biçimde aşağıda veriyoruz. Derleme işlemini şöyle yapabilirsiniz:
+
+    $ make file=wait-driver
+
+    Aşağıdaki gibi yükleyebilirsiniz:
+
+    $ sudo ./load wait-driver
+
+    Farklı terminallerden önce "wait-driver-test-read.c" programını sonra da "wait-driver-test-rwrite.c" programını 
+    çalıştırıp durumu gözlemleyebilirsiniz:
+
+    $ ./wait-driver-test-read
+
+    $ ./wait-driver-test-write
+ 
+    Test bitince aygıt sürücüyü çekirdekten şöyle çıkartabilirsiniz:
+
+    $ sudo ./unload wait-driver
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* wait-driver.c */
@@ -5857,7 +5884,9 @@ static ssize_t generic_read(struct file *filp, char *buf, size_t size, loff_t *o
 {
     size_t esize;
 
-    wait_event_interruptible(g_wq, atomic_read(&g_len) > 0);       
+    if (wait_event_interruptible(g_wq, atomic_read(&g_len) > 0) != 0)
+        return -ERESTARTSYS;       
+
     esize = size < atomic_read(&g_len) ? size : atomic_read(&g_len);
     if (copy_to_user(buf, g_buf, esize) != 0)
         return -EFAULT;
@@ -5948,7 +5977,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
@@ -5990,7 +6018,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
@@ -5998,49 +6025,53 @@ void exit_sys(const char *msg)
     Bekleme kuyruğunda bir koşul altında birden fazla thread'in bloke edildiğini düşünelim. Örneğin thread'ler şöyle
     uykuya yatırılmış olsun:
 
-    wait_event_interruptible(g_wq, atomic_read(&g_flag) != 0);  
+    if (wait_event_interruptible(g_wq, atomic_read(&g_len) > 0) != 0)
+        return -ERESTARTSYS;   
 
-    Buradaki koşul g_flag değerinin 0'a eşit olmamasıdır.  Biz flag değerini örneğin 1 yapıp wake_up_interruptible 
+    Buradaki koşul g_flag değerinin 0'a eşit olmamasıdır. Biz g_flag değerini örneğin 1 yapıp wake_up_interruptible 
     makrosunu çağırırsak bu koşulu bekleyen birden fazla thread uyanabilecektir:
 
     atomic_set(&g_flag, 1);
     wake_up_interruptible(&g_wq);
 
-    Ancak bazen programcı "tek bir therad'in uyanmasını, diğer thread'lerin uykuya devam etmesini" isteyebilir. 
-    Anımsanacağı gibi wake_up işlemleri birden fazla thread'i uyandırabilmektedir. İşte bu tür durumlarda sistem 
-    programcısının bir döngü içerisinde bu durumu manuel biçimde sağlaması gerekir. Bunu yapabilen tipik bir kalıp 
-    şöyledir:
+    Ancak bazen programcı "tek bir thread'in uyanmasını, diğer thread'lerin uyumaya devam etmesini" isteyebilir. 
+    İşte bu tür durumlarda sistem programcısının bir döngü içerisinde bu durumu manuel biçimde sağlaması gerekir. Bunu 
+    yapabilen tipik kalıp şöyledir:
 
     if (mutex_lock_interruptible(&g_mutex) != 0)
-        return -EXXX;
+        return -ERESTARTSYS;
     while (g_flag == 0) {
         mutex_unlock(&g_mutex);
         if (wait_event_interruptible(g_wq, g_flag != 0) != 0)
-            return -EXXX;
-        if (mutex_lock(&g_sem) != 0)
-            return -EXXX;
+            return -ERESTARTSYS
+        if (mutex_lock_interruptible(&g_mutex) != 0)
+            return -ERESTARTSYS;
     }
     g_flag = 0;
-    mutex_unlock(&mutex);
+    mutex_unlock(&g_mutex);
+
     /* burada uyanınca yapılacak işlemler var */
     
-    Burada önce mutex kilitlenmiş ve while döngüsüne girilmiştir. (Örneğimizdeki -EXXX errno değeri "herhangi bir errno 
-    değeri anlamında kullanılmıştır.) while döngüsündeki koşula dikkat ediniz. Artık bu koşul sağlanmadığı sürece uyanan 
-    thread zaten yeniden uykuya dalacaktır. Uyanan thread'ler aşağıda ok ile gösterdiğimiz noktadan çalışma devam 
-    edecektir:
+    Aslında bu kalıba kullanıcı modundaki "koşul değişkenleri (condition variable)" konusundan da aşinasınızdır. Burada 
+    önce mutex kilitlenmiş ve while döngüsüne girilmiştir. while döngüsündeki koşula dikkat ediniz. Artık bu koşul 
+    sağlanmadığı sürece uyanan thread zaten yeniden uykuya dalacaktır. Uyanan thread'ler aşağıda ok ile gösterdiğimiz 
+    noktadan çalışma devam edecektir:
 
     /* ... */
+    if (mutex_lock_interruptible(&g_mutex) != 0)
+        return -ERESTARTSYS;
     while (g_flag == 0) {
         mutex_unlock(&g_mutex);
         if (wait_event_interruptible(g_wq, g_flag != 0) != 0)
-            return -EXXX;
+            return -ERESTARTSYS
 
         ----> çalışma buradan devam edecek
 
-        if (mutex_lock(&g_sem) != 0)
-            return -EXXX;
+        if (mutex_lock_interruptible(&g_mutex) != 0)
+            return -ERESTARTSYS;
     }
-    /* ... */
+
+    /* burada uyanınca yapılacak işlemler var */
 
     Birden fazla thread uyandığında mutex'in sahipliği tek bir thread tarafından alınacaktır. Dolayısıyla diğer 
     thread'ler mutex kilitli olduğu için bekleyecektir. Mutex'in kilidini alan thread while koşuluna takılacak ve
@@ -6053,16 +6084,17 @@ void exit_sys(const char *msg)
     spin_lock(&g_spinlock);
     while (g_flag == 0) {
         spin_unlock(&g_spinlock);
-        if (wait_event(g_wq, g_flag != 0) != 0)
-            return -EXXX;
-        spin_lock(&g_spinlock)
-            return -EXXX;
+        if (wait_event_interruptible(g_wq, g_flag != 0) != 0)
+            return -ERESTARTSYS;
+        spin_lock(&g_spinlock);
     }
     g_flag = 0;
     spin_unlock(&g_spinlock);
-    /* burada uyanınca yapılacak işlemler var */
-----------------------------------------------------------------------------------------------------------------------*/
 
+    /* burada uyanınca yapılacak işlemler var */
+
+   Ancak bu tür durumlarda spinlock kullanırken dikkat etmelisiniz.
+----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 							                66. Ders 29/03/2026 - Pazar		
@@ -6070,13 +6102,13 @@ void exit_sys(const char *msg)
 
 /*----------------------------------------------------------------------------------------------------------------------
     Linux çekirdeklerinde bekleme kuyrukları pek çok yerde açık ya da gizli bir biçimde karşımıza çıkmaktadır. Çekirdek 
-    kodlarındaki bekleme kuyruklarının bir bölümü burada görümüş olduğumuz veri yapısı (wait_queue_head_t) ve makrolarla 
+    kodlarındaki bekleme kuyruklarının bir bölümü burada görmüş olduğumuz veri yapısı (wait_queue_head_t) ve makrolarla 
     (wait_event ve wake_up makroları) oluşturulmuştur. Ancak bazı bekleme kuyrukları performans kazancı sağlayabilmek 
     için ilgili veri yapısının içerisinde manuel oluşturulmuştur. Örneğin eskiden semaphore, mutex gibi nesnelerin bekleme 
     kuyrukları yukarıda ele almış olduğumuz wait_queue_head_t yapısını kullanıyordu, işlemler de  wait_event ve wake_up 
     ile yapılıyordu. Ancak daha sonraları bu senkronizasyon nesnelerine ilişkin bekleme kuyruklarının daha az maliyetle 
     bu senkronizasyon nesnelerinin içerisinde manuel bir biçimde oluşturulması yoluna gidilmiştir. Örneğin çekirdeğin 
-    2.4'lü versyonlarında semaphore yapısı şöyleydi:
+    2.4'lü versiyonlarında semaphore yapısı şöyleydi:
 
     struct semaphore {
         atomic_t count;
@@ -6110,7 +6142,7 @@ void exit_sys(const char *msg)
 
     İsimli borular UNIX/Linux sistemlerinde mkfifo isimli POSIX fonksiyonuyla yaratılmaktadır:
 
-    include <sys/stat.h>
+    #include <sys/stat.h>
     
     int mkfifo(const char *pathname, mode_t mode);
 
@@ -6136,13 +6168,13 @@ void exit_sys(const char *msg)
     diğer taraf okuma amaçlı boruyu açana kadar bloke olmaktadır. 
 
     UNIX/Linux sistemlerinde borular tek yönlüdür. Her iki proes de aynı boru üzerinde işlem yapmaktadır. Bu nedenle 
-    boru haberleşmesinde önce hangi tarafın okuma yapacağı hangi tarafın yazma yapacağı belirlenmelidir. Bundan sonra 
+    boru haberleşmesinde hangi tarafın okuma yapacağı hangi tarafın yazma yapacağı belirlenmelidir. Bundan sonra 
     okuma ve yazma işlemleri read ve write POSIX fonksiyonlarıyla yapılmaktadır. Borular FIFO kuyruk sistemidir. Yani 
-    yazan tarafın yazdıklarını aynı sırada karşı taraf okumaktadır. Boruları kullaşlı kılan en önemli özellik 
-    senkronizasyonun bloke yoluyla otomatik sağlanmasıdır. Boruların belli bir büyüklüğü vardır. Yazna taraf henüz okuyan 
-    taraf okumamaışsa boruyu doldurduğunda write fonksiyonunda bloke olur ve bekler. Okuyan taraf borudan okuma yaptığında 
-    boruda yer açılır. Böylece yazan tarafın blokesi çözülür. Benzer biçimde eğer boru boşsa okuyan taraf bloke olmaktadır. 
-    Boş boruya yazma yapıldığında okuyan tarafından blokesi çözülmektedir. 
+    yazan tarafın yazdıklarını aynı sırada karşı taraf okumaktadır. Boruları kullanışlı kılan en önemli özellik senkronizasyonun 
+    bloke yoluyla otomatik sağlanmasıdır. Boruların belli bir büyüklüğü vardır. Yazan taraf henüz okuyan taraf okumamışsa 
+    boruyu doldurduğunda write fonksiyonunda bloke olur ve bekler. Okuyan taraf borudan okuma yaptığında boruda yer açılır. 
+    Böylece yazan tarafın blokesi çözülür. Benzer biçimde eğer boru boşsa okuyan taraf bloke olmaktadır. Boş boruya yazma 
+    yapıldığında okuyan tarafından blokesi çözülmektedir. 
 
     Borulara write fonksiyonu ile yazma yapılırken eğer boruda tüm byte'ların yazılması için gerekli olan boşluk yoksa 
     write fonksiyonu tüm byte'lar yazılana kadar (yani talep edilen miktarın hepsi yazılana kadar) boruda yer açılmasını 
@@ -6150,23 +6182,23 @@ void exit_sys(const char *msg)
     Biz de boruya 20 byte yazmak isteyelim. İşte bu durumda write fonksiyonu bloke olarak bekler. Yani 10 byte'ı yazıp 
     geri dönmez. 20 byte'ın hepsi yazılana kadar bekler. Ancak borulardan okuma parçalı biçimde yapılabilmektedir. 
     Borudan okuyan taraf n byte okumak istediğinde boruda n byte yoksa ama k < n olacak biçimde k byte varsa read 
-    fonksiyonu bu k byte'ı okur ve okuduğu byte sayısı il geri döner. Ancak boruda hiç bilgi yoksa read fonksiyonu 
-    bloke olmaktadır. Örneğin boş bir borudan 100 byte okumak isteyelim. Şimdi biz read içerisinde bloke oluruz. Şimdi 
-    boruya karşı tarafın 10 byte yazdığını düşünelim. İşte read fonksiyonu 100 byte'ın hepsini okumaya çalışmaz okuyabildiği 
-    bu 10 byte'ı okur ve geri döner. 
+    fonksiyonu bu k byte'ı okur ve okuduğu byte sayısı olan bu k değeri ile döner. Ancak boruda okunacak hiç byte yoksa 
+    read fonksiyonu thread'i bloke etmektedir. Örneğin boş bir borudan 100 byte okumak isteyelim. Biz read içerisinde 
+    bloke oluruz. Şimdi boruya karşı tarafın 10 byte yazdığını düşünelim. İşte read fonksiyonu 100 byte'ın hepsini okumaya 
+    çalışmaz okuyabildiği bu 10 byte'ı okur ve geri döner. 
 
     Bir boruya iki farklı proses aynı anda anda yazma yapsa bile iç içe geçme oluşmamaktadır. Bunlardan biri önce yazıp 
-    diğeri sonra yazmaktadır. Ancak yazılanlar birbirleriyle karışmamaktadır. Ancak burada bir istisna vardır. Eğer 
-    tek hamlede yazılacak byte sayısı PIPE_BUF sembolik sabitiyle belirtilen değerden büyükse iç içe geçmeme garantisi 
-    verilmemektedir. PIPE_BUF değeri mevcut Linux sistemlerinde 4096'dır. Mevcut çekirdeklerde bir boru için ayrılan 
-    alan 64K'dır (eskiden 4K idi). Ancak fcntl çağrısı ile bu büyüklük 1.048.576'ya (1 MB) yükseltilebilmektedir. 
+    diğeri sonra yazmaktadır. Yani yazılanlar birbirleriyle iç içe geçmemektedir. Ancak burada bir istisna da vardır. 
+    Eğer boruya tek hamlede yazılacak byte sayısı PIPE_BUF sembolik sabitiyle belirtilen değerden büyükse iç içe geçmeme 
+    garantisi verilmemektedir. PIPE_BUF değeri Linux default durumda 4096'dır. Mevcut çekirdeklerde bir boru için ayrılan 
+    alan default alan da 64K'dır (eskiden 4K idi). Ancak fcntl çağrısı ile bu büyüklük 1.048.576'ya (1 MB) yükseltilebilmektedir. 
     
-    Boru haberleşmesinde önce kesinlikle yazan tarafın boruyu kapatması gerekir. Yazna taraf boruyu kapattıktan sonra 
+    Boru haberleşmesinde önce kesinlikle yazan tarafın boruyu kapatması gerekir. Yazan taraf boruyu kapattıktan sonra 
     okuyan taraf önce boruda kalanları okur. Boruda bir şey kalmayınca read fonksiyonu 0 ile geri döner. Bu özel 
     durum "karşı tarafın boruyu kapattığını ve artık boruda okunacak bir şey de kalmadığını" belirtmektedir. İşte read 
     fonksiyonu 0 ile geri döndüğünde okuyan taraf da işlemini sonlandırır ve boruyu kapatır. Eğer yanlışlıkla okuyan 
-    taraf boruyu önce kapatırsa yazan tarafta ilk write işleminde SIGPIPE sinyali oluşmaktadır. Bu sinyal ele alınmazsa
-    proses sonlandırılmaktadır. 
+    taraf boruyu daha önce kapatırsa yazan tarafta ilk write işleminde SIGPIPE sinyali oluşturulur. Bu sinyal ele
+    alınmazsa proses sonlandırılmaktadır. 
 
     Birden fazla proses aynı boruya yazma yapabilir ve aynı borudan okuma yapabilir. Ancak uygulamada bu durumla seyrek 
     karşılaşılmaktadır. Boru tabanlı client-server uygulamalarda aynı boruya istek iletmek için birden fazla client programın 
@@ -6176,7 +6208,7 @@ void exit_sys(const char *msg)
     da kullanılabilmektedir. Ancak bu kullanım çok daha seyrektir. Blokesiz boru işlemlerinin default blokeli işlemlere 
     göre şu farklılıkları vardır:
 
-    - open fonksiyonda bloke oluşmaz. 
+    - open fonksiyonunda bloke oluşmaz. 
     - read fonksiyonu boruda hiç byte yoksa bloke olmaz, başarısızlıkla (-1 değeri ile) geri döner. Ancak errno değişkeni
     EAGAIN özel değeri ile set edilmektedir. 
     - write fonksiyonu boru doluysa bloke olmaz, bu durumda write fonksiyonu da başarısızlıkla (-1 değeri ile) geri döner 
@@ -6211,7 +6243,7 @@ int main(void)
         exit_sys("open");
 
     for (;;) {
-        if ((result = read(fd, &val, sizeof(int)) == )
+        if ((result = read(fd, &val, sizeof(int)) == -1)
             exit_sys("read");
         if (result == 0)
             break;
@@ -6226,7 +6258,6 @@ int main(void)
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
@@ -6248,7 +6279,7 @@ int main(void)
 
     for (int i = 0; i < 1000000; ++i)
         if (write(fd, &i, sizeof(int)) == -1)
-            exit_sys("wwite");
+            exit_sys("write");
 
     close(fd);
     
@@ -6259,13 +6290,14 @@ int main(void)
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi yukarıdaki boru mekanizmasını yaklaşık oluşturan çekirdek aygıt sürücüsünün yazımına geçelim. Bu aygıt 
-    sürücüsünde okuyan taraf ve yazan taraf için (bunlar birden fazla olabilir) ayrı bekleme kuyrukları olması gerekir:
+    Biz çekirdeğin boru gerçekleştirimini kursumuzun "proseslerarası haberleşme (inter-process communiction)" yöntemlerini 
+    ele aldığımız bölümde ayrıca açıklayacağız. Ancak şimdi bekleme kuyruklarının kullanımına örnek vermek amacıyla isimli 
+    boru mekanizmasını yaklaşık oluşturan bir çekirdek aygıt sürücüsü yazmaya çalışalım. Bu aygıt sürücüsünde okuyan taraf 
+    ve yazan taraf için (bunlar birden fazla olabilir) ayrı bekleme kuyrukları olması gerekir:
 
     static wait_queue_head_t g_wqread;
     static wait_queue_head_t g_wqwrite;
@@ -6308,7 +6340,7 @@ void exit_sys(const char *msg)
     }
 
     Boruyu kullanan prosesler open fonksiyonunu çağırdığında aygıt sürücüdeki open fonksiyonu çalıştırılacaktır. İşte
-    maygıt sürücüdeki open fonksiyonu içerisinde "karşı taraf boruyu uygun bir biçimde açmış mı" kontrolü yapılıp 
+    aygıt sürücüdeki open fonksiyonu içerisinde "karşı taraf boruyu uygun bir biçimde açmış mı" kontrolü yapılıp 
     duruma göre bloke uygulanmıştır:
 
     static int pipe_driver_open(struct inode *inodep, struct file *filp)
@@ -6358,10 +6390,10 @@ void exit_sys(const char *msg)
         return 0;
     }
 
-    Burada zaten kodun en dıştan semaphore ile kilitlendiğini görüyorsunuz. Bu nedenle semapore içerisinde ayrıca 
+    Burada zaten kodun en dıştan semaphore ile kilitlendiğini görüyorsunuz. Bu nedenle semaphore içerisinde ayrıca 
     atomik işlemlerin yapılmasına gerek kalmamıştır. open fonksiyonunda ilk olarak kullanıcı modundaki prosesin open 
     aygıt dosyasını okuma modunda mı yazma modunda mı açtığına bakılmıştır. Eğer proses aygıt dosyasını okuma modunda 
-    açmışsa yazma modunda açanların uyandırılması gerekmeketdir. Ayrıca okuma modunda ve yazma modunda açanların 
+    açmışsa yazma modunda açanların uyandırılması gerekmektedir. Ayrıca okuma modunda ve yazma modunda açanların 
     sayısı da iki global değişkende tutulmuştur:
     
     if (accmode == O_RDONLY) {
@@ -6378,14 +6410,14 @@ void exit_sys(const char *msg)
         }
     }
 
-    Burada eğer aygıt dosyası O_NONBLOCK bayrağıyla açılmışsa open hemen başarıyla sonlandırılmıştır. Aygıt 
-    dosyası O_NONBLOCK ile açılmamışsa ve yazan taraf da yoksa bu durumda thread g_wqreadopen bekleme kuyruğuna 
-    kendini yazarak bloke oluştur. Bunu oradan kurtaracak olan yazan taraftır. Koddaki semaphore'un kullanımına dikkat 
-    ediniz. Thread uykuya dalmadan önce semaphore sayacını artırarak semaphore'u serbest bırakmıştır. Uykudan uyandığında 
-    yeniden semaphore kilidini almıştır. Koddaki while döngüsü size biraz tuhaf gelebilir. Bu while döngüsünün amacı şudur:
-    Okuyan taraf eğer aygıt dpsyasını yazma modunda açmış olan bir proses yoksa bloke olmaktadır, ancak bir proses 
-    dosyayı write modd açıp hemen kapatırsa ve buradaki zamanlama kötü bir tesadüfe denk gelirse eğer while döngüsü 
-    kulalnılmadığında uyandırılmş olan thread yoluna devam edecektir.    
+    Burada eğer aygıt dosyası O_NONBLOCK bayrağıyla açılmışsa open hemen başarıyla sonlandırılmıştır. Aygıt dosyası 
+    O_NONBLOCK ile açılmamışsa ve yazan taraf da yoksa bu durumda thread g_wqreadopen bekleme kuyruğuna kendini yazarak 
+    bloke oluştur. Bunu oradan kurtaracak olan yazan taraftır. Koddaki semaphore'un kullanımına dikkat ediniz. Thread 
+    uykuya dalmadan önce semaphore sayacını artırarak semaphore'u serbest bırakmıştır. Uykudan uyandığında yeniden 
+    semaphore kilidini almıştır. Koddaki while döngüsü size biraz tuhaf gelebilir. Bu while döngüsünün amacı şudur:
+    Okuyan taraf eğer aygıt dosyasını yazma modunda açmış olan bir proses yoksa bloke olmaktadır, ancak bir proses 
+    dosyayı write modda açıp hemen kapatırsa ve buradaki zamanlama kötü bir tesadüfe denk gelirse eğer while döngüsü 
+    kullanılmadığında uyandırılmış olan thread yoluna devam edecektir.    
     
     Aygıt sürücünün open fonksiyonunda eğer aygıt dosyası write modda açılmışsa aşağıdaki kod parçası çalıştırılmaktadır:
 
@@ -6406,9 +6438,9 @@ void exit_sys(const char *msg)
         }
     }
 
-    Burada da önce aygıt dosyasını modunda açıp da bloke olmuş olan thread'lerin blokesi çözülmüştür. Daha sonra 
+    Burada da önce aygıt dosyasını O_RDONLY modunda açıp da bloke olmuş olan thread'lerin blokesi çözülmüştür. Daha sonra 
     benzer mantık uygulanmıştır. Boruların read/write modda açılmasını POSIX standartları "işletim sisteminin isteğine"
-    bırakmaktadır. Linux'ta isimli borular O_RDWR modunda açılabilmektedir. İşte agıt sürücünün open fonksiyonunda 
+    bırakmaktadır. Linux'ta isimli borular O_RDWR modunda açılabilmektedir. İşte aygıt sürücünün open fonksiyonunda 
     bu kontrol de yapılmıştır:
 
     else if (accmode == O_RDWR) {
@@ -6472,7 +6504,7 @@ void exit_sys(const char *msg)
     Burada eşzamanlı okumalarda senkronizasyon sorununun oluşmaması için önce semaphore kilidi alınmıştır:
 
     if (down_interruptible(&g_sem) != 0)
-            return -ERESTARTSYS;
+        return -ERESTARTSYS;
 
     Eğer boruda hiç byte yoksa ve yazan taraf da boruyu kapatmışsa read fonksiyonu 0 ile geri döndürülmektedir:
 
@@ -6484,7 +6516,7 @@ void exit_sys(const char *msg)
         /* ... */
     }
 
-    Donra semaphore kilidi açılmış ve aygıt dosyasının O_NONBLOCK bayrağıyla açılıp açılmadığına bakılmıştır. Eğer 
+    Daha sonra semaphore kilidi açılmış ve aygıt dosyasının O_NONBLOCK bayrağıyla açılıp açılmadığına bakılmıştır. Eğer 
     boruda hiç byte yoksa ve aygıt dosyası da O_NONBLOCK bayrağıyla açılmışsa read fonksiyonu -EAGAIN errno değeriyle 
     geri döndürülmüştür:
 
@@ -6499,7 +6531,7 @@ void exit_sys(const char *msg)
         /* ... */
     }
 
-    Eğer bu durum da söz konusu değilse thread g_count > 0 || g_nwriters == 0 koşuulu ile uykuya yatırılmıştır:
+    Eğer bu durum da söz konusu değilse thread g_count > 0 || g_nwriters == 0 koşulu ile uykuya yatırılmıştır:
 
     while (g_count == 0) {
         if (g_nwriters == 0) {
@@ -6587,11 +6619,11 @@ void exit_sys(const char *msg)
     }
 
     Burada da read fonksiyonuna benzer işlemler ters biçimde yapılmıştır. Yine önce semaphore ile eş zamanlı erişimler 
-    için kilitleme uygulanmıştır. Sonra da eğer boru brudan okuma potansiyelinde olan hiçbir threda yoksa SIGPIPE 
+    için kilitleme uygulanmıştır. Sonra da eğer boru borudan okuma potansiyelinde olan hiçbir threda yoksa SIGPIPE 
     sinyali oluşturulmuştur:
 
     if (down_interruptible(&g_sem) != 0)
-            return -ERESTARTSYS;
+        return -ERESTARTSYS;
 
     if (g_nreaders == 0) {
         up(&g_sem);
@@ -6617,24 +6649,27 @@ void exit_sys(const char *msg)
         }
     }
 
-    Buradaki uyanma koşuluna dikkar ediniz:  PIPE_BUFFER_SIZE - g_count >= size || g_nreaders == 0. Bu koşul "boruda 
+    Buradaki uyanma koşuluna dikkat ediniz:  PIPE_BUFFER_SIZE - g_count >= size || g_nreaders == 0. Bu koşul "boruda 
     yeteri kadar yer açılana kadar ya da borudan okuma potansiyeline sahip hiçbir proses kalmayana kadar uyu" anlamına 
     gelmektedir. 
 
-    Aşağıda aygıt sürücünün tüm kodları verilmiştir. Burada önce aygıt sürücüyü "load" script'i ile yüklemelisiniz:
+    Aşağıda aygıt sürücünün tüm kodları verilmiştir. Derlemeyi şöyle yapabilirsiniz:
+    
+    $ make file=pipe-driver
+    
+    Yüklemeyi şöyle yapabilirsiniz:
 
     $ sudo ./load pipe-driver
 
-    Sonra farklı terminalde borudan okuma yapan programı çalıştırmalısınız (tabii öne boruya yazma yapan programı da 
-    çalıştırabilirsiniz):
+    Borudan okuma yapan programı şöyle çalıştırabilirsiniz:
 
     $ ./pipe-read mypipe
 
-    Yine farklı bir terminalden boruya yazma yapan programı da çalıştırmalısınız:
+    Boruya yazma yapan programı farklı bir terminalden çalıştırmalısınız:
 
     $ ./pipe-write mypipe
 
-    Test işleminizi bitrdikten sonra aygıt sürücüyü "unload" script'i ile kaldırabilirsiniz:
+    Test işleminizi bitirdikten sonra aygıt sürücüyü "unload" betiği ile kaldırabilirsiniz:
 
     $ sudo ./unload pipe-driver
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -6970,7 +7005,6 @@ int main(int argc, char *argv[])
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
@@ -7008,7 +7042,6 @@ int main(int argc, char *argv[])
 void exit_sys(const char *msg)
 {
 	perror(msg);
-
 	exit(EXIT_FAILURE);
 }
 
@@ -7040,7 +7073,7 @@ void exit_sys(const char *msg)
                                                                                 \
             cmd;								                                \
 
-            ---------> uyandrılan thread çalışmasına buradan devam edecek!
+            ---------> uyandırılan thread çalışmasına buradan devam edecek!
                                                                                 \
             if (condition)							                            \
                 break;							                                \
@@ -7066,9 +7099,9 @@ void exit_sys(const char *msg)
     - Uyuyan bir thread'e sinyal geldiğinde thread uyandırılmaktadır. Bu uyandırmanın wake_up işlemiyle bir 
     ilgisi yoktur.
 
-    - Çekirdek thread'leri kthread_stop() ile durulmak istendiğinde eğer thread uyuyorsa önce onun uyandırılması gerekir. 
+    - Çekirdek thread'leri kthread_stop ile durdurulmak istendiğinde eğer thread uyuyorsa önce onun uyandırılması gerekir. 
 
-    - Çekirdekteki zamanlayıcı mekanizmaları (örneğin hrtimer zaman aşımı) thread'i wkae_up işlemiyle ilgisiz bir biçimde 
+    - Çekirdekteki zamanlayıcı mekanizmaları (örneğin hrtimer zaman aşımı) thread'i wake_up işlemiyle ilgisiz bir biçimde 
     uyandırabilmektedir. 
 
     - ARM ve POWER PC gibi bazı mimarilerde işlemci tasarımından kaynaklanan nedenlerden dolayı bekleme kuyruğundaki 
@@ -7167,7 +7200,7 @@ void exit_sys(const char *msg)
     Görüldüğü gibi burada önce wait_queue_entry nesnesi DEFINE_WAIT makrosu ile yerel düzeyde yaratılmıştır. Sonra 
     prepare_to_wait_event fonksiyonu ile thread bekleme kuyruğuna yerleştirilmiştir. Bu işlemden sonra da koşul 
     kontrol edilmiş, koşul sağlanmıyorsa schedule işlemiyle CPU bırakılmıştır. Çıkışta da finish_wait fonksiyonu 
-    ile kuyruktaki wait_queue_entry bağlı listeden atılmıştır. Örneğimizdkei uyandırma işlemi modün init fonksiyonunda
+    ile kuyruktaki wait_queue_entry bağlı listeden atılmıştır. Örneğimizdeki uyandırma işlemi modün init fonksiyonunda
     aşağıdaki gibi yapılmıştır:
 
     wake_up_interruptible(&g_wq);   
@@ -7176,7 +7209,7 @@ void exit_sys(const char *msg)
 
     $ make file=wait-module
 
-    Şöyle yükleyebilrisiniz:
+    Şöyle yükleyebilirsiniz:
 
     $ sudo insmod wait-module.ko
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -7237,7 +7270,7 @@ clean:
 
 /*----------------------------------------------------------------------------------------------------------------------
     Çekirdekte prepare_to_wait_event fonksiyonun dışında ona benzeyen biraz daha alçak seviyeli prepare_to_wait isimli 
-    bir fonksiyon da bulunmaktadır. Bu fonksiyonun da parametrijk yapısı aynıdır:
+    bir fonksiyon da bulunmaktadır. Bu fonksiyonun da parametik yapısı aynıdır:
 
     void prepare_to_wait(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_entry, int state);
 
