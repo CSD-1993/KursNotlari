@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                      Son Güncelleme: 26/06/2026 - Cuma
+                                      Son Güncelleme: 29/06/2026 - Pazartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -3006,7 +3006,7 @@ void exit_sys(const char *msg)
 
     Burada başka bir thread g_flag değişkenini 0'a çektiğinde bu thread bunu anlamayabilir. Çünkü derleyici while
     parantezindeki g_flag değişkeni için döngünün her yinelenmesinde belleğe başvurmak zorunda değildir. Derleyici 
-    g_flag değişkenini bir yazamaca çekip yazmaçtaki değeri de kullanabilir. İşte derleyicinin döngünün her yinelenmesinde 
+    g_flag değişkenini bir yazmaca çekip yazmaçtaki değeri de kullanabilir. İşte derleyicinin döngünün her yinelenmesinde 
     bellekteki g_flag değişkenine başvurmasını sağlamak için bu değişkenin volatile olarak tanımlanması gerekir:
 
     volatile int g_flag;
@@ -4687,6 +4687,470 @@ module_exit(test_driver_exit);
 
     Düğüm silme işleminin herhangi bir yerinde rcu_assign_pointer makrosunun kullanılmadığına dikkat ediniz.
 ----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz çekirdek tarafından kullanılan senkronizasyon nesnelerini ele aldık. Peki kullanıcı modundan kullandığımız yani 
+    pthread kütüphanesinin kullandığı senkronizasyon nesneleri nasıl oluşturulmuştur? pthread kütüphanesi bu senkronizasyon 
+    nesnelerini hangi sistem fonksiyonlarıyla gerçekleştirmektedir? Şimdi bu konu üzerinde biraz durmak istiyoruz. 
+
+    Bilindiği gibi UNIX türevi sistemlerin programlama bağlamındaki kullanıcı arayüzü POSIX standartlarıyla belirlenmiştir. 
+    POSIX standartları tüm UNIX türevi işletim sistemlerinin taşınabilir programlama arayüzüdür. Dolayısıyla C, C++, 
+    Java, C#, Python gibi dillerin kütüphaneleri aşağı seviyeli işlemleri programcılar fark etmese de Linux sistemlerinde 
+    bu POSIX fonksiyonlarını çağırarak gerçekleştirmektedir. Zaten bu konu üzerinde daha önce durmuştuk. Anımsanacağı 
+    gibi Linux sistemlerinde POSIX fonksiyonlarının bir bölümü hemen belli bir sistem fonksiyonunu çağırmaktadır. Örneğin 
+    open POSIX fonksiyonu aslında Linux'ta sys_open sistem fonksiyonunu çağıran bir sarma fonksiyon gibidir. 
+
+    UNIX/Linux sistemlerinde kullanıcı modundaki thread senkronizasyonu işlemleri pthread_xxx fonksiyonlarıyla 
+    yapılmaktadır. pthread kütüphanesi POSIX'in resmi thread kütüphanesidir. Dolayısıyla programlama dili ne olursa olsun 
+    Linux sistemlerinde aslında o programlama dillerinin kendi thread ve senkronizasyon fonksiyonları Linux sistemlerinde 
+    pthread kütüphanesinin fonksiyonlarını çağırmaktadır. Örneğin siz C++'ın C++11 ile eklenen thread kütüphanesini 
+    Linux'ta kullanıyorsanız bunlar eninde sonunda asıl işlemleri pthread_xxx fonksiyonlarını çağırarak yapmaktadır. 
+    Benzer durum Qt kütüphanesi için de geçerlidir. Tabii programlama dillerinin ve framework'lerin thread kütüphaneleri 
+    ve senkronizasyon nesneleri o programa dili ya da framework temelinde taşınabilir (portable) durumdadır. Yani örneğin
+    biz C++'ın thread kütüphanesini hem Windows'ta hem de Linux'ta aynı biçimde kullanırız. Ancak bunların gerçekleştirimleri 
+    işletim sistemine özgü bir biçimde yapılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux sistemlerinde pthread kütüphanesinin kullanıı modundan kullanılabilen senkronizasyon nesneleri şunlardır:
+
+    mutex (pthread_mutex_t)
+    condition variable (pthread_cond_t)
+    read-write lock (pthread_rwlock_t)
+    spinlock (pthread_spinlock_t)
+    barrier (pthread_barrier_t)
+    semaphore 
+
+    İşte kullanıcı modundaki tüm bu senkronizasyon nesneleri aslında çekirdekteki "futex (fast user space mutex)" 
+    denilen sistem fonksiyonunu ve bu sistem fonksiyonunun sağladığı mekanizmayı kullanmaktadır. Yani çekirdekte her 
+    senkronizasyon nesnesi için ayrı bir sistem fonksiyonu yoktur. Yalnızca "futex" isimli bir sistem fonksiyonu vardır. 
+    pthread kütüphanesinin senkronizasyon fonksiyonları bu "futex" sistem fonksiyonunu çağırmaktadır. 
+    
+        Kullanıcı Modundaki Senkronizasyon Mekanizmaları
+    ═══════════════════════════════════════════════════════
+    pthread_mutex_t      pthread_cond_t      sem_t
+    pthread_rwlock_t     C++11 std::mutex    Java monitors
+            │                    │                │
+            └────────────────────┴────────────────┘
+                                │
+                        ┌─────────▼──────────┐
+                        │       glibc        │
+                        │  (futex wrapper)   │
+                        └─────────┬──────────┘
+                                  │  futex() syscall
+                        ┌─────────▼──────────┐
+                        │   Linux Kernel     │
+                        │  futex subsystem   │
+                        │  kernel/futex.c    │
+                        └────────────────────┘   
+    
+    futex sistem fonksiyonu için bir POSIX sarma fonksiyonu olmadığı gibi "libc" kütüphanesinde de bir sarma fonksiyon 
+    bulunmamaktadır. Ancak anımsanacağı gibi sistem fonksiyonları kullanıcı modundan "libc" kütüphanesinin bulundurduğu 
+    syscall isimli fonksiyon yoluyla çağrılabilmektedir. syscall fonksiyonunun parametrik yapısını anımsayınız:
+
+    #include <sys/syscall.h>      
+       
+    long syscall(long number, ...);
+
+    Her sistem fonksiyonun bir numarası vardır. Bu numaralar da <sys/syscall.h> dosyası içerisnde SYS_xxx biçiminde 
+    define edilmiştir. Örneğin sys_open sistem fonksiyonunun numarası SYS_open sembolik sabiti, sys_futex sistem 
+    fonksiyonunun numarası için SYS_futex sembolik sabiti bulunmaktadır. O halde "futex" sistem fonksiyonu doğrudan 
+    kullanıcı modundan şöyle çağrılabilir:
+
+    int futex(uint32_t *uaddr, int op, uint32_t val, const struct timespec *timeout, uint32_t *uaddr2, uint32_t val3)
+    {
+        return syscall(SYS_futex, uaddr, op, val, timeout, uaddr2, val3);
+    }
+
+    Futex kullanımında kullanıcı modundaki programcı uint32_t türünden (64 bit sistem olsa bile bu türden) bir nesnenin 
+    adresini sistem fonksiyona verir (val parametresi). Sonra yapılacak işlemi (op parametresi) belirtir. Diğer 
+    parametrelerin anlamı yapılacak işleme göre değişebilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Futex mekanizmasının ana kullanımı şöyledir: Kullanıcı modundaki programcı ya da kütüphane (örneğin pthread_xxx 
+    fonksiyonları) global bir değişken tanımlar. Bu değişken kilidin durumunu belirtir. Hiç çekirdek moduna geçmedne 
+    önce bu değişkenin içerisindeki değere bakarak senkronizasyon nesnesinin kilitli olup olmadığını "CAS (compare-and-swap)"
+    makine komutlarıyla belirler. Eğer kilit açıksa bunu kilitler ve hiç çekirdek moduna geçiş yapmaz. Eğer kilit kapalıysa
+    futex sistem fonksiyonunu çağırarak bloke oluşturur. Blokenin çözülmesi de yine futex sistem fonksiyonun çağrılmasıyla 
+    yapılmaktadır. Bu mekanizmada çekirdek moduna gereksiz bir biçimde geçilmesinin engellendiğine dikkat ediniz. Eğer 
+    senkronizyon nesneleri için doğrudan sistem fonksiyonları çağrılsaydı çekirdek moduna gereksiz geçiş yapılabilirdi. 
+    Çekirdekteki daha önce görmüş olduğumuz senkronizasyon nesnelerinin kullanıcı moduyla bir ilgisi olmadığına dikkat 
+    ediniz. (Windows sistemlerindeki CRITICAL_SECTION nesneler de tamamen bu biçimde çalışmaktadır. Bu sistemlerde 
+    ayrıca tamamen çekirdek modunda işlem yapan ve ismine "çekirdek senkronizasyon nesneleri denilen" kullanıcı modu 
+    mekanizmalar da bulunmaktadır.)
+
+    Futex sistem fonksiyonunun yaptığı işlemler yani op parametresine girilebilecek değerler şunlardır:
+
+    #define FUTEX_WAIT              0
+    #define FUTEX_WAKE              1
+    #define FUTEX_FD                2  /* KULLANIM DIŞI — kaldırıldı */
+    #define FUTEX_REQUEUE           3
+    #define FUTEX_CMP_REQUEUE       4
+    #define FUTEX_WAKE_OP           5
+    #define FUTEX_LOCK_PI           6
+    #define FUTEX_UNLOCK_PI         7
+    #define FUTEX_TRYLOCK_PI        8
+    #define FUTEX_WAIT_BITSET       9
+    #define FUTEX_WAKE_BITSET      10
+    #define FUTEX_WAIT_REQUEUE_PI  11
+    #define FUTEX_CMP_REQUEUE_PI   12
+    #define FUTEX_LOCK_PI2         13
+
+    Burada en önemli iki FUTEX_WAIT ve FUTEX_WAIT işlemleridir. 
+
+    Futex'te bloke oluşturmak için kullanılan FUTEX_WAIT işleminin çalışma biçimi şöyledir:
+
+    if (*uaddr == val) {
+        /* thread'i bekleme kuyruğuna ekle ve uyut */
+        /* bu kontrol + ekleme atomik olarak gerçekleşir */
+    } 
+    else {
+        /* EAGAIN döndür — değer değişmiş */
+    }
+
+    Yani futex'e verilen adresteki değerle ona verilen değer (val parametresi) eğer aynıysa bloke işlemi yapılmaktadır, 
+    değilse fonksiyon başarısızlıkla geri dönmektedir. FUTEX_WAKE işlemi de uyutulan thread'lerin uyandırılması için 
+    kullanılmaktadır. Burada kaç thread'in uyandırılacağı da belirtilebilmektedir. 
+
+    FUTEX_WAIT işleminin çekirdekteki çağrı zinciri şöyledir:
+
+    sys_futex(FUTEX_WAIT)
+    └── futex_wait()
+            ├── futex_wait_setup()       ← anahtar oluştur, bucket kilitle
+            ├── futex_wait_queue()       ← kuyruğa ekle + uyut
+            │       ├── set_current_state(TASK_INTERRUPTIBLE)
+            │       └── schedule()       ← CPU'yu bırak
+            └── futex_wait_restart()     ← sinyal gelirse yeniden dene
+
+    FUTEX_WAKE işleminde fonksiyonun val parametresi uyandırılacak thread sayısını belirtmektedir. Örneğin bu parametreye
+    1 girildiğinde futex yalnızca 1 tane thread'i uyandırmaktadır. Örneğin:
+    
+    futex(&m->state, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
+    
+    FUTEX_WAKE işleminin de şöyledir:
+
+    sys_futex(FUTEX_WAKE)
+    └── futex_wake()
+            ├── hash_futex()                 ← aynı bucket'ı bul
+            ├── spin_lock(&hb->lock)         ← bucket'ı kilitle
+            ├── plist_for_each_entry_safe()  ← zinciri tara
+            │       └── futex_wake_mark()    ← görevi işaretle
+            │               └── wake_q_add()
+            └── wake_up_q()                  ← asıl uyandırma
+                    └── try_to_wake_up()     ← görev → TASK_RUNNING
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Sistemdeki tüm prosesler için aynı sistem fonksiyonunu kullandığından dolayı futex'in çekirdek gerçekleştirimi buna 
+    uygun bir biçimde yapılmıştır. Çekirdekteki futex sistem fonksiyonu bir hash tablosu kullanır. Bloke edilecek thread'ler
+    için çekirdek hiç bekleme kuyruğu oluşturmadan yukarda belirttiğimiz gibi thread'in durumunu TASK_INTERRUPTIBLE 
+    haline getirip schedule işlemini uygular. Tabii uyutulan thread'lerin task_struct adresleri de hash tablosunda 
+    saklanmaktadır. Uyandırma işleminde de task_struct nesnesi bu hash tablosundan bulunur ve try_to_wake_up fonksiyonuyla 
+    (yani görmüş olduğumuz wake_up_state fonksiyonunun çağırdığı fonksiyonla) uyandırılmaktadır. Görüldüğü gibi futex 
+    mekanizmada da uyutma ve uyandırma işleminde daha önce görmüş olduğumuz standart bekleme kuyrukları kullanılmamaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de son olarak futex sistem fonksiyonu yoluyla kullanıcı modundan kullanılabilecek bir mutex gerçekleştirimini 
+    yapalım. (pthread kütüphanesinde zaten mutex gerçekleştiriminin bulunduğunu belirtmiştik. Biz burada futex sistem 
+    fonksiyonunun nasıl kullanıldığını bir örnek üzerinde  ele almak istiyoruz.)
+
+    Mutex için kullanıcı alanı içerisinde uint32_t türündne bir global değişken tutmak gerekir. Biz bu değişkeni soyutlama 
+    sağlamak için bir yapının içerisine yerleştirelim:
+
+    #define MUTEX_UNLOCKED              0
+    #define MUTEX_LOCKED                1
+    #define MUTEX_LOCKED_WAITERS        2
+
+    typedef struct {
+        uint32_t state;  
+    } mutex_t;
+
+    Burada MUTEX_LOCKED değeri mtex'in kilidinin açık olduğunu, MUTEX_LOCKED değeri mutex'in kilitli olduğunu ancak 
+    mutex'i bekleyen uykuya dalmış bir thread olmadığını ve MUTEX_LOCKED_WAITERS değeri ise mutex'in kilitli olduğunu 
+    ama mutex'i bekleyen uykuya dalmış bir thread'in olduğunu belirtmektedir. Mutex kilidi açıldığında uyandırma işleminin 
+    yapılıp yapılmayacağı bu MUTEX_LOCKED_WAITERS değerine bakılarak belirlenmektedir. 
+
+    Bu yapıya ilkdeğer veren bir makro ve inline fonksiyon yazabiliriz:
+
+    #define MUTEX_INIT {MUTEX_UNLOCKED}
+    
+    static inline void init_mutex(mutex_t *mutex)
+    {
+        mutex->state = MUTEX_UNLOCKED;
+    }
+
+    Şimdi de mutex_lock fonksiyonumuzu yazalım. Bu fonksiyonda biz önce atomik bir biçimde CAS işlemi ile kullanıcı 
+    modunda mutex'in kilitli olup olmadığına bakacağız. Eğer mutex kilitliyse futex sistem fonksiyonu ile kendimizi 
+    bloke edeceğiz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Mutex'in kilidini atomic CAS işlemleriyle almaya çalışmalıyız. Bunun için gcc'nin bult-in __atomic_compare_exchange_n
+    fonksiyonunu kullanabiliriz. Bu fonksiyonu aşağıdaki gibi bir fonksiyonla sarmalayalım:
+
+    static inline uint32_t cmpxchg(uint32_t *ptr, uint32_t expected,  uint32_t desired)                          
+    {
+        __atomic_compare_exchange_n(ptr, &expected, desired, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+
+        return expected;  
+    }
+
+    gcc'nin built-in __atomic_compare_exchange_n fonksiyonu şöyle çalışmaktadır: Fonksiyon birinci parametresine verilen 
+    adresteki değerle ikinci parametresine verilen adresteki değeri karşılaştırır. Eğer bu değerler eşitse üçüncü 
+    parametresindeki değeri birinci parametresine girilen adrese yerleştirir. Eğer birinci parametresine girilen 
+    adresteki değer ile ikinci parametresine girilen adresteki değer aynı değilse bu durumda birinci parametresine girilen 
+    adrese bir şey yerleştirmez, birinci parametresine girilen adresteki değeri ikinci parametresine girilen adrese 
+    yerleştirir. Fonksiyon yerleştirmeyi yaparsa sıfır dışı bir değere, yapamazsa sıfır değerine geri dönmektedir. 
+    Ayrıcca fonksiyon geri döndüğünde ikinci parametresine girilen adreste ya üçüncü parametrine girilen değer ya da 
+    birinci parametreye girilen adresteki değerin bulunacağına dikkat ediniz. Fonksiyonun son iki parametresi kullanılacak 
+    bellek modeliyle ilgilidir. Fonksiyonun çalışmasını aşağıdaki kodla da açıklayabiliriz:
+
+    function atomic_compare_exchange(ptr, expected_ptr, desired, success_order, fail_order):
+
+        // Tüm bu işlem atomik olarak (kesilemez şekilde) gerçekleşir
+        ATOMIC_BEGIN:
+            current_value ← *ptr          // ptr'nin şu anki değerini oku
+
+            if current_value == *expected_ptr:
+                *ptr ← desired            // Eşleşti → ptr'ye desired'ı yaz
+                return TRUE               // Swap başarılı
+            else:
+                *expected_ptr ← current_value  // Eşleşmedi → expected'ı güncelle
+                return FALSE                   // Swap başarısız
+        ATOMIC_END
+
+    O halde biz atomic CAS işlemiyle kilit kontrolünü yukarıdaki fonksiyonu kullanarak şöyle yapabiliriz:
+
+    result = cmpxchg(&mutex->state, 0, 1);
+    if (result == 0)
+        return; 
+
+    Burada mutex->state değeri eğer 0 ise o değer atomik bir biçimde 1 yapılacaktır. Fonksiyon da 0 değeri ile geri 
+    dönecektir. Dolayısıyla bu durum mutex'in hiç çekirdek moduna geçmeden kilitlendiği anlamına gelmektedir. Eğer 
+    mutex->state değeri 1 ise bu durumda mutex->state olduğu gibi kalacak ancak fonksiyon 1 ile geri dönecektir. 
+    Akış da aşağıdan devam edecektir. Burada artık futex sistem fonksiyonu çağrılacaktır:
+
+    do {
+        if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
+            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
+        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
+    } while (result != MUTEX_UNLOCKED);
+
+    Burada henüz futex sistem fonksiyonu çağrılmadan mutex->state nesnesine MUTEX_LOCKED_WAITERS değerinin yerleştirildiğine
+    dikkat ediniz. Buradaki xchg fonksiyonu gcc'nin built-in __atomic_exchange_n fonksiyonunu sarmalamaktadır:
+    
+    static inline uint32_t xchg(uint32_t *ptr, uint32_t val)
+    {
+        return __atomic_exchange_n(ptr, val, __ATOMIC_SEQ_CST);
+    }
+
+    gcc'nin atomik __atomic_exchange_n built-in fonksiyonu ikinci parametresine girilen değeri birinci parametresine 
+    girilen adrese yerleştirmektedir. Fonksiyon her zaman birinci parametresine girilen adresteki eski değerle geri 
+    dönmektedir. Yukarıdaki kodda futex çağrısının yapılma koşuluna dikkat ediniz:
+
+     if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
+            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
+
+    Burada önce mutex->state değeri MUTEX_LOCKED_WAITERS değilse bu değer MUTEX_LOCKED_WAITERS yapılarak futex sistem 
+    fonksiyonuyla uykuya dalınmıştır. Uykudan uyanıldığında aşağıdaki çağrı yapılmıştır:
+
+    result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
+
+    Kritik kod uygulamalarında mutex yüzündne uyanan thread kritik koda gireceğinden dolayı yeniden mutex'in kilidini 
+    almak zorundadır. Buradaki cmpxchg çağrısı ile mutex'in kilidi alınmak istenmiştir. Bu çağrı sonucunda biz mutex'i 
+    kilitleyemeyebiliriz. Çünkü o sırada başka bir thread mutex'i kilitlemiş olabilir. Bu nedenle bizim yeniden uykuya 
+    dalmamız gerekir. İşte döngü bunu sağlamaktadır. Döngüye bir kez daha dikkat ediniz:
+
+     do {
+        if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
+            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
+
+        ---> Bu sırada kilit başka bir thread tarafından alınmış olabilir
+
+        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
+    } while (result != MUTEX_UNLOCKED);
+
+    mutex_lock fonksiyonunun bütünsel hali şöyledir:
+
+    void mutex_lock(mutex_t *mutex)
+    {
+        uint32_t result;
+
+        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED);
+        if (result == 0)
+            return;   
+
+        do {
+            if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
+                futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
+            result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
+
+        } while (result != MUTEX_UNLOCKED);
+    }
+
+    Şimdi de mutex_unlock fonksiyonunu yazalım:
+
+    void mutex_unlock(mutex_t *m)
+    {
+        uint32_t old;
+
+        old = __atomic_exchange_n(&m->state, MUTEX_UNLOCKED, __ATOMIC_SEQ_CST);
+        if (old == MUTEX_LOCKED_WAITERS) 
+            futex(&m->state, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
+    }
+
+    Burada kilit açılırken mutex->state nesnesine kullanıcı modunda MUTEX_UNLOCKED değeri yerleştirilmiştir. Ancak 
+    mutex->state değeri MUTEX_LOCKED_WAITERS ise kuyrukta bekleyen en az bir thread olduğu için uyandırma işlemi 
+    yapılmıştır. 
+
+    Aslında tasarımda yalnızca MUTEX_LOCKED ve MUTEX_UNLOCKED değerleri kullanılabilirdi. Ancak bu durumda uyanırken 
+    bekleyen bir thread olmasa bile mecburen FUTEX_WAKE işleminin yapılması gerekirdi. Buradaki MUTEX_LOCKED_WAITERS 
+    durumu "kuyrukta mutex'i bekleyen en az bir thread var, kilidi bırakırken FUTEX_WAKE işlwminş yap" anlamına 
+    gelmektedir. 
+
+    Aşağıda bir test kodu eşliğinde tüm gerçekleştirimi veriyoruz. Kodu derlerken eski derleyicilerde çalışıyorsanız 
+    "-lpthread" seçeneğini komut satırına eklemelisiniz. gcc derleyici sistemi bir süredir bu kütüphaneyi default biçimde 
+    link aşamasına dahil etmeye başlamıştır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* user-mutex.h */
+
+#ifndef USER_MUTEX_H_
+#define USER_MUTEX_H_
+
+#define MUTEX_UNLOCKED              0
+#define MUTEX_LOCKED                1
+#define MUTEX_LOCKED_WAITERS        2
+
+typedef struct {
+    uint32_t state;  
+} mutex_t;
+
+#define MUTEX_INIT {MUTEX_UNLOCKED}
+
+static inline void init_mutex(mutex_t *mutex)
+{
+    mutex->state = MUTEX_UNLOCKED;
+}
+
+static inline uint32_t cmpxchg(uint32_t *ptr, uint32_t expected,  uint32_t desired)                          
+{
+    __atomic_compare_exchange_n(ptr, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+
+    return expected;  
+}
+
+static inline uint32_t xchg(uint32_t *ptr, uint32_t val)
+{
+    return __atomic_exchange_n(ptr, val, __ATOMIC_SEQ_CST);
+}
+
+void mutex_lock(mutex_t *mutex);
+void mutex_unlock(mutex_t *mutex);
+
+#endif
+
+/* user-mutex.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include "user-mutex.h"
+
+int futex(uint32_t *uaddr, int op, uint32_t val, const struct timespec *timeout, uint32_t *uaddr2, uint32_t val3)
+{
+    return syscall(SYS_futex, uaddr, op, val, timeout, uaddr2, val3);
+}
+
+void mutex_lock(mutex_t *mutex)
+{
+    uint32_t result;
+
+    result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED);
+    if (result == 0)
+        return;   
+
+    do {
+        if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
+            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
+        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
+    } while (result != MUTEX_UNLOCKED);
+}
+
+void mutex_unlock(mutex_t *m)
+{
+    uint32_t old;
+
+    old = __atomic_exchange_n(&m->state, MUTEX_UNLOCKED, __ATOMIC_SEQ_CST);
+    if (old == MUTEX_LOCKED_WAITERS) 
+        futex(&m->state, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
+}
+
+#if 1
+
+#define NTHREADS        10
+
+void exit_sys_errno(const char *msg, int eno);
+void *thread_proc(void *param);
+
+mutex_t g_mutex = MUTEX_INIT;
+
+int main(void)
+{
+    pthread_t tids[NTHREADS];
+    char *name;
+    int result;
+
+    srand(time(NULL));
+    
+    for (int i = 0; i < NTHREADS; ++i) {
+        if ((name = (char *)malloc(32)) == NULL) {
+            fprintf(stderr, "cannot allocate memory!...\n");
+            exit(EXIT_FAILURE);
+        }
+        sprintf(name, "thread %d", i + 1);
+        if ((result = pthread_create(&tids[i], NULL, thread_proc, name)) != 0) 
+            exit_sys_errno("pthread_create", result);
+    }
+
+    for (int i = 0; i < NTHREADS; ++i)
+        if ((result = pthread_join(tids[i], NULL)) != 0)
+            exit_sys_errno("pthread_join", result);
+
+    return 0;
+}
+
+void *thread_proc(void *param)
+{
+    const char *name = (const char *)param;
+
+    for (int i = 0; i < 10; ++i) {
+        mutex_lock(&g_mutex);
+        printf("%s: mutex locked....\n", name);
+
+        usleep(rand() % 10000);
+
+        printf("%s: mutex unlocked....\n", name);
+        mutex_unlock(&g_mutex);
+    }
+}
+
+void exit_sys_errno(const char *msg, int eno)
+{
+    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
+
+    exit(EXIT_FAILURE);
+}
+
+#endif
 
 /*----------------------------------------------------------------------------------------------------------------------
 	Bu bölümde önce bekleme kuyruklarının (wait queues) genel yapısını açıklayacağız. Sonra da thread'lerin çalışma 
@@ -7128,19 +7592,19 @@ void exit_sys(const char *msg)
     │ POWER HMT State Rollback  │ Hiper-threading güç durumu değişikliği   │ INTERRUPTIBLE +         │
     │                           │ uyku durumunu iptal edebilir             │ UNINTERRUPTIBLE         │
     ├───────────────────────────┼──────────────────────────────────────────┼─────────────────────────┤
-    │ TIF_SIGPENDING            │ signal_wake_up() → wake_up_state() ile   │ Sadece                  │
-    │ (schedule() öncesi)       │ task uyandırılır, koşul değişmemiştir    │ INTERRUPTIBLE           │
+    │ TIF_SIGPENDING            │ signal_wake_up → wake_up_state() ile     │ Sadece                  │
+    │ (schedule öncesi)         │ task uyandırılır, koşul değişmemiştir    │ INTERRUPTIBLE           │
     ├───────────────────────────┼──────────────────────────────────────────┼─────────────────────────┤
     │ TIF_SIGPENDING            │ Task uykudayken sinyal gelir,            │ Sadece                  │
-    │ (schedule() sonrası)      │ schedule() döner ama koşul false         │ INTERRUPTIBLE           │
+    │ (schedule sonrası)        │ schedule döner ama koşul false           │ INTERRUPTIBLE           │
     ├───────────────────────────┼──────────────────────────────────────────┼─────────────────────────┤
-    │ kthread_stop()            │ wake_up_process() ile task uyandırılır,  │ INTERRUPTIBLE +         │
+    │ kthread_stop.             │ wake_up_process ile task uyandırılır,    │ INTERRUPTIBLE +         │
     │                           │ beklenen koşulla ilgisi yok              │ UNINTERRUPTIBLE         │
     ├───────────────────────────┼──────────────────────────────────────────┼─────────────────────────┤
-    │ hrtimer / Timeout         │ Süre dolunca wake_up_process() çağrılır; │ INTERRUPTIBLE +         │
+    │ hrtimer / Timeout         │ Süre dolunca wake_up_process çağrılır;   │ INTERRUPTIBLE +         │
     │                           │ koşul üretici henüz sağlamamış olabilir  │ UNINTERRUPTIBLE         │
     ├───────────────────────────┼──────────────────────────────────────────┼─────────────────────────┤
-    │ ptrace / Debugger         │ ptrace_resume() → wake_up_process();     │ INTERRUPTIBLE +         │
+    │ ptrace / Debugger         │ ptrace_resume → wake_up_process;         │ INTERRUPTIBLE +         │
     │                           │ tracee koşul olmadan devam ettirilir     │ UNINTERRUPTIBLE         │
     └───────────────────────────┴──────────────────────────────────────────┴─────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -7274,23 +7738,23 @@ clean:
 
     void prepare_to_wait(struct wait_queue_head *wq_head, struct wait_queue_entry *wq_entry, int state);
 
-    İki fonksiyon arasındaki farklar da şöyledir:
+    İki fonksiyon arasındaki farklar aşağıdaki tabloda özetlenmektedir:
 
     ┌──────────────────┬────────────────────────────────────────────┬────────────────────────────────────────────┐
-    │     Özellik      │         prepare_to_wait_event()            │           prepare_to_wait()                │
+    │     Özellik      │          prepare_to_wait_event             │             prepare_to_wait.               │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
-    │ Tanım / Amaç     │ Wait queue'ya girmeden önce koşulu atomik  │ Süreci wait queue'ya ekler, durumunu       │
-    │                  │ olarak kontrol eder                        │ TASK_INTERRUPTIBLE vb. yapar               │
+    │ Tanım / Amaç     │ Bekleme kuyruğuna girmeden önce koşulu     │ Thread'i bekleme kuyruğuna ekler, durumunu │
+    │                  │ atomik olarak kontrol eder                 │ TASK_INTERRUPTIBLE vb. yapar               │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
     │ Dönüş Değeri     │ wait_queue_entry_t * döner;                │ void — doğrudan dönüş değeri yoktur        │
     │                  │ sonraki aşamada kullanılır                 │                                            │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
-    │ Kilit /          │ wq_head->lock spin lock'unu alır;          │ Spin lock gerektirmez;                     │
+    │ Kilit /          │ wq_head->lock spinlock kilidini alır;      │ Spinock gerektirmez;                       │
     │ Senkronizasyon   │ çağrılan sırada queue kilidi tutulur       │ set_current_state() çağırarak state        │
     │                  │                                            │ değiştirir                                 │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
-    │ Kullanım Sırası  │ 1. adım: prepare_to_wait_event() çağrılır, │ Basit döngülerde doğrudan çağrılır:        │
-    │                  │ koşul test edilir, schedule() ile uyutulur │ add → schedule() → finish_wait()           │
+    │ Kullanım Sırası  │ 1. adım: prepare_to_wait_event çağrılır,   │ Basit döngülerde doğrudan çağrılır:        │
+    │                  │ koşul test edilir, schedule ile uyutulur.  │ add → schedule → finish_wait.              │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
     │ Koşul Kontrolü   │ Atomik kontrol dahili — condition true ise │ Koşul kontrolü dışarıda; çağıran kodun     │
     │                  │ queue'ya girmeden döner                    │ döngüsü sorumludur                         │
@@ -7298,10 +7762,10 @@ clean:
     │ Spurious Wakeup  │ Yerleşik koruma sağlar; sahte uyanmada     │ Koruma yoktur; döngü while(condition) ile  │
     │                  │ koşul yeniden test edilir                  │ manuel yazılmalıdır                        │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
-    │ Exclusive Destek │ WQ_FLAG_EXCLUSIVE flag ile exclusive       │ prepare_to_wait_exclusive() kardeş         │
-    │                  │ wake desteklenir                           │ fonksiyonla sağlanır                       │
+    │ Exclusive Destek │ WQ_FLAG_EXCLUSIVE flag ile exclusive       │ prepare_to_wait_exclusive kardeş           │
+    │                  │ bekleme desteklenir                        │ fonksiyonla sağlanır                       │
     ├──────────────────┼────────────────────────────────────────────┼────────────────────────────────────────────┤
-    │ Üst Düzey Makro  │ wait_event_*() makroları bu çağrıyı sarar  │ wait_event_*() makroları bu çağrıyı sarar  │
+    │ Üst Düzey Makro  │ wait_event_* makroları bu çağrıyı sarar    │ wait_event_* makroları bu çağrıyı sarar    │
     └──────────────────┴────────────────────────────────────────────┴────────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -7321,11 +7785,11 @@ clean:
     Burada set_current_state fonksiyonu thread'in durumunu değiştirmek için kullanılmıştır. schedule fonksiyonu ise 
     bağlamsal geçişi oluşturmaktadır. (Buradaki thread durumunun TASK_INTERRUPTIBLE olması gerekmemektedir. TASK_INTERRUPTIBLE
     "sinyal geldiğinde thread yeniden CPU'ya atanıp sinyal fonksiyonu çalıştırılabilir" anlamına gelmektedir.) Tabii konunun 
-    ayrıntıları aslında "çizelgeleyici (scheduler)" alt sistemi ile ilgilidir. Bu konu çizlegeleyici alt sistemin anlatıldığı 
+    ayrıntıları aslında "çizelgeleyici (scheduler)" alt sistemi ile ilgilidir. Bu konu çizelegeleyici alt sistemin anlatıldığı 
     bölümde ele alınacaktır. 
 
     set_current_state fonksiyonu yalnızca task_struct nesnesindeki state elemanını güncellemektedir. (Bu state elemanı 
-    yeni çekirdeklerde "buraya doğrudan erişmeyin" anlamınına gelecek biçimde __state haline getirilmiştir.) Thread 
+    yeni çekirdeklerde "buraya doğrudan erişmeyin" anlamına gelecek biçimde __state haline getirilmiştir.) Thread 
     çalışma kuyruğundan schedule fonksiyonu tarafından çıkartılmaktadır. schedule fonksiyonu içerisinde çağrılan 
     deactivate_task fonksiyonunda thread'in durumuna bakılır, durum 0'dan farklı ise (0 değeri TASK_RUNNING anlamına
     gelmektedir) thread çalışma kuyruğundan çıkartılmaktadır. 
@@ -7352,7 +7816,7 @@ clean:
     static int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags);
 
     wake_up_process fonksiyonu try_to_wake_up fonksiyonunu TASK_ALL durum parametresiyle çağırmıştır. Bu durum parametresi 
-    hangi duruma sahip thread'lerin uyandırılacağını belirtmektedir. TASK_ALL şöyle define edilmiştir:
+    "hangi duruma sahip thread'lerin uyandırılacağını" belirtmektedir. TASK_ALL şöyle define edilmiştir:
 
     #define TASK_ALL		(TASK_NORMAL | __TASK_STOPPED | __TASK_TRACED)
 
@@ -7364,7 +7828,7 @@ clean:
         return try_to_wake_up(p, state, 0);
     }
 
-    Görüdüğü gibi bu fonksiyon aslında daha geneldir. Yani herhangi bir thread durumunu parametre olarak alabilmektedir. 
+    Görüldüğü gibi bu fonksiyon aslında daha geneldir. Yani herhangi bir thread durumunu parametre olarak alabilmektedir. 
 
     Peki bir thread'in çalışma kuyruğundan çıkartılıp hiçbir bekleme kuyruğuna alınmamasının nasıl bir faydası olabilir?
     Thread'lerin bekleme kuyruğuna alınmasının da zamansal maliyeti vardır. Bazı durumlarda bu işlemin yukarıda anlattığımız 
@@ -7377,479 +7841,15 @@ clean:
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Biz senkronizayon konusunda çekirdek tarafından kullanılan senkronizasyon nesnelerini ele aldık. Peki kullanıcı 
-    modundan kullandığımız yani pthread kütüphanesinin kullandığı senkronizasyon nesneleri nasıl oluşturulmuştur? pthread 
-    kütüphanesi bu senkronizasyon nesnelerini hangi sistem fonksiyonlarıyla gerçekleştirmektedir? Şimdi bu konu üzerinde 
-    biraz durmak istiyoruz. 
-
-    Bilindiği gibi UNIX türevi sistemlerin programlama bağlamındaki kullanıcı arayüzü POSIX standartlarıyla belirlenmiştir. 
-    POSIX standartları tüm UNIX türevi işletim sistemlerinin taşınabilir programlama arayüzüdür. Dolayısıyla C, C++, 
-    Java, C#, Python gibi dillerin kütüphaneleri aşağı seviyeli işlemleri programcılar fark etmese de Linux sistemlerinde 
-    bu POSIX fonksiyonlarını çağırarak gerçekleştirmektedir. Zaten bu konu üzerinde daha önce durmuştuk. Anımsanacağı 
-    gibi Linux sistemlerinde POSIZ fonksiyonlarının bir bölümü hemen belli bir sistem fonksiyonunu çağırmaktadır. Örneğin 
-    open POSIX fonksiyonu aslında Linux'ta sys_open sistem fonksiyonunu çağıran bir sarma fonksiyon gibidir. 
-
-    UNIX/Linux sistemlerinde kullanıcı modundaki thread senkronizasyonu işlemleri pthread_xxx fonksiyonlarıyla 
-    yapılmaktadır. pthread ktüphanesi POSIX'in rsmi thread kütüphanesidir. Dolayısıyla programlama dili ne olursa olsun 
-    Linux sistemlerinde aslında o programlama dillerinin kendi thread ve senkronizasyon fonksiyonları Linux sistemlerinde 
-    pthread kütüphanesinin fonksiyonlarını çağırmaktadır. Örneğin siz C++'ın C++11 ile eklenen thread kütüphanesini 
-    Linux'ta kullanıyorsanız bunlar eninde sonunda asıl işlemleri pthread_xxx fonksiyonlarını çağırarak yapmaktadır. 
-    Benzer durum Qt kütüphanesi için de geçerlidir. Tabii programlama dillerinin ve framework'lerin thread kütüphaneleri 
-    ve senkronizasyon nesneleri o programa dili ya da framework temelinde taşınabilir (portable) durumdadır. Yani örneğin
-    biz C++'ın thread kütüphanesini hem Windows'ta hem de Linux'ta aynı biçimde kullanırız. Ancak bunların gerçekleştirimleri 
-    işletim sistemine özgü bir biçimde yapılmaktadır. 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Linux sistemlerinde pthread kütüphanesinin kullanıı modundan kullanılabilen senkronizasyon nesneleri şunlardır:
-
-    mutex (pthread_mutex_t)
-    condition variable (pthread_cond_t)
-    read-write lock (pthread_rwlock_t)
-    spinlock (pthread_spinlock_t)
-    barrier (pthread_barrier_t)
-    semaphore 
-
-    İşte kullanıcı modundaki tüm bu senkronizasyon nesneleri aslında çekirdekteki "futex (fast user space mutex)" 
-    denilen sistem fonksiyonunu ve bu sistem fonksiyonunun sağladığı mekanizmayı kullanmaktadır. Yani çekirdekte her 
-    senkronizasyon nesnesi için ayrı bir sistem fonksiyonu yoktur. Yalnızca "futex" isimli bir sistem fonksiyonu vardır. 
-    pthread kütüphanesinin senkronizasyon fonksiyonları bu "futex" sistem fonksiyonunu çağırmaktadır. 
-    
-        Kullanıcı Modundaki Senkronizasyon Mekanizmaları
-    ═══════════════════════════════════════════════════════
-    pthread_mutex_t      pthread_cond_t      sem_t
-    pthread_rwlock_t     C++11 std::mutex    Java monitors
-            │                    │                │
-            └────────────────────┴────────────────┘
-                                │
-                        ┌─────────▼──────────┐
-                        │       glibc        │
-                        │  (futex wrapper)   │
-                        └─────────┬──────────┘
-                                  │  futex() syscall
-                        ┌─────────▼──────────┐
-                        │   Linux Kernel     │
-                        │  futex subsystem   │
-                        │  kernel/futex.c    │
-                        └────────────────────┘   
-    
-    futex sistem fonksiyonu için bir POSIX sarma fonksiyonu olmadığı gibi "libc" kütüphanesinde de bir sarma fonksiyon 
-    bulunmamaktadır. Ancak anımsanacağı gibi sistem fonksiyonları kullanıcı modundan "libc" kütüphanesinin bulundurduğu 
-    syscall isimli fonksiyon yoluyla çağrılabilmektedir. syscall fonksiyonunun parametrik yapısını anımsayınız:
-
-    #include <sys/syscall.h>      
-       
-    long syscall(long number, ...);
-
-    Her sistem fonksiyonun bir numarası vardır. Bu numaralar da <sys/syscall.h> dosyası içerisnde SYS_xxx biçiminde 
-    define edilmiştir. Örneğin sys_open sistem fonksiyonunun numarası SYS_open sembolik sabiti, sys_futex sistem 
-    fonksiyonunun numarası için SYS_futex seöbolik sabiti bulunmaktadır. O halde "futex" sistem fonksiyonu doğrudan 
-    kullanıcı modundan şöyle çağrılabilir:
-
-    int futex(uint32_t *uaddr, int op, uint32_t val, const struct timespec *timeout, uint32_t *uaddr2, uint32_t val3)
-    {
-        return syscall(SYS_futex, uaddr, op, val, timeout, uaddr2, val3);
-    }
-
-    Futex kullanımında kullanıcı modundaki programcı uint32_t türünden (64 bit sistem olsa bile bu türden) bir nesnenin 
-    adresini sistem fonksiyona verir (val parametresi). Sonra yapılacak işlemi (op parametresi) beelirtir. Diğer 
-    parametrelerin anlamı yapılacak işleme göre değişebilmektedir. 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Futex mekanizmasının ana kullanımı şöyledir: Kullanıcı modundaki programcı ya da kütüphane (örneğin pthread_xxx 
-    fonksiyonları) global bir değişken tanımlar. Bu değişken kilidin durumunu belirtir. Hiç çekirdek moduna geçmedne 
-    önce bu değişkenin içerisindeki değere bakarak senkronizasyon nesnesinin kilitli olup olmadığını "CAS (compe-and-swap)"
-    makine komutlarıyla belirler. Eğer kilit açıksa bunu kilitler ve hiç çekirdek moduna geçiş yapmaz. Eğer kilit kapalıysa
-    futex sistem fonksiyonunu çağırarak bloke oluşturur. Blokenin çözülmesi de yine futex sistem fonksiyonun çağrılmasıyla 
-    yapılmaktadır. Bu mekanizmada çekirdek moduna gereksiz bir biçimde geçilmesinin engellendiğine dikkat ediniz. Eğer 
-    senkronizyon nesneleri için doğrudan sistem fonksiyonları çağrılsaydı çekirdek moduna gereksiz geçiş yapılabilirdi. 
-    Çekirdekteki daha önce görmüş olduğumuz senkronizasyon nesnelerinin kullanıcı moduyla bir ilgisi olmadığına dikkat 
-    ediniz. (Windows sistemlerindeki CRITICAL_SECTION nesneler de tamamen bu biçimde çalışmaktadır. Bu sistemlerde 
-    ayrıca tamamen çekirdek modunda işlem yapan ve ismine "çekirdek senkronizasyon nesneleri denilen" kullanıcı modu 
-    mekanizmalar da bulunmaktadır.)
-
-    Futex sistem fonksiyonunun yaptığı işlemler yani op parametresine girilebilecek değerler şunlardır:
-
-    #define FUTEX_WAIT              0
-    #define FUTEX_WAKE              1
-    #define FUTEX_FD                2  /* KULLANIM DIŞI — kaldırıldı */
-    #define FUTEX_REQUEUE           3
-    #define FUTEX_CMP_REQUEUE       4
-    #define FUTEX_WAKE_OP           5
-    #define FUTEX_LOCK_PI           6
-    #define FUTEX_UNLOCK_PI         7
-    #define FUTEX_TRYLOCK_PI        8
-    #define FUTEX_WAIT_BITSET       9
-    #define FUTEX_WAKE_BITSET      10
-    #define FUTEX_WAIT_REQUEUE_PI  11
-    #define FUTEX_CMP_REQUEUE_PI   12
-    #define FUTEX_LOCK_PI2         13
-
-    Burada en önemli iki FUTEX_WAIT ve FUTEX_WAIT işlemleridir. 
-
-    Futex'te bloke oluşturmak için kullanılan FUTEX_WAIT işleminin çalışma biçimi şöyledir:
-
-    if (*uaddr == val) {
-        /* thread'i bekleme kuyruğuna ekle ve uyut */
-        /* bu kontrol + ekleme atomik olarak gerçekleşir */
-    } 
-    else {
-        /* EAGAIN döndür — değer değişmiş */
-    }
-
-    Yani futex'e verilen adresteki değerle ona verilen değer (val parametresi) eğer aynıysa bloke işlemi yapılmaktadır, 
-    değilse fonksiyon başarısızlıkla geri dönmektedir. FUTEX_WAKE işlemi de uyutulan thread'lerin uyandırılması için 
-    kullanılmaktadır. Burada kaç thread'in uyandırılacağı da belirtilebilmektedir. 
-
-    FUTEX_WAIT işleminin çekirdekteki çağrı zinciri şöyledir:
-
-    sys_futex(FUTEX_WAIT)
-    └── futex_wait()
-            ├── futex_wait_setup()       ← anahtar oluştur, bucket kilitle
-            ├── futex_wait_queue()       ← kuyruğa ekle + uyut
-            │       ├── set_current_state(TASK_INTERRUPTIBLE)
-            │       └── schedule()       ← CPU'yu bırak
-            └── futex_wait_restart()     ← sinyal gelirse yeniden dene
-
-    FUTEX_WAKE işleminde fonksiyonun val parametresi uyandırılacak thread sayısını belirtmektedir. Örneğin bu parametreye
-    1 girildiğinde futex yalnızca 1 tane thread'i uyandırmaktadır. Örneğin:
-    
-    futex(&m->state, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
-    
-    FUTEX_WAKE işleminin de şöyledir:
-
-    sys_futex(FUTEX_WAKE)
-    └── futex_wake()
-            ├── hash_futex()                 ← aynı bucket'ı bul
-            ├── spin_lock(&hb->lock)         ← bucket'ı kilitle
-            ├── plist_for_each_entry_safe()  ← zinciri tara
-            │       └── futex_wake_mark()    ← görevi işaretle
-            │               └── wake_q_add()
-            └── wake_up_q()                  ← asıl uyandırma
-                    └── try_to_wake_up()     ← görev → TASK_RUNNING
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Sistemdeki tüm prosesler için aynı sistem fonksiyonunu kullandığından dolayı futex'in çekirdek gerçekleştirimi buna 
-    uygun bir biçimde yapılmıştır. Çekirdekteki futex sistem fonksiyonu bir hash tablosu kullanır. Bloke edilecek thread'ler
-    için çekirdek hiç bekleme kuyruğu oluşturmadan yukarda belirttiğimiz gibi thread'in durumunu TASK_INTERRUPTIBLE 
-    haline getirip schedule işlemini uygular. Tabii uyutulan thread'lerin task_struct adresleri de hash tablosunda 
-    saklanmaktadır. Uyandırma işleminde de task_struct nesnesi bu hash tablosundan bulunur ve try_to_wake_up fonksiyonuyla 
-    (yani görmüş olduğumuz wake_up_state fonksiyonunun çağırdığı fonksiyonla) uyandırılmaktadır. Görüldüğü gibi futex 
-    mekanizmada da uyutma ve uyandırma işleminde daha önce görmüş olduğumuz standart bekleme kuyrukları kullanılmamaktadır.
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de son olarak futex sistem fonksiyonu yoluyla kullanıcı modundan kullanılabilecek bir mutex gerçekleştirimini 
-    yapalım. (pthread kütüphanesinde zaten mutex gerçekleştiriminin bulunduğunu belirtmiştik. Biz burada futex sistem 
-    fonksiyonunun nasıl kullanıldığını bir örnek üzerinde  ele almak istiyoruz.)
-
-    Mutex için kullanıcı alanı içerisinde uint32_t türündne bir global değişken tutmak gerekir. Biz bu değişkeni soyutlama 
-    sağlamak için bir yapının içerisine yerleştirelim:
-
-    #define MUTEX_UNLOCKED              0
-    #define MUTEX_LOCKED                1
-    #define MUTEX_LOCKED_WAITERS        2
-
-    typedef struct {
-        uint32_t state;  
-    } mutex_t;
-
-    Burada MUTEX_LOCKED değeri mtex'in kilidinin açık olduğunu, MUTEX_LOCKED değeri mutex'in kilitli olduğunu ancak 
-    mutex'i bekleyen uykuya dalmış bir thread olmadığını ve MUTEX_LOCKED_WAITERS değeri ise mutex'in kilitli olduğunu 
-    ama mutex'i bekleyen uykuya dalmış bir thread'in olduğunu belirtmektedir. Mutex kilidi açıldığında uyandırma işleminin 
-    yapılıp yapılmayacağı bu MUTEX_LOCKED_WAITERS değerine bakılarak belirlenmektedir. 
-
-    Bu yapıya ilkdeğer veren bir makro ve inline fonksiyon yazabiliriz:
-
-    #define MUTEX_INIT {MUTEX_UNLOCKED}
-    
-    static inline void init_mutex(mutex_t *mutex)
-    {
-        mutex->state = MUTEX_UNLOCKED;
-    }
-
-    Şimdi de mutex_lock fonksiyonumuzu yazalım. Bu fonksiyonda biz önce atomik bir biçimde CAS işlemi ile kullanıcı 
-    modunda mutex'in kilitli olup olmadığına bakacağız. Eğer mutex kilitliyse futex sistem fonksiyonu ile kendimizi 
-    bloke edeceğiz. 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
                                             69. Ders 12/04/2026 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Mutex'in kilidini atomic CAS işlemleriyle almaya çalışmalıyız. Bububn için gcc'nin bult-in __atomic_compare_exchange_n
-    fonksiyonunu kullanabiliriz. Bu fonksiyonu aşağıdaki gibi bir fonksiyonla sarmalayalım:
-
-    static inline uint32_t cmpxchg(uint32_t *ptr, uint32_t expected,  uint32_t desired)                          
-    {
-        __atomic_compare_exchange_n(ptr, &expected, desired, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-
-        return expected;  
-    }
-
-    gcc'nin built-in __atomic_compare_exchange_n fonksiyonu şöyle çaılmaktadır: Fonksiyon birinci parametresine verilen 
-    adresteki değerle ikinci parametresine verilen adresteki değeri karşılaştırır. Eğer bu değerler eşitse üçüncü 
-    parametresindeki değeri birinci parametresine girilen adrese yerleştirir. Eğer birinci parametresine girilen 
-    adrestekideğer ile ikinci parametresine girilen adresteki değer aynı değilse bu durumda birinci parametresine girilen 
-    adrese bir şey yerleştirmez, birinci parametresine girilen adresteki değeri ikinci parametresine girilen adrese 
-    yerleştirir. Fonksiyon yerleştirmeyi yaparsa sıfır dışı bir değere, yapamazsa sıfır değerine geri dönmektedir. 
-    Ayrıcca fonksiyon geri döndüğünde ikinci parametresine girilen adreste ya üçüncü parametrine girilen değer ya da 
-    birinci parametreye girilen adresteki değerin bulunacağına dikkat ediniz. Fonksiyonun son iki parametresi kullanılacak 
-    bellek modeliyle ilgilidir. Fonksiyonun çalışmasını aşağıdaki kodla da açıklayabiliriz:
-
-    function atomic_compare_exchange(ptr, expected_ptr, desired, success_order, fail_order):
-
-        // Tüm bu işlem atomik olarak (kesilemez şekilde) gerçekleşir
-        ATOMIC_BEGIN:
-            current_value ← *ptr          // ptr'nin şu anki değerini oku
-
-            if current_value == *expected_ptr:
-                *ptr ← desired            // Eşleşti → ptr'ye desired'ı yaz
-                return TRUE               // Swap başarılı
-            else:
-                *expected_ptr ← current_value  // Eşleşmedi → expected'ı güncelle
-                return FALSE                   // Swap başarısız
-        ATOMIC_END
-
-    O halde biz atomic CAS işlemiyle kilit kontrolünü yukarıdaki fonksiyonu kullanarak şöyle yapabiliriz:
-
-    result = cmpxchg(&mutex->state, 0, 1);
-    if (result == 0)
-        return; 
-
-    Burada mutex->state değeri eğer 0 ise o değer atomik bir biçimde 1 yapılacaktır. Fonksiyon da 0 değeri ile geri 
-    dönecektir. Dolayısıyla bu durum mutex'in hiç çekirdek moduna geçmeden kilitlendiği anlamına geşmektedir. Eğer 
-    mutex->state değeri 1 ise bu durumda mutex->state olduğu gibi kalacak ancak fonksiyon 1 ile geri dönecektir. 
-    Akış da aşağıdan devam edecektir. Burada artık futex sistem fonksiyonu çağrılacaktır:
-
-    do {
-        if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
-            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
-        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
-    } while (result != MUTEX_UNLOCKED);
-
-    Burada henüz futex sistem fonksiyonu çağrılmadan mutex->state nesnesine MUTEX_LOCKED_WAITERS değerinin yerleştirildiğine
-    dikkat ediniz. Buradaki xchg fonksiyonu gcc'nin built-in __atomic_exchange_n fonksiyonunu sarmalamaktadır:
-    
-    static inline uint32_t xchg(uint32_t *ptr, uint32_t val)
-    {
-        return __atomic_exchange_n(ptr, val, __ATOMIC_SEQ_CST);
-    }
-
-    gcc'nin atomik __atomic_exchange_n built-in fonksiyonu ikinci parametresine girilen değeri birinci parametresine 
-    girilen adrese yerleştirmektedir. Fonksiyon her zaman birinci parametresine girilen adresteki eski değerle geri 
-    dönmektedir. Yukarıdaki kodda futex çağrısının yapılma koşuluna dikkat ediniz:
-
-     if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
-            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
-
-    Burada önce mutex->state değeri MUTEX_LOCKED_WAITERS değilse bu değer MUTEX_LOCKED_WAITERS yapılarak futex sistem 
-    fonksiyonuyla uykuya dalınmıştır. Uykudan uyanıldığında aşağdıaki çağrı yapılmıştır:
-
-    result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
-
-    Kritik kod uygulamalarında mutex yüzündne uyanan thread kritik koda gireceğinden dolayı yeniden mutex'in kilidini 
-    almak zorundadır. Buradaki cmpxchg çağrısı ile mutex'in kilidi alınmak istenmiştir. Bu çağrı sonucunda biz mutex'i 
-    kilitleyemeyebiliriz. Çünkü o sırada başka bir thread mutex'i kilitlemiş olabilir. Bu nedenle bizim yeniden uykuya 
-    dalmamız gerekir. İşte döngü bunu sağlamaktadır. Döngüye bir kez daha dikkat ediniz:
-
-     do {
-        if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
-            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
-
-        ---> Bu sırada kilit başka bir thread tarafından alınmış olabilir
-
-        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
-    } while (result != MUTEX_UNLOCKED);
-
-    mutex_lock fonksiyonunun bütünsel hali şöyledir:
-
-    void mutex_lock(mutex_t *mutex)
-    {
-        uint32_t result;
-
-        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED);
-        if (result == 0)
-            return;   
-
-        do {
-            if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
-                futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
-            result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
-
-        } while (result != MUTEX_UNLOCKED);
-    }
-
-    Şimdi de mutex_unlock fonksiyonunu yazalım:
-
-    void mutex_unlock(mutex_t *m)
-    {
-        uint32_t old;
-
-        old = __atomic_exchange_n(&m->state, MUTEX_UNLOCKED, __ATOMIC_SEQ_CST);
-        if (old == MUTEX_LOCKED_WAITERS) 
-            futex(&m->state, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
-    }
-
-    Burada kilit açılırken mutex->state nesnesine kullanıcı modunda MUTEX_UNLOCKED değeri yerleştirilmiştir. Ancak 
-    mutex->state değeri MUTEX_LOCKED_WAITERS ise kuyrukta bekleyen en az bir thread olduğu için uyandırma işlemi 
-    yapılmıştır. 
-
-    Aslında tasarımda yalnızca MUTEX_LOCKED ve MUTEX_UNLOCKED değerleri kullanılabilirdi. Ancak bu durumda uyanırken 
-    bekleyen bir thread olmasa bile mecburen FUTEX_WAKE işlmenin yapılması gerekirdi. Buradaki MUTEX_LOCKED_WAITERS 
-    durumu "kuyrukta mutex'i bekleyen en az bir thread var, kilidi bırakırken FUTEX_WAKE işlwminş yap" anlamına 
-    gelmektedir. 
-
-    Aşağıda bir test kodu eşliğinde tüm gerçekleştirimi veriyoruz. Kodu derlerken eski derleyicilerde çalışıyorsanız 
-    "-lpthread" seçeneğini komut satırına eklemelisiniz. gcc derleyici sistemi bir süredir bu kütüphaneyi default biçimde 
-    link aşamasına dahil etmeye başlamıştır. 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/* user-mutex.h */
-
-#ifndef USER_MUTEX_H_
-#define USER_MUTEX_H_
-
-#define MUTEX_UNLOCKED              0
-#define MUTEX_LOCKED                1
-#define MUTEX_LOCKED_WAITERS        2
-
-typedef struct {
-    uint32_t state;  
-} mutex_t;
-
-#define MUTEX_INIT {MUTEX_UNLOCKED}
-
-static inline void init_mutex(mutex_t *mutex)
-{
-    mutex->state = MUTEX_UNLOCKED;
-}
-
-static inline uint32_t cmpxchg(uint32_t *ptr, uint32_t expected,  uint32_t desired)                          
-{
-    __atomic_compare_exchange_n(ptr, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-
-    return expected;  
-}
-
-static inline uint32_t xchg(uint32_t *ptr, uint32_t val)
-{
-    return __atomic_exchange_n(ptr, val, __ATOMIC_SEQ_CST);
-}
-
-void mutex_lock(mutex_t *mutex);
-void mutex_unlock(mutex_t *mutex);
-
-#endif
-
-/* user-mutex.c */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <linux/futex.h>
-#include <sys/syscall.h>
-#include "user-mutex.h"
-
-int futex(uint32_t *uaddr, int op, uint32_t val, const struct timespec *timeout, uint32_t *uaddr2, uint32_t val3)
-{
-    return syscall(SYS_futex, uaddr, op, val, timeout, uaddr2, val3);
-}
-
-void mutex_lock(mutex_t *mutex)
-{
-    uint32_t result;
-
-    result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED);
-    if (result == 0)
-        return;   
-
-    do {
-        if (result == MUTEX_LOCKED_WAITERS || xchg(&mutex->state, MUTEX_LOCKED_WAITERS) != 0) 
-            futex(&mutex->state, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, NULL, NULL, 0);
-        result = cmpxchg(&mutex->state, MUTEX_UNLOCKED, MUTEX_LOCKED_WAITERS);
-    } while (result != MUTEX_UNLOCKED);
-}
-
-void mutex_unlock(mutex_t *m)
-{
-    uint32_t old;
-
-    old = __atomic_exchange_n(&m->state, MUTEX_UNLOCKED, __ATOMIC_SEQ_CST);
-    if (old == MUTEX_LOCKED_WAITERS) 
-        futex(&m->state, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, NULL, NULL, 0);
-}
-
-#if 1
-
-#define NTHREADS        10
-
-void exit_sys_errno(const char *msg, int eno);
-void *thread_proc(void *param);
-
-mutex_t g_mutex = MUTEX_INIT;
-
-int main(void)
-{
-    pthread_t tids[NTHREADS];
-    char *name;
-    int result;
-
-    srand(time(NULL));
-    
-    for (int i = 0; i < NTHREADS; ++i) {
-        if ((name = (char *)malloc(32)) == NULL) {
-            fprintf(stderr, "cannot allocate memory!...\n");
-            exit(EXIT_FAILURE);
-        }
-        sprintf(name, "thread %d", i + 1);
-        if ((result = pthread_create(&tids[i], NULL, thread_proc, name)) != 0) 
-            exit_sys_errno("pthread_create", result);
-    }
-
-    for (int i = 0; i < NTHREADS; ++i)
-        if ((result = pthread_join(tids[i], NULL)) != 0)
-            exit_sys_errno("pthread_join", result);
-
-    return 0;
-}
-
-void *thread_proc(void *param)
-{
-    const char *name = (const char *)param;
-
-    for (int i = 0; i < 10; ++i) {
-        mutex_lock(&g_mutex);
-        printf("%s: mutex locked....\n", name);
-
-        usleep(rand() % 10000);
-
-        printf("%s: mutex unlocked....\n", name);
-        mutex_unlock(&g_mutex);
-    }
-}
-
-void exit_sys_errno(const char *msg, int eno)
-{
-    fprintf(stderr, "%s:%s\n", msg, strerror(eno));
-
-    exit(EXIT_FAILURE);
-}
-
-#endif
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Bu bölümde Linux çekirdeklerinin "bellek yönetimi (memory management)" alt sistemini inceleyeceğiz. Bellek yöntemi
-    modern işletim sistemlerinde oldukça ayrıntılı bir konudur. Dolayısıyla bu bölüm kurs içerisinde önemli bir zamanımızı 
-    alacaktır. İşletim sistemleri insan vücudu gibi alt sistemlerden oluşmaktadır. Bu alt sistemler birbirinden bağımsız 
-    değil birbirini etkileyecek biçimde çalışmaktadır. Ancak kursumuzda biz bu alt sistemleri soyutlayarak ele almaktayız. 
+    Bu bölümde Linux çekirdeklerinin "bellek yönetimi (memory management)" alt sistemini inceleyeceğiz. Bellek yönetimi
+    modern işletim sistemlerinde oldukça karmaşık ve ayrıntılı bir konudur. Dolayısıyla bu bölüm kurs içerisinde önemli 
+    bir zamanımızı alacaktır. İşletim sistemleri insan vücudu gibi alt sistemlerden oluşmaktadır. Bu alt sistemler 
+    birbirinden bağımsız değil birbirini etkileyecek biçimde çalışmaktadır. Ancak kursumuzda biz bu alt sistemleri s
+    oyutlayarak ele almaktayız. 
 
     Modern işletim sistemlerinin bellek yönteimlerini ele almadan önce bazı temel konuların gözden geçirilmesi gerekmektedir. 
     Biz de bu bölümde önce bu temel konuları gözden geçireceğiz. 
@@ -7865,7 +7865,7 @@ void exit_sys_errno(const char *msg, int eno)
     parametresiyle sayfalama mekanizması devre dışı bırakılarak da derlenebilmektedir. Fakat yukarıda da belirttiğimiz 
     gibi bu durumda çekirdeğin sağladığı pek çok işlevsellik devre dışı bırakılmaktadır. 
     
-    Intel 8036 ile birlikle sayfalama mekanizmasına sahip olmuştur. ARM işlemcilerinin Cortex A (Applcation) profilleri 
+    Intel 80386 ile birlikte sayfalama mekanizmasına sahip olmuştur. ARM işlemcilerinin Cortex A (Application) profilleri 
     sayfalama mekanizmasına sahiptir. Diğer güçlü işlemcilerin hemen hepsinde sayfalama mekanizması bulunmaktadır. 
     Aşağıda sayfalama mekanizmasına sahip önemli işlemciler bir tablo biçiminde verilmektedir:
 
@@ -7911,12 +7911,12 @@ void exit_sys_errno(const char *msg, int eno)
     │                │                                 │ 68020 ve üzeri içerir            │
     └────────────────┴─────────────────────────────────┴──────────────────────────────────┘
 
-    Bu tablodaki işlemcilerin hemen hepsinde işlemci reset edildiğinde sayfalama mekanizması "kapalı (disabled)" durumdadır. 
-    Sayfalama mekanizmasını çalışır hale getirmek genellikle işlemcinin belli bir kontrol yazmaındaki belli bir biti
+    Bu tablodaki işlemcilerin hepsinde işlemci reset edildiğinde sayfalama mekanizması "kapalı (disabled)" durumdadır. 
+    Sayfalama mekanizmasını çalışır hale getirmek genellikle işlemcinin belli bir kontrol yazmacındaki belli bir biti
     1 yaparak sağlanmaktadır. 
 
     İşlemcilerdeki sayfalama mekanizması aynı zamanda "sanal bellek (virtual memory)" kullanımını da mümkün hale 
-    getirmektedir. Yani sayfalama mekanizmasına sahip olmayan işlemlerde aynı zamanda sanal bellek kullanımı da mümkün 
+    getirmektedir. Yani sayfalama mekanizmasına sahip olmayan işlemcilerde aynı zamanda sanal bellek kullanımı da mümkün 
     olamamaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -7924,7 +7924,7 @@ void exit_sys_errno(const char *msg, int eno)
     Sayfalama mekanizmasına sahip olan (ve bu mekanizmanın aktif edildiği) işlemcilerde makine kodlarındaki adresler 
     RAM'de gerçek fiziksel adres belirtmemektedir. Bu adreslere "sanal adres (virtual address)", "doğrusal adres (linear
     address") ya da "mantıksal adres (logical address)" denilmektedir. Biz kursumuzda bu adreslere "sanal adresler" 
-    diyeceğiz. Örneğin C'de aşağıdaki gibi bir deyim yazılmış olsun:
+    diyeceğiz. Örneğin C'de aşağıdaki gibi bir atama işlemi yapılmış olsun:
 
     x = 100;
 
@@ -7933,173 +7933,170 @@ void exit_sys_errno(const char *msg, int eno)
     MOV EAX, 100
     MOV [x_addr], EAX
 
-    Burada x_addr fadesi x değişkeninin bellekteki adresini belirtmektedir. Ancak bu adres gerçek fiziksel adres 
-    değildir, sanal bir adrestir. İşlemci çalışırken sanal adresleri "sayfa tablosu (page table)" bir tabloya başvurarak 
-    önce gerçek fiziksel adrese dönüştürür, sonra erişimi yapar. Aynı anda çalışan iki farklı programdaki aynı sanal
-    adresler bellekte aynı fiziksel adresi belirtmezler (yani böyle bir zorunluluk yoktur). Çünkü işlemci bu sanal 
-    adreesleri izleyen paragraflarda açıklayacağımız gibi farklı sayfa tablolarına başvurarak fazla fiziksel adreslere 
+    Burada x_addr ifadesi x değişkeninin bellekteki adresini belirtmektedir. Ancak bu adres gerçek fiziksel adres 
+    değildir, sanal bir adrestir. İşlemci çalışırken sanal adresleri "sayfa tablosu (page table)" denilen bir tabloya 
+    başvurarak önce gerçek fiziksel adrese dönüştürür, sonra erişimi yapar. Aynı anda çalışan iki farklı programdaki 
+    aynı sanal adresler aynı fiziksel adresi belirtmezler (yani böyle bir zorunluluk yoktur). Çünkü işlemci bu sanal 
+    adresleri izleyen paragraflarda açıklayacağımız gibi farklı sayfa tablolarına başvurarak farklı fiziksel adreslere 
     dönüştürmektedir. (Örneğin biz bir C programını derlediğimizde makine kodlarındaki tüm adresler sanal adreslerdir. 
     Bu programı biz birden fazla kez çalıştırdığımızda aslında çalışan programlardaki sanal adresler aynı olsa da 
-    fiziksel adreslerini birbirleriyle ilgisi yoktur.)
+    program çalışırken erişilen fiziksel adreslerin birbirleriyle ilgisi yoktur.)
 
     Biz yukarıda sayfalama mekanizmasına sahip olan işlemcilerde reset işlemi yapıldığında başlangıçta sayfalama 
     mekanizmasının pasif durumda olduğunu belirtmiştik. Sayfalama mekanizması pasif durumdayken program içerisindeki 
-    sanal adresler artık gereçekten fiziksel adresler belirtmektedir. Yani bu durumda işlemci "sayfa tablosuna" başvurarak 
+    sanal adresler artık gerçekten fiziksel adresleri belirtmektedir. Yani bu durumda işlemci "sayfa tablosuna" başvurarak 
     bir dönüştürme yapmaya çalışmamaktadır. Sayfalama mekanizması Linux sistemleri boot edilirken işletim sisteminin 
     yükleyici kodları tarafından aktif hale getirilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                        70. Ders 18/04/2026 - Cumartesi
+                                         70. Ders 18/04/2026 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Bir sayfa belli uzunlukta ardışıl byte'tan oluşmaktadır. Sayfa büyüklükleri işlemciden işlemciye ve aynı işlemcide 
     onların modlarına göre değişebilmektedir. En yaygın kullanılan sayfa büyüklüğü 4K (4096 byte)'dır. Ancak yukarıda 
     da belirttiğimiz gibi işlemciler değişik modlarda değişik sayfa büyüklüklerini destekleyebilmektedir. 4K sayfa 
-    büyüklüğü pek çok işlemci tarafından (ama hepsi tarafından değil) desteklenen bir büyüklüktür. Bu büyüklük halen 
-    en uygun sayfa büyüklüğü olarak kabul edilmektedir. (Ancak bellek miktarları arttıkça daha büyük sayfalar daha 
-    uygun hale gelmeye başlayabilir.)
+    büyüklüğü pek çok işlemci tarafından (ama hepsi tarafından değil) desteklenmektedir. Bu büyüklük halen en uygun 
+    sayfa büyüklüğü olarak kabul edilmektedir. (Ancak bellek miktarları arttıkça daha büyük sayfalar daha uygun hale 
+    gelmeye başlayabilecektir.)
 
     32 Bit Intel işlemcileri tarafından desteklenen sayfa büyüklükleri şunlardır:
 
-    ┌──────────────────┬─────────────────────────────┬──────────────────────────┬─────────────────────────────┐
-    │  Sayfa Büyüklüğü │          Mekanizma          │        Gereksinim        │        Kullanım Alanı       │
-    ├──────────────────┼─────────────────────────────┼──────────────────────────┼─────────────────────────────┤
-    │       4 KB       │   Normal sayfalama          │       CR0.PG = 1         │  Standart bellek yönetimi   │
-    │                  │   (32-bit, 2 seviyeli)      │                          │                             │
-    ├──────────────────┼─────────────────────────────┼──────────────────────────┼─────────────────────────────┤
-    │       4 MB       │   PSE (Page Size Extension) │   CR4.PSE = 1,           │  Büyük çekirdek eşlemeleri  │
-    │                  │   PDE.PS = 1                │   Pentium ve üzeri       │                             │
-    ├──────────────────┼─────────────────────────────┼──────────────────────────┼─────────────────────────────┤
-    │       2 MB       │   PAE + PSE birlikte        │   CR4.PAE = 1,           │  4 GB üzeri fiziksel RAM    │
-    │                  │   (36-bit fiziksel adres)   │   CR4.PSE = 1            │                             │
-    └──────────────────┴─────────────────────────────┴──────────────────────────┴─────────────────────────────┘
+    ┌─────────────────┬───────────────────────────┐
+    │ Sayfa Büyüklüğü │     Kullanım Alanı        │
+    ├─────────────────┼───────────────────────────┤
+    │      4 KB       │ Standart bellek yönetimi  │
+    │                 │                           │
+    ├─────────────────┼───────────────────────────┤
+    │      4 MB       │ Büyük çekirdek eşlemeleri │
+    │                 │                           │
+    ├─────────────────┼───────────────────────────┤
+    │      2 MB       │ 4 GB üzeri fiziksel RAM   │
+    │                 │                           │
+    └─────────────────┴───────────────────────────┘
 
     64 Bit Intel İşlemcileri tarafından desteklenen sayfa büyüklükleri şöyledir:
 
-    ┌──────────────────┬──────────────────────────────┬───────────────────────────────┬──────────────────────────────┐
-    │  Sayfa Büyüklüğü │           Mekanizma          │          Gereksinim           │        Kullanım Alanı        │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │       4 KB       │  Normal sayfalama            │  CR0.PG = 1, CR4.PAE = 1,     │  Standart bellek yönetimi    │
-    │                  │  (4 seviyeli: PML4→PDPT      │  IA-32e modu (long mode)      │                              │
-    │                  │   →PD→PT)                    │                               │                              │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │       2 MB       │  PSE — PD girişinde          │  CR4.PAE = 1, PDE.PS = 1,     │  Büyük çekirdek eşlemeleri,  │
-    │                  │  PS biti = 1, PT atlanır     │  long mode                    │  hugepages (TLB verimliliği) │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │       1 GB       │  Huge page — PDPT girişinde  │  CR4.PAE = 1, PDPTE.PS = 1,   │  Büyük veri tabanları,       │
-    │                  │  PS biti = 1, PD+PT atlanır  │  CPUID: pdpe1gb bayrağı       │  HPC iş yükleri              │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │       4 KB       │  5 seviyeli sayfalama        │  CR4.LA57 = 1,                │  57-bit sanal adres uzayı,   │
-    │   / 2 MB / 1 GB  │  (PML5→PML4→PDPT→PD→PT)      │  Ice Lake ve üzeri            │  çok büyük bellek sunucuları │
-    └──────────────────┴──────────────────────────────┴───────────────────────────────┴──────────────────────────────┘
+    ┌─────────────────┬─────────────────────────────┐
+    │ Sayfa Büyüklüğü │        Kullanım Alanı       │
+    ├─────────────────┼─────────────────────────────┤
+    │      4 KB       │ Standart bellek yönetimi    │
+    ├─────────────────┼─────────────────────────────┤
+    │      2 MB       │ Büyük çekirdek eşlemeleri,  │
+    │                 │ hugepages (TLB verimliliği) │
+    ├─────────────────┼─────────────────────────────┤
+    │      1 GB       │ Büyük veri tabanları,       │
+    │                 │ HPC iş yükleri              │
+    ├─────────────────┼─────────────────────────────┤
+    │      4 KB       │ 57-bit sanal adres alanı,   │
+    │  / 2 MB / 1 GB  │ çok büyük bellek sunucuları │
+    └─────────────────┴─────────────────────────────┘
 
-    32 Bit ARM işlemcileri (A Profilleri) tarafından desteklenen sayfa büyüklükleri şöyledir:
+    32 Bit ARM işlemcileri tarafından desteklenen sayfa büyüklükleri şöyledir:
 
-    ┌──────────────────┬──────────────────────────────┬───────────────────────────────┬──────────────────────────────┐
-    │  Sayfa Büyüklüğü │           Mekanizma          │          Gereksinim           │        Kullanım Alanı        │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │       4 KB       │  Small page — L2 sayfa       │  TTBR0/TTBR1, L1 PTE'de       │  Standart bellek yönetimi,   │
-    │                  │  tablosu girişi (L1→L2)      │  tip = Page Table             │  Linux varsayılan sayfası    │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │      64 KB       │  Large page — L2 girişinde   │  TTBR0/TTBR1, L2 PTE'de       │  Gömülü sistemler, DMA       │
-    │                  │  16 ardışık giriş tekrarı    │  tip = Large Page             │  tampon bölgeleri            │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │       1 MB       │  Section — L1 girişi PT'yi   │  TTBR0/TTBR1, L1 PTE'de       │  Çekirdek doğrudan eşleme,   │
-    │                  │  atlar, doğrudan fiziksel    │  tip = Section                │  bootloader bellek haritası  │
-    ├──────────────────┼──────────────────────────────┼───────────────────────────────┼──────────────────────────────┤
-    │      16 MB       │  Supersection — L1 girişinde │  TTBR0/TTBR1, L1 PTE'de       │  Büyük fiziksel bellek       │
-    │                  │  16 ardışık giriş tekrarı    │  tip = Supersection           │  bloklarının eşlenmesi       │
-    └──────────────────┴──────────────────────────────┴───────────────────────────────┴──────────────────────────────┘
+    ┌──────────────────┬──────────────────────────────┐
+    │  Sayfa Büyüklüğü │        Kullanım Alanı        │
+    ├──────────────────┼──────────────────────────────┤
+    │       4 KB       │  Standart bellek yönetimi,   │
+    │                  │  Linux varsayılan sayfası    │
+    ├──────────────────┼──────────────────────────────┤
+    │      64 KB       │  Gömülü sistemler, DMA       │
+    │                  │  tampon bölgeleri            │
+    ├──────────────────┼──────────────────────────────┤
+    │       1 MB       │  Çekirdek doğrudan eşleme,   │
+    │                  │  bootloader bellek haritası  │
+    ├──────────────────┼──────────────────────────────┤
+    │      16 MB       │  Büyük fiziksel bellek       │
+    │                  │  bloklarının eşlenmesi       │
+    └──────────────────┴──────────────────────────────┘
 
-    64 Bit ARM işlemcileri (A Profilleri) tarafından desteklenen sayfa büyüklükleri ise şöyledir:
+    64 Bit ARM işlemcileri tarafından desteklenen sayfa büyüklükleri ise şöyledir:
 
-    ┌──────────────────┬───────────────────────────────┬────────────────────────────────┬──────────────────────────────┐
-    │  Sayfa Büyüklüğü │            Mekanizma          │           Gereksinim           │        Kullanım Alanı        │
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │       4 KB       │  4 seviyeli sayfalama         │  TCR_EL1.TG0 = 0b00,           │  Linux varsayılan sayfası,   │
-    │                  │  (L0→L1→L2→L3)                │  48-bit sanal adres            │  standart bellek yönetimi    │
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │       2 MB       │  Huge page — L2 girişinde     │  TCR_EL1.TG0 = 0b00,           │  Büyük kernel eşlemeleri,    │
-    │                  │  PS biti = 1, L3 atlanır      │  L2 PTE'de block entry         │  hugepages, TLB verimliliği  │
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │       1 GB       │  Huge page — L1 girişinde     │  TCR_EL1.TG0 = 0b00,           │  Büyük veri tabanları,       │
-    │                  │  PS biti = 1, L2+L3 atlanır   │  L1 PTE'de block entry         │  HPC iş yükleri              │
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │      16 KB       │  4 seviyeli sayfalama         │  TCR_EL1.TG0 = 0b10,           │  Apple Silicon (macOS/iOS),  │
-    │                  │  (L0→L1→L2→L3)                │  47-bit sanal adres            │  özel çekirdek yapılandırması│
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │      32 MB       │  Huge page — 16 KB tabanında  │  TCR_EL1.TG0 = 0b10,           │  Apple Silicon büyük         │
-    │                  │  L2 girişinde block entry     │  L2 PTE'de block entry         │  bellek eşlemeleri           │
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │      64 KB       │  3 seviyeli sayfalama         │  TCR_EL1.TG0 = 0b01,           │  Gömülü sistemler, DMA,      │
-    │                  │  (L1→L2→L3)                   │  52-bit sanal adres (opt.)     │  büyük TLB entry verimliliği │
-    ├──────────────────┼───────────────────────────────┼────────────────────────────────┼──────────────────────────────┤
-    │     512 MB       │  Huge page — 64 KB tabanında  │  TCR_EL1.TG0 = 0b01,           │  Büyük fiziksel bellek       │
-    │                  │  L2 girişinde block entry     │  L2 PTE'de block entry         │  bloklarının eşlenmesi       │
-    └──────────────────┴───────────────────────────────┴────────────────────────────────┴──────────────────────────────┘
+    ┌──────────────────┬──────────────────────────────┐
+    │  Sayfa Büyüklüğü │        Kullanım Alanı        │
+    ├──────────────────┼──────────────────────────────┤
+    │                  │ standart bellek yönetimi     │
+    ├──────────────────┼──────────────────────────────┤
+    │       2 MB       │ Büyük çekirdek eşlemeleri    │
+    │                  │ hugepages, TLB verimliliği   │
+    ├──────────────────┼──────────────────────────────┤
+    │       1 GB       │ Büyük veri tabanları,        │
+    │                  │ HPC iş yükleri               │
+    ├──────────────────┼──────────────────────────────┤
+    │      16 KB       │ Apple Silicon (macOS/iOS),   │
+    │                  │ özel çekirdek yapılandırması │
+    ├──────────────────┼──────────────────────────────┤
+    │      32 MB       │ Apple Silicon büyük          │ 
+    │                  │ bellek eşlemeleri            │ 
+    ├──────────────────┼──────────────────────────────┤
+    │      64 KB       │ Gömülü sistemler, DMA,       │
+    │                  │ büyük TLB entry verimliliği  │
+    ├──────────────────┼──────────────────────────────┤
+    │     512 MB       │ Büyük fiziksel bellek        │
+    │                  │ bloklarının eşlenmesi        │
+    └──────────────────┴──────────────────────────────┘
 
     Buradan da görüldüğü gibi 32 bit, 64 bit Intel ve ARM işlemcileri 4K sayfa büyüklüklerini desteklemektedir. Linux 
-    tarafından bu işlemcilerde 4K büyüklüğünde sayfalar kullanılmaktadır. 
+    tarafından bu işlemcilerde temel olarak 4K büyüklüğünde sayfalar kullanılmaktadır. 
 
     Son olarak yaygın tüm işlemcilerin desteklediği sayfa büyüklüklerini de aşağıdaki tabloda veriyoruz:
 
-    ┌─────────────────────────┬─────────────────────────────────────────────────────────┐
-    │        İşlemci          │                   Sayfa Büyüklükleri                    │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ Intel IA-32 (x86)       │ 4 KB, 4 MB, 2 MB (PAE modunda)                          │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ Intel/AMD x86-64        │ 4 KB, 2 MB, 1 GB                                        │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ ARM (AArch32)           │ 4 KB, 64 KB, 1 MB, 16 MB                                │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ ARM (AArch64)           │ 4 KB, 16 KB, 64 KB, 2 MB, 32 MB, 512 MB, 1 GB           │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ RISC-V (Sv32)           │ 4 KB, 4 MB                                              │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ RISC-V (Sv39)           │ 4 KB, 2 MB, 1 GB                                        │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ RISC-V (Sv48)           │ 4 KB, 2 MB, 1 GB, 512 GB                                │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ RISC-V (Sv57)           │ 4 KB, 2 MB, 1 GB, 512 GB, 256 TB                        │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ PowerPC (32-bit)        │ 4 KB, 256 KB, 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB     │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ PowerPC / POWER (64-bit)│ 4 KB, 64 KB, 16 MB, 16 GB                               │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ IBM S/390 / z/Arch      │ 4 KB, 1 MB, 2 GB                                        │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ Alpha (AXP)             │ 8 KB, 64 KB, 512 KB, 4 MB                               │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ SPARC (32-bit)          │ 4 KB, 256 KB, 16 MB                                     │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ SPARC64 / UltraSPARC    │ 8 KB, 64 KB, 512 KB, 4 MB, 32 MB, 256 MB, 2 GB          │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ MIPS (32-bit)           │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB    │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ MIPS (64-bit)           │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB    │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ IA-64 (Itanium)         │ 4 KB, 8 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB,    │
-    │                         │ 64 MB, 256 MB                                           │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ PA-RISC (HP)            │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB    │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ m68k (Motorola)         │ 4 KB                                                    │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ OpenRISC                │ 8 KB                                                    │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ LoongArch               │ 4 KB, 16 KB, 64 KB, 2 MB, 1 GB                          │
-    ├─────────────────────────┼─────────────────────────────────────────────────────────┤
-    │ Xtensa                  │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB                  │
-    └─────────────────────────┴─────────────────────────────────────────────────────────┘
+    ┌──────────────────────────┬──────────────────────────────────────────────────────┐
+    │        İşlemci           │                   Sayfa Büyüklükleri                 │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ Intel IA-32 (x86)        │ 4 KB, 4 MB, 2 MB (PAE modunda)                       │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ Intel/AMD x86-64         │ 4 KB, 2 MB, 1 GB                                     │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ ARM (AArch32)            │ 4 KB, 64 KB, 1 MB, 16 MB                             │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ ARM (AArch64)            │ 4 KB, 16 KB, 64 KB, 2 MB, 32 MB, 512 MB, 1 GB        │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ RISC-V (Sv32)            │ 4 KB, 4 MB                                           │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ RISC-V (Sv39)            │ 4 KB, 2 MB, 1 GB                                     │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ RISC-V (Sv48)            │ 4 KB, 2 MB, 1 GB, 512 GB                             │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ RISC-V (Sv57)            │ 4 KB, 2 MB, 1 GB, 512 GB, 256 TB                     │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ PowerPC (32-bit)         │ 4 KB, 256 KB, 512 KB, 1 MB, 2 MB, 4 MB, 8 MB, 16 MB  │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ PowerPC / POWER (64-bit) │ 4 KB, 64 KB, 16 MB, 16 GB                            │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ IBM S/390 / z/Arch       │ 4 KB, 1 MB, 2 GB                                     │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ Alpha (AXP)              │ 8 KB, 64 KB, 512 KB, 4 MB                            │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ SPARC (32-bit)           │ 4 KB, 256 KB, 16 MB                                  │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ SPARC64 / UltraSPARC     │ 8 KB, 64 KB, 512 KB, 4 MB, 32 MB, 256 MB, 2 GB       │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ MIPS (32-bit)            │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ MIPS (64-bit)            │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ IA-64 (Itanium)          │ 4 KB, 8 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, │
+    │                          │ 64 MB, 256 MB                                        │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ PA-RISC (HP)             │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB, 16 MB, 64 MB │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ m68k (Motorola)          │ 4 KB                                                 │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ OpenRISC                 │ 8 KB                                                 │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ LoongArch                │ 4 KB, 16 KB, 64 KB, 2 MB, 1 GB                       │
+    ├──────────────────────────┼──────────────────────────────────────────────────────┤
+    │ Xtensa                   │ 4 KB, 16 KB, 64 KB, 256 KB, 1 MB, 4 MB               │
+    └──────────────────────────┴──────────────────────────────────────────────────────┘
 
-    Biz aşağıdaki örneklerimizde sayfa büyüklüğünün 4K olduğunu varsayacağız.
+    Biz anlatımlarımızda sayfa büyüklüğünün 4K olduğunu varsayacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Sayfalama mekanizması aktif hale getirildiğinde artık işlemci fiziksel bellekteki her sayfaya 0'tan itibaren bir 
-    sayfa numarası karşılık getirmektedir. Örneğin 32 bir Intel ya da ARM işlemcilerinde 4K'lık sayfalar kullanıldığında 
+    Sayfalama mekanizması aktif hale getirildiğinde artık işlemci fiziksel bellekteki her sayfaya 0'dan itibaren bir 
+    sayfa numarası karşılık getirmektedir. Örneğin 32 bit Intel ya da ARM işlemcilerinde 4K'lık sayfalar kullanıldığında 
     fiziksel belleğin ilk 4K'lık bölgesi 0'ıncı sayfa ikinci 4K'lık bölgesi 1'inci sayfa biçiminde numaralandırılmaktadır:
 
     ┌──────────────────────────────┬───────────────┐
@@ -8119,13 +8116,13 @@ void exit_sys_errno(const char *msg, int eno)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Sayfalama mekanizması aktif hale getirildiğinde artık işlemci makine kodlarındak adresleri sayfa tablosu (page table)
+    Sayfalama mekanizması aktif hale getirildiğinde artık işlemci makine kodlarındaki adresleri sayfa tablosu (page table)
     denilen bir tabloya bakarak fiziksel adrese dönüştürmektedir. Sayfa tablolarının organizasyonu kademeli bir biçimdedir. 
     Biz önce bu dönüşümün nasıl yapıldığını açıklayabilmek için sanki sayfa tablosunu tek kademeymiş gibi ele alacağız. 
     Sonra bu kademeli yapı hakkında bilgi vereceğiz. 
     
-    32 bit bir sistemdeki sayfa tablosununun işlevini kolay anlayabilmek için onun şöyle bir yapıda olduğunu 
-    düşünebiliriz (buradaki değerler hex sistemdedir):
+    32 bit bir sistemdeki sayfa tablosunun işlevini kolay anlayabilmek için onun şöyle bir yapıda olduğunu düşünebiliriz 
+    (buradaki değerler hex sistemdedir):
 
     ┌─────────────────────┬──────────────────────┐
     │   Sanal Sayfa No    │  Fiziksel Sayfa No   │
@@ -8140,15 +8137,15 @@ void exit_sys_errno(const char *msg, int eno)
     │         ...         │         ...          │
     └─────────────────────┴──────────────────────┘
 
-    32 bit işlemcinin program ierisindeki sanal adresi nasıl fiziksel adrese dönüştürdüğünü açıklayalım. Örneğin 
+    32 bit işlemcinin program içerisindeki sanal adresi nasıl fiziksel adrese dönüştürdüğünü açıklayalım. Örneğin 
     işlemci aşağıdaki gibi bir makine komutuyla karşılaşmış olsun:
 
     MOV EAX, [1A4005A0]
 
     Buradaki 1A4005A0 adres sanal bir adrestir. İşlemci sayfa tablosuna başvurarak bu sanal adresi fiziksel adrese 
-    dönüştürecektir. Bunun işlemci önce sanal adresi sayfa büyüklüğüne (yani 4096'ya bölerek) hangi sanal sayfaya 
-    ilişkin olduğunu belirler. Bu bölmenin ikili ya da 16'lı sistemde yapılması oldukça kolaydır. 32 bitlik bir sayı
-    12 kere sağa ötelenirse ya da onun düşük anlamlı 12 biti atılırsa 4096'ya bölünmüş olur. 32 bitlik bir sayının 
+    dönüştürecektir. Bunun için işlemci önce sanal adresi sayfa büyüklüğüne (yani 4096'ya bölerek) hangi sanal sayfaya 
+    ilişkin olduğunu belirler. Bu bölmenin ikilik (ya da 16'lık )sistemde yapılması oldukça kolaydır. 32 bitlik bir 
+    sayı 12 kere sağa ötelenirse ya da onun düşük anlamlı 12 biti atılırsa 4096'ya bölünmüş olur. 32 bitlik bir sayının 
     sağındaki 12 bitin aynı zamanda sayının 4096'ya bölümünden elde edilen kalan değeri olduğuna dikkat ediniz. İşte 
     işlemci 32 bitlik sanal adresi 20 bitlik ve 12 bitlik iki kısma ayırmaktadır. Örneğin 1A4005A0 sanal adresi iki 
     kısma şöyle ayrılmaktadır:
@@ -8161,28 +8158,27 @@ void exit_sys_errno(const char *msg, int eno)
     Örneğimizdeki sayfa tablosuna göre 1A4005A0 sanal adres ile işlemci aslında 100455A0 adresine erişecektir. 
     
     Şimdi bir programın tamamının (genellikle böyle olmaz) fiziksel RAM'e yüklendiğini düşünelim. Bu durumda prosesin
-    sanal bellek alanı ardışıl olacaktır ancak aslında prosin fiziksel bellekteki yerleşimi ardışıl olmayacaktır. Örneğin 
-    program içerisinde malloc fonksiyou ile 8K'lık bir tahsisat yapmış olalım. Bu durumda aslında tahsis edilen alan
-    iki sayfa uzunluğundadır. malloc bize sanal adresi vermektedir. Yani malloc fonksiyonunun verdiği sanal adresten 
+    sanal bellek alanı ardışıl olacaktır ancak aslında prosin fiziksel bellekteki yerleşimi ardışıl olmayacaktır. 
+    Örneğin program içerisinde malloc fonksiyonu ile 8K'lık bir tahsisat yapmış olalım. Bu durumda aslında tahsis edilen 
+    alan iki sayfa uzunluğundadır. malloc bize sanal adresi vermektedir. Yani malloc fonksiyonunun verdiği sanal adresten 
     itibaren 8K'lık alanı biz programcı olarak ardışıl bir biçimde kullanabiliriz. Ancak arka planda aslında bu tahsis 
     edilen alan iki sayfaya bölündüğü için fiziksel RAM'de ardışıl olmak zorunda değildir. Aynı durum programın makine 
-    kodlarının bulundağu bölümler için de yerel değişkenlerin tutulduğu stack için de geçerlidir. 
+    kodlarının bulunduğu bölümler için de yerel değişkenlerin tutulduğu stack için de geçerlidir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Peki işlemci sayfa tablosunun yerini nasıl bilmektedir? İşte işlemcilerde mzel bir yazmaç sayfa tablosunun yerini 
-    göstermektedir. Örneğin Intel işlemcilerinde CR3 yazmacı sayfa tablosunun fiziksel adresini gösterir. Sayfa tablolarını
-    oluşturan ve bu yazamaca  sayfa tablolarının başlangıç adresini yerleştiren işletim sistemidir. Yani örneğin Intel 
+    Peki işlemci sayfa tablosunun yerini nasıl bilmektedir? İşte işlemcilerde özel bir yazmaç sayfa tablosunun yerini 
+    göstermektedir. Örneğin Intel işlemcilerinde CR3 yazmacı sayfa tablosunun fiziksel adresini gösterir. Yani Intel 
     işlemcilerinde işlemci her zaman sayfa tablosuna CR3 yazmacının gösterdiği yerden erişmektedir. ARM işlemcileri de
-    benzer biçimde sayfa tablosuna TTBR0_EL1 ve TTBR1_EL1 yazmaçlarının gösterdiği yerden erişmektedir. Biz örneklerimizde
-    default durumda Intel işlemcileri üzerinden örnekleriizi vereceğiz. 
+    benzer biçimde sayfa tablosuna TTBR0_EL1 ve TTBR1_EL1 yazmaçlarının gösterdiği yerden erişmektedir. Tabii sayfa
+    tablolarını oluşturan ve bu yazamaca sayfa tablolarının başlangıç adresini yerleştiren işletim sistemidir.     
     
     Sayfalama mekanizmasını kullanan işletim sistemlerinde her proses için (thread için değil) ayrı bir sayfa tablosu 
-    oluşturulmaktadır. İşletim sistemi thread'ler arası geçiş oluştuğunda eğer çalışmasına ara verilen thread ile geçilen 
-    thread farklı proseslere ilişkinse bu yazmacı (Intel işlemcilerindeki CR3 yazmacı) değiştirerek yeni geçilen thread'in 
-    artık o prosese ilişkin sayfa tablosunu göstermesini sağlamaktadır. Örneğin sistemde o anda P1, P2 ve P3 olmak üzere
-    üç proses proses çalışıyor olsun. Bu durumda işletim sistemi bu üç proses için üç farklı sayfa tablosu oluşturacaktır. 
-    Bu üç prosesin thread'leri de aşağıdaki gibi olsun:
+    oluşturulmaktadır. İşletim sistemi "thread'ler arası geçiş (context switch)" oluştuğunda eğer çalışmasına ara verilen 
+    thread'le geçilen thread farklı proseslere ilişkinse sayfa tablosunun yerini gösteren yazmacı (Intel işlemcilerindeki 
+    CR3 yazmacı) değiştirerek yeni geçilen thread'in artık kendi prosesine ilişkin sayfa tablosunu göstermesini sağlamaktadır. 
+    Örneğin sistemde o anda P1, P2 ve P3 olmak üzere üç proses proses çalışıyor olsun. Bu durumda işletim sistemi bu üç 
+    proses için üç farklı sayfa tablosu oluşturacaktır. Bu üç prosesin thread'leri de aşağıdaki gibi olsun:
 
     P1 
         T11
@@ -8197,8 +8193,8 @@ void exit_sys_errno(const char *msg, int eno)
     Eğer şu anda T11 thread'i çalışıyorsa işlemcinin ilgili yazmacı (Intel'deki CR3 yazmacı) P1 prosesinin sayfa tablosunu
     gösteriyor durumdadır. Thread'ler arası geçiş oluşup T12 thread'i çalışmaya başlayınca T12 thread'i de P1 prosesinin
     bir thread'i olduğu için kullanılan sayfa tablosu (yani Intel'deki CR3 yazmacı) değiştirilmez. Ancak T12 thread'inden 
-    T21 thread'ine geçilirken işletim sistemi işlemcinin ilgili yazmacını değiştirerek (Intel'deki CR3 yazmacı) işlemcinin 
-    artık P2 prosesinin sayfa tablosunu göstermesini sağlamaktadır.     
+    T21 thread'ine geçilirken işletim sistemi işlemcinin ilgili yazmacını değiştirerek işlemcinin artık P2 prosesinin 
+    sayfa tablosunu göstermesini sağlamaktadır.     
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -8249,29 +8245,28 @@ void exit_sys_errno(const char *msg, int eno)
 
     1) İşletim sistemi önce kesmeye (fault'a) yol açan sanal adresi inceler. Eğer bu sanal adres program içerisindeki 
     geçerli bir adres değilse prosesi cezalandırarak sonlandırır. Örneğin biz tahsis etmediğimiz bir bellek alanına 
-    erişmek istediğimizde prgogramımız böyle sonlandırılmaktadır. (Linux sistemlerinde işletim sistemi bu durumda 
-    proses üzerinde SIGSEGV isimli bir sinyal oluşturmaktadır. Bu sinyal programcı tarafındna işlenebilir. Ancak 
-    akış programcının sinyal için set ettiği fonksiyondan çıkıldığında sinyal yeniden tetiklenmektedir. Yani programcı
+    erişmek istediğimizde prgogramımız böyle sonlandırılmaktadır. (UNIX/Linux sistemlerinde işletim sistemi bu durumda 
+    proses üzerinde SIGSEGV isimli bir sinyal oluşturmaktadır. Bu sinyal programcı tarafından işlenebilir. Ancak 
+    akış programcının sinyal için set ettiği fonksiyondan çıktığında sinyal yeniden tetiklenmektedir. Yani programcı
     bu sinyali işledikten sonra programını kendisi sonlandırmalıdır.)
 
-    2) Eğer kesmeye yol açan adres prgram içerisinde geçerli bir adresse işletim sistemi programın o kısmına ilişkin 
+    2) Eğer kesmeye yol açan adres program içerisinde geçerli bir adresse işletim sistemi programın o kısmına ilişkin 
     sayfayı fiziksel belleğe yüklemeye çalışır. Eğer fiziksel bellekte boş bir sayfa bulursa yüklemeyi bulduğu o sayfaya 
     yapar. Biz yukarıda sayfa tablosunu basit bir biçimde soyutladık. Gerçekte sayfa tabloları çok kademeli bir biçimde 
-    organize edilmektedir. Burada gerçek duruma biraz daha yaklaşarak sayfa tablolarının Intel ve ARM işlemcilerinde 
-    nasıl organize edildiği üzerinde duracağız. Kesmeye yol açan adresin geçerli olduğunu varsayalım. Bu adresin 
-    bulunduğu kısım program dosyanın içerinde olmayabilir. (Örneğin malloc fonksiyonu ile dinamik bellek tahsisatı 
-    yapılmış olabilir ve tahsis edilen alana ulaşılmak istenmiş olabilir.) İşte işletim sistemleri aynı zamanda disk 
-    üzerinde "swap alanları (swap space)" alanları kullanmaktadır. Yani erişilmek istenen geçerli adrese ilişkin 
-    program parçası çalıştırılabilir dosyada olabileceği gibi diskteki bu swap alanlarında da bulunuyor olabilir. Linux
-    sistemlerinde swap alanları ayrı bir disk bölümü biçiminde ya da bir dosya biçiminde oluşturulabilmektedir. 
+    organize edilmektedir. Kesmeye yol açan adresin geçerli olduğunu varsayalım. Bu adresin bulunduğu kısım program
+    dosyanın içerinde olmayabilir. (Örneğin malloc fonksiyonu ile dinamik bellek tahsisatı yapılmış olabilir ve tahsis 
+    edilen alana ulaşılmak istenmiş olabilir.) İşte işletim sistemleri aynı zamanda disk üzerinde "swap alanları (swap space)" 
+    kullanmaktadır. Yani erişilmek istenen geçerli adrese ilişkin program parçası çalıştırılabilir dosyada olabileceği 
+    gibi diskteki bu swap alanlarında da bulunuyor olabilir. Linux sistemlerinde swap alanları ayrı bir disk bölümü
+    biçiminde ya da bir dosya biçiminde oluşturulabilmektedir. 
     
     İşletim sistemi diskteki programa ilişkin kısmı fiziksel belleğe yükledikten sonra sayfa tablosunu artık düzeltir. 
     Böylece kesmeye yol açan makine komutuna ilişkin sanal sayfa artık bir fiziksel sayfayla ilişkilendirilmiş olur. 
     Bu tür kesmelerin (bu tür kesmelere "fault" da denilmektedir) kesme kodlarından çıkıldığında işlemci akışı kesmeye 
     yol açan komutun kendisinden devam ettirmektedir. Ancak artık fiziksel sayfa eşleştirmesi yapılmış olduğundan yeniden 
-    kesme oluşmayacaktır. Gürüldüğü gibi işletim sistemi başlangıça tüm programı yüklememekte talep oluştuğunda programın 
-    ilgili kısmını fiziksel belleğe yüklemektedir. Bu davarnışa işletim sistemleri dünyasında "demand paging" de 
-    denilmektedir. 
+    kesme oluşmayacaktır. Gürüldüğü gibi işletim sistemi başlangıçta tüm programı yüklememekte talep oluştuğunda programın 
+    ilgili kısmını fiziksel belleğe yüklemektedir. Bu davarnışa işletim sistemleri dünyasında İngilizce "demand paging" 
+    de denilmektedir. 
  
     3) Peki geçerli bir adres için page fault kesmesi oluştuğunda fiziksel bellek tıka basa doluysa bu durumda ne 
     olacaktır? İşte bu durumda bazı süreçler devreye girmektedir. Linux'ta bu sürecin ayrıntıları vardır. Ancak tipik 
@@ -8279,7 +8274,7 @@ void exit_sys_errno(const char *msg, int eno)
     erişilmek istenen sayfaları diskten fiziksel belleğe yüklemektedir. 
 
     İşletim sistemleri terminolojisinde diskteki bir sayfanın fiziksel belleğe yüklenmesine İngilizce "swap-in", fiziksel 
-    bellekteki bir sayfanın diske geri yazılmasına da "swap-out", bu sürece de genel olarak "swapping" denilmektedir. 
+    bellekteki bir sayfanın diske geri yazılmasına "swap-out", bu sürece de genel olarak "swapping" denilmektedir. 
 
       Fiziksel RAM                    Swap Alanı (Disk)
     ┌──────────────┐   swap-out →   ┌──────────────────┐
@@ -8290,13 +8285,13 @@ void exit_sys_errno(const char *msg, int eno)
 
     Yukarıda maddelerle açıkladığımız mekanizmaya işletim sistemlerinde "sanal bellek (virtual memory)" denilmektedir. 
     Sanal bellek "programların hepsinin değil, belirli kısımlarının fiziksel belleğe yüklenerek disk ile fiziksel bellek 
-    arasında yer değiştirmeli bir biçimde çalıştırılmasına" denilmektedir. Linux gibi, Windows gibi, macOS gibi işletim 
-    sistemleri sanal bellek mekanizmasına sahiptir. Sanal bellek sayesinde fiziksel RAM'in çok ötesinde çok sayıda 
-    programın birlikte çalışması sağlanabilmektedir. 
+    arasında yer değiştirmeli bir biçimde çalıştırılması" anlamına gelmektedir. Linux gibi, Windows gibi, macOS gibi 
+    işletim sistemleri sanal bellek mekanizmasına sahiptir. Sanal bellek sayesinde fiziksel RAM'in çok ötesinde çok 
+    sayıda programın birlikte çalışması sağlanabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                        71. Ders 19/04/2026 - Pazar   
+                                            71. Ders 19/04/2026 - Pazar   
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -8336,17 +8331,16 @@ void exit_sys_errno(const char *msg, int eno)
     │         ...         │         ...          │
     └─────────────────────┴──────────────────────┘
 
-    Sayfa tablolarını işletim sistemi oluşturmaktadır. İşletim sistemi proseslerin fiziksel sayfa numaralarını özel 
-    bazı durumla dışında zaten çakıştırmaz. Bu durumda bir proses asla diğerinin fiziksel bellekteki alanına erişmez. 
-    Her proses ayrı fiziksel sayfaları kullanmaktadır. Page fault oluştuğunda işletim sistemi hiçbir proses tarafından 
-    kullanılmayan fiziksel sayfayı tahsis etmektedir. 
+    Sayfa tablolarını işletim sisteminin oluşturduğunu anımsayınız. İşletim sistemi proseslerin fiziksel sayfa numaralarını 
+    özel bazı durumlar dışında zaten çakıştırmaz. Bu durumda bir proses asla diğerinin fiziksel bellekteki alanına erişemez. 
+    Her proses ayrı fiziksel sayfaları kullanmaktadır. Page fault oluştuğunda swap-in işlemi sırasında işletim sistemi 
+    hiçbir proses tarafından kullanılmayan bir fiziksel sayfayı tahsis etmektedir. 
 
-    Pek çok işletim sisteminde (ve tabii Linux sistemlerinde de) prosesleri haberleştirmek için "paylaşılan bellek 
-    alanları (shared memory)" denilen bir yöntem grubu kullanılmaktadır. (Tabii başka yöntemler de vardır.) Paylaşılan 
-    bellek alanları yönteminde iki proses (daha fazla da olabilir) farklı sanal adresleri kullanarak aynı fiziksel 
-    sayfaya erişebilmektedir. Böylece birinin o sanal adres yoluyla o fiziksel sayfaya yazdığını diğeri başka bir sanal 
-    adres yoluyla o fiziksel sayfadan okuyabilmektedir. Örneğin 32 bit bir sistemde P1 ve P2 proseslerinin sayfa 
-    tabloları şöyle olsun:
+    Pek çok işletim sisteminde (ve tabii Linux sistemlerinde de) prosesleri haberleştirmek için "paylaşılan bellek alanları 
+    (shared memory)" denilen bir yöntem grubu da kullanılmaktadır. Paylaşılan bellek alanları yönteminde iki proses (daha 
+    fazla da olabilir) farklı sanal adresleri kullanarak aynı fiziksel sayfaya erişebilmektedir. Böylece birinin bir sanal 
+    adres yoluyla o fiziksel sayfaya yazdığını diğeri başka bir sanal adres yoluyla o fiziksel sayfadan okuyabilmektedir. 
+    Örneğin 32 bit bir sistemde P1 ve P2 proseslerinin sayfa tabloları şöyle olsun:
 
             P1 Prosesinin Sayfa Tablosu                       P2 Prosesinin Sayfa Tablosu
     ┌─────────────────────┬──────────────────────┐   ┌─────────────────────┬──────────────────────┐
@@ -8366,16 +8360,16 @@ void exit_sys_errno(const char *msg, int eno)
     └─────────────────────┴──────────────────────┘   └─────────────────────┴──────────────────────┘
     
     Burada P1 prosesinin sayfa tablosundaki 28A00 sanal sayfa numarasının P2 prosesinin sayfa tablosundaki 32B00 
-    sanal sayfa numarası ile fiziksel bellek bağlamında öakuştırıldığını görüyorsunuz. Tabii işletim sistemi böyle 
+    sanal sayfa numarası ile fiziksel bellek bağlamında çakıştırıldığını görüyorsunuz. Tabii işletim sistemi böyle 
     bir çakıştırmayı iki prosesin isteği doğrultusunda yapmaktadır. Bu durumda P1 prosesi [28A00000]-[28A00FFF]
     arasındaki sanal adres aralığını, P2 prosesi de [32B00000]-[32B00FFF] sanal adres alanını kullanarak aynı fiziksel
-    belleğe erişebilmektedir. 
+    sayfaya erişebilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Biz yukarıdaki çizimlerde sayfa tablosu girişlerinde yalnızca fiziksel sayfa numarasının bulunduğunu ima ettik. 
     Ancak aslında durum böyle değildir. Sayfa tablosu girişleri yalnızca fiziksel sayfa numarasını değil aynı zamanda 
-    o fiziksel sayfaya ilişkin ek birtkaım bilgileri de tutmaktadır. Örneğin 32 bit Intel işlemcilerindeki 4K'lık sayfa 
+    o fiziksel sayfaya ilişkin ek birtakım bilgileri de tutmaktadır. Örneğin 32 bit Intel işlemcilerindeki 4K'lık sayfa 
     tablosu girişlerinin (Page Table Entry) formatı şöyledir:
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -8401,7 +8395,7 @@ void exit_sys_errno(const char *msg, int eno)
     │  Bit  0     (P)   : Present        — 0: page fault,   1: sayfa fiziksel bellekte mevcut                   │         
     └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-    Görüldüğü gibi sayfa talosunun bir elemanı (yani bir sayfa girişi) 4 byte uzunluktadır. Bu 4 byte'ın yüksek anlamlı 
+    Görüldüğü gibi sayfa tablosunun bir elemanı (yani bir sayfa girişi) 4 byte uzunluktadır. Bu 4 byte'ın yüksek anlamlı 
     20 biti ([31-12] bitleri) fiziksel sayfa numarasını tutmaktadır. Ancak kalan 12 bitte o sayfaya ilişkin başka bilgiler 
     vardır. 3 bitlik IGN alanı kullanılmamaktadır. Sayfa tablosu da aşağıdaki gibi dörder byte'lık girişlerden oluşmaktadır:
 
@@ -8424,32 +8418,33 @@ void exit_sys_errno(const char *msg, int eno)
     Sayfa tablosu girişlerini şöyle de temsil edebiliriz:
 
     ┌─────────────────┬───────────────────┐
-    │ Fiziksel Adresi │ Sayfa Özellikleri │   4 Byte
+    │ Fiziksel Adres  │ Sayfa Özellikleri │   4 Byte
     ├─────────────────┼───────────────────┤
-    │ Fiziksel Adresi │ Sayfa Özellikleri │   4 Byte
+    │ Fiziksel Adres  │ Sayfa Özellikleri │   4 Byte
     ├─────────────────┼───────────────────┤
-    │ Fiziksel Adresi │ Sayfa Özellikleri │   4 Byte
-    ├─────────────────┼───────────────────┤
-    │       ...       │           ...     │
+    │ Fiziksel Adres  │ Sayfa Özellikleri │   4 Byte
     ├─────────────────┼───────────────────┤
     │       ...       │           ...     │
     ├─────────────────┼───────────────────┤
     │       ...       │           ...     │
     ├─────────────────┼───────────────────┤
-    │ Fiziksel Adresi │ Sayfa Özellikleri │   4 Byte
+    │       ...       │           ...     │
+    ├─────────────────┼───────────────────┤
+    │ Fiziksel Adres  │ Sayfa Özellikleri │   4 Byte
     └─────────────────┴───────────────────┘
 
     32 bit Intel işlemcilerindeki 4K'lık sayfaların sayfa özelliklerinin bazılarını açıklamak istiyoruz. 
     
     - Sanal sayfa için fiziksel sayfanın eşleştirilmiş olup olmadığı P biti ile belirlenmektedir. Bu P biti 0 ise 
-    eşleştirme yapılmamıştır, yani işlemci bu sayfaya erişmek istediğinde page fault oluşur. Bu P biti 1 ise işlemci 
-    yüksek anlamlı 20 bir ile belirtilen fiziksel sayfadan erişimini yapar. R/W biti sayfanın "read-only" olup olmadığını 
-    belirtmektedir. Eğer bu bit 0 ise sayfa "read-only" durumdadır. Sayfaya yazma yapıldığında "page fault" oluşur. 
-    Örneğin C derleyicileri genellikle string ifadelerini ve global const nesneleri ELF formatının ".const" bölümüne 
-    yerleştirmektedir. İşletim sisteminin yükleyicisi de (yani exec fonksiyonları) bu ".const" bölüm için "read-only" 
-    sayfalar oluşturmaktadır. Böylece buraya erişim yapıldığında program çökmektedir. (Derleyiciler yerel const onst 
-    nesneleri ".const" bölümüne yerleştiremez. Yerel değişkenlerimn hepsi stack'tedir. Stack sayfaları da "read-only" 
-    yapılmaz.) 
+    eşleştirme yapılmamıştır, yani işlemci bu sayfaya erişmek istediğinde "page fault" oluşur. Bu P biti 1 ise işlemci 
+    yüksek anlamlı 20 bit ile belirtilen fiziksel sayfadan erişimini yapar. 
+    
+    - R/W biti sayfanın "read-only" olup olmadığını belirtmektedir. Eğer bu bit 0 ise sayfa "read-only" durumdadır. 
+    Sayfaya yazma yapıldığında "page fault" oluşur. Örneğin C derleyicileri genellikle string ifadelerini ve global 
+    const nesneleri ELF formatının ".const" bölümüne yerleştirmektedir. İşletim sisteminin yükleyicisi de (yani exec 
+    fonksiyonları) bu ".const" bölüm için "read-only" sayfalar oluşturmaktadır. Böylece buraya erişim yapıldığında 
+    program çökmektedir. (Derleyiciler yerel const nesneleri ".const" bölümüne yerleştiremez. Yerel değişkenlerimn 
+    hepsi stack'tedir. Stack sayfaları da "read-only" yapılamamaktadır.) 
     
     - Sayfa girişindeki U/S biti sayfanın kullanıcı modunda mı çekirdek modunda olduğunu mu belirtmektedir. Eğer bu 
     bit 0 ise sayfa çekirdek modundadır. Çekirdek modundaki sayfaya kullanıcı modundaki prosesler erişmeye çalışırsa 
@@ -8463,20 +8458,20 @@ void exit_sys_errno(const char *msg, int eno)
     diskteki bir sayfayı fiziksel belleğe çektiğinde) ilgili sayfaya ilişkin sayfa girişinin D bitini de 0 yapmaktadır. 
     Daha sonra işletim sisteminin bu sayfayı "swap-out" yapmak için fiziksel bellekten atmak istediğini düşünelim. Eğer 
     bu sayfaya hiç yazma yapılmadıysa yani D biti hala 0 ise bu sayfanın swap-out sırasında diske geri yazılmasına 
-    gerek kalmaz. Ancak bu sayfaın D biti 1 ise sayfada değişiklikj yağıldığı için sayfanın diskteki swap alanında 
+    gerek kalmaz. Ancak bu sayfanın D biti 1 ise sayfada değişiklik yapıldığı için sayfanın diskteki swap alanında 
     geri yazılması gerekir. 
     
     - Sayfa girişindeki A (Access) biti sayfadan her okuma ve yazma yapıldığında set edilmektedir. Bu bitten işletim 
-    sistemleri sanal bellek mekanizmasında istatistik yapmak için gfaydalanmaktadır. İşletim sistemi bu biti belli 
-    periyotlarda kontol edip sıfırlar. Eğer bu bit çok sayıda set edildiyse bu sayfaya erişim son zamnlarda çok yapılmıştır. 
-    Bu sayfanın swapt-out amaçlı fiziksel bellekten çıkartılması uygun değildir. 
+    sistemleri sanal bellek mekanizmasında istatistik yapmak için faydalanmaktadır. İşletim sistemi bu biti belli 
+    periyotlarda kontol edip sıfırlar. Eğer bu bit çok sayıda set edildiyse bu sayfaya erişim son zamanlarda çok yapılmıştır. 
+    Bu sayfanın swap-out amaçlı fiziksel bellekten çıkartılması uygun değildir. 
 
     - Sayfa girişlerinde CPU'nun önbellek mekanizmasıyla ilgili çeşitli bitler de bulunmaktadır. CD (Cache Disable)
     biti işletim sistemi tarafından 1 yapılırsa CPU bu fiziksel sayfayı önbellek mekanizmasının dışında bırakır. Yani
     bu fiziksel sayfaya yapılan yazma ve okumalar doğrudan önbelleğe uğramadan gerçekleştirilir. WT (Write-Through)
-    biti ilgili sayfa içeriğinin CPU önbelleğini "write-throug" biçimde kullanıp kullanmayacağını belirtmekedir. Eğer 
+    biti ilgili sayfa içeriğinin CPU önbelleğini "write-through" biçimde kullanıp kullanmayacağını belirtmektedir. Eğer 
     bu bit 1 yapılırsa bu sayfayla ilgili yazma işleminde CPU'nun önbelleği kullanılmaz, yazma doğrudan fiziksel belleğe 
-    yapılır, tabii okuma işlemlerinde CPU'nun önbelliğine başvurulmaktadır. Tabii bu bit CD biti 1 ise işlev görmemektedir. 
+    yapılır, tabii okuma işlemlerinde CPU'nun önbelleğine başvurulmaktadır. Tabii bu bit CD biti 1 ise işlev görmemektedir. 
     Bu iki biti birlikte şöyle de ele alabiliriz:
 
     ┌───────┬───────┬──────────────────────────────────────────┐
@@ -8512,16 +8507,16 @@ void exit_sys_errno(const char *msg, int eno)
     Önce sayfa tablolarının neden çok kademeli olduğunu açıklayalım. Daha sonra da mekanizmanın ayrıntılarına değinelim.
     
     4K sayfa kullanan 32 bit bir sistem söz konusu olsun. Sayfa büyüklüğünün de 4K olduğunu varsayalım. Her sayfa tablosu 
-    girişi de 4 byte olsun. Bu durumda sayfa tabloları 2²⁰ * 2² = 2²⁴ = 4MB büyüklüğünde olurdu. Her proses için ayrı 
+    girişi de 4 byte olsun. Bu durumda sayfa tabloları 2²⁰ * 2² = 2²² = 4MB büyüklüğünde olurdu. Her proses için ayrı 
     sayfa tabloları  oluşturulduğunu anımsayınız. Bu durumda işletim sistemi her proses için fiziksel RAM'de 4MB büyüklüğünde 
-    ayrı sayfa tabloları oluşturacaktır. Proseslerin sayfa tablolarının aslında pek çok yeri boştur. Ancak o boş yerlere 
+    ayrı sayfa tabloları oluştururdu. Proseslerin sayfa tablolarının aslında pek çok yeri boştur. Ancak o boş yerlere 
     erişildiğinde "page fault" oluşması için o boş yerlere ilişkin sayfaların da P bitinin 0 yapılması gerekmektedir. 
-    İşte çok kademeli sayfa tabloları bu sorunu ortadan kaldırmaktadır. Aynı zamanda çok kademeli sayfa tabloları sayfa 
-    tablolarının fiziksel bellekteki ardışıl olma zorunluluğunu da ortadan kaldırmaktadır. 
+    İşte çok kademeli sayfa tabloları hem bu sorunu hem de sayfa tablolarının fiziksel bellekteki ardışıl olma zorunluluğunu 
+    ortadan kaldırmaktadır. 
 
     Şimdi çok kademeli sayfa tablolarının organizasyonunu 32 bit Intel işlemcileri üzerinde örneklendirerek açıklayalım. 
-    Çok kademeli sayfa tablolarında sanal adres ikiden fazla parçaya ayrılmaktadır. Örneğin 32 bit Intel işlemcileri 
-    iki kademeli sayfa tablolarına sahiptir ve bu işlemcilerde sanal adresler üç parçaya ayrılmaktadır:
+    Çok kademeli sayfa tablolarında sanal adres ikiden fazla parçaya ayrılmaktadır. Örneğin 4K sayfa kullanan 32 bit Intel 
+    işlemcileri iki kademeli sayfa tablolarına sahiptir ve bu işlemcilerde sanal adresler üç parçaya ayrılmaktadır:
 
     ┌───────────────────────────────────────────────────────────────────────┐
     │              32-bit Intel — 2 Kademeli Sayfa Tablosu                  │
@@ -8535,14 +8530,14 @@ void exit_sys_errno(const char *msg, int eno)
     └─────────────────────────┴─────────────────────────┴───────────────────┘
     ◄─────────────────────────────── 32 bit ────────────────────────────────►
 
-    Görüldüğü gibi Intel işlemcilerinde sanal adres üç kısma ayrılmaktadır: 10 bitlik "PGD (Page Directory)" alanı,
-    10 bitlik "PTE (Page Table Entry)" alanı ve 12 bitlik "Page Offset" alanı. Bu sistemlerde "sayfa sizini (page directory)
-    denilen bir tablo bulunmaktadır. Bu tablonun da her elemanı 4 byte uzunluktadır. Dolayısıyla sayfa dizini tablosu 
-    toplamda 2¹⁰ * 2² = 2¹² = 4K yer kaplamaktadır. Sayfa Dizininin her girişi bir sayfa tablosununun fiziksel adresini 
-    göstermektedir. Yani sayfa tabloları bir tane değil aslında 4096 tanedir. Sayfa tabloları yukarıda da belirttiğimiz 
-    gibi sayfa tablosu girişlerinden oluşmaktadır. Bir sayfa tablosu girişi 4 byte olduğu için sayfa tablolarının 
-    uzunlukları da 2¹⁰ * 2² = 2¹² = 4K'dır. Nihayet sanal adresin "sayfa offset'i (page offset)" alanı o fiziksel 
-    sayfada gerçek fiziksel adresin yeerini belirtmektedir. 32 bit Intel işlemcilerinde sayfa dizinindeki girişler 
+    Görüldüğü gibi 4K sayfa kullanan 32 bit Intel işlemcilerinde sanal adres üç kısma ayrılmaktadır: 10 bitlik "PGD (Page 
+    Directory)" alanı, 10 bitlik "PTE (Page Table Entry)" alanı ve 12 bitlik "Page Offset" alanı. Bu sistemlerde "sayfa 
+    dizini (page directory) denilen bir tablo bulunmaktadır. Bu tablonun da her elemanı 4 byte uzunluktadır. Dolayısıyla 
+    sayfa dizini tablosu toplamda 2¹⁰ * 2² = 2¹² = 4K yer kaplamaktadır. Sayfa Dizininin her girişi bir sayfa tablosununun 
+    fiziksel adresini göstermektedir. Yani sayfa tabloları bir tane değil aslında 1024 tanedir. Sayfa tabloları yukarıda 
+    da belirttiğimiz gibi sayfa tablosu girişlerinden oluşmaktadır. Bir sayfa tablosu girişi 4 byte olduğu için sayfa 
+    tablolarının uzunlukları da 2¹⁰ * 2² = 2¹² = 4K'dır. Nihayet sanal adresin "sayfa offset'i (page offset)" alanı o 
+    fiziksel sayfada gerçek fiziksel adresin yerini belirtmektedir. 32 bit Intel işlemcilerinde sayfa dizinindeki girişler 
     sayfa tablolarının fiziksel bellekteki yerini, sayfa tablosundaki girişler de sayfaların fiziksel bellekteki yerini 
     göstermektedir. Sayfa dizininin yeri ise işlemci içerisindeki CR3 yazamacı tarafından gösterilmektedir. 
 
@@ -8555,7 +8550,7 @@ void exit_sys_errno(const char *msg, int eno)
     └──────────────────────────────────────┴───┴──┴──┴──┴──┴──┴───┴───┴───┴───┴─┘
        
     Buradaki yüksek anlamlı 20 bit sayfa tablosunun fiziksel bellekteki adresini belirtmektedir. (Tabii sayfa tabloları 
-    4K olduğu için 20 bitin son 12 bitinin 0 olduğu kabul edilşmektedir.) Diğer bitlerin anlamları şöyledir:
+    4K olduğu için 20 bitin son 12 bitinin 0 olduğu kabul edilmektedir.) Diğer bitlerin anlamları şöyledir:
 
     ┌──────────┬────────────────────────┬─────────────────────────────────────────────────────────────────────┐
     │ Bit(ler) │          Alan          │                              Açıklama                               │
@@ -8595,10 +8590,10 @@ void exit_sys_errno(const char *msg, int eno)
     dikkat ediniz. Sayda dizini girişlerinin yine en düşük anlamlı biti P bitidir. Eğer bu bit 0 ise daha sayfa 
     tablosuna erişim yapılmadan "page fault" oluşmaktadır. Yani işletim sisteminin o giriş için sayfa tablosu 
     oluşturmasına gerek kalmamaktadır. Böylece sanal adres alanını az kullanan programların sayfa tabloları 
-    bellekte çok daha az yer kaplar duruma gelmektedir. Benzer biçimde sayfa dizininin R/W biti de sayfat tablosu
+    bellekte çok daha az yer kaplar duruma gelmektedir. Benzer biçimde sayfa dizininin R/W biti de sayfa tablosu
     girişinde olduğu gibi sayfanın "read-only" olup olmadığını belirtmektedir. 
 
-    Sayfa dizininin her bir girişinin sanal adres alanında 4MB'lik bir bir alanı beelirttiğine dikkat ediniz. 
+    Sayfa dizininin her bir girişinin sanal adres alanında 4MB'lik bir bir alanı belirttiğine dikkat ediniz. 
     2¹⁰ * 2¹² = 4M'dir. 
 
     Bu durumda 4K sayfa kullanan 32 bit Intel işlemcisi sanal adresi fiziksel adrese şöyle döüştürmektedir. Örneğin 
@@ -8610,8 +8605,8 @@ void exit_sys_errno(const char *msg, int eno)
 
     2) Sanal adresin yüksek anlamlı 10 bitini bu tabloya indeks yaparak sayfa dizininin ilgili elemanına erişir. 
     Örneğimizdeki sanal adresin yüksek anlamı 10 biti 0001111100 biçimindedir. Bu değer onluk sistemde 124'tür. O 
-    halde işlemci sayfa sayfa dizininin 124'üncü elemanına erişir. Sayfa dizininin 124'üncü elemanında 1024 girişlik 
-    bir sayfa tablosu bulunacaktır. İşlemci bu sayfa tablosuna erişir. 
+    halde işlemci sayfa dizininin 124'üncü elemanına erişir. Sayfa dizininin 124'üncü elemanında 1024 girişlik bir 
+    sayfa tablosu bulunacaktır. İşlemci bu sayfa tablosuna erişir. 
 
     3) İşlemci sanal adresin ikinci 10 bitini indeks yaparak eriştiği sayfa tablosunun ilgili girişin okur. Örneğimizde 
     sanal adresin ikinci 10 bitlik kısmı 1100100100 biçimindedir. Bu da onluk sistemde 804 değerine karşılık gelmektedir. 
@@ -8619,10 +8614,10 @@ void exit_sys_errno(const char *msg, int eno)
 
     4) Nihayet işlemci elde ettiği fiziksel sayfa adresine sanal adresin düşük anlamlı 12 bitini toplayarak gerçek 
     fiziksel adrese erişir. Örneğimizde sayfa offset'i belirten 12 bit 001110100100 biçimindedir. Bu değer de onluk 
-    sistemde 932 biçimindedir. 
+    sistemde 932'dir. 
     
     Biz yukarıda 4K sayfa kullanan 32 bit Intel işlemcileri üzerinde örnek verdik. Sayfa büyüklükleri değiştiğinde 
-    sanal adres dönüştürmesinin formatı da değişkemketdir. Örneğin 4MB'lık büyük sayfalar söz konusu olduğunda 32 
+    sanal adres dönüştürmesinin formatı da değişmektedir. Örneğin 4MB'lık büyük sayfalar söz konusu olduğunda 32 
     bit Intel işlemcileri sanal adresi 2 kısma ayırmaktadır:
 
     31                  22 21                                      0
@@ -13714,19 +13709,23 @@ void *malloc(unsigned nbytes)
     vmalloc_user isimli çekirdek fonksiyonu kullanıcı alanına haritalanabilen (map edilebilen) tahsisatlar yapmaktadır. 
     Bu konuyu ileride ele alacağız. 
 
-    Yukarıda da belirttiğimiz gibi vmalloc ailesi fonksiyonlar arka planda ikinz blok tahsisat sistemini kullanmaktadır.
+    Yukarıda da belirttiğimiz gibi vmalloc ailesi fonksiyonlar arka planda ikiz blok tahsisat sistemini kullanmaktadır.
     Aşağıdaki tabloda fonksiyonların ikiz blok tahsisat sisteminden sayfa tahsis ederken hangi bayrakları kullandığı 
     belirtilmektedir:
 
-    ┌──────────────────────────┬────────────────────────────────────────────────────────┐
-    │   vmalloc Türevi         │         Kullanılan GFP Bayrakları                      │
-    ├──────────────────────────┼────────────────────────────────────────────────────────┤
-    │ vmalloc()                │ GFP_KERNEL | __GFP_HIGHMEM                             │
-    │ vzalloc()                │ GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO                │
-    │ vmalloc_user()           │ GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO                │
-    │ vmalloc_node()           │ GFP_KERNEL | __GFP_HIGHMEM (+ NUMA node kısıtı)        │
-    └──────────────────────────┴────────────────────────────────────────────────────────┘
+    ┌─────────────────┬─────────────────────────────────────────────────┐
+    │  vmalloc Türevi │         Kullanılan GFP Bayrakları               │
+    ├─────────────────┼─────────────────────────────────────────────────┤
+    │ vmalloc()       │ GFP_KERNEL | __GFP_HIGHMEM                      │
+    │ vzalloc()       │ GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO         │
+    │ vmalloc_user()  │ GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO         │
+    │ vmalloc_node()  │ GFP_KERNEL | __GFP_HIGHMEM (+ NUMA node kısıtı) │
+    └─────────────────┴─────────────────────────────────────────────────┘
 
+    vmalloc ailesi fonksiyonlar arka planda ikiz blok tahsisat sistemini (buddy allocator) kullanarak sayfa düzeyinde 
+    tahsisatlar yapmaktadır. Dolayısıyla bu fonksiyonlar aslında tahsisatları sayfa katlarında yaparlar. Örneğin biz
+    vmalloc ile 1000 byte tahsis etmek isteyelim. Aslında fonksiyon 4096 byte'lık (1 sayfalık) bir tahsisat yapmaktadır. 
+    Bu nednele vmalloc ailesi fonksiyonlarda sayfa katlarından küçük olan tahsisat yapmanın bir anlamı yoktur. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -13745,7 +13744,7 @@ void *malloc(unsigned nbytes)
     │           Özellik        │          kmalloc()           │          vmalloc()             │          alloc_pages()               │
     ├──────────────────────────┼──────────────────────────────┼────────────────────────────────┼──────────────────────────────────────┤
     │ Fiziksel bitişiklik      │ Garantili                    │ Garantisiz (dağınık olabilir)  │ Garantili (2^order ardışık sayfa)    │
-    │ Sanal bitişiklik         │ Evet (physmap üzerinden)     │ Evet (vmalloc bölgesi)         │ Evet (physmap'te fiziksel ardışıklık │
+    │ Sanal ardışıllık         │ Evet (physmap üzerinden)     │ Evet (vmalloc bölgesi)         │ Evet (physmap'te fiziksel ardışıklık │
     │                          │                              │                                │ sanal ardışıklığa da yansır)         │
     │ Döndürülen değer         │ void* (sanal adres)          │ void* (sanal adres)            │ struct page* (sayfa tanımlayıcısı)   │
     │ Sanal adres edinme       │ Doğrudan                     │ Doğrudan                       │ page_address(): physmap aritmetiği   │
@@ -13774,9 +13773,9 @@ void *malloc(unsigned nbytes)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Şimdi de vmalloc ailesi fonksiyonların gerçekleştirimleri üzerinde duralım. Biz burada anlatını vmalloc üzerinden 
-    yapacağız. vmalloc fonksiyonu her çağrıda vm_struct isimli bir nesne tahsis etmektedir. Güncel çekirdeklerde 
-    vm_struct yapısı "include/linux/vmalloc.h" içerisinde şöyle bildirilmiştir:
+	Şimdi de vmalloc ailesi fonksiyonların gerçekleştirimleri üzerinde duralım. Biz burada anlatımı vmalloc üzerinden 
+    yapacağız. vmalloc fonksiyonu her çağrıldığında vm_struct isimli bir yapı türünden bir nesne tahsis etmektedir. 
+    Güncel çekirdeklerde vm_struct yapısı "include/linux/vmalloc.h" içerisinde şöyle bildirilmiştir:
    
     struct vm_struct {
         union {
@@ -13784,32 +13783,523 @@ void *malloc(unsigned nbytes)
             struct llist_node llnode; /* Asynchronous freeing on error paths. */
         };
 
-        void			*addr;
+        void			    *addr;
         unsigned long		size;
         unsigned long		flags;
-        struct page		**pages;
+        struct page		    **pages;
     #ifdef CONFIG_HAVE_ARCH_HUGE_VMALLOC
         unsigned int		page_order;
     #endif
         unsigned int		nr_pages;
-        phys_addr_t		phys_addr;
-        const void		*caller;
+        phys_addr_t		    phys_addr;
+        const void		    *caller;
         unsigned long		requested_size;
     };
 
-    Bu nesne için çekirdek tarafından oluşturulmuş bir dilim önbelleği yoktur. ÇÖünkü zaten bu yapı 64 byte uzunluktadır
+    Bu nesne için çekirdek tarafından oluşturulmuş bir dilim önbelleği yoktur. Çünkü zaten bu yapı 64 byte uzunluktadır
     ve kmalloc ailesi için 64 byte'lık bir dilim önbelleği bulunmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+					                    85. Ders 28/06/2026 - Pazar				
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    vm_struct yapısı tahsis edilen alana ilişkin bilgileri tutmaktadır. Yapının önemli elemnalarını açıklayalım:
+    
+    - Yapının addr elemanı tahsis edilen bloğun başlangıç sanal adresini tutmaktadır. Bu adres zaten vmalloc tarafından 
+    geri döndürülen adrestir. 
+
+    - Yapının size elemanı tahsis edilen alanın uzunluğunu tutmaktadır. Aslında tahsisat yapılırken eğer VM_NO_GUARD 
+    bayrağı set edilmemişse (default durumda set edilmez) tahsis edilen alanın sonuna bir sayfalık daha sanal bellek 
+    tahsisatı yapılır. Buna "koruma sayfası (guard page)" denilmektedir. Bu koruma sayfası "yanlışlıkka tahsis edilen 
+    alanın dışına taşan erişimler yapıldığında "page fault" oluşturmak için bulundurulmaktadır. Buradaki size değeri bu 
+    koruma sayfası dahil edilmiş biçimde uzunluk belirtmektedir. 
+
+    - Yapının flags elemanı tahsisatın hangi amaçla ve özelliklerle yapıldığı bilgisini tutmaktadır. Örneğin tahsisat 
+    vmalloc fonksisyonuyla yapılmışsa VM_ALLOC bayrağı, vmap fonksiyonuyla yapılmışsa VM_MAP bayrapı set edilmektedir. 
+    Koruma sayfasının tahsis edilip edilmeyeceği de yine bu flags elemanında VM_NO_GUARD bayrağı ile belirtilmektedir. 
+    Buradaki bayraklar çekirdek fonksiyonlarını kullanan kişiler tarafından set edilememektedir. Çekirdek bu bayrakları 
+    kendisi set edip kendisi kullanmaktadır. Örneğin VM_NO_GUARD bayrağını çekirdke modülleri içerisinde set etmenin bir 
+    yolu yoktur. Çekirdek kodlarının değiştirilip yeniden derlenmesi gerekir. Yapının pages elemanı tahsis edilen fiziksel 
+    sayfalara ilişkin page nesnelerin adreslerini tutmaktadır. 
+
+
+    pages ---> Gösterici Dizisi
+               ------> page nesnesi
+               ------> page nesnesi
+               ------> page nesnesi
+               .....
+
+    - Yapının nr_pages elemanı tahsis edilen sayfaların uzunluğunu, başka bir deyişle pages göstericisinin gösterdiği 
+    yerdeki dizinin uzunluğunu tutmaktadır. Yapının requested_size elemanı tahsisat için istenen uzunluğu tutmaktadır. 
+    Aşağıda yapı elemanlarını bir tablo halinde veriyoruz. 
+
+    ┌─────────────────┬──────────────────────┬──────────────────────────────────────────────────────────────┐
+    │      Alan       │           Tür        │                         Açıklama                             │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ İki amaçlı birleşim:                                         │
+    │ next /          │ struct vm_struct * / │   next     : erken önyükleme sırasında bağlı listedeki       │
+    │ llnode          │ struct llist_node    │             bir sonraki vm_struct'ı gösterir                 │
+    │                 │                      │   llnode   : hata yollarında asenkron serbest bırakma için   │
+    │                 │                      │             kilit gerektirmeyen listeye bağlanır             │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ Tahsis edilen sanal alanın başlangıç adresi;                 │
+    │ addr            │ void *               │ vmalloc() çağrısının döndürdüğü adresin kendisidir           │
+    │                 │                      │ (VMALLOC_START – VMALLOC_END aralığında)                     │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ PAGE_ALIGN() ile hizalanmış tahsisat boyutu;                 │
+    │ size            │ unsigned long        │ VM_NO_GUARD yoksa bir koruma sayfası (4 KiB) dahildir,       │
+    │                 │                      │ gerçek kullanılabilir alan size - PAGE_SIZE kadardır         │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ Tahsisat türünü ve özelliklerini kodlayan bit maskesi;       │
+    │ flags           │ unsigned long        │ başlıca değerler: VM_ALLOC (vmalloc), VM_IOREMAP (ioremap),  │
+    │                 │                      │ VM_MAP (vmap), VM_NO_GUARD, VM_ALLOW_HUGE_VMAP vs.           │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ Fiziksel sayfa çerçevlerinin struct page * göstericilerinden │
+    │ pages           │ struct page **       │ oluşan dizisi; ioremap yolunda NULL olabilir çünkü           │
+    │                 │                      │ ioremap fiziksel adresi phys_addr üzerinden doğrudan eşler   │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ CONFIG_HAVE_ARCH_HUGE_VMALLOC ile derleme koşullu;           │
+    │ page_order      │ unsigned int         │ büyük sayfa (huge page) tahsisatlarında her fiziksel         │
+    │                 │                      │ tahsisatın sayfa sırası (order); 0 ise normal 4 KiB sayfa    │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ pages[] dizisindeki eleman sayısı;                           │
+    │ nr_pages        │ unsigned int         │ normal sayfada nr_pages == size >> PAGE_SHIFT,               │
+    │                 │                      │ büyük sayfada farklı hesaplanır                              │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ Yalnızca ioremap() ailesi tarafından kullanılır;             │
+    │ phys_addr       │ phys_addr_t          │ eşlenecek fiziksel adresi tutar;                             │
+    │                 │                      │ normal vmalloc() tahsisatlarında 0'dır                       │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ Tahsisatı yapan fonksiyonun geri dönüş adresi;               │
+    │ caller          │ const void *         │ __builtin_return_address(0) ile yakalanır;                   │
+    │                 │                      │ /proc/vmallocinfo çıktısında "çağıran" sütunu olarak görünür │
+    ├─────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────┤
+    │                 │                      │ PAGE_ALIGN() öncesindeki orijinal istek boyutu;              │
+    │ requested_size  │ unsigned long        │ size alanı her zaman hizalıdır, bu alan ham isteği korur;    │
+    │                 │                      │ /proc/vmallocinfo ve hata ayıklama için kullanılır           │
+    └─────────────────┴──────────────────────┴──────────────────────────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-									
+    vmalloc fonksiyonu VM_START ve VM_END sembolik sabitleriyle belirtilen sanal adres aralığında tahsisatlar yapmaktadır. 
+    VM_START ve VM_END bölgesinin yeri ve büyüklüğü x86 ve ARM işlemcilerinde tipik olarak aşağıdaki gibidir:
+
+    ┌──────────────────────────────┬──────────────────────┬──────────────────────┬───────────┐
+    │           Mimari             │   VMALLOC_START      │   VMALLOC_END        │  Uzunluk  │
+    ├──────────────────────────────┼──────────────────────┼──────────────────────┼───────────┤
+    │ x86 (32-bit)                 │ high_memory +        │ 0xFF800000           │ en az     │
+    │ (3G/1G bölünmesi,            │ VMALLOC_OFFSET       │ (sabit)              │ 240 MiB   │
+    │  PAGE_OFFSET=0xC0000000)     │ (8 MiB boşluk)       │                      │           │
+    │                              │ Dinamiktir: fiziksel │                      │ (fiziksel │
+    │                              │ bellek arttıkça      │                      │ belleğe   │
+    │                              │ START yükselir,      │                      │ göre      │
+    │                              │ alan daralır         │                      │ değişir)  │
+    ├──────────────────────────────┼──────────────────────┼──────────────────────┼───────────┤
+    │ ARM32                        │ high_memory +        │ 0xFF800000           │ en az     │
+    │ (3G/1G bölünmesi,            │ VMALLOC_OFFSET       │ (sabit)              │ 240 MiB   │
+    │  PAGE_OFFSET=0xC0000000)     │ (8 MiB boşluk)       │                      │           │
+    │                              │ Tipik: 0xF0000000    │                      │ (tipik    │
+    │                              │ (760 MiB lowmem ile) │                      │ 240 MiB)  │
+    ├──────────────────────────────┼──────────────────────┼──────────────────────┼───────────┤
+    │ x86_64 (64-bit)              │ 0xffffc90000000000   │ 0xffffe8ffffffffff   │  32 TiB   │
+    │ 4-seviye sayfa tablosu       │ (-55 TiB)            │ (-23 TiB - 1)        │           │
+    │ (48-bit VA)                  │                      │                      │           │
+    ├──────────────────────────────┼──────────────────────┼──────────────────────┼───────────┤
+    │                              │                      │                      │           │
+    │ x86_64 (64-bit)              │ 0xffa0000000000000   │ 0xffd1ffffffffffff   │ 12.5 PiB  │
+    │ 5-seviye sayfa tablosu       │ (-24 PiB)            │ (-11.5 PiB - 1)      │           │
+    │ (57-bit VA)                  │                      │                      │           │
+    ├──────────────────────────────┼──────────────────────┼──────────────────────┼───────────┤
+    │                              │                      │                      │           │
+    │ ARM64 / AArch64              │ 0xffff800080000000   │ 0xfffffbffefffffff   │ ~124 TiB  │
+    │ 4-seviye sayfa tablosu       │ (modules bölgesinin  │                      │           │
+    │ (48-bit VA, 4 KiB sayfa)     │  hemen ardından)     │                      │           │
+    ├──────────────────────────────┼──────────────────────┼──────────────────────┼───────────┤
+    │                              │                      │                      │           │
+    │ ARM64 / AArch64              │ 0xffffa00010000000   │ 0xfffff81ffffeffff   │ ~88 TiB   │
+    │ 3-seviye sayfa tablosu       │ (modules bölgesinin  │                      │           │
+    │ (52-bit VA, 64 KiB sayfa,    │  hemen ardından)     │                      │           │
+    │  ARMv8.2-LVA gerektirir)     │                      │                      │           │
+    └──────────────────────────────┴──────────────────────┴──────────────────────┴───────────┘
+        
+    vmalloc fonksiyonu çağrıldığında fonksiyonun boş bir sanal adres verebilmesi için Çekirdeğin sanal adres alanı 
+    içerisindeki tahisatları bir biçimde tutması gerekir. İşte vmalloc tarafından sanal adres alanındaki tahsisatlar
+    için vm_area isimli bir yapı kullanılmaktadır. Her sanal adres alanındaki VM_START-VM_END arasındaki tahsisatta 
+    bir vmap_area nesnesi yaratılır. Böylece çekirdek hangi sanal adres alanının boş olup olmadığını izleyen paragraflarda 
+    açıklayacağımız biçimde izleyebilmektedir. Burada iki yapıyı karıştırmayınız. vm_struct yapısı vmalloc tarafından 
+    tahsis edilen fiziksel sayfalara ilişkin bilgileri tutarken, vmap_area yapısı sanal adres tahsisatlarını tutmaktadır. 
+    vmap_area yapısı güncel çekirdeklerde "include/linux/vmalloc.h" dosyası içerisinde aşağıdaki gibi bildirilmiştir:
+
+    struct vmap_area {
+        unsigned long va_start;
+        unsigned long va_end;
+
+        struct rb_node rb_node;         /* address sorted rbtree */
+        struct list_head list;          /* address sorted list */
+
+        /*
+        * The following two variables can be packed, because
+        * a vmap_area object can be either:
+        *    1) in "free" tree (root is free_vmap_area_root)
+        *    2) or "busy" tree (root is vmap_area_root)
+        */
+        union {
+            unsigned long subtree_max_size; /* in "free" tree */
+            struct vm_struct *vm;           /* in "busy" tree */
+        };
+        unsigned long flags;            /* mark type of vm_map_ram area */
+    };
+
+    - Yapının va_start ve va_end elemanları tahsis edilen alanın sanal bellekteki başlangıç ve bitiş adreslerini 
+    belirtmektedir. Bu elemanların void * türünden olmayıp unsigned long türünden olduğuna dikkat ediniz. Çekirdek 
+    bu adreslerle ilgili daha kolay artimetik işlemler yapabilmek için bunları unsigned_long türdne almıştır. 
+    
+    - Yapının rb_node elemanı izleyen paragraflarda açıklayacağımız gibi "kırmızı-siyah ağacının (red-black tree") 
+    düğümünü tutmaktadır. Aynı zamanda çekirdek tüm vmap_area tahsisatlarını soralı bir biçimde bir bağlı listede 
+    de tutmaktadır. 
+    
+    - Yapının list elemanı bu bağlı listenin düğümünü belirtmektedir. 
+    
+    - Yapıdaki anonim birliğe dikkat ediniz. Yukarıda açıkladığımız vm_struct nesnesinin adresi aslında vmap_area 
+    nesnesinin içerisinde tutulmaktadır. şte yapının vm elemanı eğer ilgili blok tahsis edilmiş durumdaysa bu adresi 
+    tutmaktadır. Ancak ilgili blok tahsis edilmemişse yani boş durumdaysa bu durumda subtree_max_size elemanı kırmızı-siyah 
+    ağacının alt düğümlerindeki en büyük boş alanı tutar. Eskiden boş alanlarla dolu alanlar farklı ağaçlarda tutuluyordu. 
+    Ancak en yeni çekirdeklerde artık bu alanlar aynı ağaçta birleştirilmektedir. 
+    
+    - Yapının flas elemanı tahsis edilen alanın türünü turmaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Her vmalloc çağrısı yaıldığında çekirdek yukarıda da belirttiğimiz gibi bir vm_struct nesnesi bir de vmap_area 
+    nesnesi oluşturmaktadır. vm_strruct nesnesini de vmap_area nesnesinin içerisine yerleştirmektedir. Peki belli bir 
+    sanal bellek alanının tahsis edlip edilmediğini çekirdek nasıl anlamakta ve tahsisat için gereken boş sanal bellek 
+    alanını nasıl tespit etmektedir? İşte çekirdek burada hash tablosu yerine "kırmızı-siyah ağacı (red-black tree)
+    denilen ikili arama ağacı kullanmaktadır. Biz de önce kırmızı-siyah ikili arama ağacı konusunda bazı bilgiler 
+    vereceğiz. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Her düğümün en fazla iki alt düğüme (child nodes) sahip olabildiği ağaçlara "ikili ağaçlar (binary trees)" denilmektedir. 
+    Örneğin:
+
+                            ┌───────┐
+                            │ değer │
+                            └───┬───┘
+                    ┌───────────┴───────────┐
+                ┌───┴───┐               ┌───┴───┐
+                │ değer │               │ değer │
+                └───┬───┘               └───┬───┘
+            ┌───────┴───────┐           ┌───┘
+        ┌───┴───┐       ┌───┴───┐   ┌───┴───┐ 
+        │ değer │       │ değer │   │ değer │   
+        └───┬───┘       └───────┘   └───┬───┘   
+      ┌─────┴─────┐               ┌─────┘   
+    ┌─┴───┐   ┌───┴─┐         ┌───┴───┐     
+    │değer│   │değer│         │ değer │     
+    └─────┘   └─────┘         └───────┘
+
+    Görüldüğü gibi burada her düğümün en fazla iki alt düğümü vardır. Eğer eğer düğümün tam olarak iki düğümü varsa 
+    böyle ikili ağaçlara "tam ikili ağaçlar (complete binary tree)" denilmektedir. Örneğin:
+
+           
+                                           ┌───────┐
+                                           │ değer │
+                                           └───┬───┘
+                        ┌──────────────────────┴──────────────────────┐
+                    ┌───┴───┐                                     ┌───┴───┐
+                    │ değer │                                     │ değer │
+                    └───┬───┘                                     └───┬───┘
+            ┌───────────┴───────────┐                     ┌───────────┴───────────┐
+        ┌───┴───┐               ┌───┴───┐             ┌───┴───┐               ┌───┴───┐
+        │ değer │               │ değer │             │ değer │               │ değer │
+        └───┬───┘               └───┬───┘             └───┬───┘               └───┬───┘
+      ┌─────┴─────┐           ┌─────┴─────┐         ┌─────┴─────┐           ┌─────┴─────┐
+    ┌─┴───┐     ┌─┴───┐     ┌─┴───┐     ┌─┴───┐   ┌─┴───┐     ┌─┴───┐     ┌─┴───┐     ┌─┴───┐
+    │değer│     │değer│     │değer│     │değer│   │değer│     │değer│     │değer│     │değer│
+    └─────┘     └─────┘     └─────┘     └─────┘   └─────┘     └─────┘     └─────┘     └─────┘
+
+    Ağacın hiç alt düğümü olmayan düğümlerine "yaprak (leaf)" denilmektedir. Bir ağacın yüksekliği (height) kök düğümden 
+    en dipteki yaprağa ulaşmak için kaç kenardan geçildiği ile blirlenmektedir. Örneğin yukarıdaki ağacın yüksekli 3'tür. 
+    Tam ikili ağaçlardaki düğüm sayısının 2ʰ⁺¹ - 1 olduğuna dikkat ediniz. Bir düğümün yüksekliği kökten o düğüme 
+    gitmek için geçilen kenar saısını belirtmektedir. Ağacın yükseliği de zaten en yüksek düğümünün yüksekliğidir. 
+
+    Bir ikili ağaç arama amaçlı oluşturuluyorsa (genellikle bu amaçla oluşturulur) bu tür ikili ağaçlara "ikili arama 
+    ağaçları (binary search trees)" denilmektedir. İkili arama ağaçlarında eleman anahtara göre yerleştirilir. Yerleştirme 
+    "küçükler sola, büyükler sağa" biçiminde yapılır. (Tersi de olabilir ancak gelenek böyledir.) Örneğin aşağıdaki 
+    değerler anahtar olsun ve bunları sırasıyla ikili arama ağacına yerleştirelim:
+
+    24 13 36 42 8 19 4 21 39 7
+
+                       ┌────┐
+                       │ 24 │
+                       └─┬──┘
+              ┌──────────┴──────────┐
+            ┌─┴──┐               ┌──┴─┐
+            │ 13 │               │ 36 │
+            └─┬──┘               └─┬──┘
+         ┌────┴────┐           ┌───┴────┐
+       ┌─┴─┐    ┌──┴─┐      ┌──┴─┐   ┌──┴─┐
+       │ 8 │    │ 19 │      │ 39 │   │ 42 │
+       └─┬─┘    └──┬─┘      └────┘   └────┘
+      ┌──┘         └──┐
+    ┌─┴─┐          ┌──┴─┐
+    │ 4 │          │ 21 │
+    └─┬─┘          └────┘
+      └──┐
+       ┌─┴─┐
+       │ 7 │
+       └───┘
+
+    İkili arama ağaçlarında arama yapılırken kökten girilir, aranacak anahtarla düğümün anahtarları karşılaştırılır. 
+    Aranack anahtar düğümün anahtarında büyükse sağa, küçükse sola sapılır. Yapraklara gelindiğinde hala değer bulunamamışsa
+    aramanın başarısz olduğu sonucu çıkartılır. 
+
+    Aslında ikili arama ağacı "değerleri sıraya dizmeden ikili arama (binary search)" yapabilme olanağını sağlamaktadır. 
+    Ancak yukarıdaki ikili ağaçta bir sorun vardır. Bu ağaç dengesizdir. İki alt düğüme sahip olmayan düğümlerin yükseliği 
+    arasında belli bir sınırlama getirilmiş olan ağaçlara "dengeli ağaçlar (balanced trees)" denilmektedir. Örneğin biz
+    bu sınırlamayı 1 olarak alalım. Bu durumda yukarıdaki ağacımız dengesizdir. Ancak aşağıdaki ağaç dengelidir:
+
+                   ┌────┐
+                   │ 13 │
+                   └─┬──┘
+          ┌──────────┴──────────┐
+        ┌─┴──┐               ┌──┴─┐
+        │ 7  │               │ 24 │
+        └─┬──┘               └─┬──┘
+      ┌───┴───┐           ┌────┴──────┐
+    ┌─┴─┐   ┌─┴─┐      ┌──┴─┐      ┌──┴─┐
+    │ 4 │   │ 8 │      │ 19 │      │ 36 │
+    └───┘   └───┘      └──┬─┘      └──┬─┘
+                          └──┐     ┌──┴──┐
+                          ┌──┴─┐ ┌─┴─┐ ┌─┴─┐
+                          │ 21 │ │ 39│ │ 42│
+                          └────┘ └───┘ └───┘
+
+    Burada iki alt düğüme sahip olmayan düğümlerin yüksekliği arasında fark 1'dir. 
+
+    Peki ikili ağaçta denge nasıl sağlanmaktadır? İşte eleman eklenirken dengenin bozulduğu tespit edilip denge sağlanmaktadır. 
+    Bunun için iki temel dengeleme algoritması kullanılmaktadır: "AVL (Avelson-Velsky-Landis) dengelemesi" ve "kırmızı-siyah" 
+    dengelemesi. AVL dengelemesiyle oluşturulmuş ikili arama ağaçlarına "AVL Ağacı (AVL Tree)", "kırmızı-siyah dengelemesi" 
+    ile oluşturulmuş ikili arama ağaçlarına ise "kırzmı-siyah ağacı (red-black tree)" denilmejtedir. İk dengeleme algoritmasının 
+    da birbirlerine göre avantaqj ve dezavantajları vardır. Peki dengeleme nasıl yapılmaktadır? İşte eleman insert edilirken 
+    dengenin bozulduğu tespit edilir, sonra dengeyi korumak içim az sayıda düğüm yer değiştirilerek işlem yapılır. İşte
+    dengenin korunması için yapılan işlemler AVL dengelemesinde farklıi kırmızı-siyah dengelemesinde farklıdır. 
+   
+
+    
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
 ----------------------------------------------------------------------------------------------------------------------*/
 
