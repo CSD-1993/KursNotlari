@@ -307,7 +307,7 @@ clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Modüller "modprobe" isimli programla da yüklenebilir. Ancak modprobe programı yüklenecek modülleri "/lib/modules/$(uname -r)"
+    Modüller "modprobe" isimli programla da yüklenebilmektedir. Ancak modprobe programı yüklenecek modülleri "/lib/modules/$(uname -r)"
     dizininde aramaktadır. Dolayısıyla biz kendi derlediğimiz modülleri bu dizine yerleştirmemişsek yüklemeyi modprobe ile 
     yapamayız. Ancak çekirdek derlenirken oluşturulmuş olan modüller bu dizinde olduğu için bunları modprobe ile yükleyebiliriz. 
     modprobe programı yüklenecek aygıt sürücünün yalnızca ismini almaktadır. Çünkü zaten arama işlemini kendisi yapmaktadır. 
@@ -318,17 +318,24 @@ clean:
     insmod programının yüklenecek aygıt sürücü dosyasının tüm yol ifadesini aldığına dikkat ediniz. modprobe programında dosyanın 
     ".ko" uzantısı da belirtilmemektedir. Halbuki insmod programında bu uzantının da belirtilmesi gerekmektedir. modprobe aslında 
     "modules.dep" isimli bir dosyaya başvurmaktadır. Bu dosya çekirdek kaynak kodlarının kök dizininde çekirdek modülleri derlenirken 
-    oluşturulmaktadır. Bu dosya içerisinde bağımlılık bilgileri vardır. Bir çekirdek modülü yazılırken başka bir çekirdek modülünün 
+    oluşturulur. Bu dosya içerisinde bağımlılık bilgileri vardır. Bir çekirdek modülü yazılırken başka bir çekirdek modülünün 
     içerisindeki fonksiyonlar kullanılmış olabilir. Bu durumda kullanan modülün yüklenmesi için önce onun kullandığı modülün 
     yüklenmesi gerekir. İşte bu biçimde durum karmaşık bir hal alabilmektedir. "modules.dep" dosyası içerisinde bir modülün 
-    yüklenebilmesi için hangi modüllerin de yüklenmesi gerektiği bilgileri bulunmaktadır. Eğer biz kendi çekirdek modülümüzün de 
-    modprobe ile yüklenmesini istiyorsak önce onu "/lib/modules/$(uname -r)/kernel" dizininin içerisindeki dizinlerden birine 
-    yerleştirip sonra bu "modules.dep" dosyasının güncellenmesini sağlamamız gerekir. Bu işlem "depmod" programıyla "-a" seçeneği 
-    kullanılarak yapılmaktadır:
+    yüklenebilmesi için hangi modüllerin de yüklenmesi gerektiğine ilişkin bilgiler bulunmaktadır. Eğer biz kendi çekirdek 
+    modülümüzün de modprobe ile yüklenmesini istiyorsak önce onu "/lib/modules/$(uname -r)/kernel" dizininin içerisindeki 
+    dizinlerden birine yerleştirip sonra bu "modules.dep" dosyasının güncellenmesini sağlamamız gerekir. Bu işlem "depmod" 
+    programıyla "-a" seçeneği kullanılarak yapılmaktadır:
 
     $ sudo depmod -a
 
     Kendi çekirdek modülünüzü ya da aygıt sürücünüzü örneğin "/lib/modules/$(uname -r)/kernel/drivers/misc" dizinine yerleştirebilirsiniz.
+    Örneğin:
+
+    $ sudo cp helloworld.ko /lib/modules/$(uname -r)/kernel/drivers/misc
+    $ sudo depmod -a
+    $ sudo modprobe helloworld
+    $ sudo modprobe -r helloworld
+
     Tabii aygıt sürücü geliştirirken ikide bir modülü buraya yerleştirmenin bir anlamı yoktur. Bu nedenle geliştirme aşamasında 
     genellikle "insmod" programı kullanılmaktadır.
 
@@ -342,12 +349,13 @@ clean:
 
 /*--------------------------------------------------------------------------------------------------------------------------
     Sistem açılır açılmaz otomatik olarak bir çekirdek modülünün ya da aygıt sürücünün yüklenmesi için birkaç yöntem kullanılabilmektedir. 
-    "/etc/modules" dosyası "klasik sysvinit" ve "systemd" init tarafından işletilmektedir. Dolayısıyla bu dosyanın içerisine bir 
-    satıra çekirdek modülünüzün ismini (yalnızca ismini) yazarsanız sistem açıldığında çekirdek modülü de otomatik yüklenmiş olur. 
-    Ancak init programları bu dosyada belirtilen çekirdek modüllerini modprobe ile yüklemektedir. Dolayısıyla sizin de çekirdek 
-    modülünüzü "/lib/modules/$(uname -r)/kernel" içerisindeki bir dizine (örneğin "/lib/modules/$(uname -r)/kernel/drivers/misc"
-    dizinine) yerleştirip "sudo depmod -a" komutunu uygulamanız gerekir. Eğer systemd init sistemi ile çalışıyorsanız yüklemeyi 
-    yapacak bir "servis birim dosyası" oluşturabilirsiniz. Örneğin.
+    Bunlardan biri çekirdek modülünü çekirdeğin içerisine gömmektir. "/etc/modules" dosyası "klasik sysvinit" ve "systemd init" 
+    tarafından işletilmektedir. Dolayısıyla bu dosyanın içerisine bir satıra çekirdek modülünüzün ismini (yalnızca ismini) yazarsanız 
+    sistem açıldığında çekirdek modülü de otomatik yüklenmiş olur. Ancak init programları bu dosyada belirtilen çekirdek modüllerini 
+    modprobe ile yüklemektedir. Dolayısıyla sizin de çekirdek modülünüzü "/lib/modules/$(uname -r)/kernel" içerisindeki bir dizine 
+    (örneğin "/lib/modules/$(uname -r)/kernel/drivers/misc" dizinine) yerleştirip "sudo depmod -a" komutunu uygulamanız gerekir. 
+    Eğer "systemd init" sistemi ile çalışıyorsanız yüklemeyi yapacak bir "servis birim (service unit)" dosyası da oluşturabilirsiniz. 
+    Örneğin:
 
     [Unit]
     Description=Modül Yükleme Servisi
@@ -361,16 +369,20 @@ clean:
     [Install]
     WantedBy=multi-user.target
 
-    Diğer bir yöntem de klasik systemvinit ve systemd tarafından bakılan "/etc/rc.local" dosyasının içerisine yükleme komutunu 
-    yazmaktır. Örneğin:
+    Burada modül istenirse insmod ile de yüklenebilir. Diğer bir yöntem de klasik systemvinit ve systemd tarafından bakılan 
+    "/etc/rc.local" dosyasının içerisine yükleme komutunu yazmaktır. Dosyanın içeriği şöyşe olabilir:
 
-    "sudo insmod /path/hellowold.ko"
+    #!/bin/sh
+    /sbin/insmod /path/helloworld.ko
+    exit 0
+
+    "/etc/rc.local" dosyasına "x" hakkı vermeyi unutmayınız.
 
     Tabii burada modprobe da kullanılabilir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-                                                128. Ders 17/03/2024 - Pazar
+                                            128. Ders 17/03/2024 - Pazar
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -431,14 +443,14 @@ clean:
     #define KERN_SOH        "\001"        /* ASCII Start Of Header */
     #define KERN_SOH_ASCII    '\001'
 
-    #define KERN_EMERG        KERN_SOH "0"        /* system is unusable */
-    #define KERN_ALERT        KERN_SOH "1"        /* action must be taken immediately */
-    #define KERN_CRIT        KERN_SOH "2"        /* critical conditions */
-    #define KERN_ERR        KERN_SOH "3"        /* error conditions */
-    #define KERN_WARNING    KERN_SOH "4"        /* warning conditions */
-    #define KERN_NOTICE        KERN_SOH "5"        /* normal but significant condition */
-    #define KERN_INFO        KERN_SOH "6"        /* informational */
-    #define KERN_DEBUG        KERN_SOH "7"        /* debug-level messages */
+    #define KERN_EMERG          KERN_SOH "0"        /* system is unusable */
+    #define KERN_ALERT          KERN_SOH "1"        /* action must be taken immediately */
+    #define KERN_CRIT           KERN_SOH "2"        /* critical conditions */
+    #define KERN_ERR            KERN_SOH "3"        /* error conditions */
+    #define KERN_WARNING        KERN_SOH "4"        /* warning conditions */
+    #define KERN_NOTICE         KERN_SOH "5"        /* normal but significant condition */
+    #define KERN_INFO           KERN_SOH "6"        /* informational */
+    #define KERN_DEBUG          KERN_SOH "7"        /* debug-level messages */
 
     Ancak bu makrolarda çeşitli çekirdek versiyonlarında değişiklikler yapılabilmektedir. C'de aralarında hiçbir operatör 
     bulunmayan iki string'in derleyici tarafından birleştirildiğini anımsayınız. Bu durumda aslında örneğin:
@@ -625,7 +637,7 @@ clean:
 
 /*--------------------------------------------------------------------------------------------------------------------------
     Çekirdek modüllerinin init ve cleanup fonksiyonlarında fonksiyon isimlerinin soluna __init ve __exit makroları getirilebilmektedir. 
-    Bu makrolar <linux/init.h> dosyası içerisindedir. Bu dosya da <linux/module.h> dosyası içerisinde include edilmiştir. 
+    Bu makrolar <linux/init.h> dosyası içerisinde bulunmaktadır. Bu dosya da <linux/module.h> dosyası içerisinden include edilmiştir. 
     __init makrosu ilgili fonksiyonu ELF dosyasının özel bir bölümüne (section) yerleştirir. Modül yüklendikten sonra bu bölüm 
     çekirdek alanından atılmaktadır. __exit makrosu ise çekirdeğin içine gömülmüş modüllerde fonksiyonun dikkate alınmayacağını 
     (dolayısıyla hiç yüklenmeyeceğini) belirtir. Ancak sonradan yüklemelerde bu makronun bir etkisi yoktur.
@@ -945,11 +957,33 @@ module_exit(helloworld_exit);
     fonksiyonun başarısız olduğunu gösterir. Bu negatif değerin pozitiflisi errno değerini vermektedir.
 
     2) Bir çekirdek fonksiyonu bir adrese geri dönüyorsa fonksiyonun başarısı verilen adresin değerine bağlıdır. Eğer verilen 
-    adres çok bir büyük bir adresse fonksiyon başarısız olmuştur. Bu kontrol IS_ERR inline fonksiyonuyla yapılmaktadır.
+    adres çok bir büyük bir adresse fonksiyon başarısız olmuştur. Bu kontrol IS_ERR inline fonksiyonuyla yapılmaktadır. Öreğin:
+
+    ptr = foo(...);
+    if (IS_ERR(ptr)) {
+        /* ... */
+    }
 
     3) Adrese geri dönen çekirdek fonksiyonu eğer başarısızsa negatif errno değeri PTR_ERR inline fonksiyonuyla elde edilir.
+    Örneğin:
+
+    ptr = foo(...);
+    if (IS_ERR(ptr)) {
+        err = PTR_ERR(ptr);
+        /* ... */
+    }
 
     4) Biz negatif bir errno değerini bir adres gibi geri döndüreceksek bunun için ERR_PTR inline fonksiyonunu kullanmalıyız.
+    Örneğin:
+
+    char *foo(...)
+    {
+        /* ... */
+        if (exp) {      /* başarısızlık durumu */
+            return PTR_ERR(-EINVAL);
+        }
+        /* ... */
+    }
 
     5) Biz de çekirdek modüllerini ve aygıt sürücülerini yazarken çekirdekte uygulanan bu biçime (convention) uymalıyız.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -965,6 +999,8 @@ module_exit(helloworld_exit);
 
     Modül lisansı herhangi bir açık kaynak kod lisansı olabilir. Tipik olarak "GPL" tercih edilmektedir. MODULE_AUTHOR makrosu 
     ile modülün yazarı belirtilir. MODULE_DESCRPTION modülün ne iş yapacağına yönelik kısa bir başlık yazısı içermektedir.
+    Aslında MODULE_AUTHOR ve MODULE_DESCRIPTION makrolarının buundurulması zarunlu değildir. Ancak belli bir süredir 
+    artık MODULE_LICENSE makrosunun bulundurulması zorunlu hale getirilmiştir. 
 
     Bu makrolar global alanda herhangi bir yere yerleştirilebilmektedir.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -980,7 +1016,7 @@ module_exit(helloworld_exit);
     temsil edilmektedir. O dizin girişi open fonksiyonuyla ile açıldığında aslında o dizin girişinin temsil ettiği aygıt sürücü 
     açılmış olur. Bu biçimdeki aygıt sürücüleri temsil eden dizin girişlerine "aygıt dosyaları (device files)" denilmektedir. 
     Aygıt dosyaları diskte bir dosya belirtmemektedir. Çekirdek içerisindeki aygıt sürücüyü temsil eden bir dizin girişi belirtmektedir. 
-    Aygıt dosyalarının i-node tablosunda bir i-node elemanı vardır ancak bu i-node elemanı diskte bir yer değil çekirdekte bir 
+    Aygıt dosyalarının inode tablosunda bir inode elemanı vardır ancak bu inode elemanı diskte bir yer değil çekirdekte bir 
     aygıt sürücü belirtmektedir.
 
     Peki bir aygıt dosyası nasıl yaratılmaktadır ve nasıl bir aygıt sürücüyü temsil eder hale getirilmektedir? İşte her aygıt 
@@ -1956,28 +1992,28 @@ void exit_sys(const char *msg)
     sürümündeki file yapısı şöyledir:
 
     struct file {
-        struct list_head        f_list;
-        struct dentry            *f_dentry;
-        struct vfsmount            *f_vfsmnt;
-        struct file_operations    *f_op;
-        atomic_t                f_count;
-        unsigned int            f_flags;
-        mode_t                    f_mode;
-        loff_t                    f_pos;
-        unsigned long            f_reada, f_ramax, f_raend, f_ralen, f_rawin;
-        struct fown_struct        f_owner;
-        unsigned int            f_uid, f_gid;
-        int                        f_error;
+        struct list_head            f_list;
+        struct dentry               *f_dentry;
+        struct vfsmount             *f_vfsmnt;
+        struct file_operations      *f_op;
+        atomic_t                    f_count;
+        unsigned int                f_flags;
+        mode_t                      f_mode;
+        loff_t                      f_pos;
+        unsigned long               f_reada, f_ramax, f_raend, f_ralen, f_rawin;
+        struct fown_struct          f_owner;
+        unsigned int                f_uid, f_gid;
+        int                         f_error;
 
-        size_t                    f_maxcount;
-        unsigned long            f_version;
+        size_t                      f_maxcount;
+        unsigned long               f_version;
 
         // needed for tty driver, and maybe others
-        void                    *private_data;
+        void                        *private_data;
 
         // preallocated helper kiobuf to speedup O_DIRECT
-        struct kiobuf            *f_iobuf;
-        long                    f_iobuf_lock;
+        struct kiobuf               *f_iobuf;
+        long                        f_iobuf_lock;
     };
 
     Biz burada bilerek sadelik sağlamak için eski bir çekirdeğin file yapısını verdik. Yeni çekirdeklerde buna birkaç eleman daha 
@@ -2845,7 +2881,8 @@ void exit_sys(const char *msg)
 /*--------------------------------------------------------------------------------------------------------------------------
     Biz şimdiye kadarki örneklerimizde aygıt sürücümüzün majör ve minör numarasını baştan belirledik. Bunun en önemli sakıncası 
     belirlediğimiz majör numaralı bir aygıt sürücünün zaten yüklü olarak bulunuyor olmasıdır. Bu durumda aygıt sürücümüz yüklenemeyecektir. 
-    Aslında daha doğru bir strateji tersten gitmektir. Yani önce aygıt sürücümüz içerisinde biz boş bir majör numara bulup onu 
+    Tabii bu tür durumlarda major numarayı yüklerken değiştirebilmek için modül parametrelerinden faydalanabiliriz. Aslında 
+    daha doğru bir strateji tersten gitmektir. Yani önce aygıt sürücümüz içerisinde biz boş bir majör numara bulup onu 
     kullanabiliriz. Tabii sonra kullanıcı modundan bu aygıt numarasına ilişkin bir aygıt dosyasını da yaratmamız gerekir.
 
     Boş bir aygıt numarasını bize veren alloc_chrdev_region isimli bir çekirdek fonksiyonu vardır. Fonksiyonun parametrik yapısı 
@@ -3144,7 +3181,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-     Bizim boru örneğimizde bir proses boruyu yazma modunda açtığında prosesin write fonksiyonuyla yazdıkları aygıt sürücü 
+    Bizim boru örneğimizde bir proses boruyu yazma modunda açtığında prosesin write fonksiyonuyla yazdıkları aygıt sürücü 
     içerisindeki bir FIFO kuyruk sistemine yazılmaktadır. Diğer proses de read fonksiyonuyla okuma yaptığında aslında bu bu 
     FIFO kuyruk sisteminden okuma yapılmaktadır. Burada yapacağımız gerçekleştirim UNIX/Linux sistemlerindeki "isimli borulara 
     (named pipes)" benzemektedir. Biz bu örneği çeşitli konuları gördükçe geliştireceğiz. Anımsayacağınız gibi UNIX/linux 
@@ -3588,7 +3625,7 @@ void exit_sys(const char *msg)
     Böylece blokede bekleyen thread'lerden biri mutex'in sahipliğini alarak kritik koda girer. Kritik kod tipik olarak şöyle 
     oluşturulmaktadır:
 
-     mutex_lock(...)
+    mutex_lock(...)
     ...
     ...    KRİTİK KOD
     ...
@@ -3632,14 +3669,14 @@ void exit_sys(const char *msg)
     Her ne kadar mutex_init bir fonksiyon görünümündeyse de aslında çekirdek kodlarında hem bir makro olarak hem de bir fonksiyon 
     olarak bulunmaktadır. Mevcut Linux çekirdeklerinde fonksiyonların makro gerçekleştirimleri aşağıdaki gibidir:
 
-    #define DEFINE_MUTEX(mutexname)                            \
+    #define DEFINE_MUTEX(mutexname)                             \
         struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
 
-    #define mutex_init(mutex)                \
-    do {                            \
-        static struct lock_class_key __key;        \
-                                \
-        __mutex_init((mutex), #mutex, &__key);        \
+    #define mutex_init(mutex)                                   \
+    do {                                                        \
+        static struct lock_class_key __key;                     \
+                                                                \
+        __mutex_init((mutex), #mutex, &__key);                  \
     } while (0)
 
     2) Mutex nesnesini kilitlemek için mutex_lock fonksiyonu kullanılır:
@@ -8542,7 +8579,7 @@ void exit_sys(const char *msg)
     inode yapısı dosyanın diskteki bilgilerini tutmaktadır. Yani örneğin aynı dosya üç kez açılsa çekirdek üç farklı file nesnesi 
     oluşturmaktadır. Ancak bu dosya diskte bir tane olduğuna göre çekirdek bunun için toplamda bir tane inode yapısı oluşturacaktır.
     Mevcut çekirdeklerde file yapısının içerisinde dosyanın diskteki bilgilerine ilişkin bu inode yapısına f_inode elemanı yoluyla 
-    erişilebilmektedir. Linux işletim sistemi aynı zamanda diskte son erişilen dosyalara ilişkin i-node elemanlarını inode yapısı 
+    erişilebilmektedir. Linux işletim sistemi aynı zamanda diskte son erişilen dosyalara ilişkin inode elemanlarını inode yapısı 
     biçiminde bir cache sisteminde de tutmaktadır. Buna "inode cache" denilmektedir. Örneğin biz "test.txt" isimli bir dosyayı 
     sys_open sistem fonksiyonuyla açmış olalım. İşletim sistemi bunun için bir dosya nesnesi oluşturacak ve bu dosyaya ilişkin 
     inode nesnesi zaten inode cache içerisinde varsa onu cache'ten alıp kullanacaktır. Eğer bu dosyaya ilişkin inode nesnesi 
@@ -8552,7 +8589,7 @@ void exit_sys(const char *msg)
     elemanı tutulmaktadır. Bu cache sistemi dolduğunda LRU (Least Recently Used) algoritmasına göre son zamanlarda en az kullanılan 
     inode elemanı cache'ten atılmaktadır.
 
-    Linux çekirdeğinde dosyanın i-node elemanına erişmekte kullanılan dizin girişleri dentry isimli bir yapıyla temsil edilmiştir. 
+    Linux çekirdeğinde dosyanın inode elemanına erişmekte kullanılan dizin girişleri dentry isimli bir yapıyla temsil edilmiştir. 
     inode yapısı dosyanın diskteki bilgilerini tutarken dentry yapısı dosyanın dizin girişi bilgilerini tutmaktadır. Yukarıda 
     da belirttiğimiz gibi dentry nesnesinin içerisinde inode nesnesinin adresi tutulmaktadır. Örneğin farklı dentry nesneleri 
     aynı inode nesnesini gösteriyor olabilir. Bu tür durumlar "hard link" yoluyla oluşturulmaktadır. Açılmış dosyanın hangi 
@@ -9407,15 +9444,15 @@ void exit_sys(const char *msg)
 
     _IOC(dir, type, nr, size)
 
-    Bu makro buradaki parçaları bit düzeyinde birleştirerek 4 byte'lık bir değer vermektedir. Makronun parametrelerini oluşturan 
-    dört parçanın anlamları ve bit uzunlukları şöyledir:
+    Bu makro buradaki parçaları bit düzeyinde birleştirerek 4 byte'lık bir değer haline getirmektedir. Makronun parametrelerini 
+    oluşturan dört parçanın anlamları ve bit uzunlukları şöyledir:
 
     dir (direction): Bu 2 bitlik bir alandır ([30, 31] bitler). Burada kullanılacak sembolik sabitler _IOC_NONE, _IOC_READ, 
     _IOC_WRITE ve _IOC_READ|_IOC_WRITE biçimindedir. Buradaki _IOC_READ aygıt sürücüden bilgi alınacağını _IOC_WRITE ise aygıt 
     sürücüye bilgi gönderileceğini belirtmektedir. Ancak bu yön ioctl sistem fonksiyonu tarafından dosyanın açış moduyla kontrol
     edilmemektedir. Örneğin biz buradaki yönü _IOC_READ|_IOC_WRITE biçiminde vermiş olsak bile aygıt dosyaısnı O_RDONLY modunda 
     açıp bu ioctl işlemini yapabiliriz. Çekirdek hiçbir işlemde bu yön bilgisini kontrol etmemektedir. Eğer programcı böyle bir 
-    kontrol yapmak istiyorsa aygıt sürücünün ioctl fonksiyonu içerisinde bunu yapmalıdır. Buradaki sembolil sabitler tipik olarak 
+    kontrol yapmak istiyorsa aygıt sürücünün ioctl fonksiyonu içerisinde bunu yapmalıdır. Buradaki sembolik sabitler tipik olarak 
     şu değerlerdedir:
 
     #define _IOC_NONE       0U
@@ -9433,7 +9470,7 @@ void exit_sys(const char *msg)
 
     Kullanım kolaylığı sağlamak için genellikle _IOC makrosu bir sembolik sabit biçiminde define edilir. Örneğin:
 
-    #define GENERAL_DRIVER_MAGIC    'g'
+    #define GENERAL_DRIVER_MAGIC     'g'
     #define IOC_GENERIC_INFO         _IOC(_IOC_READ, GENERAL_DRIVER_MAGIC, 0, 4)
 
     Aslında _IOC makrosundan daha kolay kullanılabilen aşağıdaki makrolar da oluşturulmuştur:
@@ -9475,13 +9512,13 @@ void exit_sys(const char *msg)
 
     Aygıt sürücüdeki ioctl fonksiyonunu yazarken iki noktaya dikkat etmek gerekir:
 
-    1) ioctl fonksiyonunun üçüncü parametresi unsigned long türden olmasına karşın aslında genellikle kullanıcı modunda çalışan 
-    programcı buraya bir nesnesin adresini geçirmektedir. Dolayısıyla bu transfer adresine aktarım gerekmektedir. Bunun için 
-    copy_to_user, copy_from_use, put_user, get_user gibi "adresin geçerliliğini sorguladıktan sonra transfer yapan fonksiyonlar" 
-    kullanılabilir.
+    1) ioctl fonksiyonunun üçüncü parametresi unsigned long türden olmasına karşın aslında genellikle kullanıcı modunda 
+    çalışan programcı buraya bir nesnesin adresini geçirmektedir. Dolayısıyla bu transfer adresine ilişkin aktarım gerekir. 
+    Bunun için copy_to_user, copy_from_user, put_user, get_user gibi "adresin geçerliliğini sorguladıktan sonra transfer 
+    yapan fonksiyonlar" kullanılabilir.
 
-    2) Kullanıcı modunda çalışan programcının olmayan bir komut kodu girmesi durumunda ioctl fonksiyonu -ENOTTY değeri ile 
-    geri döndürülmelidir. Bu tuhaf hata kodu (TTY teletype terminal sözcüklerinden kısaltmadır) tarihsel bir durumdan 
+    2) Kullanıcı modunda çalışan programcının olmayan bir komut kodu girmesi durumunda ioctl fonksiyonu -ENOTTY değeri 
+    ile geri döndürülmelidir. Bu tuhaf hata kodu (TTY teletype terminal sözcüklerinden kısaltmadır) tarihsel bir durumdan 
     kaynaklanmaktadır. Bu hata kodu için kullanıcı modunda "Inappropriate ioctl for device" biçiminde bir hata yazısı elde 
     edilmektedir.
 
@@ -9490,8 +9527,7 @@ void exit_sys(const char *msg)
     sürücüdeki fonksiyonun -ENOTTY ile geri döndürülmesi uygundur. Bazı aygıt sürücülerinde başarı durumunda aygıt sürücüden 
     bilgi ioctl fonksiyonunun üçüncü parametresi yoluyla değil geri dönüş değeri yoluyla elde edilmektedir. Bu durumda aygıt 
     sürücüdeki ioctl fonksiyonu pozitif değerle de geri döndürülebilir. Ancak bu durum seyrektir. Biz veri transferinin ioctl 
-    fonksiyonunun üçüncü 
-    parametresi yoluyla yapılmasını tavsiye ediyoruz.
+    fonksiyonunun üçüncü parametresi yoluyla yapılmasını tavsiye ediyoruz.
 
     Aygıt sürücüdeki ioctl fonksiyonu tipik olarak bir switch deyimi ile gerçekleştirilmektedir. Örneğin:
 
@@ -9774,7 +9810,7 @@ void exit_sys(const char *msg)
                                                 149. Ders 23/06/2024 - Pazar
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-
+/*--------------------------------------------------------------------------------------------------------------------------
     Bu örnek için yukarıda vermiş olduğumuz boru aygıt sürücüsünde bazı değişiklikler yaptık. Bu değişiklikler şunlardır:
 
     - Artık borunun uzunluğu PIPE_DEVICE yapısının içerisinde tutulmaya başlanmıştır:
@@ -11384,10 +11420,10 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   Anımsanacağı gibi proc dosya sistemi disk tabanlı bir dosya sistemi değildir. proc dosya sistemi çekirdek çalışması sırasında 
+    Anımsanacağı gibi proc dosya sistemi disk tabanlı bir dosya sistemi değildir. proc dosya sistemi çekirdek çalışması sırasında 
     çekirdeğin dış dünyaya bilgi vermesi için bazen de davranışını dış dünyadan gelen bilgilerle değiştirebilmesi için tasarlanmıştır 
     Daha sonraları benzer amaçlarla sys isimli bir dosya sistemi de Linux'a eklenmiştir.
-
+ 
     proc dosya sistemi yalnızca çekirdek tarafından değil aygıt sürücüler tarafından da kullanılabilmektedir. Ancak bu dosya 
     sisteminin içerisinde kullanıcı modundan dosyalar ya da dizinler yaratılamamaktadır. proc dosya sistemindeki tüm girişlerin 
     dosya uzunlukları 0 biçiminde rapor edilmektedir. proc dosya sisteminin bütün kontrolü çekirdek tarafından çekirdeğin
@@ -11418,7 +11454,7 @@ void exit_sys(const char *msg)
     #include <linux/proc_fs.h>
 
     struct proc_dir_entry *proc_create(const char *name, umode_t mode, 
-        struct proc_dir_entry *parent, const struct proc_ops *proc_ops);
+            struct proc_dir_entry *parent, const struct proc_ops *proc_ops);
 
     Fonksiyonun birinci parametresi proc dosya sisteminde yaratılacak olan dosyanın ismini belirtir. İkinci parametresi ise 
     erişim haklarını belirtmektedir. Bu parametre 0 geçilirse default erişim hakları kullanılır. Üçüncü parametre dosyanın 
@@ -11433,32 +11469,32 @@ void exit_sys(const char *msg)
 
     struct proc_ops {
         unsigned int proc_flags;
-        int    (*proc_open)(struct inode *, struct file *);
-        ssize_t    (*proc_read)(struct file *, char __user *, size_t, loff_t *);
+        int(*proc_open)(struct inode *, struct file *);
+        ssize_t (*proc_read)(struct file *, char __user *, size_t, loff_t *);
         ssize_t (*proc_read_iter)(struct kiocb *, struct iov_iter *);
-        ssize_t    (*proc_write)(struct file *, const char __user *, size_t, loff_t *);
+        ssize_t (*proc_write)(struct file *, const char __user *, size_t, loff_t *);
         /* mandatory unless nonseekable_open() or equivalent is used */
-        loff_t    (*proc_lseek)(struct file *, loff_t, int);
-        int    (*proc_release)(struct inode *, struct file *);
+        loff_t (*proc_lseek)(struct file *, loff_t, int);
+        int (*proc_release)(struct inode *, struct file *);
         __poll_t (*proc_poll)(struct file *, struct poll_table_struct *);
-        long    (*proc_ioctl)(struct file *, unsigned int, unsigned long);
+        long (*proc_ioctl)(struct file *, unsigned int, unsigned long);
     #ifdef CONFIG_COMPAT
-        long    (*proc_compat_ioctl)(struct file *, unsigned int, unsigned long);
+        long (*proc_compat_ioctl)(struct file *, unsigned int, unsigned long);
     #endif
-        int    (*proc_mmap)(struct file *, struct vm_area_struct *);
+        int  (*proc_mmap)(struct file *, struct vm_area_struct *);
         unsigned long (*proc_get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
     };
 
-    proc_ops yapısının elemanlarına ilişkin fonksiyon göstericilerinin türlerinin file_operations yapısındaki elemanlara ilişkin
-    fonksiyon göstericilerinin türleri ile aynı olduğuna dikkat ediniz. Bu fonksiyonların kullanımı tamamen aygıt sürücü 
-    için oluşturduğumuz file_operations yapısı ile aynı biçimdedir.
+    proc_ops yapısının elemanlarına ilişkin fonksiyon göstericilerinin türlerinin file_operations yapısındaki elemanlara 
+    ilişkin fonksiyon göstericilerinin türleri ile aynı olduğuna dikkat ediniz. Bu fonksiyonların kullanımı tamamen aygıt 
+    sürücü için oluşturduğumuz file_operations yapısı ile aynı biçimdedir.
 
-    proc dosya sistemi genel olarak text tabanlı bir dosya sistemi biçiminde düşünülmüştür. Yani buradaki dosyalar genel olarak 
-    text içeriğe sahiptir. Siz de aygıt sürücünüz için proc dosya sisteminde dosya oluşturacaksanız onların içeriğini text 
-    olarak oluşturmalısınız. (proc dosya sisteminde binary bir dosya içeriği oluşturmak mümkündür. Ancak kullanıcıların beklentisi
-    bu yönde değildir.)
+    proc dosya sistemi genel olarak text tabanlı bir dosya sistemi biçiminde düşünülmüştür. Yani buradaki dosyalar genel 
+    olarak text içeriğe sahiptir. Siz de aygıt sürücünüz için proc dosya sisteminde dosya oluşturacaksanız onların içeriğini 
+    text olarak oluşturmalısınız. (proc dosya sisteminde binary bir dosya içeriği oluşturmak mümkündür. Ancak kullanıcıların 
+    beklentisi bu yönde değildir.)
 
-    proc_create fonksitonu başarı durumunda yaratılan dosyanın bilgilerini içeren proc_dir_entry türünden bir yapı nesnesinin 
+    proc_create fonksiyonu başarı durumunda yaratılan dosyanın bilgilerini içeren proc_dir_entry türünden bir yapı nesnesinin 
     adresiyle, başarısızlık durumunda NULL adresle geri dönmektedir. Bu durumda çağıran fonksiyonun -ENOMEM gibi bir hata 
     değeriyle geri döndürülmesi yaygındır.
 
@@ -17659,8 +17695,8 @@ void exit_sys(const char *msg)
     daha sonra yine FAT tabanlı ancak çok daha gelişmiş NTFS denilen bir dosya sistemi gerçekleştirmiştir. Bugün Windows 
     sistemlerinde genel olarak NTFS (New Technology File Systems) dosya sistemleri kullanılmaktadır. Ancak Microsoft hala 
     FAT tabanlı dosya sistemlerini de desteklemektedir. Linux sistemlerinde "EXT (Extended File System)" ismi verilen 
-    "i-node tabanlı" dosya sistemleri kullanılmaktadır. Bu EXT dosya sistemlerinin EXT2, EXT3, EXT4 biçiminde varyasyonları 
-    vardır. Bugünkü Linux sistemlerinde en çok EXT4 dosya sistemi kullanılmaktadır. Apple firması yine i-node tabanlı HFS 
+    "inode tabanlı" dosya sistemleri kullanılmaktadır. Bu EXT dosya sistemlerinin EXT2, EXT3, EXT4 biçiminde varyasyonları 
+    vardır. Bugünkü Linux sistemlerinde en çok EXT4 dosya sistemi kullanılmaktadır. Apple firması yine inode tabanlı HFS 
     (Hierarchical File System), HFS+ (Hierarchical File System Plus) ve APFS (Apple File System) isimli dosya sistemlerini 
     kullanmaktadır. Bunlar da aile olarak birbirlerine çok benzemektedir. Bugünkü macOS sistemlerinde genellikle HFS+ 
     ya da APFS dosya sistemleri kullanılmaktadır.
@@ -17873,7 +17909,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Biz kursumuzda önce FAT dosya sisteminden bahsedeceğiz sonra UNIX/Linux sistemlerindeki i-node tabanlı EXT dosya sistemleri
+    Biz kursumuzda önce FAT dosya sisteminden bahsedeceğiz sonra UNIX/Linux sistemlerindeki inode tabanlı EXT dosya sistemleri
     üzerinde duracağız.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -19356,7 +19392,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Microsoft'un FAT dosya sisteminde ve UNIX/Linux sistemlerinde kullanılan i-node tabanlı dosya sistemlerinde dizinler de 
+    Microsoft'un FAT dosya sisteminde ve UNIX/Linux sistemlerinde kullanılan inode tabanlı dosya sistemlerinde dizinler de 
     tamamen bir dosya gibi organize edilmektedir. Yani dizinler de aslında birer dosyadır. Bir dosyanın içerisinde o dosyanın 
     bilgileri bulunurken bir dizin dosyasının içerisinde o dizindeki dosyalara ilişkin bilgiler bulunmaktadır. Yani dizinler 
     aslında "o dizindeki dosyaların bilgilerini içeren dosyalar" gibidir. Bir dizin dosyası "dizin girişlerinden (directory 
@@ -20021,12 +20057,12 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    UNIX/Linux sistemlerinde i-node tabanlı dosya sistemleri kullanılmaktadır. i-node tabanlı dosya sistemlerinin temel 
-    organizasyonu FAT dosya sistemlerinden oldukça farklıdır. i-node tabanlı dosya sistemlerinin çeşitli varyasyonu vardır. 
+    UNIX/Linux sistemlerinde inode tabanlı dosya sistemleri kullanılmaktadır. inode tabanlı dosya sistemlerinin temel 
+    organizasyonu FAT dosya sistemlerinden oldukça farklıdır. inode tabanlı dosya sistemlerinin çeşitli varyasyonu vardır. 
     Linux sistemleri ve BSD sistemleri ağırlıklı olarak "ext (extended file system)" denilen dosya sistemini kullanmaktadır.
     "ext" dosya sistemi ilk kez 1992 yılında tasarlanmıştır. Sonra zaman içerisinde bu dosya sisteminin ext2, ext3 ve ext4 biçiminde 
     çeşitli varyasyonları oluşturulmuştur. Bugün artık genellikle bu ailenin son üyesi olan ext4 dosya sistemi kullanılmaktadır. 
-    Ancak yukarıda da belirttiğimiz gibi i-node tabanlı dosya sistemleri bir aile belirtmektedir. Bu ailenin FAT sistemlerinde 
+    Ancak yukarıda da belirttiğimiz gibi inode tabanlı dosya sistemleri bir aile belirtmektedir. Bu ailenin FAT sistemlerinde 
     olduğu gibi genel tasarımı birbirine benzerdir. Biz burada ext dosya sisteminin en uzun süre kullanılan versiyonu olan 
     ext konusunda temel bilgiler vereceğiz. ext2 dosya sisteminin resmi dokümantasyonuna aşağıdaki bağlantıdan erişebilirsiniz:
 
@@ -20054,17 +20090,17 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    i-node tabanlı dosya sistemlerinde volüm kabaca aşağıdaki bölümlere ayrılmaktadır:
+    inode tabanlı dosya sistemlerinde volüm kabaca aşağıdaki bölümlere ayrılmaktadır:
 
     <boot block>>
     <super block>
-    <i-node block>
+    <inode block>
     <data block>
 
     Boot blok (boot block) işletim sistemini boot eden kodların bulunduğu bloktur. Süper blok (super block) FAT dosya sistemlerindeki 
-    boot sektör BPB alanına benzemektedir. Yani burada dosya sistemine ilişkin metadata bilgiler bulunmaktadır. i-node blok 
-    i-node elemanlarından oluşmaktadır. Data blok (data block= FAT dosya sistemindeki Data bölümü gibidir. FAT dosya sistemindeki 
-    "cluster" yerine i-node tabanlı dosya sistemlerinde "blok (block)" terimi kullanılmaktadır. Bir blok bir dosyanın parçası olabilecek 
+    boot sektör BPB alanına benzemektedir. Yani burada dosya sistemine ilişkin metadata bilgiler bulunmaktadır. inode blok 
+    inode elemanlarından oluşmaktadır. Data blok (data block= FAT dosya sistemindeki Data bölümü gibidir. FAT dosya sistemindeki 
+    "cluster" yerine inode tabanlı dosya sistemlerinde "blok (block)" terimi kullanılmaktadır. Bir blok bir dosyanın parçası olabilecek 
     en küçük birimdir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -20121,8 +20157,8 @@ void exit_sys(const char *msg)
 
     Buradaki önemli alanlar hakkında kısa bazı açıklamalar yapmak istiyoruz:
 
-    s_inodes_count: Bu alanda dosya sistemindeki toplam i-node elemanlarının sayısı bulunmaktadır. Bir ext2 disk bölümünde en 
-    fazla buradaki i-node elemanlarının sayısı kadar farklı dosya bulunabilir.
+    s_inodes_count: Bu alanda dosya sistemindeki toplam inode elemanlarının sayısı bulunmaktadır. Bir ext2 disk bölümünde en 
+    fazla buradaki inode elemanlarının sayısı kadar farklı dosya bulunabilir.
 
     s_blocks_count: Burada Data bölümündeki toplam blokların sayısı bulunmaktadır.
 
@@ -20133,7 +20169,7 @@ void exit_sys(const char *msg)
     s_log_block_size: Burada 1024 değerinin 2 üzeri kaçla çarpılacağını belirten değer tutulmaktadır. Yani blok uzunluğu 
     1024 << s_log_block_siz biçiminde hesaplanmaktadır. Örneğin burada 2 değeri yazılıyorsa blok uzunluğu 2^2 * 1024 = 4096 byte'tır.
 
-    s_inode_size: Burada bir i-node elemanının kaç byte olduğu bilgisi yer almaktadır. Örnek dosya sistemimizde i-node elemanları 
+    s_inode_size: Burada bir inode elemanının kaç byte olduğu bilgisi yer almaktadır. Örnek dosya sistemimizde inode elemanları 
     256 byte uzunluğundadır.
 
     ext2 dosya sisteminin süper blok bilgisi ve bazı önemli alanlarına ilişkin bilgiler "dumpe2fs" isimli utility programla 
@@ -20161,29 +20197,29 @@ void exit_sys(const char *msg)
     000004f0  81 50 45 f3 bb 96 6c 7c  51 bc e3 8a 01 00 00 00  |.PE...l|Q.......|
     00000500  0c 00 00 00 00 00 00 00  42 5c 2e 67 00 00 00 00  |........B\.g....|
 
-    Burada toplam i-node elemanlarının sayısı 0xC360 (50016) tanedir.
+    Burada toplam inode elemanlarının sayısı 0xC360 (50016) tanedir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Disk bölümünün i-node bloğu i-node elemanlarından oluşmaktadır. Her i-node elemanının ilki 0 olmak üzere bir indeks numarası 
+    Disk bölümünün inode bloğu inode elemanlarından oluşmaktadır. Her inode elemanının ilki 0 olmak üzere bir indeks numarası 
     vardır. Örneğin:
 
-    0       i-node elemanı
-    1       i-node elemanı
-    2       i-node elemanı
-    3       i-node elemanı
-    4       i-node elemanı
+    0       inode elemanı
+    1       inode elemanı
+    2       inode elemanı
+    3       inode elemanı
+    4       inode elemanı
     ...
-    300     i-node elemanı
-    301     i-node elemanı
-    302     i-node elemanı
-    303     i-node elemanı
-    304     i-node elemanı
+    300     inode elemanı
+    301     inode elemanı
+    302     inode elemanı
+    303     inode elemanı
+    304     inode elemanı
     ...
 
-    Bir dosyanın ismi haricindeki bütün bilgileri dosyaya ilişkin i-node elemanında tutulmaktadır. Zaten stat fonksiyonları 
-    da aslında bilgileri bu i-node elemanından almaktadır. Her dosyanın diğerlerinden farklı bir i-node numarası olduğuna 
-    dikkat ediniz. Dolayısıyla dosyanın i-node numarası o dosyayı karakterize etmektedir. ("ls" komutunda dosyanın i-node 
+    Bir dosyanın ismi haricindeki bütün bilgileri dosyaya ilişkin inode elemanında tutulmaktadır. Zaten stat fonksiyonları 
+    da aslında bilgileri bu inode elemanından almaktadır. Her dosyanın diğerlerinden farklı bir inode numarası olduğuna 
+    dikkat ediniz. Dolayısıyla dosyanın inode numarası o dosyayı karakterize etmektedir. ("ls" komutunda dosyanın inode 
     numaralarının -i seçeneği ile elde edildiğini anımsayınız.) Burada hatırlatma yapmak amacıyla stat yapısını yeniden vermek 
     istiyoruz:
 
@@ -20203,7 +20239,7 @@ void exit_sys(const char *msg)
         time_t    st_ctime;   /* time of last status change */
     };
 
-    ext2 dosya sisteminde bir i-node elemanının alanları aşağıdaki gibidir:
+    ext2 dosya sisteminde bir inode elemanının alanları aşağıdaki gibidir:
 
     +-------------+------------+----------------------------------------------------------------------------------------------+
     |    Alan     |Boyut (Byte)|                                           Açıklama                                           |
@@ -20239,10 +20275,10 @@ void exit_sys(const char *msg)
 
     i_file_acl: Dosyaya ilişkin "erişim kontrol listesi (access control list)" ile ilgili bilgiler tutulmaktadır.
 
-    i-node elemanında dosyanın isminin tutulmadığına dikkat ediniz. ext2 dosya sisteminde bir i-node elemanının uzunluğu süper
-    bloğun s_inode_size elemanında yazmaktadır. Örnek sistemimizde i-node elemanları 256 byte uzunluktadır.
+    inode elemanında dosyanın isminin tutulmadığına dikkat ediniz. ext2 dosya sisteminde bir inode elemanının uzunluğu süper
+    bloğun s_inode_size elemanında yazmaktadır. Örnek sistemimizde inode elemanları 256 byte uzunluktadır.
 
-    Peki dosyanın ismi nerededir ve dosyanın i-node numarası nereden elde edilmektedir? Bunu izleyen paragraflarda göreceğiz.
+    Peki dosyanın ismi nerededir ve dosyanın inode numarası nereden elde edilmektedir? Bunu izleyen paragraflarda göreceğiz.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -20250,15 +20286,15 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Biz yukarıda i-node tabanlı bir disk bölümünün kaba organizasyonunun aşağıdaki gibi olduğunu belirtmiştik:
+    Biz yukarıda inode tabanlı bir disk bölümünün kaba organizasyonunun aşağıdaki gibi olduğunu belirtmiştik:
 
     <boot block>                    (1024 byte)
     <super block>
-    <i-node block>
+    <inode block>
     <data block>
 
-    Burada sanki süper bloktan hemen sonra i-node blok geliyormuş gibi biz organizasyon resmedilmiştir. Halbuki süper bloktan
-    hemen sonra i-node blok gelmemektedir. ext2 dosya sisteminin gerçek yerleşimi aşağıdaki gibidir:
+    Burada sanki süper bloktan hemen sonra inode blok geliyormuş gibi biz organizasyon resmedilmiştir. Halbuki süper bloktan
+    hemen sonra inode blok gelmemektedir. ext2 dosya sisteminin gerçek yerleşimi aşağıdaki gibidir:
 
     <boot block>                      (1024 byte)
     <block group>
@@ -20271,13 +20307,13 @@ void exit_sys(const char *msg)
     <super block>
     <block group descriptor table>
     <block bitmap>
-    <i-node bitmap>
-    <i-node table>
+    <inode bitmap>
+    <inode table>
     <data block>
 
     İşte "blok grup betimleyici tablosu (block group descriptor table)" blok grupları hakkında bilgi veren bir bölümdür. Bir 
     kaç blok bilginin yer aldığı süper bloğun "s_blocks_per_group" elemanında saklanmaktadır. Her blok grupta belli sayıda 
-    i-node elemanı vardır. Bir blok gruptaki i-node elemanlarının sayısı süper bloktaki s_inodes_per_group elemanıyla 
+    inode elemanı vardır. Bir blok gruptaki inode elemanlarının sayısı süper bloktaki s_inodes_per_group elemanıyla 
     belirtilmektedir. Yani aslında ext2 dosya sisteminde aşağıdaki gibi bir organizasyon söz konusudur:
 
     <boot block>
@@ -20285,30 +20321,30 @@ void exit_sys(const char *msg)
     <super block>
     <block group desciptor table>     (1024 byte)
     <block bitmap>                    (1024 byte)
-    <i-node bitmap>                   (1024 byte)
-    <i-node table>
+    <inode bitmap>                   (1024 byte)
+    <inode table>
     <data block>
 
     <super block>
     <block group desciptor table>     (1024 byte)
     <block bitmap>                    (1024 byte)
-    <i-node bitmap >                  (1024 byte)
-    <i-node table>
+    <inode bitmap >                  (1024 byte)
+    <inode table>
     <data block>
 
     <super block>
     <block group desciptor table>     (1024 byte)
     <block bitmap>                    (1024 byte)
-    <i-node bitmap >                  (1024 byte)
-    <i-node table>
+    <inode bitmap >                  (1024 byte)
+    <inode table>
     <data block>
     ...
 
     Görüldüğü gibi ext2 dosya sisteminde süper bloğun tek bir kopyası yoktur. Her blok grupta süper blok yeniden yer 
-    almaktadır. Bir blok grupta ayrı bir i-node tablosunun ve data bölümünün olduğuna dikkat ediniz.
+    almaktadır. Bir blok grupta ayrı bir inode tablosunun ve data bölümünün olduğuna dikkat ediniz.
 
     Peki neden ext2 dosya sisteminde disk bölümü birden fazla blok gruplara ayrılmıştır? İşte bunun nedenlerinden biri 
-    güvenliktir. Yani i-node bloklardan biri bozulduğunda diğeri bozulmamış biçimde kalabilir.
+    güvenliktir. Yani inode bloklardan biri bozulduğunda diğeri bozulmamış biçimde kalabilir.
 
     Blok gruplarındaki "blok grup betimleyici tablosu (block group descriptor table)" blok grupları hakkında bazı metadata 
     bilgileri tutmaktadır. Ancak blok grup betimleyicilerinde yalnızca o blok grubuna ilişkin bilgiler değil, tüm blok gruplarına 
@@ -20339,7 +20375,7 @@ void exit_sys(const char *msg)
     | bg_reserved          |     12      | Rezerv alan (genellikle sıfırdır)       |
     +----------------------+-------------+-----------------------------------------+
 
-    Blok grup betimleyicisi toplamda 32 byte yer kaplamaktadır. Her blok grubunda blok bitmap'in, i-node bitmap'in ve i-node 
+    Blok grup betimleyicisi toplamda 32 byte yer kaplamaktadır. Her blok grubunda blok bitmap'in, inode bitmap'in ve inode 
     tablosunun yerinin blok numarası tutulmaktadır. Buradaki blok uzunlukları disk bölümünün başından itibaren yer belirtir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -20375,7 +20411,7 @@ void exit_sys(const char *msg)
 
     Disk bölümünde toplam kaç blok grubu olduğu süper bloktaki s_blocks_count elemanında yazmaktadır.
 
-    Bir blok grubundaki blok grup betimleyici tablosunun uzunluğu 1 blok kadardır. Blok bitmap'in ve i-node bitmap'in 
+    Bir blok grubundaki blok grup betimleyici tablosunun uzunluğu 1 blok kadardır. Blok bitmap'in ve inode bitmap'in 
     uzunlukları doğrudan süper blokta yazmamaktadır. Bu uzunluklar dolaylı bir biçimde hesaplanmaktadır. Dolayısıyla bir 
     blok gruptaki data alanının başlangıç bloğu da dolaylı bir biçimde hesaplanmaktadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -20389,24 +20425,24 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Peki bir dosyanın i-node numarası biliniyorsa onun disk bölümündeki yerini nasıl hesaplarız? Burada bizim bu i-node 
-    elemanının hangi blok grubunda ve o blok grubunun i-node tablosunda nerede olduğunu belirlememiz gerekir. i-node tablosundaki
-    i-node elemanları 1'den başlatılmıştır. Yani bizim elimizde i-node numarası n olan bir dosya varsa aslında bu dosya i-node
-    tablosunun n - 1'inci i-node elemanındadır. Çünkü i-node tablosunun ilk i-node elemanının numarası 0 değil, 1'dir.
+    Peki bir dosyanın inode numarası biliniyorsa onun disk bölümündeki yerini nasıl hesaplarız? Burada bizim bu inode 
+    elemanının hangi blok grubunda ve o blok grubunun inode tablosunda nerede olduğunu belirlememiz gerekir. inode tablosundaki
+    inode elemanları 1'den başlatılmıştır. Yani bizim elimizde inode numarası n olan bir dosya varsa aslında bu dosya inode
+    tablosunun n - 1'inci inode elemanındadır. Çünkü inode tablosunun ilk inode elemanının numarası 0 değil, 1'dir.
 
-    Her blok grupta eşit sayıda i-node elemanı bulunmaktadır. Bir blok gruptaki i-node elemanlarının sayısı doğrudan süper 
-    bloktaki s_inodes_per_group elemanında belirtilmektedir. Bu durumda ilgili i-node numarasına ilişkin i-node elemanı i-node
+    Her blok grupta eşit sayıda inode elemanı bulunmaktadır. Bir blok gruptaki inode elemanlarının sayısı doğrudan süper 
+    bloktaki s_inodes_per_group elemanında belirtilmektedir. Bu durumda ilgili inode numarasına ilişkin inode elemanı inode
     numarası n olmak üzere (n - 1) / s_inodes_per_group işlemiyle elde edilebilir. Tabii bu durumda (n - 1) % s_inodes_per_group 
-    ifadesi de i-node elemanının o blok gruptaki i-node tablosunun kaçıncı elemanında olduğunu verecektir. Anımsanacağı gibi her 
-    blok grubunun i-node tablosunun yeri blok grup betimleyicisinin bg_inode_table elemanında belirtiliyordu.
+    ifadesi de inode elemanının o blok gruptaki inode tablosunun kaçıncı elemanında olduğunu verecektir. Anımsanacağı gibi her 
+    blok grubunun inode tablosunun yeri blok grup betimleyicisinin bg_inode_table elemanında belirtiliyordu.
 
     Bir blok grubunun toplam kaç tane bloktan oluştuğu süper bloktaki s_blocks_per_group elemanında tutulmaktadır. Dolayısıyla 
     k'ıncı blok grubunun yeri k * s_blocks_per_group değeri ile tespit edilir. Blok numaralarına boot blok dahil değildir. Yani
     ilk blok grubunun süper bloğunun blok numarası 0'dır.
 
-    Bu durumda manuel olarak n numaralı i-node numarasına sahip bir dosyanın i-node elemanına şöyle erişilebilir:
+    Bu durumda manuel olarak n numaralı inode numarasına sahip bir dosyanın inode elemanına şöyle erişilebilir:
 
-    1) Önce n / s_inodes_per_group ile ilgili i-node elemanının hangi blok grubununda olduğu tespit edilir. Bu değer k olsun.
+    1) Önce n / s_inodes_per_group ile ilgili inode elemanının hangi blok grubununda olduğu tespit edilir. Bu değer k olsun.
 
     2) Bu blok grubunun yeri k * s_blocks_per_group değeri ile elde edilir ve bu bloğa gidilir. Her bloğun başında 1 blokluk 
     süper blok vardır. Süper bloğu blok grup betimleyici tablosu izler. Blok grup betimleyici tablosu blok grup betimleyicilerinden 
@@ -20414,12 +20450,12 @@ void exit_sys(const char *msg)
     betimleyicisinin yerini k * 32 ile tespit edebiliriz. (Aslında tüm blok gruplarındaki blok grup betimleyici tablolarının 
     birbirinin aynısı olduğunu anımsayınız.)
 
-    3) İlgili blok grubunun i-node tablosunun yeri blok grup betimleyicisinin bg_inode_table elemanında belirtilmektedir. 
-    Artık biz i-node elemanını burada belirtilen bloktan itibaren n % s_inodes_per_group kadar ilerideki i-node elemanı olarak 
-    elde edebiliriz. Bir i-node elemanının uzunluğunun 256 byte olduğunu belirtmiştik.
+    3) İlgili blok grubunun inode tablosunun yeri blok grup betimleyicisinin bg_inode_table elemanında belirtilmektedir. 
+    Artık biz inode elemanını burada belirtilen bloktan itibaren n % s_inodes_per_group kadar ilerideki inode elemanı olarak 
+    elde edebiliriz. Bir inode elemanının uzunluğunun 256 byte olduğunu belirtmiştik.
 
-    Şimdi 12'nci i-node elemanın yerini bu adımlardan geçerek bulmaya çalışalım. Elimizdeki disk bölümünde bir blok grupta 
-    toplam 25008 tane i-node elemanı vardır. O halde 12 numaralı i-node elemanı 0'ıncı blok grubunun 11'inci i-node elemanındadır. 
+    Şimdi 12'nci inode elemanın yerini bu adımlardan geçerek bulmaya çalışalım. Elimizdeki disk bölümünde bir blok grupta 
+    toplam 25008 tane inode elemanı vardır. O halde 12 numaralı inode elemanı 0'ıncı blok grubunun 11'inci inode elemanındadır. 
     0'ıncı blok grubu eğer blok uzunluğu 1K'dan fazla ise diskin 0'ıncı bloğundan başlamaktadır. (Tabii 0'ıncı bloğun hemen 
     başında boot blok, ondan 1024 byte sonra da 0'ın blok grubunun süper bloğu bulunmaktadır.) O halde elimizdeki disk bölümünün 
     0'ıncı blok grubunun blok betimleyici tablosu 1'inci bloktadır. Bunun yeri de bir blok 4096 byte olduğuna göre 0x1000 
@@ -20438,12 +20474,12 @@ void exit_sys(const char *msg)
     00001000  0e 00 00 00 0f 00 00 00  10 00 00 00 c7 79 a4 61  |.............y.a|
     00001010  02 00 04 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
 
-    Bu blok grubundaki i-node tablosunun blok numarası blok grup betimleyicisinin 8'inci offset'inde bulunan bg_inode_table
+    Bu blok grubundaki inode tablosunun blok numarası blok grup betimleyicisinin 8'inci offset'inde bulunan bg_inode_table
     elemanındadır. Bu elemandaki değer 0x00000010 (16)'dır. O halde bizim 16 numaralı bloğa gitmemiz gerekir. 16 numaralı 
-    blok disk bölümünün 16 * 4096 = 65536 (0x10000) offset'indedir. Artık bu offset'te ilgili blok grubundaki i-node elemanları 
-    bulunmaktadır. Bir i-node elemanı 256 byte olduğuna göre 11'inci elemanının yeri 11 * 256 = 2816 (0xB00) byte ileridedir. 
+    blok disk bölümünün 16 * 4096 = 65536 (0x10000) offset'indedir. Artık bu offset'te ilgili blok grubundaki inode elemanları 
+    bulunmaktadır. Bir inode elemanı 256 byte olduğuna göre 11'inci elemanının yeri 11 * 256 = 2816 (0xB00) byte ileridedir. 
     O halde bu tablonun disk bölümünün başından itibarenki yeri 65536 + 2816 = 68352 (0x10B00) offset'indedir. Aşağıda ilgili
-    i-node elemanının 256 byte'lık içeriği görülmektedir:
+    inode elemanının 256 byte'lık içeriği görülmektedir:
 
     00010b00  a4 81 00 00 c8 79 00 00  87 5c 2e 67 87 5c 2e 67  |.....y...\.g.\.g|
     00010b10  87 5c 2e 67 00 00 00 00  00 00 01 00 40 00 00 00  |.\.g........@...|
@@ -20463,34 +20499,34 @@ void exit_sys(const char *msg)
     00010bf0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
 
     Buradaki ilk WORD bilgi (0x81A4) dosyanın erişim haklarını sonraki WORD bilgi (0x0000) kullanıcı id'sini belirtmektedir. 
-    Sonraki DWORD bilgi (0x000079C8) de dosyanın uzunluğunu belirtmektedir. Diğer elemanların anlamlarına i-node yapısından 
+    Sonraki DWORD bilgi (0x000079C8) de dosyanın uzunluğunu belirtmektedir. Diğer elemanların anlamlarına inode yapısından 
     erişebilirsiniz.
 
-    i-node tablosundaki ilk n tane i-node elemanı reserved biçimde tutulmaktadır. Bunların sayısı süper bloktaki s_first_ino 
-    elemanında belirtilmektedir. Üzerinde çalıştığımız dosya sisteminde s_first_ino değeri 11'dir. Yani ilk 10 i-node elemanı 
-    reserve edilmiştir. İlk i-node elemanının numarası 11'dir. Örnek dosya sistemimizdeki durum şöyledir:
+    inode tablosundaki ilk n tane inode elemanı reserved biçimde tutulmaktadır. Bunların sayısı süper bloktaki s_first_ino 
+    elemanında belirtilmektedir. Üzerinde çalıştığımız dosya sisteminde s_first_ino değeri 11'dir. Yani ilk 10 inode elemanı 
+    reserve edilmiştir. İlk inode elemanının numarası 11'dir. Örnek dosya sistemimizdeki durum şöyledir:
 
-    0. Blok Grubunun i-node Tablosu
+    0. Blok Grubunun inode Tablosu
 
-    <1 numaralı i-node elemanı>
-    <2 numaralı i-node elemanı>
-    <3 numaralı i-node elemanı>
+    <1 numaralı inode elemanı>
+    <2 numaralı inode elemanı>
+    <3 numaralı inode elemanı>
     ...
-    <10 numaralı i-node elemanı>
-    <11 numaralı i-node elemanı (ilk reserved olmayan eleman)>
+    <10 numaralı inode elemanı>
+    <11 numaralı inode elemanı (ilk reserved olmayan eleman)>
     ...
 
-    Reserve edilmiş ilk i-node elemanlarının anlamları şöyledir:
+    Reserve edilmiş ilk inode elemanlarının anlamları şöyledir:
 
     +----------------------+-------+-------------------------------+
     |         İsim         | Değer |             Anlamı            |
     +----------------------+-------+-------------------------------+
-    | EXT2_BAD_INO         |   1   | Bad blocks i-node             |
-    | EXT2_ROOT_INO        |   2   | Root directory i-node         |
+    | EXT2_BAD_INO         |   1   | Bad blocks inode             |
+    | EXT2_ROOT_INO        |   2   | Root directory inode         |
     | EXT2_ACL_IDX_INO     |   3   | ACL index inode (deprecated?) |
-    | EXT2_ACL_DATA_INO    |   4   | ACL data i-node (deprecated?) |
-    | EXT2_BOOT_LOADER_INO |   5   | Boot loader i-node            |
-    | EXT2_UNDEL_DIR_INO   |   6   | Undelete directory i-node     |
+    | EXT2_ACL_DATA_INO    |   4   | ACL data inode (deprecated?) |
+    | EXT2_BOOT_LOADER_INO |   5   | Boot loader inode            |
+    | EXT2_UNDEL_DIR_INO   |   6   | Undelete directory inode     |
     +----------------------+-------+-------------------------------+
 
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -20506,13 +20542,13 @@ void exit_sys(const char *msg)
 /*--------------------------------------------------------------------------------------------------------------------------
     Peki ext2 dosya sisteminde bir dosyanın parçalarının (yani bloklarının) nerelerde olduğu bilgisi nerede tutulmaktadır?
     Anımsanacağı gibi FAT dosya sisteminde dosyanın parçalarının (orada block yerine cluster teriminin kullanıldığını anımsayınız)
-    diskin hangi cluster'larında olduğu FAT bölümünde saklanıyordu. İşte yalnızca ext2 dosya sisteminde değil, i-node tabanlı 
-    dosya sistemlerinde bir dosyanın diskte hangi bloklarda bulunduğu i-node elemanının içerisinde tutulmaktadır. i-node elemanlarının
+    diskin hangi cluster'larında olduğu FAT bölümünde saklanıyordu. İşte yalnızca ext2 dosya sisteminde değil, inode tabanlı 
+    dosya sistemlerinde bir dosyanın diskte hangi bloklarda bulunduğu inode elemanının içerisinde tutulmaktadır. inode elemanlarının
     genel olarak 128 byte ya da 256 byte uzunlukta olduğunu anımsayınız. Büyük bir dosyanın blok numaralarının bu kadar alana 
-    sığmayacağı açıktır. Peki o zaman dosyanın blok numaraları i-node elemanında nasıl tutulmaktadır?
+    sığmayacağı açıktır. Peki o zaman dosyanın blok numaraları inode elemanında nasıl tutulmaktadır?
 
-    İşte i-node elemanında dosyanın hangi bloklarda olduğu "doğrudan (direct)", "dolaylı (indirect)", "çift dolaylı (double 
-    indirect)" ve "üç dolaylı (triple indirect)"" bloklarda tutulmaktadır. i-node elemanının decimal 40'ıncı offset'inde (i-node 
+    İşte inode elemanında dosyanın hangi bloklarda olduğu "doğrudan (direct)", "dolaylı (indirect)", "çift dolaylı (double 
+    indirect)" ve "üç dolaylı (triple indirect)"" bloklarda tutulmaktadır. inode elemanının decimal 40'ıncı offset'inde (inode 
     elemanının 0x28 offset'indeki "i_blocks" isimli elemanında) 15 elemanlık her biri DWORD değerlerden oluşan bir dizi vardır. 
     Bu diziyi şöyle gösterebiliriz:
 
@@ -20545,7 +20581,7 @@ void exit_sys(const char *msg)
     blokların içerisinde dolaylı blokların numaraları vardır. Nihayet dolaylı blokların içerisinde de asıl blokların numaraları 
     vardır.
 
-    Peki her bloğun 4K uzunluğunda olduğu bir sistemde bir dosyanın i-node elemanında belirtilen maksimum uzunluğu ne olabilir? 
+    Peki her bloğun 4K uzunluğunda olduğu bir sistemde bir dosyanın inode elemanında belirtilen maksimum uzunluğu ne olabilir? 
     İşte bu uzunluk aşağıdaki değerlerin toplamıyla elde edilebilir:
 
     12 tane doğrudan blok = 12 * 4096
@@ -20555,7 +20591,7 @@ void exit_sys(const char *msg)
 
     Toplam = 12 * 4096 + 1024 * 4096 + 1024 * 12024 * 4096 + 1024 * 1024 * 1024 * 4096 = 4448483065856 = 4 TB civarı.
 
-    Şimdi aşağıdaki i-node elemanına bakıp dosya bloklarının yerlerini tespit edelim:
+    Şimdi aşağıdaki inode elemanına bakıp dosya bloklarının yerlerini tespit edelim:
 
     00010b00  a4 81 00 00 c8 79 00 00  87 5c 2e 67 87 5c 2e 67  |.....y...\.g.\.g|
     00010b10  87 5c 2e 67 00 00 00 00  00 00 01 00 40 00 00 00  |.\.g........@...|
@@ -20609,7 +20645,7 @@ void exit_sys(const char *msg)
     +----------------+--------------+-------------------------+
     | Offset (bytes) | Size (bytes) |        Açıklama         |
     +----------------+--------------+-------------------------+
-    |       0        |     DWORD    | i-node numarası         |
+    |       0        |     DWORD    | inode numarası         |
     |       4        |     WORD     | Girişin toplam uzunluğu |
     |       6        |     BYTE     | Dosya isminin uzunluğu  |
     |       7        |     BYTE     | Dosyanın türü           |
@@ -20629,10 +20665,10 @@ void exit_sys(const char *msg)
     };
 
     Dizin girişleri FAT dosya sistemindeki gibi eşit uzunlukta girişlerden oluşmamaktadır. Bunun nedeni dosya isimlerinin 
-    0 ile 255 karakter arasında değişebilmesidir. Dizin girişlerinin hemen başında DWORD bir alanda dosyanın i-node numarası
+    0 ile 255 karakter arasında değişebilmesidir. Dizin girişlerinin hemen başında DWORD bir alanda dosyanın inode numarası
     belirtilmektedir. Dizinler değişken uzunlukta olduğu için ilgili girişin toplam kaç byte uzunlukta olduğu sonraki WORD 
     elemanda tutulmaktadır. Girişteki dosya isminin uzunluğu ise sonraki BYTE elemanında tutulmaktadır. Dosyanın türü 
-    hiç i-node elemanına erişmeden elde edilebilsin diye dizin girişlerinde de tutulmaktadır. Dosya türlerini belirten değerler
+    hiç inode elemanına erişmeden elde edilebilsin diye dizin girişlerinde de tutulmaktadır. Dosya türlerini belirten değerler
     şöyledir:
 
     +------------------+-------+-------------------+
@@ -20656,19 +20692,19 @@ void exit_sys(const char *msg)
 
 /*--------------------------------------------------------------------------------------------------------------------------
     Peki ext2 dosya sisteminde işletim sistemi bir yol ifadesini nasıl çözümlemektedir? Örneğin "/a/b/c.txt" gibi bir yol
-    ifadesinde "c.txt" dosyasının i-node elemanına nasıl erişmektedir? İşte kök dizin dosyasının bilgileri 2 numaralı i-node 
-    elemanındadır. İşletim sistemi önce kök dizinin i-node elemanını elde eder. Oradan kök dizinin bloklarına erişir. O bloklar 
-    içerisinde ilgili girişi arar. İşlemlerini bu biçimde devam ettirir. Örneğin "/a/b/c.txt" dosyasının i-node elemanına 
+    ifadesinde "c.txt" dosyasının inode elemanına nasıl erişmektedir? İşte kök dizin dosyasının bilgileri 2 numaralı inode 
+    elemanındadır. İşletim sistemi önce kök dizinin inode elemanını elde eder. Oradan kök dizinin bloklarına erişir. O bloklar 
+    içerisinde ilgili girişi arar. İşlemlerini bu biçimde devam ettirir. Örneğin "/a/b/c.txt" dosyasının inode elemanına 
     erişmek için önce kök dizinde "a" girişini arar. Sonra "a" girişinin dizin olduğunu doğrular. Sonra "a" dizininde "b" 
     girişini arar. "b" girişinin de dosya olduğunu doğrular. Sonra "b" girişinin içerisinde "c.txt" arar ve hedef dosyanın 
-    i-node bilgilerine erişir.
+    inode bilgilerine erişir.
 
     Şimdi adım adım elimizdeki disk bölümünde "/a/b/c.txt" dosyasının yerini bulmaya çalışalım. Tabii buradaki kök dizin 
     aslında mount edilmiş dosya sisteminin köküdür. Biz bu dosya sistemini kursumuzda aşağıdaki noktaya mount ettik:
 
     "/home/kaan/Study/UnixLinux-SysProg/DiskIO-FileSystems"
 
-    Kök dizinin i-node elemanı (2 numaralı i-node elemanı) aşağıda verilmiştir:
+    Kök dizinin inode elemanı (2 numaralı inode elemanı) aşağıda verilmiştir:
 
     00010100  ed 41 00 00 00 10 00 00  a8 69 4c 67 a7 69 4c 67  |.A.......iLg.iLg|
     00010110  a7 69 4c 67 00 00 00 00  00 00 04 00 08 00 00 00  |.iLg............|
@@ -20713,19 +20749,19 @@ void exit_sys(const char *msg)
     +----------------+--------------+-------------------------+
     | Offset (bytes) | Size (bytes) |        Açıklama         |
     +----------------+--------------+-------------------------+
-    |       0        |     DWORD    | i-node numarası         |
+    |       0        |     DWORD    | inode numarası         |
     |       4        |     WORD     | Girişin toplam uzunluğu |
     |       6        |     BYTE     | Dosya isminin uzunluğu  |
     |       7        |     BYTE     | Dosyanın türü           |
     |       8        | 0-255 Bytes  | Dosya ismi              |
     +----------------+--------------+-------------------------+
 
-    İlk dizin girişinin i-node numarası 2'dir. Bu girişin uzunluğu 0x0C = 12'dir. O halde bu dizin girişi şöyledir:
+    İlk dizin girişinin inode numarası 2'dir. Bu girişin uzunluğu 0x0C = 12'dir. O halde bu dizin girişi şöyledir:
 
     0062b000  02 00 00 00 0c 00 01 02  2e 00 00 00 02
 
     Burada dosya ismi 1 karakter uzunluktadır. Dosya ismi yalnızca 0x2E karakterinde oluşmaktadır. Bu karakter de "." karakteridir.
-    Sonraki dizin girişinin i-node numarası yine 2'dir. Girişin uzunluğu yine 0xC = 12'dir. O halde giriş şöyledir:
+    Sonraki dizin girişinin inode numarası yine 2'dir. Girişin uzunluğu yine 0xC = 12'dir. O halde giriş şöyledir:
 
     0062b000                                       02 00 00 00  |................|
     0062b010  0c 00 02 02 2e 2e 00 00                           |................|
@@ -20736,24 +20772,24 @@ void exit_sys(const char *msg)
     0062b010                           0b 00 00 00 14 00 0a 02  |................|
     0062b020  6c 6f 73 74 2b 66 6f 75  6e 64 00 00              |lost+found......|
 
-    Burada dosya i-node numarası 0x0b = 11'dir. Dizin girişinin uzunluğu 0x14 = 20'dir. Dosya isminin uzunluğu 0xA = 10'dur. 
+    Burada dosya inode numarası 0x0b = 11'dir. Dizin girişinin uzunluğu 0x14 = 20'dir. Dosya isminin uzunluğu 0xA = 10'dur. 
     Dosya ismi "lost+found" biçimindedir. Sonraki giriş ise şöyledir:
 
     0062b020                                       0c 00 00 00  |lost+found......|
     0062b030  10 00 07 01 73 74 64 69  6f 2e 68 00              |....stdio.h..a..|
 
-    Buradaki girişin i-node numarası 0xC = 12'dir. Girişin toplam uzunluğu 0x10 = 16'dır. Dosyanın isminin uzunluğu 7'dir. 
+    Buradaki girişin inode numarası 0xC = 12'dir. Girişin toplam uzunluğu 0x10 = 16'dır. Dosyanın isminin uzunluğu 7'dir. 
     Dosya ismi "stdio.h" biçimindedir. Sonraki giriş ise şöyledir:
 
     0062b030                                       b2 61 00 00  |....stdio.h..a..|
     0062b040  c4 0f 01 02 61 00 00 00  00 00 00 00 00 00 00 00  |....a...........|
 
-    Burada dosyanın i-node numarası 0x61B2 = 25010'dur. Girişin uzunluğu 0xC4 = 196'dır. (Bu değerin çok uzun olması önemli değildir. 
+    Burada dosyanın inode numarası 0x61B2 = 25010'dur. Girişin uzunluğu 0xC4 = 196'dır. (Bu değerin çok uzun olması önemli değildir. 
     Çünkü bu dizindeki son dosyadır.) Dosya isminin uzunluğu 1'dir. Dosya türü 0x02'dir. Yani bu giriş bir dizin belirtmektedir. 
     Dosya ismi "a" biçimindedir.
 
-    İşte işletim sistemi 0x61B2 = 25010'ıncı i-node elemanında bu dizinin bilgilerinin olduğunu tespit eder ve o i-node elemanını
-    okur. Bu i-node elemanı aşağıdaki gibidir:
+    İşte işletim sistemi 0x61B2 = 25010'ıncı inode elemanında bu dizinin bilgilerinin olduğunu tespit eder ve o inode elemanını
+    okur. Bu inode elemanı aşağıdaki gibidir:
 
     08010100  ed 41 00 00 00 10 00 00  f8 2b 53 67 a7 69 4c 67  |.A.......+Sg.iLg|
     08010110  a7 69 4c 67 00 00 00 00  00 00 03 00 08 00 00 00  |.iLg............|
@@ -20772,7 +20808,7 @@ void exit_sys(const char *msg)
     080101e0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
     080101f0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
 
-    "a" dizinine ilişkin i-node elemanının 0x28'inci offset'teki blokları bir tanedir ve blok numarası 0x862B = 34547'dir. 
+    "a" dizinine ilişkin inode elemanının 0x28'inci offset'teki blokları bir tanedir ve blok numarası 0x862B = 34547'dir. 
     Bu bloğun offset'i de 34547 * 4096 = 140685312'dir. Dizine ilişkin dizin bloğunun içeriği şöyledir:
 
     0862b000  b2 61 00 00 0c 00 01 02  2e 00 00 00 02 00 00 00  |.a..............|
@@ -20820,11 +20856,11 @@ void exit_sys(const char *msg)
     Buradaki FF byte'larına dikkat ediniz. FF byte'ı aslında ikilik sistemde 1111 1111 bitlerine karşılık gelmektedir. Yani
     bu bloklar tamamen tahsis edilmiştir. 00 olan byte'lara ilişkin bloklar tahsis edilmemiş durumdadır.
 
-    i-node elemanlarının tahsis edilip edilmediğine yönelik de benzer bir tablo tutulmaktadır. Buna "i-node bitmap" tablosu 
-    denilmektedir. Her blok grubunda bir i-node bitmap tablosu bulunur. Bu tablo da bitlerden oluşmaktadır. Her bit ilgili 
-    i-node elemanının boş mu dolu mu olduğunu belirtir. i-node bitmap tablosunun yeri de yine blok grup betimleyicisinde 
-    tutulmaktadır. Bu tablonun uzunluğu da yine süper bloktaki "bir grup bloğundaki i-node elemanlarının sayısı" dikkate 
-    alınarak tespit edilmektedir. Aşağıda örnek bir i-node bitmap tablosunun bir kısmını görüyorsunuz:
+    inode elemanlarının tahsis edilip edilmediğine yönelik de benzer bir tablo tutulmaktadır. Buna "inode bitmap" tablosu 
+    denilmektedir. Her blok grubunda bir inode bitmap tablosu bulunur. Bu tablo da bitlerden oluşmaktadır. Her bit ilgili 
+    inode elemanının boş mu dolu mu olduğunu belirtir. inode bitmap tablosunun yeri de yine blok grup betimleyicisinde 
+    tutulmaktadır. Bu tablonun uzunluğu da yine süper bloktaki "bir grup bloğundaki inode elemanlarının sayısı" dikkate 
+    alınarak tespit edilmektedir. Aşağıda örnek bir inode bitmap tablosunun bir kısmını görüyorsunuz:
 
     0000f000  ff 0f 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
     0000f010  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
@@ -20836,7 +20872,7 @@ void exit_sys(const char *msg)
     0000f070  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
     0000f080  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
 
-    Bu blok grubunda toplam 12 i-node elemanı tahsis edilmiş durumdadır.
+    Bu blok grubunda toplam 12 inode elemanı tahsis edilmiş durumdadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
@@ -21098,7 +21134,7 @@ int main(void)
         exit(EXIT_FAILURE);
     }
 
-    printf("Number of i-node: %lu\n", (unsigned long)fs->super->s_inodes_count);
+    printf("Number of inode: %lu\n", (unsigned long)fs->super->s_inodes_count);
     printf("Total Block: %lu\n", (unsigned long)fs->super->s_blocks_count);
     /* ... */
 
@@ -21108,13 +21144,13 @@ int main(void)
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
-    Belli bir numaraya sahip i-node elemanını elde edebilmek için ext2fs_read_inode fonksiyonu kullanılmaktadır. Fonksiyonun 
+    Belli bir numaraya sahip inode elemanını elde edebilmek için ext2fs_read_inode fonksiyonu kullanılmaktadır. Fonksiyonun 
     prototipi şöyledir:
 
     errcode_t ext2fs_read_inode(ext2_filsys fs, ext2_ino_t ino, struct ext2_inode *inode);
 
     Fonksiyonun birinci parametresi dosya sistemini temsil eden handle değeridir. İkinci parametre bilgileri elde edilecek 
-    i-node elemanın numarasını belirtir. Üçüncü parametre de i-node bilgilerinin yerleştirileceği yapının adresini almaktadır. 
+    inode elemanın numarasını belirtir. Üçüncü parametre de inode bilgilerinin yerleştirileceği yapının adresini almaktadır. 
     Örneğin:
 
     if ((err = ext2fs_read_inode(fs, 13, &inode)) != 0) {
@@ -22199,7 +22235,7 @@ void exit_sys(const char *msg)
     Örneğin bir program dosyasının CAP_KILL yeteneğinin set edilmiş olduğunu varsayalım. Ancak bu dosyanın etkin kullanıcı id'si 
     root olmasın. Bu dosya çalıştırıldığında ilgili thread CAP_KILL yeteneğine sahip olacaktır. (Program birden fazla thread'e
     sahipse exec işlemiyle yalnızca exec yapan thread'in yaşamına devam ettiğini anımsayınız.) Ancak dosya yetenekleri konusunun 
-    da bazı ayrıntıları vardır. Dosya yetenekleri i-node elemanlarının içerisinde tutulmaktadır. Bu nedenle dosya sisteminin 
+    da bazı ayrıntıları vardır. Dosya yetenekleri inode elemanlarının içerisinde tutulmaktadır. Bu nedenle dosya sisteminin 
     de dosya yeteneklerini tutma özelliğine sahip olması gerekir. Örneğin FAT dosya sistemlerinde böyle bir alan bulunmamaktadır.
 
     Yalnızca çalıştırılabilen dosyalar için yetenek kavramı söz konusudur. Tabii bir text dosyanın içerisinde bir script kodu 
