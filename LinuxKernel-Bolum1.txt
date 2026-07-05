@@ -18,7 +18,7 @@
 
                     Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                    Son Güncelleme: 30/05/2026 - Cumartesi
+                                    Son Güncelleme: 05/07/2026 - Pazar
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -7613,23 +7613,22 @@ unsigned int hash_func(unsigned int key)
 /*----------------------------------------------------------------------------------------------------------------------
     Biz UNIX/Linux sistemlerinde bir dosyadan okuma yapmak için ya da bir dosyaya yazma yapmak için read/write POSIX 
     fonksiyonlarını kullanmış olalım. Bu fonksiyonlar çekirdek içerisindeki sys_read ve sys_write sistem fonksiyonlarını 
-    çalıştırmaktadır. İşletim sistemi bellek tarafında yaptığı organizasyonla okunacak ya da yazılacak bilginin ilgili 
-    blok aygıtının (disk bölümünün) kaç numaralı bloğuna ve sektörüne ilişkin olduğunu belirleyebilmektedir. Ancak işletim 
-    sisteminin sys_read ve sys_write gibi sistem fonksiyonları hemen diske yönelmez. Bu fonksiyonlar önce dosyanın ilgili 
-    bölümünün RAM'de oluşturulmuş bir önbellek sistemi içerisinde olup olmadığına bakmaktadır. Eğer ilgili bölüm bu önbellek 
-    sisteminin içerisinde varsa bu fonksiyonlar diske hiç erişmeden dolayısıyla da hiç bloke olmadan bu okuma yazma işlemini 
-    gerçekleştirmektedir. Eğer dosyadan okunacak ya da dosyaya yazılacak kısım RAM'de oluşturulmuş olan bu önbellek sisteminde 
-    yoksa bu durumda gerçek disk okuması ya da yazması izleyen paragrafta açıklayacağımız biçimde yürütülmektedir. Linux 
-    sistemlerinde bu önbellek sistemine eskiden "buffer cache" dendiğini ancak sonraları isminin "page cache" olarak 
-    değiştirildiğini belirtmiştik. Biz artık Linux temelli anlatımlarımızda bu önbellek sistemine "sayfa önbelleği 
-    diyeceğiz. Çizimlerde doğrudan İngilizce "page cache" ismini de kullanacağız.
+    çalıştırmaktadır. Ancak işletim sisteminin sys_read ve sys_write gibi sistem fonksiyonları hemen diske yönelmez.
+    Bu fonksiyonlar çağrıyı dosya "sistemi sürücüsüne (file system driver)" iletirler. Dosya sistemi sürücüsü de önce 
+    dosyanın ilgili bölümünün RAM'de oluşturulmuş bir önbellek sistemi içerisinde olup olmadığına bakan çekirdek kodlarını
+    çalıştırır. Eğer ilgili bölüm bu önbellek sisteminin içerisinde varsa bu fonksiyonlar diske hiç erişmeden dolayısıyla 
+    da hiç bloke olmadan bu okuma yazma işlemini gerçekleştirmiş olurlar. Eğer dosyadan okunacak ya da dosyaya yazılacak 
+    kısım sayfa önbelleğinde yoksa yoksa bu durumda gerçek disk okuması ya da yazması dosya sistemi sürücüsü tarafından 
+    blok aygıt sürücüleri kullanılarak yapılmaktadır.
 
     read/write POSIX fonksiyonları çağrıldığında yapılan işlemleri aşağıdaki şekille özetleyebiliriz:
 
     ┌─────────────────────────────────────┐
     │    read/write POSIX Fonksiyonları   │
     └──────────────┬──────────────────────┘
+                   │    
                    │    Çekirdek Moduna Geçiliyor
+                   │          
                    ▼
     ┌──────────────────────────────┐
     │    sys_read / sys_write      │
@@ -7637,21 +7636,26 @@ unsigned int hash_func(unsigned int key)
                    │
                    ▼
     ┌──────────────────────────────┐
-    │   Page Cache'te bilgi var?   │
-    └───────┬─────────────┬────────┘
-            │             │
-        Evet           Hayır
-            │             │
-            ▼             ▼
-    ┌──────────────┐  ┌─────────────────────────┐
-    │  Veriyi      │  │ Gerçek disk I/O başlat  │
-    │  kopyala     │  │  (okuma / yazma)        │
-    └──────────────┘  └───────────┬─────────────┘
-                                  │
-                                  ▼
-                        ┌────────────────────────┐
-                        │ Page Cache güncellenir │
-                        └────────────────────────┘
+    │    Dosya Sistemi Sürücüsü    │
+    └──────────────┬───────────────┘
+                   │
+                   ▼
+    ┌────────────────────────────────────┐
+    │  Veri Sayfa Önbelleğinde var mı?   │
+    └───────┬───────────────────┬────────┘
+            │                   │
+           Evet               Hayır
+            │                   │
+            ▼                   ▼
+    ┌──────────────┐     ┌─────────────────────────┐
+    │  Veriyi      │     │ Gerçek disk I/O başlat  │
+    │  kopyala     │     │     (okuma / yazma)     │
+    └──────────────┘     └──────────┬──────────────┘
+                                    │
+                                    ▼
+                        ┌─────────────────────────────┐
+                        │ Sayfa Önbelleği güncellenir │
+                        └─────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -7663,12 +7667,13 @@ unsigned int hash_func(unsigned int key)
     Linux sisteminde yeni bir SD kart birimi için bir blok aygıt sürücüsü yazmak zorunda kalabilirsiniz. Blok aygıt 
     sürücülerinin yazımı aygıt sürücülerinin yazılmasına ilişkin konuların bir bölümünü oluşturmaktadır.
 
-    Aslında işletim sistemi sayfa önbelleğinde (page cache) olmayan kısımların transfer edilmesini blok aygıt sürücülerinden 
-    istemektedir. Disklere ilişkin (bunlara genel olarak blok aygıtları denilmektedir) birtakım okuma yazma işlemleri 
-    aslında işletim sistemleri tarafından çizelgelemeye sokulmaktadır. Çünkü çok sayıda farklı proses aynı disk sektörlerini 
-    okuyacak ya da o sektörlere yazacak olabilir. İşletim sistemi bu nedenle hemen IO isteğini blok aygıt sürücüsüne 
-    göndermez. Önce onları sıraya dizer, mümkünse birleştirir, bu biçimdeki iyileştirme işleminden sonra istekleri blok 
-    aygıt sürücüsüne gönderir. Bu sürece işletim sistemlerinin "IO çizelgelemesi (IO scheduling)" denilmektedir.
+    Aslında işletim sistemi sayfa önbelleğinde (page cache) olmayan kısımların diskteki yerlerini callback fonksiyonlar 
+    aracılığıyla dosya sistemine iletip transferi blok aygıt sürücüsüne yaptırmaktadır. Disklere ilişkin (bunlara genel 
+    olarak blok aygıtları denilmektedir) birtakım okuma yazma işlemleri aslında işletim sistemleri tarafından çizelgelemeye 
+    sokulmaktadır. Çünkü çok sayıda farklı proses aynı disk sektörlerini okuyacak ya da o sektörlere yazacak olabilir. 
+    İşletim sistemi bu nedenle hemen IO isteğini blok aygıt sürücüsüne göndermez. Önce onları sıraya dizer, mümkünse 
+    birleştirir, bu biçimdeki iyileştirme işleminden sonra istekleri blok aygıt sürücüsüne gönderir. Bu sürece işletim 
+    sistemlerinin "IO çizelgelemesi (IO scheduling)" denilmektedir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -7685,16 +7690,18 @@ unsigned int hash_func(unsigned int key)
     2) read ve write POSIX fonksiyonları Linux'ta sys_read ve sys_write isimli sistem fonksiyonlarını çağırır. Artık 
     akış kullanıcı modundan (user mode) çekirdek moduna (kernel mode) geçmiştir. Çekirdekteki kodlar çalışmaktadır.
 
-    3) sys_read ve sys_write fonksiyonları önce okunacak ya da yazılacak yerin Linux'un disk önbellek sistemi olan "sayfa 
-    önbelleğinde ("page cache", eski ismiyle "buffer cache") olup olmadığına bakar. Eğer ilgili disk blokları sayfa 
-    önbelleğinde varsa akış hiç bloke olmadan sayfa önbelleği içerisinden karşılanır. Ancak eğer söz konusu bloklar 
-    sayfa önbelleğinde yoksa bu durumda Linux çekirdeği isteği "IO çizelgeleyicisi (IO scheduler)" denilen çekirdek 
-    birimine iletir. read/write çağrısını yapan thread bloke edilir.
+    3) sys_read ve sys_write fonksiyonları dosya sistemi sürücüsünün callback fonksiyonları yoluyla çağrıyı dosya 
+    sistemi sürücüsüne iletir.
 
-    4) IO çizelgeleyicisi istekleri çizelgeler. Okuma işlemi söz konusuysa sayfa önbelleğinde transfer edilecek önbellek 
-    bloklarını tahsis eder. Yazma işlemi söz konusuysa diske transfer edilecek önbellek bloklarını belirler. (Bu konuda 
-    bazı ayrıntılar da vardır.) Blok aygıt sürücüsüne transfer edilecek sektörleri ve transfere ilişkin bellek adreslerini 
-    iletir.
+    4) Dosya sistemi sürücüsü çekirdek kodlarını kullanarak okunacak ya da yazılacak yerin "sayfa önbelleğinde ("page cache") 
+    olup olmadığına bakar. Eğer dosyanın ilgili kısımları sayfa önbelleğinde varsa akış hiç bloke olmadan sayfa önbelleği 
+    içerisinden karşılanır. Ancak eğer söz konusu bloklar sayfa önbelleğinde yoksa bu durumda dosya sistemi sürücüsü 
+    okuma yazma işlemlerini blok aygıt sürücüsünü kullanarak gerçekleştirir. 
+
+    4) Transfer işlemleri IO çizelgeleyicisi tarafından işlenir. Çekirdek okuma işlemi söz konusuysa sayfa önbelleğinde 
+    transfer edilecek önbellek bloklarını tahsis eder. Yazma işlemi söz konusuysa diske transfer edilecek önbellek 
+    bloklarını belirler. (Bu konuda bazı ayrıntılar da vardır.) Blok aygıt sürücüsüne transfer edilecek sektörleri 
+    ve transfere ilişkin bellek adreslerini iletir.
 
     5) Gerçek transfer işlemi blok aygıt sürücüsü tarafından yapılmaktadır. İşletim sistemi blok aygıt sürücüsüne "hangi 
     sektörlerin sayfa önbelleğindeki hangi adreslere transfer edileceğini ya da sayfa önbelleği içerisindeki hangi adresteki 
@@ -7726,7 +7733,7 @@ unsigned int hash_func(unsigned int key)
     ┌───────────────────────────────────────────────────┐
     │ 2) POSIX fonksiyonları sys_read / sys_write       │
     │    sistem fonksiyonlarını çağırır                 │
-    │    → Geçiş: User Mode ➜ Kernel Mode               │
+    │    → Geçiş: User Mode -> Kernel Mode              │
     └───────────────────────────────────────────────────┘
                             │
                             ▼
@@ -7959,7 +7966,8 @@ unsigned int hash_func(unsigned int key)
     POSIX dosya fonksiyonlarının Linux'taki işletim sisteminin sistem fonksiyonlarını çağırdığını belirtmiştik. İşletim 
     sisteminin sistem fonksiyonları ilgili disk bloğu sayfa önbellekte olsa bile belli bir yavaşlık oluşturmaktadır. 
     Programın akışının kullanıcı modundan çekirdek moduna geçirilmesi ve akışın ilgili sistem fonksiyonuna aktarılması 
-    göreli bir zaman kaybına yol açmaktadır. Bu nedenle ayrıca bu kütüphanelerin kullanıcı modunda tamponlama yapması önemli olmaktadır.
+    göreli bir zaman kaybına yol açmaktadır. Bu nedenle ayrıca bu kütüphanelerin kullanıcı modunda tamponlama yapması 
+    önemli olmaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -7991,13 +7999,14 @@ unsigned int hash_func(unsigned int key)
 
     UNIX/Linux sistemlerinde kullanılan standart C kütüphaneleri aynı zamanda POSIX fonksiyonlarını da içermektedir. 
     Bilindiği gibi bugün masaüstü Linux sistemlerinde en fazla kullanılan standart C kütüphanesi GNU'nun "libc" kütüphanesidir. 
-    Bu kütüphane pek çok sistem için ortak kodlar içerdiğinden dolayı biraz karmalık bir kod yapısına sahiptir. Eğer standart 
-    C fonksiyonlarının ve POSIX fonksiyonlarının nasıl yazılıdığını merak ediyorsanız gömülü Linux sistemleri için daha 
-    minimalist biçimde yazılmış olan kütüphanelerin kaynak kodlarını inceleyebilirsiniz. Bunun için iki alternatif "musl" 
-    ve "uclibc" kütüphaneleridir. "uclibc" kütüphanesine "Mikro C kütüphanesi de denilmektedir. Bu kütüphanelerin kaynak 
-    kodlarını yine "elixir.bootlin.com" sitesinden inceleyebilirsiniz. Bu site yalnızca Linux çekirdekleri için değil 
-    başka projeler için de kodlar üzerinde gezinme olanağı de sunmaktadır. Biz sadeliği nedeniyle "musl" kütüphanesini 
-    incelemenizi salık veriririz. Kütüphanenin kodları üzerinde gezinebilmek için aşağıdaki bağlantıdan faydalanabilirsiniz:
+    Bu kütüphane pek çok sistem için ortak kodlar içerdiğinden dolayı biraz karmalık bir kod yapısına sahiptir. Eğer 
+    standart  C fonksiyonlarının ve POSIX fonksiyonlarının nasıl yazılıdığını merak ediyorsanız gömülü Linux sistemleri 
+    için daha minimalist biçimde yazılmış olan kütüphanelerin kaynak kodlarını inceleyebilirsiniz. Bunun için iki 
+    alternatif "musl" ve "uclibc" kütüphaneleridir. "uclibc" kütüphanesine "Mikro C kütüphanesi de denilmektedir. Bu 
+    kütüphanelerin kaynak kodlarını yine "elixir.bootlin.com" sitesinden inceleyebilirsiniz. Bu site yalnızca Linux 
+    çekirdekleri için değil başka projeler için de kodlar üzerinde gezinme olanağı de sunmaktadır. Biz sadeliği nedeniyle 
+    "musl" kütüphanesini incelemenizi salık veriririz. Kütüphanenin kodları üzerinde gezinebilmek için aşağıdaki 
+    bağlantıdan faydalanabilirsiniz:
 
     https://elixir.bootlin.com/musl/v1.2.5/source
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -15000,7 +15009,7 @@ void exit_sys(const char *msg)
 		result = -EINVAL;
 		goto EXIT3;
 	}
-	sfs_sb->data_bitmap = (unsigned long *) sfs_sb->data_bitmap_bh->b_data;
+	sfs_sb->data_bitmap = (unsigned long *) sfs_sb->data_"bitmap_bh->b_data;
 
     Burada simplefs_super_block yapısının inode_bitmap ve data_bitmap elemanlarının neden char * değil de unsiegned long * 
     türünden olduğunu merak edebilirsiniz. Linux çekirdeğindeki bitmap'ler üzerinde işlem yapan yardımcı çekirdek 
@@ -16148,7 +16157,7 @@ static struct inode *simplefs_iget(struct super_block *sb, unsigned long ino)
 
     Bu bilgi de aslında "/proc/mounts" dosyasından elde edilmektedir.
 
-    Aşağıda şu ana kadar geldiğimiz noktaya kadarki simplefs dosya sistemi aygıt sürücümüzün kodlarını bir bütün olarak
+    Aşağıda şu ana kadar geldiğimiz noktaya kadarki simplefs dosya sistemi sürücümüzün kodlarını bir bütün olarak
     veriyoruz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
