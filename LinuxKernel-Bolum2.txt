@@ -10112,19 +10112,19 @@ clean:
     içerisinde bu bilgi vardı. Ancak daha sonra bu bilgi kaldırıldı. Bu işlemi yapan page_to_pfn makrosu bulundurulmuştur. 
     Bu makro yukarıdaki işlemlerin tersini yapmaktadır. Örneğin CONFIG_FLATMEM durumunda şöyle tanımlanmıştır:
 
-    #define page_to_pfn __page_to_pfn
+    #define page_to_pfn          __page_to_pfn
     #define __page_to_pfn(page)  ((unsigned long)((page) - mem_map) + ARCH_PFN_OFFSET)
 
     CONFIG_SPARSEMEM_VMEMMAP durumunda ise şöyle tanımlanmıştır:
 
-    #define page_to_pfn __page_to_pfn
+    #define page_to_pfn          __page_to_pfn
     #define __page_to_pfn(page)  ((unsigned long)((page) - vmemmap)
     
     CONFIG_SPARSEMEM durumunda ise şöyle tanımlanmıştır:
 
     #define __page_to_pfn(pg)					                                    \
     ({	const struct page *__pg = (pg);				                                \
-        int __sec = memdesc_section(__pg->flags);		\
+        int __sec = memdesc_section(__pg->flags);		                            \
         (unsigned long)(__pg - __section_mem_map_addr(__nr_to_section(__sec)));	    \
     })
 
@@ -10543,24 +10543,39 @@ clean:
     }
 
     __pa ve __va makroları ve fonksiyonlar platforma bağlı dizinlerde bulunmaktadır (örneğin "arch/x86/asm/io.h" gibi). 
+    Fiziksel adresle sanal adres yapan makro ve fonksiyonları aşağıda da tablo halinde veriyoruz:
     
-    ┌─────────────────────────┬──────────────────────────┬─────────────────────────────┐
-    │         Makro           │        Dönüşüm           │       Tanımlandığı Yer      │
-    ├─────────────────────────┼──────────────────────────┼─────────────────────────────┤
-    │ __pa(virt)              │ Sanal   → Fiziksel       │ asm/page.h                  │
-    │ __va(phys)              │ Fiziksel → Sanal         │ asm/page.h                  │
-    │ virt_to_phys(virt)      │ Sanal   → Fiziksel       │ asm/io.h                    │
-    │ phys_to_virt(phys)      │ Fiziksel → Sanal         │ asm/io.h                    │
-    │ page_to_phys(page)      │ struct page → Fiziksel   │ asm/memory_model.h          │
-    │ page_to_virt(page)      │ struct page → Sanal      │ asm/page.h                  │
-    |  page_address(page)     | struct page → Sanal      │ mm/highmem.c                │
-    │ virt_to_page(virt)      │ Sanal   → struct page    │ asm/page.h                  │
-    │ page_to_pfn(page)       │ struct page → PFN        │ include/linux/mm.h          │
-    │ pfn_to_page(pfn)        │ PFN → struct page        │ include/linux/mm.h          │
-    └─────────────────────────┴──────────────────────────┴─────────────────────────────┘
+    ┌────────────────────┬─────────────────────┬──────────────────┐
+    │       Makro        │       Dönüşüm       │ Tanımlandığı Yer │
+    ├────────────────────┼─────────────────────┼──────────────────┤
+    │ __pa(virt)         │ Sanal   → Fiziksel  │ asm/page.h       │
+    │ __va(phys)         │ Fiziksel → Sanal    │ asm/page.h       │
+    │ virt_to_phys(virt) │ Sanal   → Fiziksel  │ asm/io.h         │
+    │ phys_to_virt(phys) │ Fiziksel → Sanal    │ asm/io.h         │
+    └────────────────────┴─────────────────────┴──────────────────┘
+-------------------------------------------------------------------------------------------------------------*/
 
-    Bu tabloda page yapısı ile dönüştürme yapan fonksiyonlar da bulunmaktadır. Bu fonksiyonlardan izleyen konularda da 
-    söz edeceğiz.
+/*----------------------------------------------------------------------------------------------------------------------
+    Son olarak page nesnesi ile ilgili erişim yapan makro ve fonksiyonları da ayrı bir tablo halinde veriyoruz: 
+
+    ┌───────────────────┬─────────────────────────────────────────────────────────┐
+    │ Makro / Fonksiyon │                       İşlevi                            │
+    ├───────────────────┼─────────────────────────────────────────────────────────┤
+    │ page_to_pfn       │ page → PFN (vmemmap gösterici aritmetiği)               │
+    │ pfn_to_page       │ PFN → page (vmemmap + pfn)                              │
+    │ page_to_phys      │ page → fiziksel adres (pfn << PAGE_SHIFT)               │
+    │ PFN_PHYS          │ PFN → fiziksel adres                                    │
+    │ PHYS_PFN          │ Fiziksel adres → PFN                                    │
+    │ page_address      │ page → çekirdek sanal adresi, HIGHMEM dikkate alınamaz  │
+    │ page_to_virt      │ page → çekirdek sanal adres, HIGHMEM dikkate alınır     │
+    │ virt_to_page      │ Çekirdek sanal adresi→ page                             │
+    │ virt_to_pfn       │ Çekirdek sanal adresi → PFN                             │
+    │ kmap_local_page   │ page için geçici, CPU-yerel eşleme yapa                 │
+    │ kunmap_local      │ kmap_local eşlemesini kaldırır.                         │
+    │ page_to_nid       │ page → NUMA düğüm no (flags bitlerinden)                │
+    │ page_zonenum      │ page → Bölge no (flags bitlerinden)                     │
+    │ page_to_section   │ page → SPARSEMEM bölüm no (flags bitlerinden)           │
+    └───────────────────┴─────────────────────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -10661,9 +10676,9 @@ clean:
     bölünür. Böünen bloklar 8 sayfalık olacaktır. Bunlardan biri 3'üncü düzeydeki boş listeye eklenir, diğeri bölünmeye
     devan eder:
 
-    düzey-4: ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-             │     16 Sayfa      │ │     16 Sayfa      │ │     16 Sayfa      │
-             └───────────────────┘ └───────────────────┘ └───────────────────┘
+    düzey-4: ┌───────────────────┐ ┌───────────────────┐     ┌───────────────────┐
+             │     16 Sayfa      │ │     16 Sayfa      │ ... │     16 Sayfa      │
+             └───────────────────┘ └───────────────────┘     └───────────────────┘
 │                      |
                        ▼ Bölünüyor
     düzey-3: ┌────────┐ ┌────────┐
@@ -10674,12 +10689,12 @@ clean:
 
     Burada 3'üncü düzeydeki 8 sayfanın yeniden ikiye bölünmesiyle bunlardan biri 2'inci düzeydeki boş listeye eklenir:
 
-    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
-             │    16 Sayfa    │ │    16 Sayfa    │ ... │   16 Sayfa     │
-             └────────────────┘ └────────────────┘     └────────────────┘
+    düzey-4: ┌───────────────────┐ ┌───────────────────┐     ┌───────────────────┐
+             │     16 Sayfa      │ │     16 Sayfa      │ ... │     16 Sayfa      │
+             └───────────────────┘ └───────────────────┘     └───────────────────┘
 
     düzey-3: ┌────────┐
-             │  8S    │  ← boş listede kalır
+             │   8S   │  ← boş listede kalır
              └────────┘
 
     düzey-2: ┌────┐ ┌────┐
@@ -10691,13 +10706,12 @@ clean:
     İşte 8 sayfanın 4'lük kısmı 2'inci düzeydeki bağlı listeye eklenip kalan 4'lük kısmı da çağrıyı yapana verilmektedir. 
     Boş listelerin son hali şöyle olacaktır:
 
-    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
-             │    16 Sayfa    │ │    16 Sayfa    │ ... │  16 Sayfa      │
-             └────────────────┘ └────────────────┘     └────────────────┘
-
+    düzey-4: ┌───────────────────┐ ┌───────────────────┐     ┌───────────────────┐
+             │     16 Sayfa      │ │     16 Sayfa      │ ... │     16 Sayfa      │
+             └───────────────────┘ └───────────────────┘     └───────────────────┘
 
     düzey-3: ┌────────┐
-             │  8S    │
+             │   8S   │
              └────────┘
 
     düzey-2: ┌────┐
@@ -10712,10 +10726,9 @@ clean:
     taşınmasının temel amacı budur. Şimdi bu birleştirme işlemini yine adım adım gösterelim. Free işlemi öncesindeki durum 
     şöyledir:
 
-    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
-             │    16 Sayfa    │ │    16 Sayfa    │ ... │  16 Sayfa      │
-             └────────────────┘ └────────────────┘     └────────────────┘
-
+    düzey-4: ┌───────────────────┐ ┌───────────────────┐     ┌───────────────────┐
+             │     16 Sayfa      │ │     16 Sayfa      │ ... │     16 Sayfa      │
+             └───────────────────┘ └───────────────────┘     └───────────────────┘
 
     düzey-3: ┌────────┐
              │  8S    │
@@ -10729,9 +10742,9 @@ clean:
     o düzeyde var mı diye bakar. Eğer varsa onları birleştirip bir yukarıdaki düzeye eklemeye çalışır. Bizim örneğimizde
     onun ikizi 2'inci düzeyde bulunmaktadır:
 
-    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
-             │    16 Sayfa    │ │    16 Sayfa    │ ... │    16 Sayfa    │
-             └────────────────┘ └────────────────┘     └────────────────┘
+    düzey-4: ┌───────────────────┐ ┌───────────────────┐     ┌───────────────────┐
+             │     16 Sayfa      │ │     16 Sayfa      │ ... │     16 Sayfa      │
+             └───────────────────┘ └───────────────────┘     └───────────────────┘
 
     düzey-3: ┌────────┐
              │   8S   │
@@ -10744,13 +10757,13 @@ clean:
                 └──────┘
                     │
                     ▼
-                İkiz çifti tespit edildi → birleştir (coalesce)
+                İkiz çift tespit edildi → birleştir (coalesce)
 
     Birleştirme sonucunda şu durum oluşacaktır:
 
-    düzey-4: ┌────────────────┐ ┌────────────────┐     ┌────────────────┐
-             │    16 Sayfa    │ │    16 Sayfa    │ ... │    16 Sayfa    │
-             └────────────────┘ └────────────────┘     └────────────────┘
+    düzey-4: ┌───────────────────┐ ┌───────────────────┐     ┌───────────────────┐
+             │    16 Sayfa       │ │    16 Sayfa       │ ... │     16 Sayfa      │
+             └───────────────────┘ └───────────────────┘     └───────────────────┘
 
     düzey-3: ┌────────┐ ┌────────┐
              │   8S   │ │   8S   │   ← yeni oluşan düzey-3 bloğu boş listeye eklendi
@@ -10787,11 +10800,11 @@ clean:
 
     MAX_PAGE_ORDER maksimum düzeyin indeks numarasını, NR_PAGE_ORDERS ise bunların sayısını belirtmektedir. Linux 
     çekirdeklerinde maksimum düzey 10'dur. (Yani toplam 11 tane düzey listesi bulunmaktadır.) 6.1 çekirdeği ve öncesinde
-    MAX_ORDER toplam liste sayısını belirtirken, daha sonra en yüksek düzey imdeksini belirtir hale getirilmiştir. 
+    MAX_ORDER toplam liste sayısını belirtirken, daha sonra en yüksek düzey indeksini belirtir hale getirilmiştir. 
     Nihayet yukarıda da belirttiğimiz gibi 6.8 ile birlikte bu sembolik sabitlerin isimleri değiştirilmiştir.
 
     ┌────────────────┬──────────────────────────────────────────────────────┐
-    │   Versiyon     │  Durum                                               │
+    │   Versiyon     │                 Durum                                │
     ├────────────────┼──────────────────────────────────────────────────────┤
     │  ≤ 6.1         │  MAX_ORDER=11, max indeks 10                         │
     │  6.2 – 6.7     │  MAX_ORDER=10, anlam düzeltildi                      │
@@ -10811,80 +10824,81 @@ clean:
     Biz yukarıda ikiz blok tahsisat sisteminin temel algoritmasını açıkladık. Ancak Linux çekirdeğinde ikiz blok tahsisat 
     sistemi bir tane değildir. Her NUMA düğümü bellek bölgelerinden (memory zones), her bellek bölgesi de göç türlerine 
     (migration types) ilişkin ikiz blok tahsisat sistemlerinden (buddy allocators) oluşmaktadır. Yani bir bellek bölgesinde 
-    bile birden fazla ikiz blok tahsisat sistemi bulunmaktadır. Bu durumu aşağıdaki şekille kafanızda daha iyi canlandırabilirsiniz:
+    bile birden fazla ikiz blok tahsisat sistemi bulunmaktadır. Bu durumu aşağıdaki şekille kafanızda daha iyi 
+    canlandırabilirsiniz:
     
-    ┌──────────────────────────────────────────────────────────────────────────────┐
-    │  NUMA Node 0                                                                 │
-    │                                                                              │
-    │  ┌───────────────────────────────────┐  ┌──────────────────────────────────┐ │
-    │  │  Zone: DMA                        │  │  Zone: NORMAL                    │ │
-    │  │                                   │  │                                  │ │
-    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │
-    │  │  │  migrate type: UNMOVABLE    │  │  │  │  migrate type: UNMOVABLE   │  │ │
-    │  │  │  order: 0  [ ][ ][ ]...     │  │  │  │  order: 0  [ ][ ][ ]...    │  │ │
-    │  │  │  order: 1  [ ][ ]...        │  │  │  │  order: 1  [ ][ ]...       │  │ │
-    │  │  │  order: 2  [ ]...           │  │  │  │  order: 2  [ ]...          │  │ │
-    │  │  │  ...                        │  │  │  │  ...                       │  │ │
-    │  │  │  order: 10 [ ]              │  │  │  │  order: 10 [ ]             │  │ │
-    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │ │
-    │  │                                   │  │                                  │ │
-    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │
-    │  │  │  migrate type: MOVABLE      │  │  │  │  migrate type: MOVABLE     │  │ │
-    │  │  │  order: 0  [ ][ ][ ]...     │  │  │  │  order: 0  [ ][ ][ ]...    │  │ │
-    │  │  │  order: 1  [ ][ ]...        │  │  │  │  order: 1  [ ][ ]...       │  │ │
-    │  │  │  order: 2  [ ]...           │  │  │  │  order: 2  [ ]...          │  │ │
-    │  │  │  ...                        │  │  │  │  ...                       │  │ │
-    │  │  │  order: 10 [ ]              │  │  │  │  order: 10 [ ]             │  │ │
-    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │ │
-    │  │                                   │  │                                  │ │
-    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │
-    │  │  │  migrate type: RECLAIMABLE  │  │  │  │  migrate type: RECLAIMABLE │  │ │
-    │  │  │  order: 0  [ ][ ][ ]...     │  │  │  │  order: 0  [ ][ ][ ]...    │  │ │
-    │  │  │  order: 1  [ ][ ]...        │  │  │  │  order: 1  [ ][ ]...       │  │ │
-    │  │  │  order: 2  [ ]...           │  │  │  │  order: 2  [ ]...          │  │ │
-    │  │  │  ...                        │  │  │  │  ...                       │  │ │
-    │  │  │  order: 10 [ ]              │  │  │  │  order: 10 [ ]             │  │ │
-    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │ │
-    │  └───────────────────────────────────┘  └──────────────────────────────────┘ │
-    └──────────────────────────────────────────────────────────────────────────────┘
+    ┌───────────────────────────────────────────────────────────────────────────────┐
+    │  NUMA Düğümü 0                                                                │
+    │                                                                               │
+    │  ┌───────────────────────────────────┐  ┌──────────────────────────────────┐  │
+    │  │  Zone: DMA                        │  │  Zone: NORMAL                    │  │
+    │  │                                   │  │                                  │  │
+    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │  │
+    │  │  │  göç türü: UNMOVABLE        │  │  │  │  göç türü: UNMOVABLE       │  │  │
+    │  │  │  düzey: 0  [ ][ ][ ]...     │  │  │  │  düzey: 0  [ ][ ][ ]...    │  │  │
+    │  │  │  düzey: 1  [ ][ ]...        │  │  │  │  düzey: 1  [ ][ ]...       │  │  │
+    │  │  │  düzey: 2  [ ]...           │  │  │  │  düzey: 2  [ ]...          │  │  │
+    │  │  │  ...                        │  │  │  │  ...                       │  │  │
+    │  │  │  düzey: 10 [ ]              │  │  │  │  düzey: 10 [ ]             │  │  │
+    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │  │
+    │  │                                   │  │                                  │  │
+    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │  │
+    │  │  │  göç türü: MOVABLE          │  │  │  │  göç türü: MOVABLE         │  │  │
+    │  │  │  düzey: 0  [ ][ ][ ]...     │  │  │  │  düzey: 0  [ ][ ][ ]...    │  │  │
+    │  │  │  düzey: 1  [ ][ ]...        │  │  │  │  düzey: 1  [ ][ ]...       │  │  │
+    │  │  │  düzey: 2  [ ]...           │  │  │  │  düzey: 2  [ ]...          │  │  │
+    │  │  │  ...                        │  │  │  │  ...                       │  │  │
+    │  │  │  düzey: 10 [ ]              │  │  │  │  düzey: 10 [ ]             │  │  │
+    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │  │
+    │  │                                   │  │                                  │  │
+    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │  │
+    │  │  │  göç türü: RECLAIMABLE      │  │  │  │  göç türü: RECLAIMABLE     │  │  │
+    │  │  │  düzey: 0  [ ][ ][ ]...     │  │  │  │  düzey: 0  [ ][ ][ ]...    │  │  │
+    │  │  │  düzey: 1  [ ][ ]...        │  │  │  │  düzey: 1  [ ][ ]...       │  │  │
+    │  │  │  düzey: 2  [ ]...           │  │  │  │  düzey: 2  [ ]...          │  │  │
+    │  │  │  ...                        │  │  │  │  ...                       │  │  │
+    │  │  │  düzey: 10 [ ]              │  │  │  │  düzey: 10 [ ]             │  │  │
+    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │  │
+    │  └───────────────────────────────────┘  └──────────────────────────────────┘  │
+    └───────────────────────────────────────────────────────────────────────────────┘
 
-    ┌──────────────────────────────────────────────────────────────────────────────┐
-    │  NUMA Node 01                                                                │
-    │                                                                              │
-    │  ┌───────────────────────────────────┐  ┌──────────────────────────────────┐ │
-    │  │  Zone: DMA                        │  │  Zone: NORMAL                    │ │
-    │  │                                   │  │                                  │ │
-    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │
-    │  │  │  migrate type: UNMOVABLE    │  │  │  │  migrate type: UNMOVABLE   │  │ │
-    │  │  │  order: 0  [ ][ ][ ]...     │  │  │  │  order: 0  [ ][ ][ ]...    │  │ │
-    │  │  │  order: 1  [ ][ ]...        │  │  │  │  order: 1  [ ][ ]...       │  │ │
-    │  │  │  order: 2  [ ]...           │  │  │  │  order: 2  [ ]...          │  │ │
-    │  │  │  ...                        │  │  │  │  ...                       │  │ │
-    │  │  │  order: 10 [ ]              │  │  │  │  order: 10 [ ]             │  │ │
-    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │ │
-    │  │                                   │  │                                  │ │
-    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │
-    │  │  │  migrate type: MOVABLE      │  │  │  │  migrate type: MOVABLE     │  │ │
-    │  │  │  order: 0  [ ][ ][ ]...     │  │  │  │  order: 0  [ ][ ][ ]...    │  │ │
-    │  │  │  order: 1  [ ][ ]...        │  │  │  │  order: 1  [ ][ ]...       │  │ │
-    │  │  │  order: 2  [ ]...           │  │  │  │  order: 2  [ ]...          │  │ │
-    │  │  │  ...                        │  │  │  │  ...                       │  │ │
-    │  │  │  order: 10 [ ]              │  │  │  │  order: 10 [ ]             │  │ │
-    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │ │
-    │  │                                   │  │                                  │ │
-    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │ │
-    │  │  │  migrate type: RECLAIMABLE  │  │  │  │  migrate type: RECLAIMABLE │  │ │
-    │  │  │  order: 0  [ ][ ][ ]...     │  │  │  │  order: 0  [ ][ ][ ]...    │  │ │
-    │  │  │  order: 1  [ ][ ]...        │  │  │  │  order: 1  [ ][ ]...       │  │ │
-    │  │  │  order: 2  [ ]...           │  │  │  │  order: 2  [ ]...          │  │ │
-    │  │  │  ...                        │  │  │  │  ...                       │  │ │
-    │  │  │  order: 10 [ ]              │  │  │  │  order: 10 [ ]             │  │ │
-    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │ │
-    │  └───────────────────────────────────┘  └──────────────────────────────────┘ │
-    └──────────────────────────────────────────────────────────────────────────────┘
+    ┌───────────────────────────────────────────────────────────────────────────────┐
+    │  NUMA Düğümü 1                                                                │
+    │                                                                               │
+    │  ┌───────────────────────────────────┐  ┌──────────────────────────────────┐  │
+    │  │  Zone: DMA                        │  │  Zone: NORMAL                    │  │
+    │  │                                   │  │                                  │  │
+    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │  │
+    │  │  │  göç türü: UNMOVABLE        │  │  │  │  göç türü: UNMOVABLE       │  │  │
+    │  │  │  düzey: 0  [ ][ ][ ]...     │  │  │  │  düzey: 0  [ ][ ][ ]...    │  │  │
+    │  │  │  düzey: 1  [ ][ ]...        │  │  │  │  düzey: 1  [ ][ ]...       │  │  │
+    │  │  │  düzey: 2  [ ]...           │  │  │  │  düzey: 2  [ ]...          │  │  │
+    │  │  │  ...                        │  │  │  │  ...                       │  │  │
+    │  │  │  düzey: 10 [ ]              │  │  │  │  düzey: 10 [ ]             │  │  │
+    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │  │
+    │  │                                   │  │                                  │  │
+    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │  │
+    │  │  │  göç türü: MOVABLE          │  │  │  │  göç türü: MOVABLE         │  │  │
+    │  │  │  düzey: 0  [ ][ ][ ]...     │  │  │  │  düzey: 0  [ ][ ][ ]...    │  │  │
+    │  │  │  düzey: 1  [ ][ ]...        │  │  │  │  düzey: 1  [ ][ ]...       │  │  │
+    │  │  │  düzey: 2  [ ]...           │  │  │  │  düzey: 2  [ ]...          │  │  │
+    │  │  │  ...                        │  │  │  │  ...                       │  │  │
+    │  │  │  düzey: 10 [ ]              │  │  │  │  düzey: 10 [ ]             │  │  │
+    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │  │
+    │  │                                   │  │                                  │  │
+    │  │  ┌─────────────────────────────┐  │  │  ┌────────────────────────────┐  │  │
+    │  │  │  göç türü: RECLAIMABLE      │  │  │  │  göç türü: RECLAIMABLE     │  │  │
+    │  │  │  düzey: 0  [ ][ ][ ]...     │  │  │  │  düzey: 0  [ ][ ][ ]...    │  │  │
+    │  │  │  düzey: 1  [ ][ ]...        │  │  │  │  düzey: 1  [ ][ ]...       │  │  │
+    │  │  │  düzey: 2  [ ]...           │  │  │  │  düzey: 2  [ ]...          │  │  │
+    │  │  │  ...                        │  │  │  │  ...                       │  │  │
+    │  │  │  düzey: 10 [ ]              │  │  │  │  düzey: 10 [ ]             │  │  │
+    │  │  └─────────────────────────────┘  │  │  └────────────────────────────┘  │  │
+    │  └───────────────────────────────────┘  └──────────────────────────────────┘  │
+    └───────────────────────────────────────────────────────────────────────────────┘
 
     Görüldüğü gibi NUMA düğümleri bellek bölgelerinden, bellek bölgeri ise göç türlerine göre birden fazla ikiz blok 
-    tahsisat sistemlerinden oluşmaktadır. 
+    tahsisat sisteminden oluşmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -10910,8 +10924,8 @@ clean:
         unsigned long		nr_free;
     };
 
-    Göürldüğü gibi free_area aslında her göç türü için bağlı listelerden oluşmaktadır. Aşağıdaki şekil bu veri yapısın 
-    daha iyi anlaşımasına yadırmdı olacaktır:
+    Görüldüğü gibi free_area aslında her göç türü için bağlı listelerden oluşmaktadır. Aşağıdaki şekil bu veri yapısını 
+    daha iyi anlaşılmasına yardımcı olacaktır:
 
     zone (örn. ZONE_NORMAL):
     │
@@ -10942,6 +10956,30 @@ clean:
     liste dizisi her göç türü için 0'ıncı düzeyin bağlı listelerini, free_area[1] bağlı liste dizisi her göç türü 
     için 1'inci düzeyin bağlı listelerini tutmaktadır.) Göç türlerinin ne amaçla kullanıldığını izleyen paragraflarda 
     açıklayacağız. 
+
+    Güncel çekirdeklerde free_area nesnelerinin içerisindeki free_list bağlı listeleri buddy_list elemanı yoluyla page 
+    nesnelerini tutar durumdadır:
+
+    struct page {
+        memdesc_flags_t flags;		
+
+        union {
+            struct {	
+                union {
+                    /* ... */
+                  
+                    struct list_head buddy_list;        ----> free_list tarafındna kullanılan düğüm
+                  
+                    /* ... */
+                };
+
+                /* ... */
+
+            };
+
+            /* ... */
+
+    } _struct_page_alignment;
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -10958,47 +10996,47 @@ clean:
 
     alloc_pages fonksiyonun birinci parametresi tahsisatın nereden yapılacağını belirtmektedir. İkinci parametresi ise 
     tahsisat için düzey belirtmektedir. (Yani örneğin 1 sayfa tahsis edilecekse bu parametre 0, iki sayfa tahsis edilecekse 
-    1, 4 sayfa tahis edilecekse 2 girilmelidir.) Fonksiyonun birinci parametresindeki gfp_t türü tipik olarak unsigned 
+    1, 4 sayfa tahsis edilecekse 2 girilmelidir.) Fonksiyonun birinci parametresindeki gfp_t türü tipik olarak unsigned 
     int biçiminde typedef edilmektedir. Bu parametreye çeşitli mask bayrakları bit düzeyinde OR işlemine sokularak 
     verilmektedir. Mask bayrakları "include/linux/gfp_types.h" dosyası içerisinde define edilmiştir. Bunları aşağıda 
     bir tablo biçiminde veriyoruz:
 
-    ┌──────────────────────┬───────────────────────────────────────────────────────────────┐
-    │       Bayrak Adı     │                         İşlevi                                │
-    ├──────────────────────┼───────────────────────────────────────────────────────────────┤
-    │ __GFP_DMA            │ Ayırmayı ZONE_DMA'dan yap (eski ISA DMA uyumu için)           │
-    │ __GFP_HIGHMEM        │ Ayırmayı ZONE_HIGHMEM'den yap                                 │
-    │ __GFP_DMA32          │ Ayırmayı 32-bit adreslenebilir ZONE_DMA32'den yap             │
-    │ __GFP_MOVABLE        │ ZONE_MOVABLE'a izin ver; sayfa migration ile taşınabilir      │
-    │ __GFP_RECLAIMABLE    │ Sayfa shrinker'lar aracılığıyla geri alınabilir (slab için)   │
-    │ __GFP_WRITE          │ Sayfa kirletilecek; zone'lar arasında dağıtılır (fair policy) │
-    │ __GFP_HARDWALL       │ cpuset bellek ayırma politikasını zorla uygula                │
-    │ __GFP_THISNODE       │ Yalnızca belirtilen NUMA node'undan ayır, fallback yok        │
-    │ __GFP_ACCOUNT        │ Ayırmayı kmemcg'ye hesapla (kernel memory cgroup)             │
-    │ __GFP_HIGH           │ Yüksek öncelikli; atomic rezervlere erişebilir                │
-    │ __GFP_MEMALLOC       │ Tüm belleğe (rezervler dahil) erişime izin ver                │
-    │ __GFP_NOMEMALLOC     │ Acil rezervlere erişimi açıkça yasakla                        │
-    │ __GFP_IO             │ Bellek geri almak için fiziksel I/O başlatabilir              │
-    │ __GFP_FS             │ Bellek geri almak için dosya sistemi çağrısı yapabilir        │
-    │ __GFP_DIRECT_RECLAIM │ Çağıran direct reclaim'e girebilir                            │
-    │ __GFP_KSWAPD_RECLAIM │ Low watermark'ta kswapd'yi uyandırabilir                      │
-    │ __GFP_RECLAIM        │ __GFP_DIRECT_RECLAIM | __GFP_KSWAPD_RECLAIM kısayolu          │
-    │ __GFP_RETRY_MAYFAIL  │ İlerleme varsa reclaim'i tekrar dene; OOM'u tetiklemez        │
-    │ __GFP_NOFAIL         │ Sonsuz tekrar; asla başarısız olamaz, bloklanabilir           │
-    │ __GFP_NORETRY        │ Yalnızca hafif reclaim dene; OOM killer çağrılmaz             │
-    │ __GFP_NOWARN         │ Ayırma başarısız olursa kernel uyarı mesajını bastır          │
-    │ __GFP_COMP           │ Compound page metadata ekle (büyük sayfa grupları için)       │
-    │ __GFP_ZERO           │ Başarılı ayırmada sıfırlanmış sayfa döndür                    │
-    │ __GFP_ZEROTAGS       │ Bellek sıfırlanırken KASAN HW memory tag'lerini de sıfırla    │
-    │ __GFP_SKIP_ZERO      │ KASAN HW tag sıfırlamasını atla                               │
-    │ __GFP_SKIP_KASAN     │ KASAN sayfa zehirleme/çözme kontrollerini atla                │
-    │ __GFP_NOLOCKDEP      │ GFP context takibi için lockdep denetimini devre dışı bırak   │
-    └──────────────────────┴───────────────────────────────────────────────────────────────┘
+    ┌──────────────────────┬─────────────────────────────────────────────────────────────────┐
+    │      Bayrak Adı      │                           İşlevi                                │
+    ├──────────────────────┼─────────────────────────────────────────────────────────────────┤
+    │ __GFP_DMA            │ Tahsisatı ZONE_DMA'dan yap (eski ISA DMA uyumu için)            │
+    │ __GFP_HIGHMEM        │ Tahsisatı ZONE_HIGHMEM'den yap                                  │
+    │ __GFP_DMA32          │ tahsisatların 32-bit adreslenebilir ZONE_DMA32'den yap          │
+    │ __GFP_MOVABLE        │ ZONE_MOVABLE'a izin ver; sayfa göç ile taşınabilir              │
+    │ __GFP_RECLAIMABLE    │ Sayfa shrinker'lar aracılığıyla geri alınabilir (dilim için)    │
+    │ __GFP_WRITE          │ Sayfa kirletilecek; bölgeler arasında dağıtılır (fair policy)   │
+    │ __GFP_HARDWALL       │ cpuset bellek tahsisat politikasını zorla uygula                │
+    │ __GFP_THISNODE       │ Yalnızca belirtilen NUMA düğümlerini ayır, fallback yok         │
+    │ __GFP_ACCOUNT        │ Tahsisatı kmemcg'ye hesapla (kernel memory cgroup)              │
+    │ __GFP_HIGH           │ Yüksek öncelikli; atomic rezervlere erişebilir                  │
+    │ __GFP_MEMALLOC       │ Tüm belleğe (rezervler dahil) erişime izin ver                  │
+    │ __GFP_NOMEMALLOC     │ Acil rezervlere erişimi açıkça yasakla                          │
+    │ __GFP_IO             │ Bellek geri almak için fiziksel I/O başlatabilir                │
+    │ __GFP_FS             │ Bellek geri almak için dosya sistemi çağrısı yapabilir          │
+    │ __GFP_DIRECT_RECLAIM │ Çağıran doğrudan geri alıma girebilir                           │
+    │ __GFP_KSWAPD_RECLAIM │ Low watermark'ta kswapd'yi uyandırabilir                        │
+    │ __GFP_RECLAIM        │ __GFP_DIRECT_RECLAIM | __GFP_KSWAPD_RECLAIM kısayolu            │
+    │ __GFP_RETRY_MAYFAIL  │ İlerleme varsa geri alımı tekrar dene; OOM'u tetiklemez         │
+    │ __GFP_NOFAIL         │ Sonsuz yineleme; asla başarısız olamaz, bloke olabilir          │
+    │ __GFP_NORETRY        │ Yalnızca hafif geri alım dene; "OOM killer" çağrılmaz           │
+    │ __GFP_NOWARN         │ Ayırma başarısız olursa çekirdek uyarı mesajını bastır          │
+    │ __GFP_COMP           │ Bileşik sayfalar için metadata ekle (büyük sayfa grupları için) │
+    │ __GFP_ZERO           │ Başarılı tahsisatlarda sıfırlanmış sayfa döndür                 │
+    │ __GFP_ZEROTAGS       │ Bellek sıfırlanırken KASAN HW bellek etiketlerini de sıfırla    │
+    │ __GFP_SKIP_ZERO      │ KASAN HW etiket sıfırlamasını atla                              │
+    │ __GFP_SKIP_KASAN     │ KASAN sayfa zehirleme/çözme kontrollerini atla                  │
+    │ __GFP_NOLOCKDEP      │ GFP context takibi için lockdep denetimini devre dışı bırak     │
+    └──────────────────────┴─────────────────────────────────────────────────────────────────┘
 
     Linux çekirdek kodlamasında başı __ ile başlayan değişkenlerin "aşağı seviyeli kodlardan tarafından kullanıldığını"
     anımsayınız. Yukarıdaki bayraklar ince ayar için kullanılmaktadır. Bunların her bileşimi anlamlı değildir. Yani 
-    örneğin bazı bayraklar bazı bayraklarla kullanılamamaktadır. Aslında çekirdek içerisinde başı __ ile başlamayan
-    yukarıdaki bayraklar kullanılarak oluşturulmuş olan daha yüksek seviyeli bayraklar da vardır. Bunların listesini 
+    örneğin bazı bayraklar bazı bayraklarla kullanılamamaktadır. Aslında çekirdek içerisinde yukarıdaki bayraklar 
+    kullanılarak oluşturulmuş başı __ ile başlamayan daha yüksek seviyeli bayraklar da vardır. Bunların listesini 
     de aşağıdaki tabloda veriyoruz:
 
     ┌──────────────────────┬────────────────────────────────────────────────────────┐
@@ -11022,25 +11060,24 @@ clean:
     └──────────────────────┴────────────────────────────────────────────────────────┘
 
     Programcılar genellikle bu yüksek seviyeli bayrakları kullanmaktadır. Örneğin GFP_ATOMIC, GFP_KERNEL, GFP_USER, 
-    GFP_DMA, GFP_DMA2 en çok kullanılan yüksek seviyeli bayraklardır. Biz bu nayraklar hakkında izleyen paragraflarda 
+    GFP_DMA, GFP_DMA32 en çok kullanılan yüksek seviyeli bayraklardır. Biz bu bayraklar hakkında izleyen paragraflarda 
     daha fazla bilgi vereceğiz. 
 
     alloc_pages fonksiyonu başarı durumunda tahsis edilen sayfaların ilkine ilişkin page yapı nesnesinin adresiyle,  
     başarısızlık durumunda NULL adresle geri dönmektedir. Anımsanacağı gibi zaten çekirdek tüm sayfaları doğrudan 
-    ya da dolaylı biçimde bir dizi içerisinde tutmaktadır. alloc_pages bize ilgili page nesnesinin bu dizi içerisindeki 
-    adresini vermektedir. Burada bize verilen page adresini biz ileletirsek ilgili dizinin sonraki elemanına erişiriz. 
-    İkiz blok tahsisat sisteminde her zaman fiziksel bellekte ardışıl fiziksel sayfaların tahsis edildiğini anımsayınız. 
-    Tabii alloc_pages fonksiyonun bize verdiği adres sanal adrestir. Anımsanacağı gibi bir page nesnesinin adresi 
-    bilindiğinde bunun fiziksel bellekteki kaç numaralı sayfaya ilişkin olduğu page_to_pfn fonksiyonuyla elde edilebilmekteydi.  
-    
+    ya da dolaylı biçimde bir dizi içerisinde tutmaktadır. alloc_pages bize ilgili page nesnesinin bu dizideki adresini 
+    vermektedir. Burada bize verilen page adresini biz ilerleterek ilgili dizinin sonraki elemanına erişiriz. İkiz blok 
+    tahsisat sisteminde her zaman fiziksel bellekte ardışıl fiziksel sayfaların tahsis edildiğini anımsayınız. Tabii 
+    alloc_pages fonksiyonun bize verdiği adres sanal adrestir. Anımsanacağı gibi bir page nesnesinin adresi bilindiğinde 
+    bunun fiziksel bellekteki kaç numaralı sayfaya ilişkin olduğu page_to_pfn fonksiyonuyla elde edilebilmekteydi.  
+
     alloc_pages fonksiyonuyla tahsis edilen sayfaların __free_pages fonksiyonuyla serbest bırakılması gerekir:
 
     void __free_pages(struct page *page, unsigned int order);
 
-    Fonksiyon "mm/page_alloc.c" dosyası içerisinde tanımlanmıştır ve prototipi "include/linux/gfp.h" dosyasında bulunmaktadır. 
-    Fonksiyonun birinci parametresi tahsisata ilişkin ilk page nesnesinin adresini, ikinci parametresi ise düzey bilgisini 
-    belirtmektedir. Örneğin 2'inci düzeyden 4 sayfa tahsis etmiş olalım. Bu sayfaları serbest bırakırken yine düzey bilgisini 
-    2 olarak girmeliyiz. Örneğin:
+    Fonksiyon "mm/page_alloc.c" dosyası içerisinde tanımlanmıştır. Fonksiyonun birinci parametresi tahsisata ilişkin ilk 
+    page nesnesinin adresini, ikinci parametresi ise düzey bilgisini belirtmektedir. Örneğin 2'inci düzeyden 4 sayfa 
+    tahsis etmiş olalım. Bu sayfaları serbest bırakırken yine düzey bilgisini 2 olarak girmeliyiz. Örneğin:
 
     struct page *pages;
     /* ... */
@@ -11076,17 +11113,15 @@ clean:
 
     #define alloc_page(gfp_mask)    alloc_pages(gfp_mask, 0)
 
-    Yukarıda da belirttiğimiz gibi artık alloc_pages çekirdeklerde bir süredi makro olarak yazılmaktadır. Bu makronun 
+    Yukarıda da belirttiğimiz gibi artık alloc_pages çekirdeklerde bir süredir makro olarak yazılmaktadır. Bu makronun 
     çağırma grafı şöyledir:
 
-    alloc_pages(gfp, order)                            [MAKRO]
-    include/linux/gfp.h
     #define alloc_pages(gfp, order)  alloc_pages_noprof(gfp, order)
                         │
               ┌─────────┴──────────┐
-        CONFIG_NUMA                !CONFIG_NUMA
-            │                        │
-            ▼                        ▼
+        CONFIG_NUMA           !CONFIG_NUMA
+            │                      │
+            ▼                      ▼
     ┌─────────────────────┐   ┌──────────────────────────────┐
     │ alloc_pages_noprof  │   │ alloc_pages_node             │
     │ (gfp, order)        │   │ (numa_node_id(), gfp, order) │
@@ -11124,7 +11159,7 @@ clean:
     │  static  │  │   static       │         │
     └────┬─────┘  └───────┬────────┘         │
          │                │                  │
-         └────────┬────────┘                 │
+         └────────┬───-───┘                  │
                   │                          │
                   └──────────────┬───────────┘
                                  │
@@ -11158,10 +11193,10 @@ clean:
             │ page_alloc.c │  │   static            │
             │   static     │  └────────┬────────────┘
             └──────────────┘           │
-                            sayfa      │ sayfa
-                            bulundu ◄──┘ bulunamadı
-                                        │
-                                        ▼
+                            sayfa      │ 
+                            bulundu ◄──┘ 
+                                       │ sayfa
+                                       ▼ bulunamadı
                             ┌──────────────────────────┐
                             │ __alloc_pages_slowpath   │
                             │ (gfp, order, ac)         │
@@ -11411,7 +11446,7 @@ void exit_sys(const char *msg)
 /*----------------------------------------------------------------------------------------------------------------------
 	Çekirdekteki __get_free_pages fonksiyonu alloc_pages gibi sayfa tahsisatı yapmakla birlikte bize page nesnesinin 
     adresini değil doğrudan tahsis edilen fiziksel sayfanın sanal bellek adresini vermektedir. (Çekirdek alanındaki fiziksel 
-    sayfaların ardışıl biçimde sanal adrese haritalandığını anımsayınız.) __get_free_pages aslında  "include/linux/gfp.h"
+    sayfaların ardışıl biçimde sanal adrese haritalandığını anımsayınız.) __get_free_pages aslında "include/linux/gfp.h"
     dosyasında bir makro olarak yazılmıştır. Biz burada anlatımı kolaylaştırmak için ona fonksiyon diyeceğiz. Fonksiyonun 
     parametrik yapısı şöyledir:
 
@@ -14805,7 +14840,31 @@ void *malloc(unsigned nbytes)
 
     Burada i_mapping elemanının address_space isimli bir yapı türünden olduğuna dikkat ediniz. İşte address_space 
     yapısı dosyanın sayfa önbelleğinin giriş noktasıdır. Her dosya için çekirdek bir address_space nesnesi oluşturmaktadır.
-    address_space yapısı güncel çekirdeklerde "include/linux.fs.h" dosyasında aşağıdaki gibi bildirilmiştir:
+   
+    
+    İşte bu address_space yapısı dosyaya ilişkin önbellek işlemlerinde gereksinim duyulacak tüm bilgileri içermektedir. 
+    Nesneler arasındaki ilişkiyi aşağıdai şekille betimleyebiliriz:
+
+    ┌───────────────┐      ┌───────────────┐      ┌─────────────────┐      ┌──────────────────────────────────┐
+    │               │      │               │      │                 │      │  Dosyanın önbelleğindeki         │
+    │ dosya nesnesi │ ───> │ inode nesnesi │ ───> │  address_space  │ ───> │  sayfalara ilişkin bilgiler      │
+    │               │      │               │      │                 │      │  (sayfa önbelleği / page cache)  │
+    └───────────────┘      └───────────────┘      └─────────────────┘      └──────────────────────────────────┘
+
+    Peki bir dosyanın önbelleklenmiş sayfaları addres_space nesnesi içrisinde nasıl tutulmaktadır? Çekirdek dosyanın 
+    okunacak ya da yazılacak kısmının önbellekte olup olmadığını nasıl anlamaktadır? İşte bunun için XArray veri yapısı 
+    kullanılmaktadır. Anımsanacağı gibi XArray aslında "radix ağaçlarının (radix tree)" bir gerçekleştirimiydi. Radix 
+    ağaçlarının sayısal anahtarlara sahip sistemlerde hızlı arama amacıyla kullanıldığını anımsayınız. Radix ağaçlarında
+    her düğümün n tane alt düğümü olabilmektedir. İşte sayfa önbelleğinde kullanılan radix ağaçlarında dosyanın sayfa 
+    numarası anahtar durumundadır. Bu ağaçlarda her kademede 6 bitlik değer tutulmaktadır. Yani ağacın her düğümü
+    64 bit temel alındığında 64 alt düğüm içermektedir. Tabii XArray gerçekleştiminde düğümler ancak gerektiğinde 
+    yaratılmaktadır. Yani her düğümün 64 alt düğümü olmakla birlikte bu alt düğümler kullanılmadıktan sonra NULL adres 
+    içermektedir. Böylece belli bir sayfa numarası ağaçta 11 (64 / 6 + 1) karşılaştırmayla bulunabilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bu nokada address_space yapısını ele alabiliriz. address_space yapısı güncel çekirdeklerde "include/linux.fs.h" 
+    dosyasında aşağıdaki gibi bildirilmiştir:
 
     struct address_space {
         struct inode		*host;
@@ -14828,25 +14887,62 @@ void *malloc(unsigned nbytes)
         struct rw_semaphore	i_mmap_rwsem;
         void *			    i_private_data;
     } __attribute__((aligned(sizeof(long)))) __randomize_layout;
-    
-    İşte bu address_space yapısı dosyaya ilişkin önbellek işlemlerinde gereksinim duyulacak tüm bilgileri içermektedir. 
-    Nesneler arasındaki ilişkiyi aşağıdai şekille betimleyebiliriz:
 
-    ┌───────────────┐      ┌───────────────┐      ┌─────────────────┐      ┌──────────────────────────────────┐
-    │               │      │               │      │                 │      │  Dosyanın önbelleğindeki         │
-    │ dosya nesnesi │ ───> │ inode nesnesi │ ───> │  address_space  │ ───> │  sayfalara ilişkin bilgiler      │
-    │               │      │               │      │                 │      │  (sayfa önbelleği / page cache)  │
-    └───────────────┘      └───────────────┘      └─────────────────┘      └──────────────────────────────────┘
+    address_space yapısının i_pages elemanı xarray yapısı türündendir. Yani XArray ğacı (radix ağacının bir versiyonu) 
+    yapının bu elemanında tutulmaktadır. Arama bu elemanın belirttiği ağaç kullanılarak yapılmaktadır. Yapının nrpages 
+    elemanı bu dosyanın önbelleğinde tutulan sayfaların toplam sayısını belirtmektedir. Bazı durumalrda eelde bir 
+    address_space nesnesi varken geriye dönüp ona ilişkin inode nesnesine erişilmesi gerekebilmektedir. Yapının host 
+    elemanı address_aspace nesnesinin sahibi olan inode nesnesini göstermektedir. Yapının içersinde bazı senkronizasyon 
+    nesnelerini görüyorsunuz. Bunlar dosyanın önbellek işlemlerinde eşzamanlı erişimlerde koruma sağlamak için kullanılmaktadır. 
+    Yapının flags elemanında işleyiş sırasında kullanılan bazı bayraklar tutulmaktadır. Yapının i_mmap elemanı "belek tabnlı 
+    dosyalarda ve genel olarak bellek haritalama işlemlerinde (memory mapping) kullanılmaktadır. Yapının a_ops elemanı 
+    çokbiçimli davranış için kullanılan fonksiyon göstericilerinden oluşan bir yapı nesnesnin adresini turmaktadır. Biz 
+    bu konuları ayrı bir paragrafta ele alacağız. Aşağıdaki tabloda yapı elemanlarının işlevlerini özet olarak veriyoruz:
 
-    Peki bir dosyanın önbelleklenmiş sayfaları addres_space nesnesi içrisinde nasıl tutulmaktadır? Çekirdek dosyanın 
-    okunacak ya da yazılacak kısmının önbellekte olup olmadığını nasıl anlamaktadır? İşte bunun için XArray veri yapısı 
-    kullanılmaktadır. Anımsanacağı gibi XArray aslında "radix ağaçlarının (radix tree)" bir gerçekleştirimiydi. Radix 
-    ağaçlarının sayısal anahtarlara sahip sistemlerde hızlı arama amacıyla kullanıldığını anımsayınız. Radix ağaçlarında
-    her düğümün n tane alt düğümü olabilmektedir. İşte sayfa önbelleğinde kullanılan radix ağaçlarında dosyanın 
-    sayfa numarası anahtar durumundadır. Bu ağaçlarda her kademede 6 bitlik değer tutulmaktadır. Yani ağacın her düğümü
-    64 bit temel alındığında 64 alt düğüm içermektedir. Tabii XArray gerçekleştiminde düğümler ancak gerektiğinde 
-    yaratılmaktadır. Yani her düğümün 64 alt düğümü olmakla birlikte bu alt düğümler kullanılmadıktan sonra NULL adres 
-    içermektedir. Böylece belli bir sayfa numarası ağaçta 11 (64 / 6 + 1) karşılaştırmayla bulunabilmektedir. 
+    ┌──────────────────┬─────────────────────────────────────────────────────────┐
+    │    Eleman İsmi   │                    Kısa İşlevi                          │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ host             │ Sahip inode nesnesini gösteren geri gösterici           │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ i_pages          │ Önbelleğe alınmış sayfaları (folio'ları) sayfa indeksi  │
+    │                  │ ile tutan XArray ağacı                                  │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ invalidate_lock  │ Önbellek içeriği ile ofset→blok eşlemesi arasındaki     │
+    │                  │ tutarlılığı geçersiz kılma sırasında koruyan rw         │
+    │                  │ semaphore                                               │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ gfp_mask         │ Önbellek sayfalarının tahsisinde kullanılacak GFP       │
+    │                  │ bayrakları                                              │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ i_mmap_writable  │ VM_SHARED | VM_MAYWRITE eşlemelerin sayısını tutan      │
+    │                  │ atomik sayaç                                            │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ i_mmap           │ Dosyayı eşleyen özel ve paylaşımlı VMA'ların aralık     │
+    │                  │ ağacı (kırmızı-siyah ağaç kökü)                         │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ nrpages          │ Ağaçtaki sayfa girişlerinin sayısı (i_pages kilidiyle   │
+    │                  │ korunur)                                                │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ writeback_index  │ Döngüsel geri yazımın başlayacağı sayfa indeksi         │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ a_ops            │ Dosya sistemine özgü işlem fonksiyonlarını içeren       │
+    │                  │ address_space_operations göstericisi                    │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ flags            │ Hata bitleri ve AS_* bayrakları                         │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ wb_err           │ Geri yazımda oluşan en son hatayı tutan errseq_t        │
+    │                  │ değeri                                                  │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ i_private_lock   │ Sahibin özel verilerini (klasik olarak buffer_head      │
+    │                  │ listesini) korumak için kullandığı spinlock             │
+    ├──────────────────┼─────────────────────────────────────────────────────────┤
+    │ i_mmap_rwsem     │ i_mmap ağacını ve i_mmap_writable sayacını koruyan rw   │
+    │                  │ semaphore                                               │
+    └──────────────────┴─────────────────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                         88. Ders 11/07/2026 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -14858,38 +14954,95 @@ void *malloc(unsigned nbytes)
     Tabii dosyaya offset yoluyla erişilmektedir. Dosya offset'inin dosyanın kaçıncı sayfasında olduğunun hesabı basittir: 
     offset >> PAGE_SHIFT Burada PAGE_SHIFT bir sayfanın 2 üzeri kaç byte'tan oluştuğunu belirtmektedir. (4K sayfalar 
     için bu PAGE_SHIFT değeri 12'dir.) İlgili sayfadaki offset'te tabii offset % PAGE_SHIFT değeri ile elde edilebilmektedir. 
-    İşte çekirdek belli bir dosya offset'ten hareketle önce dosya offset'ini sayfa offset'ine dönüştürüp sonra ilgili 
-    sayfayı dosyanın sayfa önbelleğinde aramaktadır. Örneğin biz aşağıdaki gibi bir çağrı yapmış olalım:
+    İşte çekirdek belli bir dosya offset'ten hareketle önce dosya offset'ini sayfa indeksine (syafa offset'i de diyebiliriz) 
+    dönüştürüp sonra ilgili sayfayı dosyanın sayfa önbelleğinde aramaktadır. Örneğin biz aşağıdaki gibi bir çağrı yapmış 
+    olalım:
 
     result = read(fd, buf, 100);
 
     Dosya göstericisinin konumu da 10254 olsun. Çekirdek önce dosya nesnesine, oradan dosyaya ilişkin inode nesnesine, 
-    oradan da dosyanın önbellek bilgilerinin bulunduğu address_space nesnesine erişir. İzleyen paragraflarda açıklayacağımız 
-    gibi XArray yani radix ağacının kökü bu address_space nesnesindedir. İşte radix ağacında anahtar sayfa offset'idir. 
-    Çekirdek 10254 numaralı dosya offset'ini 4096'ya tam bölerek sayfa offsetini elde eder. Örneğimizde bu değer 2'dir. 
-    İşte bu 2 değerini radix ağacına anahtar yapmaktadır. 
+    oradan da dosyanın önbellek bilgilerinin bulunduğu address_space nesnesine erişir. XArray yani radix ağacının kökünün 
+    address_space nesnesi içerisinde olduğunu belirtmiştik. İşte radix ağacında anahtar sayfa indeksidir. Çekirdek 10254 
+    numaralı dosya offset'ini 4096'ya tam bölerek sayfa indeskini (buna sayfa offset'i de denilmektedir) elde eder. 
+    Örneğimizde bu değer 2'dir. İşte bu 2 değerini radix ağacına anahtar yapmaktadır. 
 
-    XArray radix ağacının anahtarının sayfa offset'i olduğunu söyledik. Peki aramadan elde edilecek değer nedir? İşte 
-    sayfa önbelleğindeki aramadan folio isimli bir yapı türünden nesne adresi elde edilmektedir. Yani radix ağacındaki
-    anahtar sayfa offset'idir, elde edilecek değer ise folio nesnesinin adresidir. Eskiden çekirdeğin 5.16 versiyonundan 
-    önce folio nesneleri yerine doğrudan page nesneleri kulanılıyordu. Yani çekirdeğin 5.16 versiyonundan önce buradaki 
-    radix ağacı bize doğrudan dosyanın bellekteki kısmına ilişkin page nesnenin adresini veriyordu. Ancak 5.16'dan itibaren
-    sistem biraz daga iyileştirilmiş ve folio yapısı kullanılmaya başlanmıştır. Tabii folio yapısından izeleyen paragraflarda
-    ele alacağımız gibi page nesnesine dolayısıyla dosyanın ilgil kısmının bellekteki yerine erişilmektedir.
+    XArray radix ağacının anahtarının sayfa indeksi (dosya offset'i değil) olduğunu söyledik. Peki aramadan elde edilecek 
+    değer nedir? İşte güncel çekirdeklerde sayfa önbelleğindeki aramadan folio isimli bir yapı türünden nesne adresi elde 
+    edilmektedir. Yani radix ağacındaki anahtarlar sayfa indeksidir, elde edilecek değerler ise folio nesnesinin adresidir. 
+    Eskiden çekirdeğin 5.16 versiyonundan önce folio nesneleri yerine doğrudan page nesneleri kulanılıyordu. Yani çekirdeğin 
+    5.16 versiyonundan önce buradaki radix ağacı bize dosyanın bellekteki kısmına ilişkin page nesnenin adresini veriyordu. 
+    Ancak 5.16'dan itibaren sistem biraz daha iyileştirilmiş ve folio yapısı kullanılmaya başlanmıştır. Tabii folio yapısından 
+    izeleyen paragraflarda ele alacağımız gibi page nesnesine dolayısıyla dosyanın ilgili kısmının bellekteki yerine erişilmektedir.
+
+    Örneğin bir dosyaya ilişkin önbelleğin XArray ağacını sembolik biçimde şöyle betimleyebiliriz:
+
+    ┌───────┬─────────────────────────────────────────┐
+    │ index │ Değer                                   │
+    ├───────┼─────────────────────────────────────────┤
+    │  0    │ → struct folio (dosya byte 0–4095)      │
+    │  1    │ → struct folio (dosya byte 4096–8191)   │
+    │  2    │ NULL (önbellekte yok)                   │
+    │  3    │ → struct folio (dosya byte 12288–16383) │
+    │ ...   │                                         │
+    └───────┴─────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Bu nokada address_space yapısını ele alabiliriz. Yapıyı yukarıda vermiştik. address_space yapısının i_apges elemanı 
-    xarray yapısı türündendir. Yani XArray ağacı yapının bu elemanında tutulmaktadır. Arama bu eleman kullanılarak 
-    yapılmaktadır. 
+    Biz yukarıda sayfa önbelleğinin yalnızca disk tabanlı dosya işlemlerinde kullanıldığı yönünde bir izlenim vermiş 
+    olabiliriz. Ancak sayfa önbelleği disk dosyalarının dışında başa çekirdek mekanizmaları tarafından da kullanılmaktadır. 
+
+    ┌──────────────────────────────────────────────────────────┐
+    │               SAYFA ÖNBELLEĞİ KULLANICILARI              │
+    │                                                          │
+    │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+    │  │  VFS     │  │  mmap/   │  │  Swap    │  │  tmpfs/  │  │
+    │  │  I/O     │  │  fault   │  │  subsys  │  │  shmem   │  │
+    │  │  path    │  │  handler │  │          │  │          │  │
+    │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
+    │       └─────────────┴─────────────┴─────────────┘        │
+    │                          │                               │
+    │                          ▼                               │
+    │              ┌──────────────────────┐                    │
+    │              │    Sayfa Önbelleği   │                    │
+    │              │   (address_space /   │                    │
+    │              │   struct folio)      │                    │
+    │              └──────────────────────┘                    │
+    └──────────────────────────────────────────────────────────┘
+
+    Buradaki VFS kutucuğu disk tabanlı dosya işlemlerini belirtmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Biz sayfa önbelleğindeki birimlerin sayfalardan oluştuğuna yönelik bir izlenmim vermiş olabiliriz. Gerçekten de 
+    genellikle sayfa önbelleğinde saklanan birimler birer sayfa büyüklüğündedir. Yani örneğin bir dosyanın çeşitli 
+    kısımlarınının birer sayfalık (tipik olarak 4K'lık) bölümleri önbelleğe alınmaktadır. Ancak bazı durumlarda ilgili 
+    dosyanın (genellikle bellek haritalama işlemlerinde karşımıza çıkmaktadır) daha büyük kısımları da önbelleğe alınabilmektedir. 
+    Örneğin biz bir dosyanın 4K'lık değil de 64K'lık kısımlarının önbelleğe alınacağını düşünelim. Bu durumda organizasyon 
+    nasıl olacaktır. İşte Linux çekirdeğinde sayfa önbelleiğinde bir sayfadan daha fazla bilgi bulunması durumuna
+    "bileşik sayfa (compong page)" denilmektedir. Önbellekte örneğin 64K'lık bileşik sayfa denilen daha büyük bir 
+    birimin de tutulduğunu düşünelim. Çekirdek bu 64K'lık bileşik sayfayı aslında 16 tane normal sayfa gibi XArray 
+    ağacında tutmaktadır. Bu 16 sayfanın ilk sayfasına "baş (head)" diğerlerine ise "kuyruk (tail)" sayfaları denilmektedir. 
+    (Buradaki kuyruk sayfası baş sayfa dışındaki sayfaları temsil etmektedir.) 
+    
+    XArray ağacında her zaman sayfa temelinde arama yapılmaktadır. Bu durumda örneğin dosyanın 64K'lık bir birimi tek 
+    bir birim gibi sayfa önbelleğine yerleştirilip belli bir offaset'e dayalı arama yapıldığında bulunan sayfa bu 16 
+    sayfanın baş sayfası olabileceği gibi kuyruk sayfası da olabilecektir. Bir sayfadan daha büyük birimlerin önbelleğe 
+    yerleştirilmesi durumunda sayfa önbelleği için metadata bilgileri her zmaan baş sayfada tutulmaktadır. O halde 
+    çekirdek bir sayfa indeksiyle XArray ağacında arama yapıldığında o sayfanın bir baş sayfa mı yoksa kuyruk sayfası 
+    mı olduğunu anlayabilmeli eğer erişilen sayfa bir kuyruk sayfası ise onun baş sayfasını bulabilmelidir. İşte page 
+    yapısının içerisinde compound_page isimli bir eleman vardır:
 
-----------------------------------------------------------------------------------------------------------------------*/
+    struct page {
+        /* ... */
 
-/*----------------------------------------------------------------------------------------------------------------------
-
+        unsigned long compound_head;	/* Bit zero is set for tail pages */
+        
+        /* ... */
+    };
+    
+    Bir sayfdan (tipik olarak 4K'dan) büyük birimlerin önbelleklerde tutulması Linux çekirdeğine 4.8 versiyonuyla 
+    eklenmiş bir özelliktir. Dolayısıyla daha önceki çekirdeklerin page yapılarında compıund_head elemanı yoktur.
+    
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
