@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                      Son Güncelleme: 08/07/2026 - Çarşamba
+                                      Son Güncelleme: 11/07/2026 - Pazartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -11090,6 +11090,8 @@ clean:
 
     __free_pages(pages, 2);                     /* 2'inci düzeyden yapılan tahsisat iade ediliyor */
 
+    alloc_pages ve __free_pages fonksiyonları export edildiği için aygıt sürücüler tarafından da kullanılabilmektedir. 
+
     alloc_pages fonksiyonun başında __ yokken yapılan tahsisatı serbest bırakan __free_pages fonksiyonun başında __
     olması bir uyumsuzluk oluşturmaktadır. Çekirdekte aslında free_pages isimli başka bir fonksiyon da vardır. Bu 
     fonksiyon sayfaları onların sanal adreslerini (page adreslerini değil sanal adreslerini) alarak serbest bırakmaktadır. 
@@ -11102,7 +11104,9 @@ clean:
     __free_pages(pages + 2, 0);         /* dikkat! yanlış kullanım */
     __free_pages(pages + 3, 0);         /* dikkat! yanlış kullanım */
 
-    alloc_pages ve __free_pages fonksiyonları export edildiği için aygıt sürücüler tarafından da kullanılabilmektedir. 
+    __get_free_pages fonksiyonunun tek sayfayı serbest bırakan __get_free_page isimli makrosu da bulunmaktadır:
+
+    #define __get_free_page(gfp_mask) __get_free_pages((gfp_mask), 0)
 
     alloc_pages fonksiyonunun bize fiziksel sayfanın sanal adresini vermediğine o sayfayı yönetmekte kullanılan page 
     nesnesinin adresini verdiğine dikkat ediniz. Biz eğer ilgili sayfanın içeriğine erişmek istiyorsak page_to_virt 
@@ -11113,120 +11117,24 @@ clean:
 
     #define alloc_page(gfp_mask)    alloc_pages(gfp_mask, 0)
 
-    Yukarıda da belirttiğimiz gibi artık alloc_pages çekirdeklerde bir süredir makro olarak yazılmaktadır. Bu makronun 
-    çağırma grafı şöyledir:
-
-    #define alloc_pages(gfp, order)  alloc_pages_noprof(gfp, order)
-                        │
-              ┌─────────┴──────────┐
-        CONFIG_NUMA           !CONFIG_NUMA
-            │                      │
-            ▼                      ▼
-    ┌─────────────────────┐   ┌──────────────────────────────┐
-    │ alloc_pages_noprof  │   │ alloc_pages_node             │
-    │ (gfp, order)        │   │ (numa_node_id(), gfp, order) │
-    │ mm/mempolicy.c      │   │ include/linux/gfp.h          │
-    │ EXPORT_SYMBOL       │   │   static inline              │
-    └────────┬────────────┘   └──────────────┬───────────────┘
-             │                               │
-             ▼                               ▼
-    ┌─────────────────────┐   ┌──────────────────────────────┐
-    │ get_task_policy     │   │ __alloc_pages_node           │
-    │ (current)           │   │ (nid, gfp, order)            │
-    │ mm/mempolicy.c      │   │ include/linux/gfp.h          │
-    │   static            │   │   static inline              │
-    └────────┬────────────┘   └──────────────┬───────────────┘
-             │                               │
-             ▼                               │
-    ┌─────────────────────┐                  │
-    │ alloc_pages_mpol    │                  │
-    │ (gfp, order, pol,   │                  │
-    │  ilx, nid)          │                  │
-    │ mm/mempolicy.c      │                  │
-    │   static            │                  │
-    └───┬─────────────┬───┘                  │
-        │             │                      │
-    MPOL_           diğer                    │
-    INTERLEAVE    politikalar                │
-        │             │                      │
-        ▼             ▼                      │
-    ┌──────────┐  ┌────────────────┐         │
-    │ alloc_   │  │ alloc_pages_   │         │
-    │ page_    │  │ preferred_many │         │
-    │ inter-   │  │ (gfp, order,   │         │
-    │ leave()  │  │  nid, nodemask)│         │
-    │ mempol.c │  │ mempolicy.c    │         │
-    │  static  │  │   static       │         │
-    └────┬─────┘  └───────┬────────┘         │
-         │                │                  │
-         └────────┬───-───┘                  │
-                  │                          │
-                  └──────────────┬───────────┘
-                                 │
-                                 ▼
-                ┌───────────────────────────────────┐
-                │  __alloc_pages_noprof             │
-                │  (gfp, order, preferred_nid,      │
-                │   nodemask)                       │
-                │  mm/page_alloc.c                  │
-                │  EXPORT_SYMBOL                    │
-                │  (#define __alloc_pages(...)  \   │
-                │     __alloc_pages_noprof(...))    │
-                └──────────────┬────────────────────┘
-                                │
-                                ▼
-                ┌───────────────────────────────────┐
-                │  __alloc_pages                    │
-                │  (gfp, order, preferred_nid,      │
-                │   nodemask)                       │
-                │  mm/page_alloc.c                  │
-                │    normal fonksiyon (export yok)  │
-                └──────┬───────────────┬────────────┘
-                       │               │
-                       ▼               ▼
-            ┌──────────────┐  ┌─────────────────────┐
-            │ prepare_     │  │ get_page_from_      │
-            │ alloc_pages  │  │ freelist            │
-            │ (gfp, order, │  │ (gfp, order,        │
-            │  nid, nm,    │  │  alloc_flags, ac)   │
-            │  ac, ...)    │  │ mm/page_alloc.c     │
-            │ page_alloc.c │  │   static            │
-            │   static     │  └────────┬────────────┘
-            └──────────────┘           │
-                            sayfa      │ 
-                            bulundu ◄──┘ 
-                                       │ sayfa
-                                       ▼ bulunamadı
-                            ┌──────────────────────────┐
-                            │ __alloc_pages_slowpath   │
-                            │ (gfp, order, ac)         │
-                            │ mm/page_alloc.c          │
-                            │   static (export yok)    │
-                            └────────┬────────┬────────┘
-                                     │        │
-                                     ▼        ▼
-                            ┌─────────────┐  ┌──────────────┐
-                            │  kswapd     │  │  OOM killer  │
-                            │  wake_up    │  │  out_of_     │
-                            │  mm/vmscan.c│  │  memory()    │
-                            │   internal  │  │ mm/oom_kill.c│
-                            └─────────────┘  └──────────────┘
+    Yukarıda da belirttiğimiz gibi artık alloc_pages de çekirdeklerde bir süredir makro olarak yazılmaktadır. 
     
     Burada çekirdekteki makroların ve static inline fonksiyonların aygıt sürücülerde kullanımına ilişkin bir noktayı 
     belirtmek istiyoruz. Bir makro ya da inline fonksiyon koda açılmaktadır. Açılan koddaki makrolar da yeniden 
-    açılmaktadır. Makroların ve inline fonksiyonların export edilmesi anlamlı değildir. Ancak bunların açımları sonucunda 
+    açılmaktadır. Makroların ve inline fonksiyonların export edilmesi söz konusu değildir. Makroların ve inline 
+    fonksiyonların çekirdek modülleri ve aygıt sürücüler tarafından kullanılabilmesi için onların açımları sonucunda 
     çağrılan fonksiyonların export edilmiş olması gerekir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                        78. Ders 16/05/2026 - Cumartesi								
+                                            78. Ders 16/05/2026 - Cumartesi								
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Aşağıda alloc_pages ve __free_pages fonksiyonlarının kullanımına ilişkin basit bir aygıt sürücü örneği verilmiştir. 
     Aygıt sürücünün init fonksiyonunda sayfa tahsisatı yapılmış ve sayfanın sanal adresi bir global değişkende saklanmıştır. 
     write işleminde bu sayfaya yazma yapılıp, read işleminde de yazılanlar okunmuştur. Aygıt sürücünün exit fonksiyonunda 
-    da tahsis edilen sayfa serbest bırakılmıştır. Aygıt sürcünün init fonksiyonunda sayfa tahsisatı şöyle yapılmıştır:
+    da tahsis edilen sayfa serbest bırakılmıştır. Aygıt sürücünün init fonksiyonunda sayfa tahsisatı şöyle yapılmıştır:
 
     static void *g_pageaddr;
     /* ... */
@@ -11248,7 +11156,7 @@ clean:
         return 0;
     }
 
-    Aygıt sürücünün exit fonksiyonunda da tahsisat şöyle geri alınmıştır:
+    Aygıt sürücünün exit fonksiyonunda tahsisat şöyle geri alınmıştır:
 
     static void __exit test_driver_exit(void)
     {
@@ -11473,22 +11381,18 @@ void exit_sys(const char *msg)
     Örneğin:
 
     unsigned long addr;
-    char *buf;
+    void *buf;
     /* ... */
 
     if ((addr = __get_free_pages(GFP_KERNEL, 1)) != 0) 
         return -ENOMEM;
 
-    buf = (char *)addr;
+    buf = (void *)addr;
     memset(buf, 0, PAGE_SIZE * 2);
     
     free_pages(addr, 1);
 
-    __get_free_pages fonksiyonunun tek sayfa tahsis eden __get_free_page isimli makrosu da vardır:
-
-    #define __get_free_page(gfp_mask) __get_free_pages((gfp_mask), 0)
-
-    Çekirdekteki get_zerod_page fonksiyonu içi sıfırlanmış tek bir sayfanın tahsisatını yapmaktadır. Fonksiyon tahsis 
+    Çekirdekteki get_zeroed_page fonksiyonu içi sıfırlanmış tek bir sayfanın tahsisatını yapmaktadır. Fonksiyon tahsis 
     edilen sayfanın sanal bellek adresiyle geri dönmektedir:
 
     unsigned long get_zeroed_page(gfp_t gfp_mask);
@@ -11499,14 +11403,14 @@ void exit_sys(const char *msg)
     void *alloc_pages_exact(size_t size, gfp_t gfp_mask);
 
     Fonksiyonun birinci parametresi byte cinsinden büyüklük belirtmektedir. Fonksiyon parametresiyle belirtilen 
-    büyüklüğü kapsayan en küçük sayfa miktarını tahsis eder. Ancak ikiz blok tahsisat sisteminde tahisisatlar 2'nin 
+    büyüklüğü kapsayan en küçük sayfa miktarını tahsis eder. Ancak ikiz blok tahsisat sisteminde tahsisatlar 2'nin 
     kuvvetlerine göre yapıldığı için artan sayfalar oluşabilecektir. Bunlar fonksiyon tarafından geri bırakılmaktadır. 
     Örneğin biz bu fonksiyonun birinci parametresine 25000 değerini girmiş olalım. 25000 byte'ı karşılayabilecek sayfa 
     sayısı 6'dır. Ancak ikiz blok tahsisat sisteminde 6 sayfa tahsis edilememektedir, ancak 8 sayfa tahsis edilebilmektedir. 
     İşte fonksiyon 8 sayfayı tahsis edip 2 sayfayı geri bırakmaktadır. Fonksiyonun doğrudan sanal adresle geri döndüğüne 
     dikkat ediniz. 
 
-    alloac_pages_exact fonksiyonuyla tahsis edilen sayfalar free_pages_exact fonksiyonuyla serbest bırakılmaktadır:
+    alloc_pages_exact fonksiyonuyla tahsis edilen sayfalar free_pages_exact fonksiyonuyla serbest bırakılmaktadır:
 
     void free_pages_exact(void *virt, size_t size);
 
@@ -15027,7 +14931,7 @@ void *malloc(unsigned nbytes)
     XArray ağacında her zaman sayfa temelinde arama yapılmaktadır. Bu durumda örneğin dosyanın 64K'lık bir birimi tek 
     bir birim gibi sayfa önbelleğine yerleştirilip belli bir offaset'e dayalı arama yapıldığında bulunan sayfa bu 16 
     sayfanın baş sayfası olabileceği gibi kuyruk sayfası da olabilecektir. Bir sayfadan daha büyük birimlerin önbelleğe 
-    yerleştirilmesi durumunda sayfa önbelleği için metadata bilgileri her zmaan baş sayfada tutulmaktadır. O halde 
+    yerleştirilmesi durumunda sayfa önbelleği için metadata bilgileri her zaman baş sayfada tutulmaktadır. O halde 
     çekirdek bir sayfa indeksiyle XArray ağacında arama yapıldığında o sayfanın bir baş sayfa mı yoksa kuyruk sayfası 
     mı olduğunu anlayabilmeli eğer erişilen sayfa bir kuyruk sayfası ise onun baş sayfasını bulabilmelidir. İşte page 
     yapısının içerisinde compound_page isimli bir eleman vardır:
@@ -15041,19 +14945,512 @@ void *malloc(unsigned nbytes)
     };
     
     Bir sayfdan (tipik olarak 4K'dan) büyük birimlerin önbelleklerde tutulması Linux çekirdeğine 4.8 versiyonuyla 
-    eklenmiş bir özelliktir. Dolayısıyla daha önceki çekirdeklerin page yapılarında compıund_head elemanı yoktur.
+    eklenmiş bir özelliktir. Dolayısıyla daha önceki çekirdeklerin page yapılarında compound_head elemanı yoktur.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        89. Ders 12/07/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki çekirdek sayfa önbelleğinde aramayı sayfa temelinde yaptıktan sonra bulduğu page nesnesinin baş (head) bir  
+    page nesnesi mi yoksa bir kuyruk (tail) page nesnesi mi olduğunu nereden anlamaktadır? İşte page yapısının 
+    içerisindeki compound_head elemanının en düşük anlamlı biti (0 numaralı biti) eğer set edilmişse sayfa bir kuyruk 
+    sayfası edilmemişse baş sayfadır. Sayfa eğer kuyruk sayfasıysa compound_head elemanının en düşük anlamlı biti  
+    sıfırlandığında (bu işlem 1 çıkartılarak da yapılabilir) compound_head elemanı baş sayfaya ilişkin page nesnesinin
+    adresini vermektedir. Eğer compound_head elemanının en düşük anlamlı biti 1 değilse zaten ilgili sayfa bir baş 
+    sayfadır ve bu compound_head elemanı sayfasının page nesnesinin adresini vermektedir. Bı konuda bazı küçük ayrıntılar 
+    vardır. Çekirdekte bir page nesnesinin baş sayfasına ilişkin page nesne adresini elde eden _compound_head fonksiyonu 
+    şöyle yazılmıştır:
+
+    static __always_inline unsigned long _compound_head(const struct page *page)
+    {
+        unsigned long head = READ_ONCE(page->compound_head);
+
+        if (unlikely(head & 1))
+            return head - 1;
+        return (unsigned long)page_fixed_fake_head(page);
+    }
+
+    Aslında sayfa önbelleğinde bir sayfadan (yani 4K'dan) daha büyük birimlerle seyrek karşılaşılmaktadır. Bir sayfadan 
+    büyük önbellek birimleri kullanan başlıca kaynaklar şunlardır:
+
+    ┌───────────────────────────┬────────────┬──────────────────────────────────────────────────────┐
+    │    Dosya Sistemi /        │    İlk     │                      Açıklama                        │
+    │       Mekanizma           │   Sürüm    │                                                      │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ hugetlbfs                 │ 2.6.x      │ En eski örnek; sayfa önbelleği ağacında her zaman    │
+    │                           │            │ huge page (PMD/PUD boyutlu) tutar, özel yol kullanır │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ tmpfs / shmem             │ 4.8        │ 4.8: PMD boyutlu THP (huge= bağlama seçeneği)        │
+    │                           │            │ 5.16: mapping_set_large_folios() ile bayrak          │
+    │                           │            │ 6.11: herhangi bir order (mTHP, shmem_allowable_     │
+    │                           │            │ huge_orders)                                         │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ XFS                       │ 5.17       │ Büyük folio kullanan ilk genel amaçlı disk dosya     │
+    │                           │            │ sistemi (iomap dönüşümü sonrası); 6.12'de LBS ile    │
+    │                           │            │ blok boyutu > sayfa boyutu (min order) desteği       │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ readahead (mekanizma)     │ 5.18       │ page_cache_ra_order(): öndenokuma yolu, izin veren   │
+    │                           │            │ her mapping için büyük folio üretir                  │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ AFS                       │ 6.0        │ netfs altyapısı üzerinden                            │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ EROFS                     │ 6.2        │ Sıkıştırılmamış veri için etkinleştirildi            │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ SMB / CIFS istemcisi      │ 6.10       │ netfs kütüphanesine dönüşümle birlikte               │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ NFS                       │ 6.11       │                                                      │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ zonefs                    │ 6.11       │                                                      │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ Blok aygıtı önbelleği     │ 6.15       │ block/bdev.c; mantıksal blok boyutu > sayfa boyutu   │
+    │ (bdev sayfa önbelleği)    │            │ olan aygıtlar için min order zorunluluğu             │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ ext4                      │ 6.16       │ Normal (regular) dosyalar için                       │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ btrfs                     │ 6.17       │ Deneysel (CONFIG_BTRFS_EXPERIMENTAL arkasında)       │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ f2fs                      │ 7.0        │                                                      │
+    ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
+    │ khugepaged (mekanizma)    │ 5.4        │ collapse_file(): dosya destekli sayfaları THP'ye     │
+    │                           │            │ katlama (CONFIG_READ_ONLY_THP_FOR_FS ile başladı)    │
+    └───────────────────────────┴────────────┴──────────────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi eskiden sayfa önbelleğine ilişkin XArray ağacına dosyanın sayfa indeksi verildiğinde 
+    o bize doğrudan sayfaya ilişkin page nesnesinin adresini veriyordu. Ancak daha sonra folio nesneleri kullanılmaya 
+    başlandı. Mevcut çekirdeklerde arama sonucunda folio nesnelerinin adresleri verilmektedir. folio yapısı birlikler 
+    içeren oldukça karmaşık bir yapıdır. Yapının bildirimi "include/linux/mm_types.h" dosyası içeisinde şöyle yapılmıştır:
+
+    struct folio {
+        /* private: don't document the anon union */
+        union {
+            struct {
+        /* public: */
+                memdesc_flags_t flags;
+                union {
+                    struct list_head lru;
+        /* private: avoid cluttering the output */
+                    /* For the Unevictable "LRU list" slot */
+                    struct {
+                        /* Avoid compound_head */
+                        void *__filler;
+        /* public: */
+                        unsigned int mlock_count;
+        /* private: */
+                    };
+        /* public: */
+                    struct dev_pagemap *pgmap;
+                };
+                struct address_space *mapping;
+                union {
+                    pgoff_t index;
+                    unsigned long share;
+                };
+                union {
+                    void *private;
+                    swp_entry_t swap;
+                };
+                atomic_t _mapcount;
+                atomic_t _refcount;
+    #ifdef CONFIG_MEMCG
+                unsigned long memcg_data;
+    #elif defined(CONFIG_SLAB_OBJ_EXT)
+                unsigned long _unused_slab_obj_exts;
+    #endif
+    #if defined(WANT_PAGE_VIRTUAL)
+                void *virtual;
+    #endif
+    #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
+                int _last_cpupid;
+    #endif
+        /* private: the union with struct page is transitional */
+            };
+            struct page page;
+        };
+        union {
+            struct {
+                unsigned long _flags_1;
+                unsigned long _head_1;
+                union {
+                    struct {
+        /* public: */
+                        atomic_t _large_mapcount;
+                        atomic_t _nr_pages_mapped;
+    #ifdef CONFIG_64BIT
+                        atomic_t _entire_mapcount;
+                        atomic_t _pincount;
+    #endif /* CONFIG_64BIT */
+                        mm_id_mapcount_t _mm_id_mapcount[2];
+                        union {
+                            mm_id_t _mm_id[2];
+                            unsigned long _mm_ids;
+                        };
+        /* private: the union with struct page is transitional */
+                    };
+                    unsigned long _usable_1[4];
+                };
+                atomic_t _mapcount_1;
+                atomic_t _refcount_1;
+        /* public: */
+    #ifdef NR_PAGES_IN_LARGE_FOLIO
+                unsigned int _nr_pages;
+    #endif /* NR_PAGES_IN_LARGE_FOLIO */
+        /* private: the union with struct page is transitional */
+            };
+            struct page __page_1;
+        };
+        union {
+            struct {
+                unsigned long _flags_2;
+                unsigned long _head_2;
+        /* public: */
+                struct list_head _deferred_list;
+    #ifndef CONFIG_64BIT
+                atomic_t _entire_mapcount;
+                atomic_t _pincount;
+    #endif /* !CONFIG_64BIT */
+        /* private: the union with struct page is transitional */
+            };
+            struct page __page_2;
+        };
+        union {
+            struct {
+                unsigned long _flags_3;
+                unsigned long _head_3;
+        /* public: */
+                void *_hugetlb_subpool;
+                void *_hugetlb_cgroup;
+                void *_hugetlb_cgroup_rsvd;
+                void *_hugetlb_hwpoison;
+        /* private: the union with struct page is transitional */
+            };
+            struct page __page_3;
+        };
+    };
+
+    Yapının anlaşılması oldukça zordur. Yapının baş kısmı bir birlik içermektedir:
+
+     struct folio {
+        union {
+            struct {
+        
+                /* ... */
+        
+            };
+            struct page page;
+        };
+
+        /* ... */
+     };
+
+    folio yapısının baş kısmı birlik kullanılarak tamamen page yapısının üzerine oturtulmuştur. folio nesneleri için ayrıca 
+    bir tahsisat yapılmamaktadır. Yani folio nesneleri aslında page nesneleri ile aynı alanı kullanmaktadır. folio yapısının 
+    page yapısı dışında kalan alanlarına ancak folio yapısı birden fazla sayfadan oluşan bir önbellek birimine ilişkinse 
+    erişilmektedir. Bu alanlar folio nesnesi bir sayfadan büyük birimleri tutuyorsa onun sonraki sayfasına referans etmektedir. 
+    Bir sayfadan büyük önbellek birimlerinin ikinci sayfasında da bazı folio bilgileri saklanmaktadır. 
+
+                 ...
+                 page nesnesi
+    folio --->   page nesnesi       (burası nesnesinin folio yapısının ilk sayfayla çakıştırıldığı kısmı)
+                 page nesnesi       (burası folio nesnesinin geri kalan kısmı)
+                 ...
+
+    Bir folio nesnesinin belirttiği önbellek sayfasına nasıl erişilmektedir? folio nesnesi aslında bir page nesnesi olduğuna
+    göre folio nesnesinin adresi de page nesnesinin adresi ile aynıdır. Biz bir page nesnesinin adresi ile o nesnenin 
+    belirttiği sayfanın adresine makrolarla ve fonksiyonlarla erişebiliyorduk. Bunun için HIGMEM kontrolü de yapan 
+    page_address makrosunun tercih edildiğini anımsayınız. Erişim çekirdek kodlarında "include/linux/mm.h" dosyası içerisindeki 
+    folio_address fonksiyonuyla yapılabilmektdir:
+
+    static inline void *folio_address(const struct folio *folio)
+    {
+        return page_address(&folio->page);
+    }
+
+    Burada zaten folio yapısının page elemanı aslında nesnesininsd başlangıç adresiyle dolayısıyla da folio adresiyle aynıdır 
+    Ancak page_address fonksiyonu page tründen bir adres istediği için erişim bu biçimde yapılmıştır. 
+
+    Peki bir sayfadan büyük (örneğin 64K) önbellek birimine sahip bir dosya sisteminde belli bir dosya offset'inden 
+    read fonksiyonuyla okuma yapıldığında çekirdek önbellekteki yeri nasıl tespit etmektedir? İşte çekirdek önce dosya 
+    offset'ini yine sayfa indeksine dönüştürerek bu sayfa indeksi ile XArray ağacında arama yapmaktadır. XArray ağacında 
+    arama yapıldığında ağaçtaki alt düğümün yerlerini belirten slotlardaki aranan hedef slot bulunur (düğümün slotları alt 
+    düğüm varsa onların yerlerini tutan göstericileri barındırmaktadır). İşte bu slot eğer baş sayfaya ilişkin bir slot 
+    değilse buna "kardeş slot (sibling slot)" denilmektedir. Bu kardeş slotun içerisinde folio nesnesinin adresi değil 
+    baş sayfanın slot indeksinin yeri tutulmaktadır. Zaten bu slot baş sayfaya ilişkinse (baş sayfaya ilişkin slotlara 
+    kanonik slotlar da denilmektedir) doğrudan folio nesnesinin adresini tutmaktadır. Yani bulunan kardeş slottan hareketle 
+    baş slotun (kanonşk slotun) yeri oradan hareketle de büyük birimin folio nesne adresi elde edilmektedir. Yani işlemler 
+    çekirdek tarafından şu aşamalardan geçilerek yütürülmektedir:
+
+    1) Dosya offset'inden hareketle eişilecek yerin sayfa indeksi elde edilir.
+    2) Bu sayfa indeksi XArray ağacına anahtar yapılarak ağaçtan bu sayfa indeksine ilişkin slot elde edilir. 
+    Bu slot baş sayfaya ilişkin değilse baş sayfaya ilikin slota (kanonik slota) geçilir.
+    3) Baş sayfaya ilişkin slotun (kanonik slotun) içerisinden folio nesne adresinden hareketle bir sayfadan büyük 
+    (örneğin 64K) önbellek biriminin yeri elde edilir. 
+    4) Çekirdek önbellek biriminin başlangıç adresini (yani örneğimizde offset'e ilişkin 64K'lık birimin başlangıç adresini) 
+    elde etmiştir. Bu durumda çekirdek dosyanın ilgili offset'inin sayfa önbelleğindeki yerini bunu dikkate alarak 
+    hesaplamaktadır. 
+
+    Örneğin önbellek biriminin 64K (16 sayfa) olduğunu düşünelim. Biz de read fonlsiyonuyla 72128'inci offset'ten 
+    okuma yapmak isteyelim. İşte çekirdek önce 72128'inci offset'i sayfa indeksine dönüştürür. Bu değer 17'dir. 
+    Sonra bu 17'inci sayfa indeksini XArray üzerinde arar. Bunu-a ilişkin slot eğer bu bir kardeş slotsa onun baş slotuna
+    geçer. Oradaki folio nesnesinin adresini dolayısıyla da önbellek adresini elde eder. Artık çekirdeğin elinde 64K'lık
+    önbellek biriminin başlangıç adresi vardır. Erişilecek offset 72128 olduğuna göre oradan 721228 % 65536 = 6592'inci 
+    offset'e erişir. Bu süreci şekilsel olarak şöyle gösterebiliriz:
+
+    dosya ofseti 72128
+    │
+    │ >> 12                              (PAGE_SHIFT)
+    ▼
+    index = 17 ──► XArray araması ──► kardeş slot ──► kanonik slot (16)
+                                                    │
+                                                    ▼
+                                        folio { index=16, order=4 }
+                                                    │
+    72128 & (65536−1) = 6592                        │
+    (folio içi ofset)                               │
+                                                    ▼
+                                        folio_address(folio) + 6592
+                                        = alt sayfa 1, sayfa içi ofset 2496
+                                        = istenen byte'ın adresi
     
-----------------------------------------------------------------------------------------------------------------------*/
+    Burada XArray radix ağacının organizasyonu hakkında bir anımsatma yapmak istiyoruz. XArray ağacında 
+    yapraklar için ayrı düğümlerin tutulmasına gerek yoktur. Zaten arama son kademeye geldiğinde son kademedeki slot
+    doğrudan değeri ya da değerin bulunduğu nesnenin adresini tutmaktadır. Yukarıdaki gerçekleştirimde son kademede 
+    bulunan slotların yalnızca bir tanesi (baş slot ya da kanonik slot) folio nesnesinin adresini tutmaktadır. 
+    Diğer slotlar kardel slotlardır ve ilk slotun indeksini tutmaktadır. Yani son kademedeki slotların yalnızca bir 
+    tanesinde büyük önbellek biriminin folio nesnesinin adresi vardır. Tabii eğer sönbellek birimleri tam bir sayfadan 
+    oluşuyorsa artık kardeş slot diye bir kavram da yoktur. Bu slotların her biri ayrı floio nesnelerinin adreslerini
+    tutmaktadır. 
 
-/*----------------------------------------------------------------------------------------------------------------------
+    Burada bir noktaya dikkatiniz çekmek istiyoruz. Sayfa önbelleğinde farklı büyüklüklere ilişkin önbellek birimleri 
+    bir arada bulunabilir. Örneğin XArray ağacının bazı slotları 4K'lık sayfalara ilişkin önbellek bloklarını 
+    tutarken bazı slotları 64'ya ilişkin slotları tutuyor olabilir. 
 
-----------------------------------------------------------------------------------------------------------------------*/
+    folio yapısının elemanlarının bazıları henüz görmediğimiz konularla ilgilidir. Ancak biz aşağıdaki tabloda folio 
+    yapısının tüm elemanlarının anlamlarını özet olarak veriyoruz. 
 
-/*----------------------------------------------------------------------------------------------------------------------
+    ┌────────────────────────┬───────────────────────┬─────────────────────────────────────────────────┐
+    │        Eleman          │          Tür          │                    Açıklama                     │
+    ╞════════════════════════╧═══════════════════════╧═════════════════════════════════════════════════╡
+    │ SAYFA 0 (head page'in struct page nesnesiyle örtüşür)                                            │
+    ├────────────────────────┬───────────────────────┬─────────────────────────────────────────────────┤
+    │ flags                  │ memdesc_flags_t       │ Sayfa bayrakları (PG_locked, PG_dirty,          │
+    │                        │                       │ PG_uptodate, PG_writeback vs). Üst bitlerde     │
+    │                        │                       │ zone, node ve section numarası kodlanır         │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ lru                    │ struct list_head      │ LRU listesi bağlantısı (aktif/inaktif liste).   │
+    │                        │                       │ Buddy sistemindeyken free list bağlantısı       │
+    │                        │                       │ olarak da kullanılır                            │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ mlock_count            │ unsigned int          │ lru ile aynı union içinde; unevictable          │
+    │                        │                       │ (mlock'lanmış) folio'larda mlock sayacı         │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ pgmap                  │ struct dev_pagemap *  │ lru ile aynı union içinde; ZONE_DEVICE          │
+    │                        │                       │ folio'ları için aygıt sayfa eşlemi              │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ mapping                │ struct address_space *│ Dosya destekli folio'larda sahibin Adres        │
+    │                        │                       │ Alanı'nı gösterir; anonim folio'larda düşük     │
+    │                        │                       │ bitleri işaretlenmiş biçimde anon_vma'yı        │
+    │                        │                       │ gösterir                                        │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ index                  │ pgoff_t               │ Folio'nun dosya (ya da anonim bölge)            │
+    │                        │                       │ içindeki, sayfa cinsinden başlangıç ofseti;     │
+    │                        │                       │ XArray içindeki anahtar değeri                  │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ share                  │ unsigned long         │ index ile aynı union içinde; FSDAX'ta paylaşım  │
+    │                        │                       │ sayacı                                          │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ private                │ void *                │ Dosya sistemine özel veri (örn. buffer_head     │
+    │                        │                       │ listesi ya da iomap durum bilgisi)              │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ swap                   │ swp_entry_t           │ private ile aynı union içinde; swap             │
+    │                        │                       │ önbelleğindeki folio'nun swap girdisi           │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _mapcount              │ atomic_t              │ Order-0 folio'da kullanıcı Adres Alanı'na       │
+    │                        │                       │ eşlenme sayısı (-1 tabanlı)                     │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _refcount              │ atomic_t              │ Folio'nun referans sayacı; folio'nun TEK        │
+    │                        │                       │ geçerli referans sayacıdır (tail'lerde 0'dır).  │
+    │                        │                       │ Doğrudan değil, folio_get()/folio_put() ile     │
+    │                        │                       │ kullanılır                                      │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ memcg_data             │ unsigned long         │ Bağlı olduğu memory cgroup bilgisi              │
+    │                        │                       │ (CONFIG_MEMCG)                                  │
+    ╞════════════════════════╧═══════════════════════╧═════════════════════════════════════════════════╡
+    │ SAYFA 1 (birinci tail page ile örtüşür — yalnızca order >= 1 folio'larda geçerli)                │
+    ├────────────────────────┬───────────────────────┬─────────────────────────────────────────────────┤
+    │ _flags_1               │ unsigned long         │ Düşük 8 biti folio'nun order değerini tutar     │
+    │                        │                       │ (folio_large_order(): _flags_1 & 0xff)          │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _head_1                │ unsigned long         │ Tail page'in compound_info alanı (head          │
+    │                        │                       │ göstericisi | 1)                                │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _large_mapcount        │ atomic_t              │ Büyük folio'nun toplam eşlenme sayacı (tüm      │
+    │                        │                       │ sayfa/PMD eşlemlerinin toplamı)                 │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _nr_pages_mapped       │ atomic_t              │ Kaç alt sayfanın PTE düzeyinde eşlendiğinin     │
+    │                        │                       │ izlenmesi                                       │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _entire_mapcount       │ atomic_t              │ Folio'nun bütün halinde (örn. PMD ile)          │
+    │                        │                       │ eşlenme sayısı (64 bitte burada, 32 bitte       │
+    │                        │                       │ sayfa 2'de)                                     │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _pincount              │ atomic_t              │ pin_user_pages() (FOLL_PIN) ile sabitlenme      │
+    │                        │                       │ sayacı                                          │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _mm_id_mapcount[2],    │ mm_id_mapcount_t,     │ Folio'nun tek bir mm tarafından mı özel         │
+    │ _mm_id[2] / _mm_ids    │ mm_id_t               │ (exclusive) eşlendiğini izleyen mm kimlik       │
+    │                        │                       │ takibi (folio_maybe_mapped_shared() için)       │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _nr_pages              │ unsigned int          │ Folio'daki toplam sayfa sayısının önbelleğe     │
+    │                        │                       │ alınmış değeri (NR_PAGES_IN_LARGE_FOLIO         │
+    │                        │                       │ tanımlıysa; yoksa 1 << order'dan hesaplanır)    │
+    ╞════════════════════════╧═══════════════════════╧═════════════════════════════════════════════════╡
+    │ SAYFA 2 (ikinci tail page ile örtüşür — yalnızca order >= 2 folio'larda geçerli)                 │
+    ├────────────────────────┬───────────────────────┬─────────────────────────────────────────────────┤
+    │ _deferred_list         │ struct list_head      │ Ertelenmiş bölme (deferred split) kuyruğu       │
+    │                        │                       │ bağlantısı; kısmen unmap edilmiş THP'lerin      │
+    │                        │                       │ bellek baskısında bölünmesi için                │
+    ╞════════════════════════╧═══════════════════════╧═════════════════════════════════════════════════╡
+    │ SAYFA 3 (üçüncü tail page ile örtüşür — hugetlb folio'ları için)                                 │
+    ├────────────────────────┬───────────────────────┬─────────────────────────────────────────────────┤
+    │ _hugetlb_subpool       │ void *                │ hugetlb alt havuzu göstericisi                  │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _hugetlb_cgroup,       │ void *                │ hugetlb cgroup muhasebesi (normal ve            │
+    │ _hugetlb_cgroup_rsvd   │                       │ rezervasyon)                                    │
+    ├────────────────────────┼───────────────────────┼─────────────────────────────────────────────────┤
+    │ _hugetlb_hwpoison      │ void *                │ Donanım hatası (memory failure) izleme          │
+    │                        │                       │ bilgisi                                         │
+    └────────────────────────┴───────────────────────┴─────────────────────────────────────────────────┘
 
-----------------------------------------------------------------------------------------------------------------------*/
+    Çekirdek sayfa önbelleğindeki XArray ağacı üzerinde işlem yapan yüksek seviyeli fonksiyonlar bulundurmaktadır. 
+    Biz bu fonksiyonların bazılarını ioremap modeliyle dosya sisteminin gerçekleştirilmesi kısmında göreceğiz:
 
-/*----------------------------------------------------------------------------------------------------------------------
+    ┌───────────────────────────────┬────────────────────────────────────────────────────┐
+    │       Fonksiyon               │                      İşlevi                        │
+    ╞═══════════════════════════════╧════════════════════════════════════════════════════╡
+    │ ARAMA (tek girdi)                                                                  │
+    ├───────────────────────────────┬────────────────────────────────────────────────────┤
+    │ filemap_get_entry             │ Verilen indeksteki ham girdiyi döndürür: folio,    │
+    │                               │ shadow/swap value girdisi ya da NULL. Value        │
+    │                               │ girdileri süzmez; çağıran ayrımı kendisi yapar     │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_get_folio             │ İndeksteki folio'yu bulur, referans alır; yoksa    │
+    │                               │ ERR_PTR(-ENOENT) döndürür. Value girdileri NULL    │
+    │                               │ sayar. En yaygın nokta arama arayüzü               │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_lock_folio            │ filemap_get_folio + folio kilidi alınmış hâli      │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ __filemap_get_folio           │ Genel amaçlı motor: FGP_LOCK, FGP_CREAT,           │
+    │                               │ FGP_ACCESSED vs bayraklarıyla bul / kilitle /      │
+    │                               │ yoksa tahsis edip ekle davranışları birleşir.      │
+    │                               │ fgf_set_order ile istenen folio order'ı da         │
+    │                               │ iletilir (master'da __filemap_get_folio_mpol       │
+    │                               │ üzerine ince bir sarmalayıcıdır)                   │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_grab_folio            │ __filemap_get_folio(FGP_LOCK|FGP_ACCESSED|         │
+    │                               │ FGP_CREAT) kısayolu: bul ya da oluştur             │
+    ╞═══════════════════════════════╧════════════════════════════════════════════════════╡
+    │ ARAMA (toplu / aralık)                                                             │
+    ├───────────────────────────────┬────────────────────────────────────────────────────┤
+    │ filemap_get_folios            │ [start, end] aralığındaki folio'ları folio_batch   │
+    │                               │ içine toplar (yalnızca gerçek folio'lar)           │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_get_folios_contig     │ Aynı işi yalnızca KESİNTİSİZ ardışık folio'lar     │
+    │                               │ için yapar; ilk boşlukta durur                     │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_get_folios_tag        │ Aralıktaki, verilen etiketi (örn.                  │
+    │                               │ PAGECACHE_TAG_DIRTY) taşıyan folio'ları toplar;    │
+    │                               │ writeback tarafının ana tarayıcısı                 │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ find_get_entries              │ Aralıktaki girdileri value (shadow/swap) girdiler  │
+    │                               │ DAHİL toplar; truncate/invalidate yolları için     │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ find_lock_entries             │ find_get_entries gibi, ama folio'ları kilitli      │
+    │                               │ döndürür ve indeksi aralık dışına taşan büyük      │
+    │                               │ folio'ları atlar (kısmi truncate güvenliği)        │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_get_read_batch        │ (statik) read yolu için ardışık folio toplar;      │
+    │                               │ uptodate olmayan ya da readahead işaretli          │
+    │                               │ folio'da durur                                     │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ page_cache_next_miss          │ Verilen indeksten ileri/geri giderek ağaçtaki      │
+    │ page_cache_prev_miss          │ ilk BOŞ indeksi bulur; öndenokuma pencere          │
+    │                               │ kararlarında kullanılır                            │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_range_has_page        │ Aralıkta en az bir folio var mı sorusunu yanıtlar  │
+    │                               │ (direct I/O çakışma denetimleri)                   │
+    ╞═══════════════════════════════╧════════════════════════════════════════════════════╡
+    │ EKLEME / DEĞİŞTİRME                                                                │
+    ├───────────────────────────────┬────────────────────────────────────────────────────┤
+    │ __filemap_add_folio           │ Folio'yu ağaca yerleştiren asıl fonksiyon:         │
+    │                               │ xas_set_order ile multi-index girdi olarak         │
+    │                               │ yazar, yerinden ettiği shadow girdiyi geri         │
+    │                               │ döndürür, istatistikleri günceller                 │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_add_folio             │ __filemap_add_folio + memcg muhasebesi + LRU'ya    │
+    │                               │ ekleme; readahead ve FGP_CREAT yolunun kullandığı  │
+    │                               │ dış arayüz                                         │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ replace_page_cache_folio      │ Yuvadaki eski folio'yu yenisiyle atomik olarak     │
+    │                               │ değiştirir (aynı indeks; örn. FUSE tarafından      │
+    │                               │ kullanılır)                                        │
+    ╞═══════════════════════════════╧════════════════════════════════════════════════════╡
+    │ SİLME                                                                              │
+    ├───────────────────────────────┬────────────────────────────────────────────────────┤
+    │ __filemap_remove_folio        │ Folio'nun kapladığı yuvaları temizler (istenirse   │
+    │                               │ yerine shadow girdi yazar), muhasebeyi düşer;      │
+    │                               │ i_pages kilidi çağıranda                           │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ filemap_remove_folio          │ Kilidi kendisi alan tam silme yolu                 │
+    │                               │ (+ filemap_free_folio ile referans bırakma)        │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ delete_from_page_cache_batch  │ Bir folio_batch'teki folio'ların tümünü tek        │
+    │                               │ kilit altında ağaçtan söker; truncate'in hızlı     │
+    │                               │ toplu yolu                                         │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ clear_shadow_entries          │ (mm/truncate.c) Aralıktaki shadow/value            │
+    │                               │ girdilerini temizler                               │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ mapping_try_invalidate        │ (mm/truncate.c) Aralıktaki temiz, kullanımda       │
+    │                               │ olmayan folio'ları ağaçtan düşürmeyi dener         │
+    ╞═══════════════════════════════╧════════════════════════════════════════════════════╡
+    │ ETİKET (XA_MARK) İŞLEMLERİ                                                         │
+    ├───────────────────────────────┬────────────────────────────────────────────────────┤
+    │ __folio_mark_dirty            │ (mm/page-writeback.c) Folio'nun yuvasına           │
+    │                               │ PAGECACHE_TAG_DIRTY etiketini işler                │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ __folio_start_writeback       │ DIRTY etiketini kaldırıp WRITEBACK etiketini       │
+    │                               │ koyar (TOWRITE yönetimiyle birlikte)               │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ __folio_end_writeback         │ WRITEBACK etiketini temizler, bekleyenleri         │
+    │                               │ uyandırır                                          │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ mapping_tagged                │ Ağaçta verilen etikete sahip en az bir girdi       │
+    │                               │ olup olmadığını sorar                              │
+    ╞═══════════════════════════════╧════════════════════════════════════════════════════╡
+    │ ÖZEL DURUMLAR                                                                      │
+    ├───────────────────────────────┬────────────────────────────────────────────────────┤
+    │ folio_migrate_mapping         │ (mm/migrate.c) Bellek göçünde yuvadaki eski        │
+    │                               │ folio göstericisini yeni folio ile değiştirir      │
+    ├───────────────────────────────┼────────────────────────────────────────────────────┤
+    │ xas_split / xas_split_alloc   │ (lib/xarray.c) Büyük folio bölünürken multi-index  │
+    │                               │ girdiyi çok sayıda küçük girdiye/alt düğüme        │
+    │                               │ dönüştürür (split_huge_page yolundan çağrılır)     │
+    └───────────────────────────────┴────────────────────────────────────────────────────┘
+
+    Örneğin amacımız belli bir sayfa indeksine ilişkin folio nesnesinin adresini elde etmek olsun. Bunun için 
+    Bu işlemi filemap_get_folio fonksiyonuyla yapabiliriz. Fonksiyonun prototipi şöyledir:
+
+    struct folio *filemap_get_folio(struct address_space *mapping, pgoff_t index);
+
+    Fonksiyon inode nesnesi içeisindeki address_space nesnesinin adresini ve sayfa indeksini parametre olarak alır. 
+    Başarı durumunda folio nesnesinin adresine, başarısızlık durumunda ise NULL adrese geri döner. 
+
+    Dosya önbelleğindeki XArray ağacı üzerinde işlemler yapan fonksiyonların listesini pid aramasını açıkladığımız 
+    bölümde vermiştik.   
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
