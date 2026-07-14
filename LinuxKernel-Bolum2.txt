@@ -11776,7 +11776,7 @@ void exit_sys(const char *msg)
     zoneref nesnesi de ilgili bölgeyi belirtmektedir. (Başka bir deyişle NUMA düğümünün fallback listesi aslında bir bölge 
     listesinden oluşmaktadır.) 
 
-    node_zonelists dizisinin uzunluğunun MAX_ZONELISTS ile belirtildiğine dikkat ediniz. Bu selbbolik sabit şöyle 
+    node_zonelists dizisinin uzunluğunun MAX_ZONELISTS ile belirtildiğine dikkat ediniz. Bu sembolik sabit şöyle 
     tanımlanmıştır:
 
     #define MAX_ZONES_PER_ZONELIST (MAX_NUMNODES * MAX_NR_ZONES)
@@ -11807,15 +11807,16 @@ void exit_sys(const char *msg)
             [3]: zone=NULL
 
     Bu temsili çizimde örnek olarak 0'ıncı NUMA düğümünün node_zonelists dizisi gösterilmiştir. Görüldüğü gibi bu 
-    dizinin 0'ncı eşemanı bölgelerden oluşmaktadır, ancak bölgeler de yalnızca 0'ıncı düğümün bölgelerini içermemektedir.
+    dizinin 0'ncı elemanı bölgelerden oluşmaktadır, ancak bölgeler de yalnızca 0'ıncı düğümün bölgelerini içermemektedir.
     Diğer düğümlerin bölgelerini de içermektedir. Örneğin 0'ıncı NUMA düğümünde alloc_pages ile ZONE_DMA32 bölgesinden 
-    MIGRATE_UNMOVABLE tahsisatı yapılmak istensin. İşte bölge listesinin dolaşılmasına 0'düğümdeki DMA32'den başlatılacaktır:
+    MIGRATE_UNMOVABLE tahsisatı yapılmak istensin. İşte bölge listesinin dolaşılmasına 0'ıncı düğümdeki DMA32'den 
+    başlatılacaktır:
 
-       pg_data_t (Node 0)
+    pg_data_t (Node 0)
     ├── node_zonelists[0]  ← ZONELIST_FALLBACK
     │   └── _zonerefs[]
     │         [0]: zone=&node0.zone[NORMAL],  zone_idx=ZONE_NORMAL
-    │         Bölge aramsı buradan başlatılacak --------> [1]: zone=&node0.zone[DMA32],   zone_idx=ZONE_DMA32
+    │         Bölge araması buradan başlatılacak --------> [1]: zone=&node0.zone[DMA32],   zone_idx=ZONE_DMA32
     │         [2]: zone=&node0.zone[DMA],     zone_idx=ZONE_DMA
     │         [3]: zone=&node1.zone[NORMAL],  zone_idx=ZONE_NORMAL  ← komşu node
     │         [4]: zone=&node1.zone[DMA32],   zone_idx=ZONE_DMA32
@@ -11833,26 +11834,66 @@ void exit_sys(const char *msg)
     Eğer bu bölgenin göç fallback listesinin hiçbir yerinde talep edilen miktarda boş sayfa bulunamazsa bundan sonra 
     arama 0'ıncı düğümün ZONE_DMA bölgesinden devam edecek, orada da bulunamazsa 1'inci düğümün ZONE_NORMAL bölgesinden 
     devam edecektir. 
+
+    node_zonelists[1] elemanının (ZONELIST_NOFALLBACK) ne işe yaradığını merak edebilirsiniz. Bu elemanda belirtilen 
+    bölge dizisi aramanın kesinlikle belirli bir NUMA düğümünde kalması gerektiği durumlar için bulundurulmuştur. Bu 
+    dizi elemanı __GFP_THISNODE bayrağı girildiğinde kullanılmaktadır. Bu dizi elemanında yalnızca ilgili düğümün
+    bölümleri vardır. Yani alloc_pages_node çağrısında GFP bayrakları içinde __GFP_THISNODE varsa, node_zonelists[1] 
+    (ZONELIST_NOFALLBACK) seçilir. Bu liste yalnızca o düğümün kendi bölgelerini içerdiği için arama diğer düğümlere 
+    hiçbir koşulda taşmaz.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Başlangıç durumu hakkında bilgi eklenecek
+    Şimdi de başlangıçta (yani boot işleminden sonra) boş sayfa listelerinin durumu hakkında bilgi verelim. Başlangıçta 
+    her sayfa kendi bellek bölgesinin en yüksek düzeyli MIGRATE_MOVABLE göç türüne ilişkin ikiz blok tahsisat sistemindedir 
+    Örneğin UMA x86-64 mimarisindeki başlangıç durumu şöyledir:
+
+    node 0 (pgdat)
+    ├── ZONE_DMA      (0–16MB)
+    │     free_area[10].free_list[MIGRATE_MOVABLE]  → ~birkaç adet 4MB blok
+    │     (diğer tüm göç listeleri boş)
+    │
+    ├── ZONE_DMA32    (16MB–4GB)
+    │     free_area[10].free_list[MIGRATE_MOVABLE]  → ~binlerce sayfa 
+    │     (diğer tüm göç listeleri boş)
+    │
+    └── ZONE_NORMAL   (4GB–16GB)
+        free_area[10].free_list[MIGRATE_MOVABLE]  → belleğin ana gövdesi
+        (diğer tüm göç listeleri boş) 
+
+    Örneğin ARM64 kullanılan Raspberry Pi modelleri için başlangıç durumu şöyledir:
+
+    node 0 (pgdat) — RPi, UMA
+    ├── ZONE_DMA      (0 – 1GB)
+    │     free_area[10].free_list[MIGRATE_MOVABLE]  → ~1GB'ın boş kısmı, çoğu 4MB'lık blok 
+    │     (diğer tüm göç listeleri boş)   
+    ├── ZONE_DMA32    (1GB – 4GB)
+    │     free_area[10].free_list[MIGRATE_MOVABLE]  → ~3GB
+    │     (diğer tüm göç listeleri boş)
+    └── ZONE_NORMAL   (4GB – 8GB)
+        free_area[10].free_list[MIGRATE_MOVABLE]  → ~4GB
+        (diğer tüm göç listeleri boş)
+
+    ARM32 kullanan BeagleBone modelleri için de başlangıç durumu şöyledir:
+
+    node 0 (pgdat) — BBB, UMA
+    └── ZONE_NORMAL   (0x80000000 – 0x9FFFFFFF, 512MB)
+        free_area[10].free_list[MIGRATE_MOVABLE]  → tüm boş bellek burada, çoğu 4MB'lık blok
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Siz bölgelerde fallback yapılırken NUMA düğümlerine hangi sırada bakılacağının nasıl belirlendiğini merak edebilirsiniz. 
-    NUMA mimarisini kullanan donanmımlar hakkında bazı bilgiler verelim. NUMA mimarisi donanım düzeyinde biraz ayrıntılıdır. 
+    Peki bölgelerde fallback yapılırken NUMA düğümlerine hangi sırada bakılmaktadır? NUMA mimarisini kullanan donanımlar 
+    hakkında bazı bilgiler verelim. NUMA mimarisi donanım düzeyinde biraz ayrıntılıdır. 
     
-    Bilgisyar ana kartında CPU'lar için soketler bulunmaktadır. Bu soketlere takılan entegre deverelere "paket (package)" 
-    denilmektedir. Biz bu kaketlere "işlemci paketleri" de diyeceğiz.  Bu paketler içerisinde İngilizce "die" denilen 
-    silikon  kalıplar bulunmaktadır. Bu slikon kalıplar üzerinde de çekirdekler vardır. Her çekirdek bağımız bir işlemci 
-    gibi davranmaktadır. İşte soketlerdeki işlemcilerin çekirdekleri her bank'a eşit hızda erişememektedir. Ayrıca bir 
-    kasa içerisindeki soketlerin sayısında da belli bir sınır vardır. Bu sınır donanımsal kısıtlardan kaynaklanmaktadır. 
-    Eğer kasa soket sayısını kaldıramıyorsa bu durumda kasa sayısı, dolayısıyla da soket sayısı artırlmaktadır. Tabii 
-    kasalar arasındaki RAM şletişimi de yüksek hızlı iletkenlerle sağlanmaktadır. Böylece büyük NUMA sistemlerinde dağıtık 
-    RAM blokları bulunabilmektedir ve her çekirdek bu RAM bloklarına (yani düğümlerine) farklı hızlarda erişebilmektedir. 
+    Bilgisayar ana kartında CPU'lar için soketler bulunmaktadır. Bu soketlere takılan entegre devrelere "paket (package)" 
+    denilmektedir. Biz bu paketlere "işlemci paketleri" de diyeceğiz. Bu işlemci paketleri içerisinde İngilizce "die" 
+    denilen silikon  kalıplar bulunmaktadır. Çekirdekler bu silikon kalıplar üzerindedir. Her çekirdek bağımsız bir işlemci 
+    gibi davranmaktadır. Bir kasa içerisindeki soketlerin sayısında da belli bir sınır vardır. Bu sınır donanımsal kısıtlardan 
+    kaynaklanmaktadır. Eğer kasa soket sayısını kaldıramıyorsa bu durumda kasa sayısı artırılmaktadır. Tabii kasalar 
+    arasındaki RAM iletişimi de yüksek hızlı iletkenlerle sağlanmaktadır. Böylece büyük NUMA sistemlerinde dağıtık RAM 
+    blokları bulunabilmektedir ve her çekirdek bu RAM bloklarına (yani düğümlerine) farklı hızlarda erişebilmektedir. 
     
-    Linux çekirdeği her soket ve dolayısıla çekirdek için NUMA düğümlerine "NUMA uzaklığı (NUMA distance)" denilen bir 
+    Linux çekirdeği her soket ve dolayısıyla çekirdek için NUMA düğümlerine "NUMA uzaklığı (NUMA distance)" denilen bir 
     uzaklık derecesi atamaktadır. Tabii çekirdek bu bilgiyi de aslında donanımdan yani modern sistemlerde ACPI tablosundan 
     elde etmektedir. NUMA uzaklık matrisindeki değerler gerçek bir gecikme değeri değil göreli bir değer belirtmektedir. 
     Örneğin soketlerin NUMA düğümlerine uzaklıkları aşağıdakine benzer olabilmektedir:
@@ -11873,13 +11914,13 @@ void exit_sys(const char *msg)
 
     NUMA uzaklık matrisi aşağıdaki gibi temsil edilebilir:
 
-           Node0  Node1  Node2  Node3
-    SOket0  [  10     21     31     41  ]
+             Node0  Node1  Node2  Node3
+    Soket0  [  10     21     31     41  ]
     Soket1  [  21     10     21     31  ]
     Soket2  [  31     21     10     21  ]
     Soket3  [  41     31     21     10  ]
 
-    Tipik bazı NUMA donanımlarındaki gecikmeler de nano saniyeler mertebesinde şöyledir:
+    Tipik bazı NUMA donanımlarındaki gecikmeler de nanosaniyeler mertebesinde şöyledir:
 
     2 soketli Intel Xeon (UPI):
     Local RAM erişimi:   ~80–90 ns
@@ -11896,79 +11937,21 @@ void exit_sys(const char *msg)
     1-hop remote:        ~150 ns
     2-hop remote:        ~220 ns
 
-
     Örneğin 2 soketli bir NUMA sistemi aşağıdaki gibi bir mimariye sahip olabilmektedir:
 
             Socket 0                          Socket 1
     ┌────────────────────────┐        ┌────────────────────────┐
     │  8 × CCD               │        │  8 × CCD               │
-    │  (64 çekirdek, Zen 2)  │◄──────►│  (64 çekirdek, Zen 2)  │
-    │                        │Infinity│                        │
-    │  Central IO Die        │ Fabric │  Central IO Die        │
+    │  (64 çekirdek, Zen 2)  │        │  (64 çekirdek, Zen 2)  │
+    │                        │◄──────►│                        │
+    │  Central IO Die        │        │  Central IO Die        │
     │  8× DDR4 kanalı        │        │  8× DDR4 kanalı        │
     └────────────────────────┘        └────────────────────────┘
-        NUMA Node 0                       NUMA Node 1
+       NUMA Düğümü (Bank) 0              NUMA Düğümü (Bank) 1
         Local: ~75-85ns                   Remote: ~140-170ns
 
     Her soketteki çekirdek o sokete ilişkin RAM bank'ına (yani NUMA düğümüne) daha hızlı erişmektedir. Yukarıdaki 
     sistemde her sokette 64 çekirdekli bir işlemci paketi, 2 sokette toplamda 128 çekirdek bulunmaktadır.
-
-    Örneğin OpenAI'ın ChatGPT sunucularında kulandığı makineler şöyledir:
-
-    ╔════════════════════════════════════════════════════════════════════════════════════╗
-    ║          1 × Fiziksel Kasa  (10U Rack Server — NVIDIA DGX A100 / Azure ND A100 v4) ║
-    ║                                                                                    ║
-    ║  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐          ║
-    ║  │         SOCKET 0                │  │         SOCKET 1                │          ║
-    ║  │   AMD EPYC 7742  (Zen 2/Rome)   │  │   AMD EPYC 7742  (Zen 2/Rome)   │          ║
-    ║  │   64 çekirdek · 128 thread      │◄►│   64 çekirdek · 128 thread      │          ║
-    ║  │   8× DDR4 kanal                 │  │   8× DDR4 kanal                 │          ║
-    ║  │   PCIe Gen4 × 128 şerit         │  │   PCIe Gen4 × 128 şerit         │          ║
-    ║  │   2.25 GHz base / 3.4 GHz boost │  │   2.25 GHz base / 3.4 GHz boost │          ║
-    ║  └─────────────────────────────────┘  └─────────────────────────────────┘          ║
-    ║               │   Infinity Fabric (inter-socket)  │                                ║
-    ║  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐          ║
-    ║  │     RAM — Socket 0              │  │     RAM — Socket 1              │          ║
-    ║  │  16 × 32 GB DDR4-3200 = 512 GB  │  │  16 × 32 GB DDR4-3200 = 512 GB  │          ║
-    ║  └─────────────────────────────────┘  └─────────────────────────────────┘          ║
-    ║                    Toplam Sistem RAM: 1 TB  (maks. 2 TB)                           ║
-    ║                                                                                    ║
-    ║  ┌────────────────────────────────────────────────────────────────────────┐        ║
-    ║  │                      6 × NVIDIA NVSwitch                               │        ║
-    ║  │        NVLink 3.0  ·  4.8 TB/s bidirectional all-to-all                │        ║
-    ║  └────────────────────────────────────────────────────────────────────────┘        ║
-    ║        │          │          │         │            │          │         │         ║
-    ║  ┌─────┴───┐ ┌────┴────┐ ┌───┴─────┐ ┌─┴───────┐ ┌─────────┐ ┌───────┐ ┌──┐        ║
-    ║  │  GPU 0  │ │  GPU 1  │ │  GPU 2  │ │ GPU 3   │ │  GPU 4  │ │ GPU 5 │ │..│        ║
-    ║  │ A100    │ │ A100    │ │ A100    │ │ A100    │ │ A100    │ │ A100  │ │  │        ║
-    ║  │ 80GB    │ │ 80GB    │ │ 80GB    │ │ 80GB    │ │ 80GB    │ │ 80GB  │ │  │        ║
-    ║  │ HBM2e   │ │ HBM2e   │ │ HBM2e   │ │ HBM2e   │ │ HBM2e   │ │ HBM2e │ │  │        ║
-    ║  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └───────┘ └──┘        ║
-    ║                                          GPU 6 ve GPU 7 de aynı şekilde            ║
-    ║                    Toplam GPU belleği: 8 × 80 GB = 640 GB HBM2e                    ║
-    ║                                                                                    ║
-    ║  ┌────────────────────────────────────────────────────────────────────────┐        ║
-    ║  │              8 × Mellanox ConnectX-6 InfiniBand NIC                    │        ║
-    ║  │    Her GPU'ya 1 adanmış port · 200 Gb/s HDR · GPU Direct RDMA          │        ║
-    ║  └────────────────────────────────────────────────────────────────────────┘        ║
-    ║                                                                                    ║
-    ║  ┌────────────────────────────────────────────────────────────────────────┐        ║
-    ║  │  NVMe SSD Depolama                                                     │        ║
-    ║  │  2 × 1.92 TB (OS, RAID-1)  +  4–8 × 3.84 TB U.2 NVMe (scratch)         │        ║
-    ║  └────────────────────────────────────────────────────────────────────────┘        ║
-    ║                                                                                    ║
-    ║  ┌────────────────────────────────────────────────────────────────────────┐        ║
-    ║  │  NODE ÖZETİ                                                            │        ║
-    ║  │  ──────────────────────────────────────────────────────────────────    │        ║
-    ║  │   Kasa        │ Soket │ CPU Modeli      │ Çekirdek/Soket │ Toplam      │        ║
-    ║  │  ─────────────┼───────┼─────────────────┼────────────────┼──────────   │        ║
-    ║  │       1       │   2   │ AMD EPYC 7742   │      64        │ 128 fiziksel│        ║
-    ║  │               │       │ (Zen 2 / Rome)  │                │ 256 (SMT)   │        ║
-    ║  │  ──────────────────────────────────────────────────────────────────    │        ║
-    ║  │   GPU/Node: 8 × A100  │  RAM: 1–2 TB DDR4  │  GPU Mem: 640 GB HBM2e    │        ║
-    ║  │   Ağ: 8 × 200 Gb/s InfiniBand  │  ~3.617 node (SemiAnalysis, 2023)     │        ║
-    ║  └────────────────────────────────────────────────────────────────────────┘        ║
-    ╚════════════════════════════════════════════════════════════════════════════──══════╝
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -11976,39 +11959,32 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Biz Linux çerkirdeklerindeki bellek tahsisat sistemini iki kısma ayırmıştık: Sayfa düzeyinde tahsisat ve byte 
+	Biz Linux çekirdeklerindeki bellek tahsisat sistemini iki kısma ayırmıştık: Sayfa düzeyinde tahsisat ve byte 
     düzeyinde tahsisat. Sayfa düzeyinde tahsisatların "ikiz blok tahsisat sistemi (buddy allocator)" ile yapıldığını
     gördük. Şimdi de çekirdeğin byte düzeyinde tahsisat sistemi üzerinde duracağız. Daha önceden de belirttiğimiz 
     gibi çekirdeğin byte düzeyinde tahsisat sistemine "dilimli tahsisat sistemi (slab allocator)" denilmektedir. 
     
-    Diliml tahsisat sistemi 1994 yılında Jeff Bonwick tarafından önerilmiştir. Bonwick'in orijinal makalesine aşağıdaki
+    Dilimli tahsisat sistemi 1994 yılında Jeff Bonwick tarafından önerilmiştir. Bonwick'in orijinal makalesine aşağıdaki
     bağlantıdan erişebilirsiniz:
 
     https://people.eecs.berkeley.edu/~kubitron/courses/cs194-24-S14/hand-outs/bonwick_slab.pdf
 
-    Dilimli tahsisat sistemi ilk kez Solaris sistemlerinde kullanılmıştır. Bunu Free BSD sistemleri izlemiştir. Sonra 
+    Dilimli tahsisat sistemi ilk kez Solaris sistemlerinde kullanılmıştır. Bunu FreeBSD sistemleri izlemiştir. Sonra 
     da Linux'un 2.2 kararlı sürümüyle çekirdekte yerini almıştır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Dilimli tahsisat sistemini açıklamadan önce klasik byte düzeyinde tahsisat işleminin (yani malloc gibi bir fonksiyonun)
-    nasıl gerçekleştirildiği üzerinde duralım. Klasik byte düzeyinde tahsisat algoritması oldukç basittir. Bellekte bir 
+    nasıl gerçekleştirildiği üzerinde duralım. Klasik byte düzeyinde tahsisat algoritması oldukça basittir. Bellekte bir 
     bölge heap olarak ayrılır. Bu bölgedeki "yalnızca boş alanlar" bir bağlı listede tutulur. Tahsis edilmiş alanlar 
-    için bir kayıt turulmaz. Tahisat yapılmak istendiğinde boş blokları tutan bağlı liste üzerinde istenilen uzunlukta
+    için bir kayıt tutulmaz. Tahsisat yapılmak istendiğinde boş blokları tutan bağlı liste üzerinde istenilen uzunlukta
     ilk blokla karşılaşılana kadar (buna İngilizce "first fit" yöntemi de denilmektedir) sıralı arama yapılır. Klasik 
     tahsis algoritması D. Ritchie ve B. Kernighan'ın ünlü "The C Programming Language" kitabında "8.7 Example - A Storage 
     Allocator (Sayfa 163)" başlığı altında da açıklanmıştır. Pek çok malloc/realloc/free benzeri tahsisat sistemi 
     burada belirtilen algoritmayı temel almıştır. Örneğin Windows sistemlerindeki HeapAlloc, HeapFree gibi API 
     fonksiyonlarının temeli de bu algoritmadır. Linux sistemlerinde malloc/realloc/free fonksiyonları da uzun süre 
-    bu klasik algoritmayı kullanmıştır. D. Ritchie ve B. Kernighan tarafından "The Programming Language" kitabında 
-    verilen örnek malloc ve free algoritmaları aşağıda verilmiştir. Bu klasik algoritmanın iki sorunu vardır:
-
-    - Uygun boş bloğun bulunması ve sisteme iade edilmesi O(N) karmaşıklıkta bir işlemdir. 
-    - Bellek bölünmesi (fragmentation) oluşabilmektedir. (Yani çok sayıda küçük blok olduğu halde büyük bir bloğun 
-    tahsis edilememesi durumu)
-
-    İşte dilimli tahsisat sistemi bu klasik tahsis algortimasının yukarıda belirttiğimiz olumsuzluklarını ortadan 
-    kaldırmak için geliştirilmiştir.
+    bu klasik algoritmayı kullanmıştır. D. Ritchie ve B. Kernighan tarafından "The C Programming Language" kitabında 
+    verilen örnek malloc ve free algoritmaları aşağıda verilmiştir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 #include <stddef.h>
@@ -12089,7 +12065,16 @@ void *malloc(unsigned nbytes)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Yukarıda açıkladığımız klasik tahsisat sistemindeki bağlı listede tutulan boş bloklar aynı y-uzunlukta olsaydı 
+	Bu klasik algoritmanın iki sorunu vardır:
+
+    - Uygun boş bloğun bulunması ve sisteme iade edilmesi O(N) karmaşıklıkta bir işlemdir. 
+    - Bellek bölünmesi (fragmentation) oluşabilmektedir. (Yani çok sayıda küçük blok olduğu halde büyük bir bloğun 
+    tahsis edilememesi durumu)
+
+    İşte dilimli tahsisat sistemi bu klasik tahsis algortimasının yukarıda belirttiğimiz olumsuzluklarını ortadan 
+    kaldırmak için geliştirilmiştir.
+    
+    Yukarıda açıkladığımız klasik tahsisat sistemindeki bağlı listede tutulan boş bloklar aynı y-uzunlukta olsaydı 
     tahsisat ve serbest bırakma işlemleri O(1) karmaşıklıkta yapılabilirdi. Çünkü boş bağlı listedeki tüm bloklar
     eşit uzunlukta olduğuna göre hemen listenin başındaki blok verilebilirdi. Benzer biçimde serbest bırakma işleminde 
     hemen blok listenin başına eklenebilirdi. Ancak bu yöntemde bu blok uzunluğunun belirlenmesi sorunu vardır. Örneğin 
