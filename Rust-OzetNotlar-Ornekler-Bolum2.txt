@@ -8432,8 +8432,9 @@ impl Drop for Point {
 
     let v = Vec::new();     // error! T türü çıkarsanamıyor
 
-    Rust'ın tür belirleme mekanizması esnek olduğu için yukarıdkai gibi bildirim aslında daha sonra push yapıldığında 
-    geçerli hale gelebilmektedir. Örneğin:
+    Rust'ın tür belirleme mekanizması esnek olduğu için yukarıdaki gibi bildirim aslında daha sonra push yapıldığında 
+    geçerli hale gelebilmektedir. Anımsayacağınız gibi Rust derleyicisi tür tespitini değişkenin kullanıldığı noktaya 
+    erteleyebilmektedir. Örneğin:
 
     let v = Vec::new();     
 
@@ -11021,12 +11022,11 @@ fn getstr(msg: &str) -> String {
     let mut hm: HashMap<i32, String> = HashMap::new();
     
     println!("len: {}, capacity: {}", hm.len(), hm.capacity());     // len: 0, capacity: 0
-
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
     HashMap yapısının with_capacity ilişkili fonksiyonu hash tablosunu programcının belirlediği kapasite değeri ile 
-    oluşturmaktadır:
+    (yani bucket sayısı ile) oluşturmaktadır:
     
     pub fn with_capacity(capacity: usize) -> HashMap<K, V, RandomState>
 
@@ -11073,6 +11073,28 @@ fn getstr(msg: &str) -> String {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    İçerisnde anahtar ve değer olacak biçimde HashMap nesnesi yaratabilmek için hash_map isimli bir makro da bulundurulmuştur. 
+    Nasıl vec makrosuyla içi dolu bir vektör oluşturabiliyorsak hash_map makrosuyla da içi dolu bir HashMap oluşturabiliriz. 
+    Ancak hash_map makrosu henüz deneysel (experimental) aşamasındadır ve derleyicilerin "nightly" versiyonlarında bulunmaktadır. 
+    Biz burada bir örnekle yetineceğiz:
+
+    #![feature(hash_map_macro)]
+    use std::hash_map;
+
+    fn main() {
+        let mut hm  = hash_map! {
+            "ali" => 10,
+            "veli" => 20,
+            "selami" => 30,
+        };
+
+        println!("{:?}", hm);
+    }
+
+    Görüldüğü gibi makro kullanılırken anahtarla değer arasına => atomu getirilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
     HashMap içerisine anahtar-değer çifti eklemek için insert metodu kullanılmaktadır:
 
     pub fn insert(&mut self, k: K, v: V) -> Option<V>
@@ -11107,6 +11129,25 @@ fn getstr(msg: &str) -> String {
         (87, String::from("Ayşe Er"))]);
 
     println!("{:?}", hm);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Anımsayacağınız gibi Rust'ta tür tespiti değişkenin ilk kez kullanıldığı noktaya ertelenebiliyordu. Biz de HashMap türünden 
+    bir değişken oluştururken türü bildirim sırasında değil ona ilk kez değer yerleştirirken örtük biçimde belirtebiliriz. 
+    Örneğin:
+
+    let mut hm = HashMap::new();
+
+    Buradaki bildirimde HashMap için anahtar ve değer türleri belirtilmemiştir. Kodu bu haliyle bırakırsak error oluşacaktır. 
+    Ancak bildirimden sonra insert kullanıldığında derleyici anahtar ve değer türlerini insert metodunun argümanlarından 
+    anlayabilecektir:
+
+    hm.insert(10, String::from("Ali"));
+
+    Burada hm değişkeninin anahtarı i32 türünden değeri de String türündendir. Tabii sonraki işlemlerin bu belirlenen türle
+    çatışmaması gerekir. Örneğin:
+
+    hm.insert(10, 20.2);        // error!
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -11185,8 +11226,6 @@ fn getstr(msg: &str) -> String {
 
 use std::io::{stdin, stdout, Write};
 use std::collections::HashMap;
-
-
 
 fn main() {
     let mut hm: HashMap<i32, String> = HashMap::new();
@@ -11462,7 +11501,7 @@ fn main() {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Programlama dillerindek sözlük tarzı veri yapılarının hemen hepsinde "yalnızca anahtarları elde etmenin" ve "yalnızca 
+    Programlama dillerindeki sözlük tarzı veri yapılarının hemen hepsinde "yalnızca anahtarları elde etmenin" ve "yalnızca 
     değerleri etmenin" de yolları vardır. İşte Rust'ta da bu işlemler into_keys ve into_values metotlarıyla yapılmaktadır. 
     Bu metotlar sırasıyla bize anahtarları ve değerleri dolaşmakta kullanılan dolaşılabilir nesneler vermektedir. Bu dolaşımlarda
     anahtarlar ve değerlerin kendileri elde edilmektedir. Dolayısıyla bu dolaşımlar HashMap içerisindeki anahtar-değer 
@@ -19997,6 +20036,58 @@ fn main() {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Rust'taki makrolarda çağrılma ifadesindeki atomlar bir ağaç haline getirildikten sonra makro açımı yapılmaktadır. 
+    Oysa C ve C++'ta önişlemci (preprocessor) ilk aşamada devreye girmektedir. Aşağıdaki C makrosuna dikkat ediniz:
+
+    #define square(a)      ((a) * (a))
+
+    Biz C'de bu tür makrolarda makro parametresini paranteze alıp makroyu da en dıştan paranteze alırız. Çünkü C'de makrolar 
+    birer fonksiyon gibi davranmalıdır. Aşağıdaki hatalı yazıma dikkat ediniz:
+
+    #define square(a)      a * a
+
+    Bu makro aşağıdaki gibi çağrılırsa fonksiyon etkisi oluşturmaz:
+
+    result = square(1 + 2);
+
+    Ancak Rust'ta makrolar yukarıda da belirttiğimiz gibi atomlara ayırma aşamsından sonra makro argümanları olan atomlar 
+    birer ağaç haline getirildikten sonra açılmaktadır. Dolayısıyla Rust makrolarında bizim C'deki gibi bir önlem almamız
+    gerekemez. 
+
+    Kaynak kod
+    │
+    ▼
+    Lexing (atomlarına ayırma)
+    │
+    ▼
+    Parsing (AST oluşturma)  ←──────────────┐
+    │                                       │
+    ▼                                       │
+    Makro genişlemesi  ─── yeni atomlar   ──┘   (gerekirse yinelemeli)
+    │
+    ▼
+    İsim çözümleme / AST doğrulama
+    │
+    ▼
+    HIR → tür denetimi → borrow check → MIR → LLVM IR → makine kodu
+    
+    Örneğin:
+
+    macro_rules! square {
+        ($val: expr) => {
+            $val * $val
+        }
+    }
+
+    fn main() {
+        let result = square!(1 + 2);
+
+        println!("{}", result);         // 9
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
     Şimdi de makrolarda "yineleme (repitition)" özelliği üzerinde duralım. vec makrosunu anımsayınız. Bu makro bir vektör 
     yaratıp verdiğimiz değerleri o vektöre yerleştirip bize o vektörü veriyordu. Örneğin:
 
@@ -20030,8 +20121,874 @@ fn main() {
         println!("{:?}", v);        // [10, 20, 30]
     }
 
-    Makronun yazımına ayrıca dikkat ediniz. Kuralın genişleticisi içerisinde bir blok şfadesinin kullanılması gerekmiştir. 
-    Çünkü bir bloğunun sonucu bir değişkene atanabilmektedir. 
+    Makronun yazımına ayrıca dikkat ediniz. Kuralın genişleticisi içerisinde bir blok ifadesinin kullanılmıştır. 
+    Çünkü bir bloğunun sonucu bir değişkene atanabilmektedir. Eğer bu blok ifadesi olmasaydı atama işlemi error ile 
+    sonuçlanırdı. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        120. Ders 13/07/2026 - Pazartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki makronun istenildiği kadar argümanla çağrılmasını sağlayabilmek için makroya "yineleme (repitition)" özelliğinin
+    kazandırılması gerekir. Yineleme "düzenli ifadelerde kullanılan *, + ve ? yineleme operatörleriyle oluşturulmaktadır. 
+    Yineleme işlemi eşleştirici $'lı paranteze alınarak oluşturulmaktadır. Eşleştiriciden sonra fakat yineleme operatöründen 
+    önce bir ayrıcı atom bulunabilir. "The Rust Reference" dokümanlarında yinelemeli makronun gramaeri şöyle verilmektedir:
+    
+
+    MacroRule →
+       MacroMatcher => MacroTranscriber
+
+    MacroMatcher →
+      ( MacroMatch* )
+    | [ MacroMatch* ]
+    | { MacroMatch* }
+
+   MacroMatch →
+      Tokenexcept $ and delimiters
+    | MacroMatcher
+    | $ ( IDENTIFIER_OR_KEYWORDexcept crate | RAW_IDENTIFIER ) : MacroFragSpec
+    | $ ( MacroMatch+ ) MacroRepSep? MacroRepOp
+
+    (Yukarıdaki BNF granerinde (IDENTIFIER_OR_KEYWORDexcept crate | RAW_IDENTIFIER ) kısmındaki parantezler parantez atomlarını 
+    değil BNF'nin | operatörü için gereken gruplama parantezini belirtmektedir. Aslında BNF notasyonunda sentaktik gruplama 
+    için küme parantezleri ve köşeli parantezler de kullanılşabilmektedir. Ancak "The Rust Reference" dokümanı normal parantezi 
+    tercih etmiştir. Fakat yukarıdan da göreceğiniz gibi bu yanlış anlaşılmaya açıktır. Orijinal dokümanlarda "son semboller 
+    (terminal symbols)" beyaz zemin içerisinde belirtilmiştir. Ancak text editörlerde bu olanak yoktur.)
+
+    Anımsanacağı gibi MacroRule eşleştiriciden (MacroMatcher), => atomundan ve genişleticiden (MacroTranscriber) oluşmaktadır. 
+    eşleştirici normal parantezler, köşeli parantezzler ya da küme parantezleri içerisinde sıfır tane ya da daha fazla eşleşten 
+    (MacroMatch) oluşmaktadır. İşte anımsanacağı gibi eşleşler eğer makro parametresi içeriyorsa $'lı paranteze alınıyordu.
+    Gramerdeki MacroRepSep isteğe bağlı olarak kullanılan ayırıcı atomu ve MacroRepOp ise *, + ve ? karakterlerinden 
+    yalnızca birini belirtmektedir. Ayırıcı atom için genellikle ',' kullanılmaktadır. Örneğin kural çöyle olsun:
+
+    ($($val:expr),* ) => {
+        //...
+    }
+
+    Buradaki en dıştaki parantezler eşleştiricinin parantezidir. Anımsayacağınız gibi buradaki parantezler normal parantezler 
+    olabileceği gibi köşeli parantezler ya da küme parantezleri de olabilmektedir. Gramerden görüldüğü gibi yineleme oluşturabilmek 
+    için bu en dıştaki parantezlerin içerisinde $'lı bir normal parantezin bulunuyor olması gerekir. Yani yinelemeli eşleştirici
+    tipik olarak şu biçimlerde oluşturulmaktadır:
+
+    ($(...),*)
+    [$(...),*]
+    {$(...),*]
+
+    Buradaki ',' ve * yerine başka bir ayırıcı ve yineleme operatörü bulunabilir. İç parantezin içerisinde tipik olarak 
+    makro parametreleri bulunmaktadır. Bu durumda tipik bir yinelemeli eşleştirici şu sentaksa sahip olmaktadır:
+
+    ($($val:expr),* ) => {
+        //...
+    }
+
+    Peki yukarıdaki yinelemeli eşleştirici ne anlama gelmektedir? Burada aslında $val: expr eşleşi 0 kez ya da daha 
+    fazla yinelenebilmektedir. $val: expr eşleşinden sonra ',' ayırıcı atomu bulunabilir de bulunmayabilir de. Örneğin:
+
+    macro_rules! foo {
+        ($($val: expr),*)  => {
+            //...
+        };
+    }
+
+    Burada biz foo makrosunu sıfır tane ifadeyle ya da daha fazla ifadeyle çağırabiliriz. İfadeler arasında ',' atomunun 
+    bulunması gerekir. Örneğin:
+
+    foo!();                         // geçerli
+    foo!(10);                       // geçerli
+    foo!(10, 20);                   // geçerli
+    foo!(10, 20);                   // geçerli
+    
+    Ancak argüman listesinin sonunda ayırıcı atom (örneğimizde ',') bulundurulamaz. Örneğin:
+
+    foo!(10, 20, );                 // error!
+
+    Peki genişletici içerisinde eşleştiricideki yineleyen eşleşleri nasıl elde edebiliriz? İşte bunun için aşağıdaki 
+    sentaks kullanılmaktadır:
+
+    $(
+        //...
+    )*
+
+    Burada parazntezlerin sonunda + yineleme operatörü de bulunabilmektedir:
+
+    $(
+        //...
+    )+
+
+    Bu sentaks "yinelenen her bir eşleş için parantez içerisindeki kodun yeniden açılacağını" belirtmektedir. Örneğin:
+
+    macro_rules! myvec {
+        ($($val: expr),*)  => {
+            {
+                let mut v = Vec::new();
+       
+                $(
+                    v.push($val);
+                )*
+
+                v
+            }
+        };
+    }
+
+    Burada makronun genişleticisindeki yinelenme sentaksına dikkat ediniz:
+
+    $(
+        v.push($val);
+    )*
+
+    Bu sentaks makroya argüman olarak girilen her ifade için vektöre push yapılacağını belirtmektedir. Örneğin:
+
+    let v = myvec!(10, 20, 30, 40, 50);
+
+    Burada aslında makro açımı sonrasında şöyle bir kod elde edilmektedir:
+
+    let v = {
+        let mut v = Vec::new();
+
+        v.push(10);
+        v.push(20);
+        v.push(30);
+        v.push(40);
+        v.push(50);
+
+        v
+    };
+
+    Eşleştiricideki ayıraç atom ',' olmak zorunda değildir. Örneğin:
+
+    macro_rules! calc_total {
+        ($($val: expr);*) => {
+            {
+                let mut total = 0;
+
+                $(
+                    total += $val;
+                )*
+
+                total
+            }
+        };
+    }
+
+    Burada makro argümanlarının toplamına geri döndürülmüştür. Ancak ',' yerine ';' ayıraç olarak kullanılmıştır. Çağırma 
+    şöyle yapılabilir:
+
+    fn main() {
+        let result = calc_total!(1; 2; 3; 4; 5);
+
+        println!("{}", result);     // 15
+    }
+
+    Peki biz ayıraç olarak herhangi bir atom kullanabilir miyiz? Evet ancak "tamamlayıcı (followup)" kuralına uymak 
+    koşuluyla. Örneğin yukarıdaki makroda expr sentaktik öğeleri yan yana gelmektedir. O halde yukarıdaki örnekte ayıracın 
+    expr sentaktik öğesinden sonra kullanılabilecek tamamlayıcı olması gerekir. expr sentaktik öğesinden sonra kullanılabilecek 
+    tamamlayıcların listesini anımsayınız:
+
+    =>
+    ,
+    ;
+
+    Örneğin:
+
+    macro_rules! calc_total {
+        ($($val: expr)=>*) => {
+            {
+                let mut total = 0;
+
+                $(
+                    total += $val;
+                )*
+
+                total
+            }
+        };
+    }
+
+    fn main() {
+        let result = calc_total!(1 => 2 => 3 => 4 => 5);
+
+        println!("{}", result);     // 15
+    }
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        122. Ders 20/07/2026 - Pazartesi           
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    vec gibi bazı makrolar çağrılırken sonunda isteğe bağlı olarak virgül bulundurulabiliyordu. Örneğin:
+
+    let v = vec![1, 2, 3, 4, 5, ];         // geçerli
+
+    Bizim yazdığımız myvec şöyleydir:
+
+    macro_rules! myvec {
+        ($($val: expr),*)  => {
+            {
+                let mut v = Vec::new();
+
+                $(
+                    v.push($val);
+                )*
+
+                v
+            }
+        };
+    }
+
+    Buradaki yineleme "ifadeler arasında virgül olabilir" anlamına gelmektedir. Burada myvec çağrılırken sonuna ekstra bir virgül 
+    getirilemez:
+
+    let v = myvec![1, 2, 3, 4, 5, ];       // error!
+
+    İşte bunu sağlayabilmek için ayrıca isteğe bağlı $(,)? biçiminde bir virgül kalıbının da eklenmesi gerekir:
+
+    macro_rules! myvec {
+        ($($val: expr),*, $(,)?)  => {
+            {
+                let mut v = Vec::new();
+
+                $(
+                    v.push($val);
+                )*
+
+                v
+            }
+        };
+    }
+
+    Artık makromunuzu sonunda virgül olacak biçimde çağırabiliriz:
+
+    let v = myvec![1, 2, 3, 4, 5, ];       // geçerli
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de hash_map makrosunu yazmaya çalışalım. Anımsayacağınız gibi hash_map makrosu henüz karalı sürüme aktarılmamıştı. 
+    Makroyu şöyle yazabiliriz:
+
+    use std::collections::HashMap;
+
+    macro_rules! my_hash_map {
+        ($($key: expr => $value: expr),*)  => {
+            {
+                let mut hm = HashMap::new();
+
+                $(
+                    hm.insert($key, $value);
+                )*
+
+                hm
+            }
+        };
+    }
+
+    Burada kuraldaki eşleitiriciye dikkat ediniz:
+
+    ($($key: expr => $value: expr),*)
+
+    En dıştaki parantezler eşleştirici parantezleridir. Anımsayacağınız gibi bu parantezler aslında köşeli parantez biçiminde 
+    ya da küme parantezi biçiminde de olabilir. Yineleme için $() paramtez kalbının kullanıldığını anımsayınız. Burada 
+    yinelenen öğeler şunlardır:
+
+    $($key: expr => $value: expr),*
+
+    Anahtarla değeri ayırmak için => eşleşi kullanılmıştır. Yine bunların arasına virgül atomu getirilebilmektedir. 
+    Örnek kullanım şöyle olabilir:
+
+    fn main() {
+        let hm = my_hash_map! {
+            10 => String::from("Ali"),
+            20 => String::from("Veli"),
+            30 => String::from("Selami")
+        };
+
+        println!("{:?}", hm);
+    }
+
+
+    Tabii burada biz makroyu küme parantezleriyle çağırmak zorunda değiliz. Normal parantezlerle de köşeli parantezlerle de 
+    çağırabiliriz. Çağrımn sırasında hangi parantezlerin daha uygunolacağı makroya bağlı olarak dğeişebilmektedir. Birden 
+    fazla eşleş bulunduğu durumda kğme parantezleri daha okunabilir bir durum oluşturabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::collections::HashMap;
+
+macro_rules! my_hash_map {
+    ($($key: expr => $value: expr),*)  => {
+        {
+            let mut hm = HashMap::new();
+
+            $(
+                hm.insert($key, $value);
+            )*
+
+            hm
+        }
+    };
+}
+
+fn main() {
+    let hm = my_hash_map! {
+        10 => String::from("Ali"),
+        20 => String::from("Veli"),
+        30 => String::from("Selami")
+    };
+
+    println!("{:?}", hm);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bildirimsel makrolar özyinelemeli biçimde oluşturulabilmektedir Bu sayede Rust'ta neta programlama yapılabilmektedir. 
+    Makrolardaki özyinelemenin algısal karmaşıklığı fazla olduğu için bir örnek vermekle yetineceğiz. Aşağıdkai find_min 
+    makrosuna dikkat ediniz:
+
+    macro_rules! find_min {
+        ($x:expr) => {
+            $x
+        };
+        ($x:expr, $($rest:expr),+) => {
+            {
+                let rest_min = find_min!($($rest),+);
+                if $x < rest_min { $x } else { rest_min }
+            }
+        };
+    }
+
+    Bu makroda iki kural vardır. Birinci kuraldaki eşleştiricinin tek bir eşleşi vardır. İkinci kuraldaki eşleştirici 
+    yineleme içermektedir. Yineleme operatörünün + olduğuna dikkat ediniz Bu durumda ikinci kuralın eşleştiricisi en az 
+    aralarında virgül olan iki argümanla çağrıldığında uyuşum sağlanacaktır. Biz bu makroyu aşağdaki gibi tek argümanla 
+    çağırmış olalım:
+
+    result = find_min!(10);
+
+    Burada birinci eşleştirici uyuşum sağlayacağı için 10 değeri elde edilecektir. Şimdi makroyu iki argümanla çağıralım:
+
+    result = find_min!(10, 20);
+
+    Burada ikinci eşleştirici uyuşum sağlayacaktır ve genişletici açılacaktır:
+
+    {
+        let rest_min = find_min!($( $rest),+ );
+        if $x < rest_min { $x } else { rest_min }
+    }
+
+    Burada yeniden find_min makrosunun çağrıldığını görüyorsunuz. Ancak artık find_min 20 ile çağrılmış gibi etki gösterecektir. 
+    Yani bu çağrıdan 20 elde edilecektir. İşte bu 20 değeri ilk argüman olan 10 ile karşlaştırılmış ve hangisi küçükse o 
+    değer elde edimiştir. Dolayısıyla burada 10 değeri elde edilecektir. Şimdi makroyu üç argümanla çağıralım:
+
+    result = find_min!(10, 20, 30);
+
+    Burada yine ikinci eşleştirici uyuşum sağlayacaktır. Ancak gemişleticideki çağrı bu kez find_min!(20, 30) biçiminde 
+    olacaktır. Bu çağrı da ikinci eşleştirici ile uyuşacaktır. Yeniden aynı genişletici açılınca oradan 30 elde edilecektir. 
+    20 ile 30 değerlerinin küçüğü 20 olduğu için önce 20 elde edilecek sonra bu 20 değeri 10 ile karşılaştırılarak nihai 
+    olarak 10 değeri elde edilecektir. Yani buradaki açımlar şöyle yürütülmektedir:
+
+    find_min(10, 20, 30)
+        find_min!(20, 30)
+            find_min!(30)
+                30 değeri elde edilir
+        20 ile 20 kaşılaştırılıp 20 elde edilir
+    10 ile 20 karşılaştırılıp 10 elde edilir
+
+    find_min!(10, 20, 30) çağrısının kod açımını şöyle de ifade edebiliriz:
+
+    {
+        let rest_min = {
+            let rest_min = {
+                30
+            };
+            if 20 < rest_min { 20 } else { rest_min }
+        };
+        if 10 < rest_min { 10 } else { rest_min }
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yineleme iç içe de olabilir. Örneğin:
+
+    macro_rules! nested_vec {
+        ($([$($elem:expr),*]),* $(,)?) => {
+            vec![
+                $(
+                    vec![$( $elem ),*]
+                ),*
+            ]
+        };
+    }
+
+    Buradaki makrodnun eşleştiricisine dikkat ediniz:
+
+    ($([$( $elem:expr ),* ]),* $(,)?)
+
+    En dıştaki parantezler eşleştiricinin parantezleridir. Yinelenen eşleşlere dikkat ediniz:
+
+    $([$( $elem:expr ),* ]),*
+
+    Burada köşeli parantezler eşleş görevindedir ve köşeli paranetz içerisinde yine yineleme kalıbı bulunmaktadır. Yani 
+    buradaki eşleştirici virgüllerle ayrılmış köşeli parantezlerden, köşeli parantezler de virgüllerle ayrılmış ifadelerden
+    oluşmaktadır. Örneğin:
+
+    let mut nv = nested_vec![
+        [10, 20, 30, 50],
+        [40, 50],
+        [70, 80, 90, 100]
+    ];
+
+    Buradakinvm değişkeninin Vec<Vec<i32>> türündne olduğuna dikkat ediniz. Biz dıştaki vektörü dolaşırsak vektörşer elde 
+    ederiz. Örneğin:
+
+    for v in nv {
+       for x in v {
+           print!("{} ", x);
+       }
+       println!();
+   }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+macro_rules! nested_vec {
+    ($([$($elem:expr),*]),* $(,)?) => {
+        vec![
+            $(
+                vec![$( $elem ),*]
+            ),*
+        ]
+    };
+}
+
+fn main() {
+    let mut nv = nested_vec![
+        [10, 20, 30, 50],
+        [40, 50],
+        [70, 80, 90, 100]
+    ];
+
+   for v in nv {
+       for x in v {
+           print!("{} ", x);
+       }
+       println!();
+   }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz Rust'taki makroları iki gruba yaırmıştık: Bildirimsel makrolar (declarative macros) ve prosedürel makrolar (Procedural
+    macros). Bildirimsel makrolara İngilizce "macro by example" da deniyoordu. Bildirimsel makroları gördük. Şimdi de prosedürel
+    makrolara üzerinde duracağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Prosedürel makrolar isminden de anlaşıldığı gibi bir fonksiyon biçiminde yazılmaktadır. Bildirmsel makrolara göre daha 
+    esnek kullanımlar sunmaktadır. Prosedürel makrolar da kendi aralarında üç gruba ayrılmaktadır:
+
+    1) #[proc_macro] özniteligi ile oluşturulanlar
+    2) #[proc_macro_derive(isim)] özniteliği ile oluşturulanlar3
+    3) #[proc_macro_attribute] özniteliğiyle oluşturulanlar
+
+    Birinci gruba İnlizce "function like macros", ikinci gruba "derive macros" ve üçncü gruba da "attribute macros" 
+    da denilmektedir. Bunlardna en fazla kullanılan prosedürel makrolar #[proc_macro] özniteliği ile oluşturulan makrolardır. 
+    Bunların kullanımları (ama semantikleri değil) biribine oldukça benzerdir. Biz bu makroları sırasıyla göreceğiz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Prosedürel makrolar ayrı bir crate içerisinde bulunmak zorundadır. Bunlar adeta kütüphane oluşturur gibi oluşturulmaktadır. 
+    Prosedürel makrolar "library crate" içerisinde bulunurlar ve by create'in en dışında tanımlanmak zorundadırlar. (Yani 
+    bunları kütüphane crate'inin içerisindeki başka bir modülde tanımlayamayız. crate'in ana modülünde yani en dışarıda 
+    tanımlamak zorundayız.)
+
+    Prosedürel makro için kütüphane crate'ini şöyle oluşturabiliriz:
+
+    cargo new procmacro --lib
+
+    RustRover IDE'si ile de kütüphane crate'inin görsel biçimde oluşturulabildiğini anımsayınız. 
+
+    Kütüphane crate'i yaratıldıktan sonra "Cargo.toml" dosyasının açılıp [lib] bölümünde proc-macro = true direktifinin 
+    yerleştirilmesi gerekmektedir:
+
+    [lib]
+    proc-macro = true
+
+    Kütüphane crate'imizin "Cargo.toml" dosyası şöyledir:
+
+    [package]
+    name = "procmacro"
+    version = "0.1.0"
+    edition = "2024"
+
+    [dependencies]
+
+    [lib]
+    proc-macro = true
+
+    Minmal bir makro create'in "lib.rs" dosyası içerisinde aşağıdaki gibi tanımlanabilir:
+
+    use proc_macro::TokenStream;
+
+    #[proc_macro]
+    pub fn my_macro(input: TokenStream) -> TokenStream {
+        input
+    }
+
+    Buradaki my_macro isimli makronun bir fonksiyon gibi tanımlandığına dikkat ediniz. Ancak fonksiyonun başında #[proc_macro]
+    özniteliği bulunmaktadır. Bu özniteliği kullanabilmemiz için "Cargo.toml" dosyasında proc-macro = true direktifinin bulunuyor 
+    olması gerekir. Aksi takdirde bu öznitelik derleyici tarafından tanınmayacaktır. #[prc_macro] özniteliğiye oluşturulan 
+    prosedürel makroların tek parametresi olur. O parametre de proc_macro modülündeki TokenStream isimli yapı türündendir. 
+    Fonksiyonun geri dönüş değerinin de aynı yapı türünden olduğuna dikkat ediniz.nStream yapısı standart prelude içerisinde 
+    use edilmediği için use işlemini biz yaptık. Buradaki makro aslında hiçbir şey yapmamaktadır. Biz bu makroya girdi 
+    olarak ne vermişsel makro da onu açmaktadır. 
+
+    Prosedürel makrolar başka bir crate'ten tipik olarak da "binary crate'ten" kullanılmaktadır. Prosedürel makroların 
+    kullanılması için daha önce görmüş olduğumuz "kütüphane kullanımındaki" adımların uygulanması gerekir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            122. Ders 22/07/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıdaki prosedürel makroyu binary crate'imiz içerisinde "Cargo.toml" dosyasında [dependencies] belirterek 
+    kullanabiliriz:
+
+    // Cargo.toml
+
+    [package]
+    name = "macrotest"
+    version = "0.1.0"
+    edition = "2024"
+
+    [dependencies]
+    procmacro = { path = "../procmacro" }
+
+    Prosedürel makroyu "main.rs" içerisinde şöyle kullanabiliriz:
+
+    use procmacro::my_macro;
+
+    fn main() {
+        let s = my_macro!("test");
+        
+        println!("{}", s);      // test
+    }
+
+    Görüldüğü gibi my_macro!("test") çağrısı "test" üretmiştir. Örneğin:
+
+    my_macro!{
+        fn foo() {
+            println!("foo");
+        }
+    }
+
+    my_macro aynı atom yığınını çıktı olarak vereceğine göre aslında biz fonksiyon tanımlamış gibi olduk. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    proc_macro modülü yalnızca proc-macro = true direktifi belirtilmiş crate'lerden kullanılabilmektedir. Örneğin biz bir 
+    binary crate içerisinde proc_macro örnetiğini ve TokenStream yapısını kullanamayız:
+
+    use proc_macro::TokenStream;        // error!
+
+    fn main() {
+        //...
+    }
+
+    Debug ve test işlemlerinin kolay yapılabilmesi için binary crate'lerden kullanılabilen proc-macro2 isimli bir modül de 
+    oluşturulmuştur. Bunun için tabii binary crate'in dependencies bölümünde proc-macro2 crate'ini belirtmek gerekir:
+
+    [package]
+    name = "macrotest"
+    version = "0.1.0"
+    edition = "2024"
+
+    [dependencies]
+    proc-macro2 = "1.0"
+
+    Artık proc_macro2 modülündeki orijinali ile (yani proc_macro modülündekiyle) aynı olan TokenStream ve diğer türleri 
+    kullanabiliriz:
+
+    use proc_macro2::TokenStream;       // geçerli
+
+    fn main() {
+        //...
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi TokenTree ve TokenStream Türleri üzerinde duralım. Biz daha önce TokenTree türünden bahsetmiştik. TokenTree tek 
+    bir atomu temsil ediyordu. Ancak bu atom normal, köşeli ve küme paramtezleriyle oluşturulmuş bir grup atomu da temsil 
+    edebiliyordu. TokenTree proc_macro modülünde aşağıdaki gibi bir enum biçiminde tanımlanmıştır:
+
+    pub enum TokenTree {
+        Group(group),
+        Ident(ident),
+        Punct(punct),
+        Literal(literal),
+    }
+
+    Görüldüğü gibi bir TokenTree bir Group olabilir, bir Ident olabilir, bir Punct olabilir, bir Literal olabilir. Bu türlerin 
+    hepsi proc_macro modülünde tanımlanmıştır. 
+
+    Buradaki Ident türü anahtar sözcük ve değişken olan atomları temsil etmektedir. (Makrolar parse aşamasından önce devreye 
+    girdiği için bu aşamada anahtar sözcük ile değişken atomların bir farkı yoktur.) Örneğin:
+
+    fn foo(a: i32) {
+        //...
+    }
+
+
+    Buradaki fn, foo, a, i32 atomlarının hepsi Ident ile temsil edilmektedir. Bir Ident türünden değer yaratmak için Ident 
+    yapısının new ilişkili fonksiyonu kullanılabilir. Örneğin:
+
+    use proc_macro2::{Ident, Span};
+
+    fn main() {
+        let ident: Ident = Ident::new("foo", Span::call_site());
+        println!("{}", ident);          // foo
+    }
+
+    new ilişkili fonksiyonunun ikinci parametresi Span isimli yapı türündendir. Span değeri örneğimizde Span::call_site() 
+    çağrısıyle elde edilmiştir. Ident olarak girilen yazının değişken isimlendirme kurallarına uygun bir isim olması gerekir. 
+    Aksi takdirde panic oluşacaktır. 
+
+    Punct yapısı ayıraç atomları ve operatörleri temsil etmektedir. Ancak -> gibi += gibi atomlar tek bir atom değil iki 
+    ayrı atom gibi temsil edilmektedir. Bunların tek atom olup olduğu Punct değeri aratılırken new ilişkili fonksiyonunun 
+    Spacing türündne ikinc parametresiyle belirtilmektedir. Spacing aiağıdaki gi bir enum türüdür:
+
+    pub enum Spacing {
+        Joint,
+        Alone,
+    }
+
+    Punct değeri yaratılıken Spacing::Joint girilirse sonraki Puvct ile yaratılan Punct tek bir atom olarak ele alınır. Alone 
+    ise ilgili karakterin tek atom oludğunu belirtmektedir. Örneğin:
+
+    use proc_macro2::{Punct, Spacing};
+
+    fn main() {
+        let punct1: Punct = Punct::new('+', Spacing::Joint);
+        let punct2: Punct = Punct::new('=', Spacing::Alone);
+
+        println!("{}{}", punct1, punct2);          // += 
+    }
+
+    Punct değişkeni içerisindeki Spacing bilgisi yapının spacing metodu ile elde elde edilebilir.
+
+    Literal türü sabitleri temsil etmektedir. Literal türünden değer oluşturmak için her sabite ilişkin ilişkili fonksiyon 
+    bulunmaktadır. Bunların listesini veriyoruz:
+
+    ┌───────────────────────┬─────────────────────────┬──────────────────────────────┐
+    │      Fonksiyon        │       Parametre         │           Açıklama           │
+    ├───────────────────────┼─────────────────────────┼──────────────────────────────┤
+    │ i8_suffixed           │ n: i8                   │ Örn. 10i8                    │
+    │ i16_suffixed          │ n: i16                  │ Örn. 10i16                   │
+    │ i32_suffixed          │ n: i32                  │ Örn. 10i32                   │
+    │ i64_suffixed          │ n: i64                  │ Örn. 10i64                   │
+    │ i128_suffixed         │ n: i128                 │ Örn. 10i128                  │
+    │ isize_suffixed        │ n: isize                │ Örn. 10isize                 │
+    │ u8_suffixed           │ n: u8                   │ Örn. 10u8                    │
+    │ u16_suffixed          │ n: u16                  │ Örn. 10u16                   │
+    │ u32_suffixed          │ n: u32                  │ Örn. 10u32                   │
+    │ u64_suffixed          │ n: u64                  │ Örn. 10u64                   │
+    │ u128_suffixed         │ n: u128                 │ Örn. 10u128                  │
+    │ usize_suffixed        │ n: usize                │ Örn. 10usize                 │
+    │ f32_suffixed          │ n: f32                  │ Örn. 1.5f32                  │
+    │ f64_suffixed          │ n: f64                  │ Örn. 1.5f64                  │
+    ├───────────────────────┼─────────────────────────┼──────────────────────────────┤
+    │ i8_unsuffixed         │ n: i8                   │ Eksiz tamsayı literal'i      │
+    │ i16_unsuffixed        │ n: i16                  │ "                            │
+    │ i32_unsuffixed        │ n: i32                  │ "                            │
+    │ i64_unsuffixed        │ n: i64                  │ "                            │
+    │ i128_unsuffixed       │ n: i128                 │ "                            │
+    │ isize_unsuffixed      │ n: isize                │ "                            │
+    │ u8_unsuffixed         │ n: u8                   │ "                            │
+    │ u16_unsuffixed        │ n: u16                  │ "                            │
+    │ u32_unsuffixed        │ n: u32                  │ "                            │
+    │ u64_unsuffixed        │ n: u64                  │ "                            │
+    │ u128_unsuffixed       │ n: u128                 │ "                            │
+    │ usize_unsuffixed      │ n: usize                │ "                            │
+    │ f32_unsuffixed        │ n: f32                  │ Eksiz gerçek sayı literal'i  │
+    │ f64_unsuffixed        │ n: f64                  │ "                            │
+    ├───────────────────────┼─────────────────────────┼──────────────────────────────┤
+    │ string                │ string: &str            │ Örn. "hello" (kaçışlar dahil)│
+    │ character             │ ch: char                │ Örn. 'a'                     │
+    │ byte_character        │ byte: u8                │ Örn. b'a'   (Rust 1.79+)     │
+    │ byte_string           │ bytes: &[u8]            │ Örn. b"hello"                │
+    │ c_string              │ string: &CStr           │ Örn. c"hello" (Rust 1.79+)   │
+    └───────────────────────┴─────────────────────────┴──────────────────────────────┘
+
+    Örneğin:
+
+    use proc_macro2::{Literal};
+
+    fn main() {
+        let literal = Literal::f64_unsuffixed(3.14);
+
+        println!("{}", literal);        // 3.14
+
+        let literal = Literal::f64_suffixed(3.14);
+
+        println!("{}", literal);        // 3.14f64
+    }
+
+    Normal parantezler, köşeli parantezler ve kğme parantezleri içerisindeki atomların hepsi Group isimli türle temsil 
+    edilmiştir. Örneğin:
+
+    fn foo(a: i32, b: i32) -> i32 {
+        (a + b) * 2
+    }
+
+    Buradaki atom türleri şöyledir:
+
+    ┌──────────────────┬────────────────────────────────┬────────────────────────────────┐
+    │      Token       │         TokenTree Türü         │           Açıklama             │
+    ├──────────────────┼────────────────────────────────┼────────────────────────────────┤
+    │ fn               │ Ident                          │ Anahtar sözcükler de Ident'tir │
+    │ foo              │ Ident                          │ Fonksiyon ismi                 │
+    │ (a: i32, b: i32) │ Group (Delimiter::Parenthesis) │ Parametre listesi              │
+    │ -                │ Punct                          │ Spacing::Joint                 │
+    │ >                │ Punct                          │ Spacing::Alone                 │
+    │ i32              │ Ident                          │ Geri dönüş türü                │
+    │ { (a + b) * 2 }  │ Group (Delimiter::Brace)       │ Fonksiyon gövdesi              │
+    └──────────────────┴────────────────────────────────┴────────────────────────────────┘
+
+    Group türünden bir değer Group yapısının new ilişkili fonksiyonu ila oluşturulmaktadır. Bu fonksiyonun parametrik yapısı 
+    şöyledir:
+
+    pub fn new(delimiter: Delimiter, stream: TokenStream) -> Group
+
+    Fonksiyonun birincvi parametresi parantezin nasıl bir parantez olduğunu belirtir:
+
+    pub enum Delimiter {
+        Parenthesis,
+        Brace,
+        Bracket,
+        None,
+    }
+
+    İkinci parametre zaten izleyen paragraflarda aöıklayacağımız TokenStream türündendir. Burada bir özyineleme söz konusudur. 
+    Yani TokenStream değeri TokenTree değerlerinden oluşurken Group TokenTree değeri de TokenStream değerindne oluşmaktadır. 
+    Zaten özyineleme yapılmadan Rust sentaksınının oluşturulması mümkün de değildir. İzleyen paragraflarda göreceğimiz gibi 
+    bir string'ten TokenStream oluşturulabilmektedir. Örneğin:
+
+    use proc_macro2::{Group, TokenStream, Delimiter};
+
+    fn main() {
+        let ts: TokenStream = "1 + 2".parse().unwrap();
+        let group = Group::new(Delimiter::Parenthesis, ts);
+
+        println!("{}", group);  // (1 + 2)
+    }
+
+    Group yapısının stream isimli metodu Group içerisindeki TokenStream değerini, delimiter metodu ise ayıracı varmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda TpkenTree türlerini tek tek ele aldık. Şimdi de TokenStream türü üzerinde duralım. TokenStream aslında 
+    TokenTree değerlerini tutan bir collection nesne gibidir. Yani TokenStream dolaşılabilir. Dolaşıldıkça onu oluşturan 
+    TokenTree değerleri elde edilir. 
+
+    Bir TokenStream değeri tipik olarak bir string diliminin parse edilmesiyle oluşturulmaktadır. TokenStream yapısı FromStr 
+    trait'ini desteklemektedir. Anımsayacağınız gibi bu trait'in from_str isimli bir metodu vardır:
+    
+    pub trait FromStr: Sized {
+        type Err;
+
+        // Required method
+        fn from_str(s: &str) -> Result<Self, Self::Err>;
+    }
+
+    İşte TokenStream yapısının FromStr trait'inden gelen from_str fonksiyonu bir string dilimini parametre olarak alır, 
+    onu parse edip TokenStream nesnesi verir. Örneğin:
+
+    use proc_macro2::{TokenStream};
+    use std::str::FromStr;
+
+    fn main() {
+        let ts = TokenStream::from_str("fn add(a: i32, b: i32) -> i32 { (a + b) * 2}").unwrap();
+
+        println!("{:?}", ts);
+    }
+
+    from_str fonksiyonu std::str::FromStr trait'indne geldiği için bu trait'in faaliyet alanı içerisinde olması gerekir. 
+    Anımsayacağınız gibi zaten str yapısının parse netodu generic yazılmıtır ve from_str fonksiyonunu çağırmaktadır:
+
+    impl str {
+        //...
+        pub fn parse<F: FromStr>(&self) -> Result<F, F::Err> {
+            FromStr::from_str(self)
+        }
+        //...
+    }
+
+    O halde biz bir TokenStrem nesnesini aslında parse metodu ile de oluşturabiliriz:
+
+    use proc_macro2::{TokenStream};
+
+    fn main() {
+        let ts: TokenStream = "fn add(a: i32, b: i32) -> i32 { (a + b) * 2}".parse().unwrap();
+
+        println!("{:?}", ts);
+    }
+
+    TokenStream yapısı IntoIterator trait'ini desteklemektedir. Dolayısıyla tüketici dolaşım yapan into_iter metodu vardır. 
+    Biz bir döngü içerisinde TokenStream içerisindeki TokenTree değerlerini elde edebiliriz:
+
+    use proc_macro2::{TokenStream};
+
+    fn main() {
+        let ts: TokenStream = "fn add(a: i32, b: i32) -> i32 { (a + b) * 2}".parse().unwrap();
+
+        for tt in ts.into_iter() {
+            println!("{}", tt);
+        }
+    }
+
+    Buradan aşağıdaki çıktı elde edilmektedir:
+
+    fn
+    add
+    (a : i32 , b : i32)
+    -
+    >
+    i32
+    { (a + b) * 2 }
+
+    Eğer tüketici dolaşım yapmak istemiyorsanız TokenSTream değerini clone işlemine sokabilirsiniz:
+
+    for tt in ts.into_iter().clone() {
+        //...
+    }
+
+    TokenStreamn yapısının iter ve iter_mut metotları yoktur. Şimdi TokenStream nesnesini türlerini tespit ederek 
+    dolaşalım:
+
+    use proc_macro2::{TokenTree, TokenStream, Ident, Punct, Literal, Group};
+
+    fn main() {
+        let ts: TokenStream = "fn add(a: i32, b: i32) -> i32 { (a + b) * 2}".parse().unwrap();
+
+        for tt in ts.into_iter() {
+            match tt {
+                TokenTree::Group(group) => {
+                    println!("Group: {}", group);
+                },
+                TokenTree::Ident(ident) => {
+                    println!("Ident: {}", ident);
+                },
+                TokenTree::Punct(punct) => {
+                    println!("Punct: {} ({:?})", punct, punct.spacing());
+
+                }
+                TokenTree::Literal(literal) => {
+                    println!("Literal: {}", literal);
+                },
+                _ => ()
+            }
+        }
+    }
+
+
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -20042,24 +20999,6 @@ fn main() {
 /*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-
----------------------------------------------------------------------------------------------------------------------------*/
-
-
 
 
 /*---------------------------------------------------------------------------------------------------------------------------

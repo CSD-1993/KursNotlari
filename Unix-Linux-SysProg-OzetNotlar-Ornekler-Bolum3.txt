@@ -8573,7 +8573,7 @@ void exit_sys(const char *msg)
     file yapısının içerisine) doğrudan bir inode göstericisi daha eklenmiştir. Mevcut durum şöyledir:
 
     File  ──▶ dentry ──▶ inode
-  ╰──────────────────────▶
+     ╰──────────────────────▶
 
     inode yapısı dosyanın diskteki bilgilerini tutmaktadır. Yani örneğin aynı dosya üç kez açılsa çekirdek üç farklı file nesnesi 
     inode yapısı dosyanın diskteki bilgilerini tutmaktadır. Yani örneğin aynı dosya üç kez açılsa çekirdek üç farklı file nesnesi 
@@ -14077,7 +14077,7 @@ clean:
     yerel kesme denetleyicileri CPU'nun bir ucu ile değil bellek tabanlı IO işlemleriyle (Yani adeta belli bir bölgesine bir 
     şey yazılarak) tetiklenmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
-<BURADA KALDIK>
+
 /*--------------------------------------------------------------------------------------------------------------------------
     Bugün kullandığımız PC'lerde (laptop ve notebook'lar da dahil olmak üzere) eskiden kesme denetleyicisi olarak bir tane 
     Intel'in 8259 (PIC) denilen entegre devresi kullanılıyordu. Bunun 8 girişi bulunuyordu. Yani bu kesme denetleyicisinin 
@@ -14704,7 +14704,7 @@ rm -f $module
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------------
-   Port-mapped IO işlemlerinde kullanılması gereken işlemcilerin IN, OUT gibi makine komutları "özel (privileged)" komutlardır. 
+    Port-mapped IO işlemlerinde kullanılması gereken işlemcilerin IN, OUT gibi makine komutları "özel (privileged)" komutlardır. 
     Bunlar kullanıcı modundan kullanılırsa işlemci koruma mekanizması gereği bir içsel kesme oluşturur, işletim sistemi de 
     bu kesme kodunda prosesi sonlandırır. Dolayısıyla bu komutları kullanarak donanım aygıtlarıyla konuşabilmek için çekirdek 
     modunda çalışan aygıt sürücülerin yazılması gerekmektedir. 
@@ -14999,6 +14999,7 @@ static struct file_operations g_file_ops = {
 };
 
 static DECLARE_WAIT_QUEUE_HEAD(g_wq);
+static DEFINE_SPINLOCK(g_lock);
 static int g_key;
 
 static int __init generic_init(void)
@@ -15040,14 +15041,23 @@ static irqreturn_t keyboard_irq_handler(int irq, void *dev_id)
 {
     int key;
 
-    if (g_key != 0)
+    spin_lock(&g_lock);
+
+    if (g_key != 0) {
+        spin_unlock(&g_lock);
         return IRQ_NONE;
+    }
 
     key = inb(0x60);
-    if (key & 0x80)
+    if (key & 0x80) {
+        spin_unlock(&g_lock);
         return IRQ_NONE;
+    }
 
     g_key = key;
+
+    spin_unlock(&g_lock);
+
     wake_up_all(&g_wq);
 
     return IRQ_HANDLED;
@@ -15055,16 +15065,26 @@ static irqreturn_t keyboard_irq_handler(int irq, void *dev_id)
 
 static long keyboard_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    switch (cmd) {
-        case IOC_GETKEY:
-            g_key = 0;
-            if (wait_event_interruptible(g_wq, g_key != 0))
-                return -ERESTARTSYS;
+   switch (cmd) {
+        case IOC_GETKEY: {
+            int key;
 
-            if (copy_to_user((void *)arg, &g_key, sizeof(int)) != 0)
+            spin_lock_irq(&g_lock);
+            g_key = 0;
+
+            if (wait_event_interruptible_lock_irq(g_wq, g_key != 0, g_lock)) {
+                spin_unlock_irq(&g_lock);
+                return -ERESTARTSYS;
+            }
+
+            key = g_key;
+            spin_unlock_irq(&g_lock);
+
+            if (copy_to_user((void *)arg, &key, sizeof(int)) != 0)
                 return -EFAULT;
 
-            return g_key;
+            return key;
+        }
         default:
             return -ENOTTY;
     }
@@ -15380,7 +15400,7 @@ void exit_sys(const char *msg)
 }
 
 /*--------------------------------------------------------------------------------------------------------------------------
-     Şimdi de Intel tabanlı masaüstü bilgisayarlardaki RTC (Real Time Clock) devresinden zamanı okuyan bir aygıt sürücü yazalım.
+    Şimdi de Intel tabanlı masaüstü bilgisayarlardaki RTC (Real Time Clock) devresinden zamanı okuyan bir aygıt sürücü yazalım.
     Bugün kullandığımız PC'lerde bilgisayar kapatıldıktan sonra zamanı tutanm ismine "gerçek zaman saati (real time clock)" 
     denilen bir yardımcı işlemci (denetleyici) vardır. Masaüstü bilgisayarlarımızı açarken Del ya da F1 tuşuna basarak çıkarttığımız 
     setup ekranındaki bilgiler de (buna CMOS setup bilgileri de denilmektedir) aslında aynı denetleyicinin içerisindeki bir 
@@ -15841,10 +15861,10 @@ void exit_sys(const char *msg)
 
     #include <asm/io.h>
 
-    u8   ioread8(const void __iomem *addr);
-    u16  ioread16(const void __iomem *addr);
-    u32  ioread32(const void __iomem *addr);
-    u64  ioread64(const void __iomem *addr);
+    u8  ioread8(const void __iomem *addr);
+    u16 ioread16(const void __iomem *addr);
+    u32 ioread32(const void __iomem *addr);
+    u64 ioread64(const void __iomem *addr);
 
     Aşağıdaki fonksiyonlar ise addr ile belirtilen bellek adresine 1 byte, 2 byte ve 4 byte bilgi yazmaktadır:
 
@@ -15909,8 +15929,8 @@ void exit_sys(const char *msg)
     kullanılmaktadır. Ancak mimariye sonradan eklenen donanım bileşenleri memory-mapped IO kullanacak biçimde tasarlanmıştır. 
     
     Eskiden PC mimarisinde tek işlemci vardı ve bu işlemcinin içerisinde de APIC (yani kesme denetleyicisi ve timer devresi)
-    yoktu. Eski PC'lerde zamanlama amacıyla yalnızca board üzerinde Inetl 8254 PIT (Programmable Interval Timer) devresi 
-    kullanılıyordu. Gerçekten de işletim sistemlerinde preemptive bağlamsal geçiş (context switch) işlemini bu timer devresinin
+    yoktu. Eski PC'lerde zamanlama amacıyla yalnızca board üzerinde "Intel 8254 PIT (Programmable Interval Timer)" devresi 
+    bulunduruluyordu. Gerçekten de işletim sistemlerinde preemptive bağlamsal geçiş (context switch) işlemini bu timer devresinin
     ürettiği kesme tetikliyordu. Ancak daha sonraları PC mimamrisine HPET (High Precision Event Timer) isimli modern ve yüksek
     çözünürlüklü bir timer devresi eklenmiştir. HPET  denetleyicisi aynı zamanda kesme de oluşturabilmektedir. Bu timer devresine 
     memory-mapped IO tekniğiyle erişilmektedir. Aynı zamanda Linux sistemlerinde HPET denetleyicisine erişmek için "/dev/hpet" 
@@ -15990,9 +16010,9 @@ void exit_sys(const char *msg)
     ...
 
     Aygıt sürücücümüzün 0xFED00000 fiziksel adresine erişebilmesi için ioremap fonksiyonun çağrılması gerekir. Örneğimizde 
-    fonksiyon şçyle çağrılmıştır:
+    fonksiyon şöyle çağrılmıştır:
 
-    static void *g_hpet_base;;
+    static void *g_hpet_base;
     ...
 
     if ((g_hpet_base = ioremap(HPET_BASE_ADDR, 4096)) == NULL) {     
@@ -16000,7 +16020,7 @@ void exit_sys(const char *msg)
         return -ENOMEM;
     }
    
-    HPET denetleyicisinden sayaç değerini almak için denetleyicinin taban adresinden 0xF0 byte ilerisinden 8 byte'ın okunması 
+    HPET denetleyicisinden sayaç değerini almak için denetleyicinin taban adresinin 0xF0 byte ilerisinden 8 byte'ın okunması 
     gerekir. Bu okuma işlemi aygıt sürücü içerisinde şöyle yapılabilmektedir:
 
     memcpy_fromio(&count_val, (char *)g_hpet_base + OFFSET_MAIN_CNT, size);
@@ -16035,7 +16055,7 @@ void exit_sys(const char *msg)
         switch (cmd) {
             case IOC_HPET_GETFREQ:
                 memcpy_fromio(&cap_id, (char *)g_hpet_base + HPET_GEN_CAP_ID_OFFSET, sizeof(u64));
-                clk_period_fs = cap_id >> 32;      // femtosaniye per tick
+                clk_period_fs = cap_id >> 32;      //  period by fs 
                 frequency_hz = 1000000000000000ULL / clk_period_fs;
                 if (copy_to_user((void *)arg, & frequency_hz, sizeof(u64)) != 0)
                     return -EFAULT;     
@@ -16245,7 +16265,7 @@ module=$1
 /sbin/rmmod ./${module}.ko || exit 1
 rm -f $module
 
-/* ioctl-test.c */
+/* hpet-test.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16294,6 +16314,436 @@ void exit_sys(const char *msg)
 
 	exit(EXIT_FAILURE);
 }
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi IRQ'lar için yazdığımız fonksiyonların hızlı bir biçimde işlemini bitirmesi gerekir. 
+    Bu kodlar içerisinde bloke oluşturabilecek giçbir işlemin yapılmaması gerekir. Eğer IRQ kodlarında uzun süre kalınırsa 
+    tüm sistem bundan oluşsuz etkilenir. Bir IRQ fonksiyonu bir işlemci ya da çekirdekte öalışırken o işlemci ya da çekirdek
+    IRQ kodlarının çalışması bitene kadar kesmelere kapatılmaktadır. Diğer işlemciler ve çekirdekler de aynı IRQ işlemini 
+    diğeri bitirmedne yapamamaktadır. Aşağıdaki tabloda IRQ kodlarında yapılmaması gereken işlemlri listelyoruz:
+
+    ┌──────────────────────────────────────┬──────────────────────────────────────┬──────────────────────────────────────┐
+    │           İşlem                      │              Neden                   │        Güvenli Alternatif            │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ kmalloc(GFP_KERNEL)                  │ Bellek yoksa uyuyabilir (sleep)      │ kmalloc(GFP_ATOMIC) veya önceden     │
+    │                                      │                                      │ ayrılmış tampon kullanmak            │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ mutex_lock() / mutex_unlock()        │ Mutex uyuyabilen bir kilittir;       │ spin_lock() / spin_lock_irqsave()    │
+    │                                      │ atomik bağlamda yasaktır             │                                      │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ msleep(), ssleep(),                  │ Scheduler'a girer, uyur;             │ Gerekirse udelay()/ndelay() ile çok  │
+    │ schedule(), schedule_timeout()       │ IRQ context'te process yok           │ kısa busy-wait; işi bottom half'e    │
+    │                                      │                                      │ ertelemek                            │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ copy_to_user() / copy_from_user()    │ Page fault → sleep olabilir;         │ Veriyi kernel tamponuna alıp         │
+    │                                      │ ayrıca geçerli bir user bağlamı yok  │ transferi read()/ioctl() yolunda     │
+    │                                      │                                      │ (process context) yapmak             │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ down() (semaphore),                  │ Uyuyabilen senkronizasyon            │ spinlock, atomic_t, completion'ı     │
+    │ wait_event*()                        │ primitifleri                         │ sadece complete() tarafında kullanmak│
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Uzun süren hesaplama / döngüler      │ IRQ'lar kapalıyken sistemi kilitler, │ İşi tasklet, workqueue veya threaded │
+    │                                      │ latency'yi artırır                   │ IRQ (request_threaded_irq) ile       │
+    │                                      │                                      │ ertelemek                            │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ Disk / dosya I/O (VFS çağrıları)     │ Blocking I/O uyur; VFS katmanı       │ İşi workqueue'ya (process context)   │
+    │                                      │ process context varsayar             │ devretmek                            │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ printk() ile aşırı loglama           │ Uyumaz ama yavaştır, console lock    │ Nadir olaylarda printk_ratelimited() │
+    │                                      │ contention yaratır                   │ veya trace_printk()                  │
+    ├──────────────────────────────────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+    │ kfree_rcu olmadan RCU nesnesini      │ synchronize_rcu() uyur               │ call_rcu() veya kfree_rcu()          │
+    │ synchronize_rcu() ile beklemek       │                                      │                                      │
+    └──────────────────────────────────────┴──────────────────────────────────────┴──────────────────────────────────────┘
+
+    İşte Linux çekirdeğinde IRQ kodlarında yapılması planlanan işlemlerin IRQ kodundan çıkıldıktan sonra yapılmasının 
+    sağlanması için "softirq" mekanizması oluşturulmuştur. (Burada "soft" sözcüğü uygun bir sözcük olmayabilir. Bunun Intel 
+    işlemcilerindeki yazılım kesmeleriyle "software interrupts" bir ilgisi yoktur.) Linux çekirdeğindek "softirq" kavramı
+    "kesme kodları çalıştırılıp kesme bağlamından çıkıldıktan sonra çalıştırılan kodlar" anlamına gelmektedir. Kesme kodlarında 
+    uzun sürecek eyemler yapılamadığı için bunların kısa bir süre ertelenerek ("deffered" terimi kullanılmaktadır) işleme 
+    sokulması yoluna gidilmiştir. 
+
+    Lşnux çekirdeğinde çekirdeğin kodlarına gömülü bir biçimde belli sayıda "softirq" bulundurulmuştur. Çekirdeği yeniden 
+    derlemeden bunların sayısını artırmak mümkün değildir. Bunlar çekirdeğin içsel çalışmaıs için IRQ bağlamında gecikmeli 
+    (deffered) işlem yapmak için oluşturulmutur. Güncel Linux çekirdeklerindeki softirq kodları şunlardır:
+
+    ┌─────┬──────────────────┬─────────────────┬────────────────────────────────────────────────────────┐
+    │ No  │   Softirq        │  /proc/softirqs │                     Kullanım Amacı                     │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  0  │ HI_SOFTIRQ       │ HI              │ Yüksek öncelikli tasklet'ler (tasklet_hi_schedule)     │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  1  │ TIMER_SOFTIRQ    │ TIMER           │ Klasik timer wheel (timer_list) zamanlayıcılarının     │
+    │     │                  │                 │ callback'lerinin çalıştırılması                        │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  2  │ NET_TX_SOFTIRQ   │ NET_TX          │ Ağ paketlerinin gönderim (transmit) yolu               │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  3  │ NET_RX_SOFTIRQ   │ NET_RX          │ Ağ paketlerinin alım (receive) yolu, NAPI polling      │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  4  │ BLOCK_SOFTIRQ    │ BLOCK           │ Blok katmanı I/O tamamlanma (completion) işlemleri     │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  5  │ IRQ_POLL_SOFTIRQ │ IRQ_POLL        │ irq_poll altyapısı (eski adıyla BLOCK_IOPOLL);         │
+    │     │                  │                 │ ağırlıkla blok/SCSI sürücülerinde polling tamamlanması │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  6  │ TASKLET_SOFTIRQ  │ TASKLET         │ Normal öncelikli tasklet'ler (tasklet_schedule)        │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  7  │ SCHED_SOFTIRQ    │ SCHED           │ Scheduler'ın periyodik yük dengeleme (load balancing)  │
+    │     │                  │                 │ işlemleri                                              │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  8  │ HRTIMER_SOFTIRQ  │ HRTIMER         │ Softirq bağlamında çalışması istenen hrtimer'lar       │
+    │     │                  │                 │ (HRTIMER_MODE_*_SOFT ile başlatılanlar)                │
+    ├─────┼──────────────────┼─────────────────┼────────────────────────────────────────────────────────┤
+    │  9  │ RCU_SOFTIRQ      │ RCU             │ RCU callback'lerinin işlenmesi ve quiescent state      │
+    │     │                  │                 │ takibi                                                 │
+    └─────┴──────────────────┴─────────────────┴────────────────────────────────────────────────────────┘
+
+    Peki bu softirq kodları nerede tetiklenmektedir? İşte çekirdekte tipik olarak bu sogtirq kodları IRQ kesmelerinden 
+    çıkarken tetiklenmektedir. Bunların tetiklendiği birkaç yer daha avrdır. Anca tetikleme kesme IRQ bağlamından çıkarken 
+    yapılmaktadır. 
+
+    Peki çekirdek yeniden derlenmeden softirq kodları oluşturmanın yolu olmadığına göre biz aygıt sürücülerde gecikmeli 
+    işlemleri nasıl yapabiliriz? İşte bunun Linux çekirdeğinde "tasklet" ve "çalışma kuyruğu (workqueue)" denilen iki 
+    öekazniama bulundurulmuştur. Her ne kadar "tasklet" denilen mekanizma bir süredir "deprecated" yapılmış olsa da bu 
+    mekanizmanın kaldırılması kısa süre içerisinde mümkün görülmemektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Tasklet mekanizması TASKLET_SOFTIRQ ve HI_SOFTIRQ denilen softirq kodları tarafından işleme sokulmaktadır. Yani 
+    aslında tasklet'ler zaten çekirdekte var olan softirq kodları tarafından yönetilmektedir. Tasklet kullanımına ilişkin 
+    çekirdek fonksiyonlarında 5.10'dan itibaren değişiklikler yapılmıştır. Mekaznima aynı olmasına karşın kullanılan 
+    çekirdek fonksiyonlarının parametrik yapısı farklıdır. Biz burada güncel çekirdeklerde buöunan 5.10'dan sonraki 
+    fonksiyonları ele alacağız. 
+
+    Tasklet nesneleri makroyla statik düzeyde oluşturulabileceği dinamik bir biçimde de oluşturulablmektedir. Statik düzeyde 
+    tasklet oluşturmak için aşağıdaki makro kullanılmaktadır:
+
+    DECLARE_TASKLET(name, callback);
+    DECLARE_TASKLET_DISABLED(name, callback);
+
+    Makrolardaki isim tasklet değişkeninin ismidir. Tasklet değişkenleri tasklet_struct isimli bir yapı türündendir. 
+    DECLARE_TASKLET_DISABLED fonksiyonu "disable edilmiş" tasklet oluşturmaktadır. Tasklet'in disable edilmesi geçici süre 
+    işlem dışı bırakılması anlamına gelmektedir. Bu makrolar "include/linux/interrupt.h" dosyası içerisinde şöyle tanımlanmıştır:
+
+    #define DECLARE_TASKLET(name, _callback)	    \
+    struct tasklet_struct name = {				    \
+        .count = ATOMIC_INIT(0),			        \
+        .callback = _callback,				        \
+        .use_callback = true,				        \
+    }
+
+    #define DECLARE_TASKLET_DISABLED(name, _callback)	    \
+    struct tasklet_struct name = {				            \
+        .count = ATOMIC_INIT(1),			                \
+        .callback = _callback,				                \
+        .use_callback = true,				                \
+    }
+
+    Tasklet fonksiyonunun parametrik yapısı şöyle olmalıdır:
+
+    void tasklet_handler(struct tasklet_struct *t);
+
+    tasklet nesnei dinamik bir biçimde (yani kod iöerisinde) taskleT-stup fonksiyonuyla oluşturulabilmektedir. Fonksiyonun 
+    parametrik yapısı şöyledir:
+
+    #include <linux/interrupt.h>
+
+    void tasklet_setup(struct tasklet_struct *t, void (*callback)(struct tasklet_struct *));
+
+    Fonksiyonun birinci parametresi tasklet_struct türündne nesnenin adresini ikinci parametresi ise tasklet fonksiyonunu 
+    almaktadır. Eski arauüzde tasklet fonskiyonunun parametresi unsigned long türdendi. tasklet_struct yapısının data Elemanı
+    bu fonksiyona geçiriliyordu. Bu data elemanı hala yapıda bulunuyor olsa da artık "gömme yönteminin" uygulanmsı tavsiye 
+    edilmektedir. Yani aslında tasklet_struct türünden nesneyi kendi yapımızın bir elemanı haline getiririz. Sonra container_of
+    makrosu ile kendi yapı nesnemize erişebiliriz. Örneğin:
+
+    struct mytasklet_struct {
+        int val;
+        struct tasklet_struct tasklet;
+    };
+
+    static struct mytasklet_struct g_mts = {10};
+
+    static int __init generic_init(void)
+    {
+        tasklet_setup(&g_mts.tasklet, tasklet_handler);
+
+        return 0;
+    }
+
+    void tasklet_handler(struct tasklet_struct *t)
+    {
+        struct mytasklet_struct *mts;
+
+        mts = container_of(t, struct mytasklet_struct, tasklet);
+
+        printk(KERN_INFO "tasklet handler runs...\n");
+    }
+
+    Tabii tasklet fonksiyonumuza bu biçimde parametre aktarmak zorunda değiliz. 
+
+    Bir tasklet oluşturulduktan sonra onun işleme alınması için schedule_tasklet fonksiyonun çağrılması gerekir. Aksi takdirde 
+    tasklet fonksiyonu çalıştırışmayacaktır. Tabii schedule_tasklet fonksiyonu mekanizmayı kurmaktadır. Tasklet fonksiyonu 
+    tipik olarak softirq kodları tarafından IRQ çıkışlarında çağılacaktır. tasklet_schedule fonksiyonunun parametik yapısı 
+    şöyledir:
+
+    void tasklet_schedule(struct tasklet_struct *t); 
+    
+    Örneğin:
+
+    static int __init generic_init(void)
+    {
+        tasklet_setup(&g_mts.tasklet, tasklet_handler);
+        tasklet_schedule(&g_mts.tasklet);
+
+        return 0;
+    }
+
+    Tasklet fonksiyonları sürekli çalıştırılmaz. Yalnızca bir kez (one shot) çalıştırılır. Eğer biz onu yeniden çalıştırmak 
+    istersek tasklet fonksiyonu içerisinde  yeniden tasklet_schedule fonksiyonunu çağırmalıyız. 
+
+    Tasklet ile işimiz bittiğinde artık onu mekanizmadan çıkarmamız gerekir. Bunun için tasklet_kill fonksiyonu kullanılmaktadır:
+    Fonksiyonunun parametrik yapısı şöyledir:
+
+    void tasklet_kill(struct tasklet_struct *t);
+
+    Bu fonksiyon tipik olarak çekirdek modülünün exit fonksiyonunda çağrılır:
+
+    static void __exit generic_exit(void)
+    {
+        tasklet_kill(&g_mts.tasklet);
+        
+        printk(KERN_INFO "tasklet-module module exit...\n");
+    }
+
+    Bir tasklet disable edilebilir. Tasklet'in disable edilmesi mekanizmanın kurulu olduğu ancak işletilmediği nalamına 
+    gelmektedir. Tekrar nable işlemi yapıldığında tasklet fonskiyonu çalıştırılır. Fonksiyonların prototipleri şöyşedir:
+
+    void tasklet_disable(struct tasklet_struct *t);
+    void tasklet_enable(struct tasklet_struct *t);
+
+    Aşağıda temel işlemlerin yapıldığı bir çekirdek modülü örneği verilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/* tasklet-module.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h>
+#include <linux/proc_fs.h>
+#include <linux/interrupt.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("jiffy module");
+
+void tasklet_handler(struct tasklet_struct *t);
+
+struct mytasklet_struct {
+    int val;
+    struct tasklet_struct tasklet;
+};
+
+static struct mytasklet_struct g_mts = {10};
+
+static int __init generic_init(void)
+{
+    tasklet_setup(&g_mts.tasklet, tasklet_handler);
+    tasklet_schedule(&g_mts.tasklet);
+
+    return 0;
+}
+
+static void __exit generic_exit(void)
+{
+    tasklet_kill(&g_mts.tasklet);
+    
+    printk(KERN_INFO "tasklet-module module exit...\n");
+}
+
+void tasklet_handler(struct tasklet_struct *t)
+{
+    struct mytasklet_struct *mts;
+
+    mts = container_of(t, struct mytasklet_struct, tasklet);
+
+    printk(KERN_INFO "tasklet handler runs: %d\n", mts->val);
+}
+
+module_init(generic_init);
+module_exit(generic_exit);
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Tasklet fonksiyonları her zaman tasklet'in çizelgelendiği (yani tasklet_schedule fonksiyonunun çalıtırıldığı) işlemci 
+    ya da çekirdekte çalıtırılmaktadır. İç içe geçme olmamaktadır. Yani tasklet fonksiyonun çalışması bitmeden aynı tasklet 
+    fonksiyonu başka bir işlemci ya da çekirdekte de çalıştırılmamaktadır. Tasklet fonksiyonlarında da tıpkı kesme kodlarında 
+    olduğu gibi bloke yol açan eylemler yapılmamalıdır. Tasklet fonksiyonu da yine proses bağlamında çalıştırılmamaktadır. 
+    Yani biz tasklet fonksiyonlarında copy_to_user gibi copy_from_user gibi fonksiyonları kullanamayız. Kesme kodları kadar 
+    kritik olmasa da tasklet fonksiyonlarında da uzun süren işlemlerdne kaçınılmalıdır. Tasklet fonksiyonlarında yapılmaması 
+        gereken işlemleri de aşağıdaki tabloda veriyoruz:
+
+    ┌────────────────────────────────────────┬──────────────────────────────────────────────────────────────┐
+    │           Yasak İşlem                  │                          Neden                               │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Uyumak (schedule, msleep,              │ Atomic context'te çalışır; current task belirsizdir,         │
+    │ schedule_timeout, wait_event vb.)      │ scheduler çağrılamaz. "scheduling while atomic" hatası oluşur│
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ mutex_lock / rw_semaphore /            │ Bu primitifler bekleme durumunda uyur; atomic context'te     │
+    │ down() gibi uyuyabilen kilitler        │ uyumak yasaktır. Yerine spin_lock kullanılmalıdır            │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ GFP_KERNEL ile bellek ayırma           │ kmalloc(GFP_KERNEL) uyuyabilir; tasklet içinde yalnızca      │
+    │                                        │ GFP_ATOMIC kullanılabilir                                    │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ copy_to_user / copy_from_user          │ User space erişimi page fault'a ve dolayısıyla uyumaya       │
+    │ ve genel user space erişimi            │ yol açabilir; ayrıca geçerli bir user context yoktur         │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Uzun süren işlemler                    │ Softirq'ler o CPU'daki tüm process'leri geciktirir;          │
+    │ (yoğun döngü, busy-wait, mdelay)       │ uzun iş workqueue'ya (process context) taşınmalıdır          │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Dosya sistemi / VFS çağrıları          │ filp_open, vfs_read gibi çağrılar uyuyabilir ve process      │
+    │                                        │ context varsayar                                             │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ current üzerinden task'a özgü          │ Interrupt context'te current rastgele bir process'i          │
+    │ işlem yapmak (signal gönderme,         │ gösterir; ona güvenmek mantık hatasıdır                      │
+    │ credentials okuma vb.)                 │                                                              │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Aynı tasklet'in kendini yeniden        │ tasklet_schedule ile kendini sürekli schedule etmek          │
+    │ sonsuz schedule etmesi                 │ softirq storm'a ve CPU açlığına neden olur                   │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ spin_lock_irqsave yerine yanlış        │ Hardirq ile paylaşılan veri korunurken IRQ'lar kapatılmazsa  │
+    │ kilit varyantı seçmek                  │ aynı CPU'da deadlock oluşur (hardirq spinlock'u beklerken)   │
+    ├────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ tasklet_kill'i tasklet'in kendi        │ tasklet_kill tasklet'in bitmesini bekler; kendi içinden      │
+    │ içinden çağırmak                       │ çağrılırsa deadlock oluşur                                   │
+    └────────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Tasklet ile yapılabilecek işlemlerin bazıları çekirdek thread'leri yoluyla da yapılabilir. Ancak çekirdek threda'leri 
+    gerçek bir thread gibi çizelgeleyici tarafından çizelgelenmektedir. Halbuki tasklet fonksiyonları çok daha hızlı bir 
+    biçimde IRQ dönüşlerinde işleme sokulabilmektedir. Aşağıdaki tasklet kullanımı ile çekirdek thread'lerinin kullanımını 
+    karşılaştırıyoruz:
+
+    ┌──────────────────────────────┬─────────────────────────────────────────┬─────────────────────────────────────────┐
+    │           Özellik            │                 Tasklet                 │            Çekirdek Thread'i            │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Çalışma bağlamı              │ Softirq (atomic / interrupt context)    │ Process context                         │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Uyuyabilme                   │ Hayır; schedule, mutex, msleep yasak    │ Evet; her türlü blocking API serbest    │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Bellek ayırma                │ Yalnızca GFP_ATOMIC                     │ GFP_KERNEL dahil tüm bayraklar          │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Kullanıcı alanı erişimi      │ Yapılamaz (copy_to_user vb. yasak)      │ Kendi mm'i olmadığından normalde        │
+    │                              │                                         │ yapılmaz; ancak uyuyan API'ler serbest  │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Gecikme (latency)            │ Çok düşük; hardirq bitiminde softirq    │ Daha yüksek; scheduler'ın thread'i      │
+    │                              │ aşamasında hemen koşabilir              │ seçmesini bekler                        │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Öncelik / zamanlama          │ Scheduler'a tabi değildir; process'leri │ Scheduler'a tabidir; nice / RT önceliği │
+    │                              │ keserek koşar (HI_SOFTIRQ/TASKLET_...)  │ atanabilir (sched_set_fifo vb.)         │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ CPU ilişkisi                 │ Genelde schedule edildiği CPU'da        │ CPU affinity serbestçe ayarlanabilir    │
+    │                              │ çalışır affinity kontrolü yoktur        │ (kthread_bind)                          │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Uygun iş süresi              │ Çok kısa işler (mikrosaniye–            │ Uzun, bloklanabilen, ağır işler         │
+    │                              │ milisaniye altı)                        │                                         │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Oluşturma / yaşam döngüsü    │ tasklet_setup ile hazırlanır,           │ kthread_create / kthread_run ile        │
+    │                              │ tasklet_schedule ile tetiklenir,        │ başlatılır, kthread_stop ile            │
+    │                              │ tasklet_kill ile sonlandırılır          │ sonlandırılır (kthread_should_stop)     │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Tetikleme modeli             │ Olay bazlı: her schedule bir kez        │ Genelde döngü + wait_event ile sürekli  │
+    │                              │ çalışır koşup biter                     │ yaşar, iş geldikçe uyanır               │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ ps ile görünürlük            │ Görünmez (ksoftirqd dolaylı istisna)    │ Görünür (köşeli parantezli isim,        │
+    │                              │                                         │ örn. [my_worker])                       │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Sistem yüküne etkisi         │ Softirq storm tüm CPU'yu kilitleyebilir;│ Preempt edilebilir; sistemin geri       │
+    │                              │ yoğunlukta ksoftirqd'ye devredilir      │ kalanını aç bırakmaz                    │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Güncel durum (API)           │ Deprecated yönünde; yeni kodda BH       │ Tam desteklenen, kalıcı mekanizma       │
+    │                              │ workqueue / threaded IRQ öneriliyor     │                                         │
+    └──────────────────────────────┴─────────────────────────────────────────┴─────────────────────────────────────────┘
+
+    Peki doğrudan IRQ kesme kodu oluşturmak yerine tasklet fonksiyonu oluştmanın ne faydası vardır? Daha önceden de 
+    belirtitğimiz gibi kesme kodlarından bir an evvel çıkılması gerekir. Ancak tasklet işlemleri biraz daha uzatılabilir. 
+    Tasklet işlemleri kesme mekanizmasının açılmasından sonra yürütülmektedir. Dolayısıyla sistemin daha interaktif 
+    kalmasına yol açar. Aşağıda bu karşılaştırmaları bir tablo halinde veriyoruz. 
+
+    ┌──────────────────────────────┬─────────────────────────────────────────┬─────────────────────────────────────────┐
+    │           Özellik            │     Doğrudan IRQ Handler (Top Half)     │        Tasklet (Bottom Half)            │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Yürütme bağlamı              │ Hardirq context                         │ Softirq context                         │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Çalışma zamanı               │ Interrupt geldiği anda, senkron         │ Handler IRQ_HANDLED döndükten sonra,    │
+    │                              │                                         │ irq_exit() aşamasında (veya ksoftirqd)  │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ IRQ durumu                   │ En azından ilgili IRQ hattı maskelidir; │ IRQ'lar açıktır; yeni kesmeler          │
+    │                              │ handler koşarken aynı IRQ tekrar        │ tasklet'i kesebilir (tasklet hardirq    │
+    │                              │ gelmez                                  │ tarafından preempt edilebilir)          │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Sistem gecikmesine etkisi    │ Doğrudan ve kritik: burada geçen her    │ Daha dolaylı: softirq'ler process'leri  │
+    │                              │ mikrosaniye diğer kesmeleri ve  tüm     │ geciktirir ama interrupt alımını        │
+    │                              │ sistemi bekletir                        │ engellemez                              │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Yapılması gereken iş         │ Mutlak minimum: donanımı sustur (ack/   │ Asıl veri işleme: buffer'ı boşaltma,    │
+    │                              │ mask), durumu oku, veriyi kap, bottom   │ protokol işleme, üst katmana iletme     │
+    │                              │ half'i tetikle                          │                                         │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Uyuma / blocking             │ Yasak                                   │ Yasak (her ikisi de atomic context)     │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Zaman toleransı              │ Mikrosaniyeler mertebesinde kısa        │ Daha uzun sürebilir ama yine de kısa    │
+    │                              │ olmalı                                  │ tutulmalı (ms mertebesi bile sorunlu)   │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Kilit gereksinimleri         │ Aynı veriyi paylaşan kod                │ Hardirq ile veri paylaşıyorsa tasklet   │
+    │                              │ spin_lock_irqsave kullanmak zorunda     │ tarafında spin_lock_irqsave; yalnızca   │
+    │                              │ kalır                                   │ task'larla paylaşımda spin_lock_bh      │
+    │                              │                                         │ yeterlidir                              │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Yeniden giriş / serilik      │ Aynı IRQ hattı için serialize (hat      │ Aynı tasklet sistem genelinde aynı anda │
+    │                              │ maskeli); farklı IRQ'lar iç içe         │ tek instance çalışır; ikinci schedule   │
+    │                              │ girebilir (mimariye göre)               │ çalışma bitene dek bekletilir           │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Veri kaybı riski             │ Uzun tutulursa FIFO taşması, kaçan      │ Ertelemeden doğan gecikme; hardirq ile  │
+    │                              │ kesmeler zaman aşımları                 │ arasında yarış durumu yönetimi gerekir  │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Tetikleme / API              │ request_irq ile kaydedilir; donanım     │ tasklet_setup ile hazırlanır; handler   │
+    │                              │ tetikler                                │ içinden tasklet_schedule ile tetiklenir │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Çoklu tetikleme davranışı    │ Her interrupt handler'ı bir kez         │ Koşmadan önce N kez schedule edilirse   │
+    │                              │ çalıştırır                              │ yalnız 1 kez çalışır (coalescing);      │
+    │                              │                                         │ sayaç gerekiyorsa ayrıca tutulmalı      │
+    ├──────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+    │ Ne zaman yeterli             │ İş zaten birkaç yazmaç okuma/yazma      │ İş kısa ama handler'da tutulamayacak    │
+    │                              │ kadar kısaysa bottom half'e hiç gerek   │ kadar uzunsa; ya da IRQ'lar açıkken     │
+    │                              │ yok, hepsi handler'da yapılır           │ koşması gerekiyorsa                     │
+    └──────────────────────────────┴─────────────────────────────────────────┴─────────────────────────────────────────┘
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi aslında bir süredir tasklet kullanımı da "deprecated" ilan edilmiştir. Ancak tasklet 
+    mekanizmasını kullanan çok sayıda aygıt sürücüünn olması bu mekanizmanın çekirdekten atılmasını ötelemektedir. Modern 
+    yaklaşım "çalışma kuyruları (workqueues)" denilen modeldir. Bu model resmi olarak 2.6 verisyonlarıyla birlikte çekirdeğe 
+    eklenmiştir. Ancak zaman içerisinde fonksiyon arayüzlerinde değişiklikler yapılmıştır. Biz burada güncel çekirdeklerdekeri
+    dikkat alacağız. 
+
+    Çalışma kuyrukları aslında pek çok aşağı seviyeli tasarımlarda karşılatığımız "üretici-tüketici (producer-consumer)" 
+    kuyruklarına benzemektedir. Tipk olarak aygıt sürücüler gecikmeli biçimde yapılmasını istedikleri işlemleri çalışma 
+    kuyruğuna yerleştirirler, çekirdeğin bu mekanizma için oluşturulmuş thread'leri de bu kuyruğa bırakılmış işlemleri alarak
+    onları çalıştırırlar. Linux'ta bu thread'lere "kworker" thread'ler denilmektedir. Buradaki tasarım "thread havuzlerına 
+    (thread pools)" benzemektedir. İşlemler için kworker thread'ler yaratılır. Onlar yetmezse yenileri yaratılır. Duruma 
+    göre yaratılmış olanlar da yok edilir. Yani dinmaik yaratım söz konusudur.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*--------------------------------------------------------------------------------------------------------------------------
+                                                
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*--------------------------------------------------------------------------------------------------------------------------
+                                                
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
 
 /*--------------------------------------------------------------------------------------------------------------------------
                                                 162. Ders 11/08/2024 - Pazar
