@@ -20749,7 +20749,7 @@ fn main() {
 
     new ilişkili fonksiyonunun ikinci parametresi Span isimli yapı türündendir. Span değeri örneğimizde Span::call_site() 
     çağrısıyle elde edilmiştir. Ident olarak girilen yazının değişken isimlendirme kurallarına uygun bir isim olması gerekir. 
-    Aksi takdirde panic oluşacaktır. 
+    Aksi takdirde panic oluşacaktır. Bir Ident değeri içerisindeki isim to_string metoduyla elde edilebilir.    
 
     Punct yapısı ayıraç atomları ve operatörleri temsil etmektedir. Ancak -> gibi += gibi atomlar tek bir atom değil iki 
     ayrı atom gibi temsil edilmektedir. Bunların tek atom olup olduğu Punct değeri aratılırken new ilişkili fonksiyonunun 
@@ -20987,6 +20987,447 @@ fn main() {
             }
         }
     }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        123. Ders 27/07/2026 - Pazartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Group da bir çeşit TokenStream olduğuna göre biz Group nesnesini de dolaşabiliriz. Tabii Group nesneleri Group nesnelerini 
+    de içerbilir. Bu durumda bir TokenStream özyinelemeli (recursive) bir biçimde dolaşılabilir.  Aşağıda özniyinelemeli 
+    dolaşımı veriyoruz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use proc_macro2::{TokenTree, TokenStream, Ident, Punct, Literal, Group, Delimiter};
+
+fn disp_token_stream(ts: TokenStream, level: usize) {
+    for tt in ts.into_iter() {
+        print!("{:level$}", "");
+        match tt {
+            TokenTree::Group(group) => {
+
+                let (open, close) = match group.delimiter() {
+                    Delimiter::Parenthesis => ('(', ')'),
+                    Delimiter::Brace => ('{', '}'),
+                    Delimiter::Bracket => ('[', ']'),
+                    Delimiter::None => (' ', ' ')
+                };
+                println!("Group {}", open);
+                disp_token_stream(group.stream(), level + 4);
+                println!("{:level$}{}", "", close);
+            },
+            TokenTree::Ident(ident) => {
+                println!("Ident: {}", ident);
+            },
+            TokenTree::Punct(punct) => {
+                println!("Punct: {} ({:?})", punct, punct.spacing());
+            }
+            TokenTree::Literal(literal) => {
+                println!("Literal: {}", literal);
+            },
+            _ => ()
+        }
+    }
+}
+
+fn main() {
+    let ts: TokenStream = "fn add(a: i32, b: i32) -> i32 { (a + b) * 2}".parse().unwrap();
+
+    disp_token_stream(ts, 0);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    quote isimli bir makro atomarı bir yazı biçiminde değil doğrudan alıp ondan TokenStream nesnesi oluşturmaktadır. Ancak 
+    bu quote makrosu henüz Rust'ın stabil sürümlerinde yer almaktadır. Yani halen "nightly" sürümlerine ilişkin bir özelliktir. 
+    Ancak quote isimli bir paket debug işlemleri için ayrıca oluşturulmuştur. Bu paket yoluyla quote makarosunu kullanabiliriz. 
+    Gerek kütüphane crate'imizde gerekse binary crate'imizde bu quote makrousnu kullanabilmek için [depnedencies] bölümüne 
+    aşağıdaki satırın eklenmesi gerekmektedir:
+
+    [dependencies]
+    proc-macro2 = "1.0"
+    quote = "1.0"
+
+    library crate'te proc-macro2 kullanmaya gerek yoktur. quote makrosunu kullanırken aşağıdaki use işlemini yapabiliriz:
+
+    use quote::quote;
+
+     let ts: TokenStream = quote! {
+        fn foo() {
+            println!("foo");
+        }
+    };
+
+    Ancak bir noktaya dikkatinizi çekmek istiyoruz. "quote" paketindeki quote makrosu bize proc-macro2 paketindeki TokenStream 
+    yapısı türünden nesne vermektedir. Eğer quote makrosunu kütüphane crate'indne kullanacaksanız proc-macro2'deki TokenStream 
+    nesnesini standart kütüphanedeni TokenStream nesnesine döüştürmeniz gerekir. proc-macro2 paketindeki TokenStream yapısı 
+    From trait'ini kaplayıcı destekleme dolayısıyla da Into trait'ini desteklemektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi yukarıdaki bilgilerden hareketle prosedürel makromuzu kütüphane crate'i içerisinde oluşturalım:
+
+    use proc_macro::TokenStream;
+
+    #[proc_macro]
+    pub fn my_macro(input: TokenStream) -> TokenStream {
+        "fn foo() { println!(\"foo\");}".parse().unwrap()
+    }
+
+    Kütüphane crate'imizin "Cargo.toml" dosyası şöyledir:
+
+    [package]
+    name = "procmacro"
+    version = "0.1.0"
+    edition = "2024"
+
+    [dependencies]
+
+    [lib]
+    proc-macro = true
+
+    Şimdi de binary crate içerisinde makromuzu kullanalım:
+
+    use procmacro::my_macro;
+
+    my_macro!();
+
+    fn main() {
+        foo();
+    }
+
+    Binary crate'imizin "Cargo.toml" dosyası da şöyledir:
+
+    [package]
+    name = "macrotest"
+    version = "0.1.0"
+    edition = "2024"
+
+    [dependencies]
+    procmacro = { path = "../procmacro" }
+
+    Burada my_macro! çağrısı aşağıdaki atomları koda açacaktır:
+
+    fn foo() { println!(\"foo\");}
+
+    Yukarıda da belirttiğimiz gibi eğer kütüphane crate'inde quote makrosunu kullanacaksak bu durumda kütüphane crate'indeki 
+    "Cargo.toml" içerisinde buu belirtmeliyiz:
+
+    [package]
+    name = "procmacro"
+    version = "0.1.0"
+    edition = "2024"
+
+    [dependencies]
+    quote = "1.0"
+
+    [lib]
+    proc-macro = true
+
+    Şimdi kürüphane crate'i içerisind yukarıdaki makroyu quote makrosunu kullanarak yazalım:
+
+    use proc_macro::TokenStream;
+    use quote::quote;
+
+    #[proc_macro]
+    pub fn my_macro(input: TokenStream) -> TokenStream {
+        quote! {
+            fn foo() {
+                println!("foo");
+            }
+        }.into()
+    }
+    
+    Buradaki into metodu proc_macro2::TokenStream türünü proc_macro::TokenStream türüne dönüştürmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    ELimizde bir TokenStream değeri olsun. Bunun içerisindeki n'inci TokenTree değerini elde edebilir miyiz? TokenStream 
+    değerini into_iterator yoluyla tüketici bir biçimde dolaşarak bu işlemi yapabiliriz. Ya da doğrudan into_iterator ile 
+    aldığımız iterator nesnesini doğrudan n defa ilerletebiliriz. Bunun için zaten Iterator trait'inin nth metodun bulunduğunu 
+    anımsayınız. Örneğin:
+
+    let tt: TokenTree = ts.into_iter().nth(n).expect("not enough tokens");
+
+    Ya da alternatif olarak iterator'ü collect yapıp onu bir vektöre de dönüştürbiliriz:
+
+    let ttvec: Vec<TokenTree> = stream.into_iter().collect();
+
+    Artık vektörün n'inci elemanını elde edebiliriz. Ancak Rust'ta vektörün elemanları Copy türünden değilse onun belli 
+    bir elemanını taşıyamadığımızı anımsayınız. 
+
+    Aşağıdaki örnekte prosedürel makroya tek bir Ident atom içeren TokenStream geçirilmiştir. Prosedürel makroda da bunun 
+    ismi alınrak ondan bir fonksiyon oluşturulmuştur. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+// lib.rs 
+
+use proc_macro::{TokenStream, TokenTree};
+use quote::quote;
+
+#[proc_macro]
+pub fn my_macro(input: TokenStream) -> TokenStream {
+    let ttvec: Vec<TokenTree> = input.into_iter().collect();
+
+    if ttvec.len() != 1 {
+        panic!("expected only an identifier");
+    }
+    if let TokenTree::Ident(ident) = &ttvec[0] {
+        let name: String = ident.to_string().parse().unwrap();
+
+        format!("fn {}() {{ println!(\"{name}\", );}}", name).parse().unwrap()
+    }
+    else {
+        panic!("invalid token");
+    }
+}
+
+// main.rs
+
+use procmacro::my_macro;
+
+my_macro!(foo);
+my_macro!(bar);
+
+fn main() {
+    foo();
+    bar();
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        124. Ders 29/07/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki prosedürel makroyu quote makrosunu kullanarak oluşturabilit miydik? Burada önemli bir sorun quote makrosunun 
+    atomları bire bir oluşturmasıdır. Örneğin:
+
+    quote! {
+        fn name() {
+            println!("foo");
+        }
+    }.into()
+
+    Buradaki name üretilen TokenStream değerinde name biçiminde kalacaktır. Halbuki bizim istediğimiz şey name değişkeninin 
+    içerisindeki yazının oraya yerleşmesini sağlamaktır. İşte quote makrosu içerisinde bir değişkeni # ile kullanabilmek için
+    o değişkenin türünün ToTokens arayüzünü destekliyor olması gerekmektedir. ToTokens trait'i şöyle tanımlanmıştır:
+
+    pub trait ToTokens {
+        // Zorunlu metot
+        fn to_tokens(&self, tokens: &mut TokenStream);
+    }
+        
+    Trait'in isteğe bağlı başka metotları da vardır. 
+
+    proc-macro2 modülündeki atom belirten türler (Ident, Punct gibi) bu trait'i desteklemektedir. (Ancak standart proc_macro 
+    modülündeki türler desteklememektedir.) quote modülünde de println mantığıyla çalışan format_ident isminde bir makro 
+    vardır. Bu makro bir String değerini alıp bize onu içeren bir proc_macro::Ident değeri vermektedir. Biz de quote makrosuyla 
+    bu işlemi şöyle yapabiliriz:
+
+    //...
+    let name: String = ident.to_string().parse().unwrap();
+    let fname = format_ident!("{}", name);
+
+     quote! {
+        fn #fname() {
+            println!(#name);
+        }
+    }.into()
+
+    Tabii aslında biz proc-macro2::Ident değerini zaten proc-macro2::Ident::new(...) işlemiyle de yaratabilirdik.
+    proc_macro2 modülünde String türü içim ToTokens trait'i desteklenmiştir. Biz String türünden bir değişkeni # ile 
+    kullandığımızda quote makrosu o string'in içerisindeki yazıyı iki tırnak içeisinde koda yerleştirmektedir. Biz fonksiyon 
+    ismini oluştururken proc_macro2::Ident değerinden hareket ettik. String türünden bir değerden hareket etseydik fonksiyon 
+    ismi iki tırnakla üretilirdi. Yani biz makronun ilgili kısmını aşağıdaki gibi yazsaydık error oluşurdu:
+
+     let name: String = ident.to_string().parse().unwrap();
+    
+     quote! {
+        fn #name() {            
+            println!(#name);
+        }
+    }.into()
+
+    Burada fonksiyon ismi iki tırnaklı oluşturulacağından sorun ortaya çıkacaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+// lib.rs
+
+use proc_macro::{TokenStream, TokenTree};
+use quote::{quote, format_ident};
+
+#[proc_macro]
+pub fn my_macro(input: TokenStream) -> TokenStream {
+    let ttvec: Vec<TokenTree> = input.into_iter().collect();
+
+    if ttvec.len() != 1 {
+        panic!("expected only an identifier");
+    }
+    if let TokenTree::Ident(ident) = &ttvec[0] {
+        let name: String = ident.to_string().parse().unwrap();
+        let fname = format_ident!("{}", name);
+
+        quote! {
+            fn #fname() {
+                println!(#name);
+            }
+        }.into()
+
+    }
+    else {
+        panic!("invalid token");
+    }
+}
+
+// main.rs
+
+use procmacro::my_macro;
+
+my_macro!(foo);
+my_macro!(bar);
+
+fn main() {
+   foo();
+   bar();
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki işlemler biraz karmaşıktır. Karmaşıklığın nedeni büyük ölçüde proc_macro ile proc_macro2 türlerinin aynı 
+    anda kullanılmasından kaynaklanmaktadır. Biz anahtar noktaları şöyle özetleyebiliriz:
+
+    - Prosedürel makroların girdisi de çıktısı da proc_macro::TokenStream türündendir. 
+
+    - proc_macro2 modülü standart bir modül değildir. Ayrı bir paket olarak indirilmektedir. Bu paketin oluşturulmasının 
+    nedeni proc_macro standart modülünün yalnızca kütüphane crate'leri içerisinde kullanılmasıdır. proc_macro2 paketi 
+    tamamen proc_macro modülünü taklit etmekle birlikte daha serbest bir kullanım sunmaktadır. 
+
+    - quote makrosu quote isimli bir pakettedir. Bu quote paketi proc_macro2 paketi ile birlikte kullanılmaktadır. quote 
+    makrosunun çıktısı proc_macro2::TokenStream türündendir. Bu nedenle biz örneklerimizde into metodula onu standart 
+    TokenStream türüne dönüştürdük.
+
+    - quote makrosundaki # kullanımı quote makrosunun bir buluşudur. Dolayısıyla ToTokens trait'i de quote paketi içerisindedir. 
+
+    - quote makrosunda # kullanmak için değişkenin quote::ToTokens trait'ini destekliyor olması gerekir. 
+
+    - quote paketinde proc_macro2 paketindeki TokenTree türleri için ToTokens trait'i desteklenmiştir. Dolayısıyla biz 
+    örneğin proc_macro2::Ident türünden bir dğeişkeni quote makrosu içerisinde # ile kullanabiliriz. 
+
+    - quote paketinde ayı zamanda String türünü de ToTokens trait'ini desteklemesi sağlanmıştır. Bir String değeri quote 
+    makrosunda # ile kullanılırsa oraya makro iki tırnak içeirisnde string'in içerisindeki yazıyı yerleştirmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Prosedürel makroya bir örnek daha verelim. Makromuzun ismi describe_tokens olsun. Biz bu makroya birtakım atomları verelim.
+    Makro da bize onların türlerini yazı olarak versin. Bunu sağlamak için prosedürel makroyu tek string sabitinden oluşan 
+    bir atom içeren TokenStream ile geri döndürmek gerekir. Makro aşağıdaki gibi yazılabilir:
+
+    #[proc_macro]
+    pub fn describe_tokens(input: TokenStream) -> TokenStream {
+        let mut report = String::new();
+
+        for tree in input {
+            let line = match tree {
+                TokenTree::Group(group) => format!(
+                    "Group(delimiter = {:?}, inner_token_count = {})",
+                    group.delimiter(),
+                    group.stream().into_iter().count()
+                ),
+                TokenTree::Ident(ident) => format!("Ident({ident})"),
+                TokenTree::Punct(punct) => {
+                    format!("Punct('{}', spacing = {:?})", punct.as_char(), punct.spacing())
+                }
+                TokenTree::Literal(literal) => format!("Literal({literal})"),
+            };
+            report.push_str(&line);
+            report.push('\n');
+        }
+
+        quote! { #report }.into()   
+    }
+
+    Burada girdiyş belirten TokenSTream nesnesinin for döngüsüyle dolaşıldığına dikkat edşniz. Her TokenTree için string'e 
+    bir satır eklenmiştir. (Ancak burada Group elde edildiğinde onun özyinelemeli bir biçimde dolaşılmadığına dikkat ediniz.)
+    Fonksiyonun geri dönüş değerine dikkat ediniz:
+
+    quote! { #report }.into()   
+
+    Burada yapılan işlem aşağıdaki gibidir:
+
+    quote! { "..........." }.into()   
+
+    quote makrosunun proc_macro2::TokenStream verdiğini belirtmiştik. O halde burada aslında tek bir yazı oluşturulmaktadır. 
+    Makroyu şöyle kullanabiliriz:
+
+    use procmacro::describe_tokens;
+
+    fn main() {
+        let result = describe_tokens! { (10 + 20) * 2};
+        
+        println!("{}", result);
+    }
+
+    Çağrıya dikat ediniz:
+
+    let result = describe_tokens! { (10 + 20) * 2};
+
+    Burada makro geri döndürülen TokenSTream değerini açmaktadır. O da bir string'tir. Yani aslında makro açıldıktan sonra 
+    şöyle bir eşdeğerlik oluşacaktır:
+
+    let result = "..........";
+---------------------------------------------------------------------------------------------------------------------------*/
+
+// lib.rs 
+
+use proc_macro::{TokenStream, TokenTree};
+use quote::quote;
+
+#[proc_macro]
+pub fn describe_tokens(input: TokenStream) -> TokenStream {
+    //let input = proc_macro2::TokenStream::from(input);
+    let mut report = String::new();
+
+    for tree in input {
+        let line = match tree {
+            TokenTree::Group(group) => format!(
+                "Group(delimiter = {:?}, inner_token_count = {})",
+                group.delimiter(),
+                group.stream().into_iter().count()
+            ),
+            TokenTree::Ident(ident) => format!("Ident({ident})"),
+            TokenTree::Punct(punct) => {
+                format!("Punct('{}', spacing = {:?})", punct.as_char(), punct.spacing())
+            }
+            TokenTree::Literal(literal) => format!("Literal({literal})"),
+        };
+        report.push_str(&line);
+        report.push('\n');
+    }
+
+    quote! { #report }.into()   // String -> str literal
+}
+
+// main.rs 
+
+use procmacro::describe_tokens;
+
+fn main() {
+    let result = describe_tokens! { (10 + 20) * 2};
+
+    println!("{}", result);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Prosedürel makroların yazımında kolaylık sağlayan diğer bir pakette syn isimli pakettir. Bu paketin en son sürümü "2.0"
+    idi. Ancak birkaç hafta önce "3.0.0" sürümü de kullanıma sunulmuştur. Tabii paketi kullanabilmek için yine [dependencies]
+    bölümünde paketi belirtmemiz gerekir:
+
+    [dependencies]
+    proc-macro2 = "1.0"
+    syn = "3.0.0"
+
+    
+
+    
 
 
 
@@ -20999,9 +21440,32 @@ fn main() {
 /*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
 
 
 /*---------------------------------------------------------------------------------------------------------------------------
                                             GEÇİCİ NOTLAR
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+syn paketindeki parse_macro_input makrosu girdi olarak bir proc_macro::TokenStream alıp çıktı olarak onun parse edilmiş 
+halini vermektedir. Anımsayacağınız gibi TokenStream aslında TokenTree değerlerindne oluşan bir dizilimdir. Yani TokenStream 
+içerisindeki aotomların bir organizasyonu yoktur. Derleyici ve yorumlayıcı yazımında atomarından organize eidlmiş 
+ağaç elde etme sürecine "parsing" denilmektedir. Parsing işlemi sonucunda bir parse apacı oluşturulmaktadır. Bu parse 
+ağacına kavramsal olarak "AST (Abstract Syntax Tree)" de denilmektedir. İşte parse_macro_input makrosu bizden aldığı 
+atom grubunu parse ederek organize edilmiş bir ağaç haline getirmektedir. Bu sayede biz bazı işlemleri daha kolay 
+yapabilir hale geliriz. 
+
+parse_macro_input makrosu iki biçimde kullanılmaktadır:
+
+1) ast = parse_macro_input!(token_stream) 
+2) ast = parse_macro_input!(token_stream as DeriveInput) 
+
+İkinci biçimdeki as sözcüğünün Rust'taki tür dönüştürme operatörü ile hiçbir ilgisi yoktur. Buradaki as kalıbın ikinci 
+biçimini oluşturmak için uydurulmuş bir eşleştir. Her iki durumda da makro syn::DeriveInput türündne bir değer vermektedir. 
+syn::DeriveInput parse ağacını temsil eden bir yapıdır. Bu yapının alanları şunlardır:
+
+    

@@ -1253,36 +1253,36 @@ void exit_sys(const char *msg)
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ BEKLEME DAVRANIŞI                                                                                                    │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
-    │ Bekleme tipi            │ Busy-wait — CPU kilit serbest olana döndürür │ Sleep — thread uyutur, başka iş çalışır     │
+    │ Bekleme tipi            │ Meşgul dögü                                  │ Sleep — thread uyutur, başka iş çalışır     │
     │ CPU kullanımı           │ Yüksek — bekleme süresince CPU %100          │ Düşük — bekleme süresince CPU boşta         │
-    │ Overhead                │ Çok düşük — birkaç instruction               │ Yüksek — bağlam switch + scheduler         │
+    │ Overhead                │ Çok düşük — birkaç makine komutu             │ Yüksek — bağlamsal geçiş + çizelgeleyici    │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ KULLANILABİLECEK BAĞLAM                                                                                              │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
-    │ Interrupt handler (ISR) │ [OK] Kullanılabilir                          │ [!!] YASAK — sleep yapamaz                  │
-    │ Softirq / Tasklet       │ [OK] Kullanılabilir                          │ [!!] YASAK — atomic bağlam                  │
-    │ Process bağlam          │ [OK] Kullanılabilir                          │ [OK] Kullanılabilir — tercih edilmeli       │
+    │ Kesme kodları (ISR)     │ Kullanılabilir                               │ YASAK — sleep yapamaz                       │
+    │ Softirq / Tasklet       │ Kullanılabilir                               │ YASAK — atomic bağlam                       │
+    │ Process bağlamında      │ Kullanılabilir                               │ Kullanılabilir — tercih edilmeli            │
     │ Preemption durumu       │ Alındığında preemption devre dışı kalır      │ Preemption etkilenmez                       │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ KRİTİK BÖLGE                                                                                                         │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ Uygun bölge uzunluğu    │ Çok kısa — birkaç instruction (µs düzeyi)    │ Uzun olabilir — ms, hatta sn düzeyi         │
-    │ Sleep çağrısı           │ [!!] YASAK — kmalloc(GFP_KERNEL), msleep...  │ [OK] Serbest — istediğin gibi uyuyabilirsin │
+    │ Sleep çağrısı           │ YASAK — kmalloc(GFP_KERNEL), msleep...       │ Serbest — istediğin gibi uyuyabilirsin      │
     │ GFP flags               │ Sadece GFP_ATOMIC                            │ GFP_KERNEL kullanılabilir                   │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ SMP / ÇOK ÇEKİRDEK                                                                                                   │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ Çok çekirdekli etkinlik │ Bekleme çok kısaysa avantajlı                │ Bekleme uzunsa avantajlı                    │
-    │ Tek çekirdekte          │ [!!] DİKKAT — aynı CPU'da deadlock riski     │ Scheduler önler, güvenli                    │
+    │ Tek çekirdekte          │ DİKKAT — aynı CPU'da deadlock riski          │ Çizelgeleyici önler, güvenli                │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ TİPİK KULLANIM YERLERİ                                                                                               │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
-    │ Örnek senaryolar        │ IRQ handler, tasklet, register erişimi,      │ open/read/write/ioctl, donanım başlatma,    │
+    │ Örnek senaryolar        │ IRQ kesme kodları, tasklet, yazmaç erişimi   │ open/read/write/ioctl, donanım başlatma,    │
     │                         │ ISR ↔ process paylaşımlı veri                │ uzun I/O bekleme, kullanıcı alanı istekleri │ 
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
     │ ÖZET KURAL                                                                                                           │
     ├─────────────────────────┼──────────────────────────────────────────────┼─────────────────────────────────────────────┤
-    │ Ne zaman?               │ Atomic bağlam VEYA kritik bölge çok kısaysa  │ Process bağlamındaysan VE bölge uzunsa      │
+    │ Ne zaman?               │ Atomik bağlam ya da kritik bölge çok kısaysa │ Process bağlamında ve bölge uzunsa          │
     └─────────────────────────┴──────────────────────────────────────────────┴─────────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -2424,19 +2424,19 @@ void exit_sys(const char *msg)
     ┌─────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────┐
     │         Parametrik Yapı                 │                           İşlevi                                     │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ set_bit(nr, addr)                       │ addr adresindeki bellek alanının nr. bitini 1 yapar (atomik).        │
+    │ set_bit(nr, addr)                       │ addr adresindeki bellek alanının nr. bitini 1 yapar (atomik)         │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ clear_bit(nr, addr)                     │ addr adresindeki bellek alanının nr. bitini 0 yapar (atomik).        │
+    │ clear_bit(nr, addr)                     │ addr adresindeki bellek alanının nr. bitini 0 yapar (atomik)         │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ change_bit(nr, addr)                    │ addr adresindeki nr. bitin değerini tersine çevirir (atomik).        │
+    │ change_bit(nr, addr)                    │ addr adresindeki nr. bitin değerini tersine çevirir (atomik)         │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ test_and_set_bit(nr, addr)              │ nr bitinin eski değerini döndürür, ardından o biti 1 yapar (atomik). │
+    │ test_and_set_bit(nr, addr)              │ nr bitinin eski değerini döndürür, ardından o biti 1 yapar (atomik)  │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ test_and_clear_bit(nr, addr)            │ nr bitinin eski değerini döndürür, ardından o biti 0 yapar (atomik). │
+    │ test_and_clear_bit(nr, addr)            │ nr bitinin eski değerini döndürür, ardından o biti 0 yapar (atomik)  │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ test_and_change_bit(nr, addr)           │ nr bitinin eski değerini döndürür, ardından o biti tersine çevirir.  │
+    │ test_and_change_bit(nr, addr)           │ nr bitinin eski değerini döndürür, ardından o biti tersine çevirir   │
     ├─────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
-    │ test_bit(nr, addr)                      │ addr adresindeki nr bitinin mevcut değerini okur; 0 veya 1 döner.    │
+    │ test_bit(nr, addr)                      │ addr adresindeki nr bitinin mevcut değerini okur; 0 veya 1 döner     │
     └─────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────┘
 
     Atomik bit fonksiyonları bit maskelerinden oluşan bayraklı nesnelerdeki bit bayraklarını set ya da clear etmek 
@@ -9676,8 +9676,9 @@ clean:
     #endif
     } _struct_page_alignment;
 
-    Tabii eskiden bu yapı bu kadar büyük değildi. Zaman içerisinde yapıya çeşitli konfigürasyon parametreleri eşliğinde 
-    alanlar eklendi ve yapı büyüdü. Örneğin çekirdeğin 2.2 versiyonunda page yapısı şöyleydi:
+    Güncel çekirdeklerde page yapısının uzunluğu 64 byte'tır. Dolayısıyla bir fiziksel sayfaya bu`page yapılarından 64 
+    tanesi sığabilmektedir. Eskiden page bu kadar büyük değildi. Zaman içerisinde yapıya çeşitli konfigürasyon parametreleri 
+    eşliğinde alanlar eklendi ve yapı büyüdü. Örneğin çekirdeğin 2.2 versiyonunda page yapısı şöyleydi:
 
     typedef struct page {
         /* these must be first (free area handling) */
@@ -9727,6 +9728,56 @@ clean:
 
     Güncel çekirdeklerde page yapısının uzunluğu 64 byte'tır. Dolayısıyla bir fiziksel sayfaya bu page yapılarından 
     64 tanesi sığabilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Güncel çekirdeklerde page nesnesinin elemanları sayfanın o andaki durumuna göre birlikler yoluyla değişik biçimlerde
+    ele alınmaktadır. Bir page nesnesinin içinde bulunduğu olası durumları aşağıdaki tabloda belirtiyoruz. Her ne kadar 
+    tabloyu şu andaki bilgilerinizle anlamlandıramayacak olsanız da konular ilerledikçe geriye dönüp bu tabloya 
+    başvurabilirsiniz:
+
+    ┌──────────────────────────┬──────────────────────────────────────────────────────────────┐
+    │          Durum           │                        Açıklama                              │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Buddy serbest            │ İkiz blok sisteminin free_area listesinde bekleyen boş page, │
+    │                          │ order bilgisi private elemanında                             │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ PCP serbest              │ Per-CPU free list'te bekleyen boş sayfa;                     │
+    │                          │ hızlı tahsis için CPU'ya özel önbellek                       │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Sayfa önbelleği (dosya)  │ Bir dosyanın verisini tutan sayfa;                           │
+    │                          │ address_space + pgoff_t ile dosyaya bağlı                    │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Anonim                   │ Dosya karşılığı olmayan bellek: heap, stack, malloc;         │
+    │                          │ anon_vma üzerinden VMA'lara bağlı                            │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Swap cache               │ Swap alanıyla ilişkilendirilmiş anonim sayfa;                │
+    │                          │ swp_entry_t ile swap slotuna eşlenmiş                        │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ KSM                      │ İçeriği özdeş bulunup birleştirilmiş paylaşımlı sayfa;       │
+    │                          │ stable_node'a bağlı, salt okunur                             │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ LRU dışı taşınabilir     │ LRU'da olmadan taşınabilen özel sayfa: zsmalloc, balloon;    │
+    │                          │ movable_operations sağlar                                    │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Bileşik kuyruk sayfası   │ Büyük tahsisin baş olmayan sayfası;                          │
+    │                          │ tek görevi compound_head ile başı göstermek                  │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Sayfa dilim içerisinde   │ kmalloc / kmem_cache nesnelerini barındıran page;            │
+    │                          │ struct slab overlay'i ile yönetilir                          │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Sayfa tablosunda         │ PTE / PMD tablolarını tutan page;                            │
+    │                          │ struct ptdesc overlay'i, kendi kilidi ptl ile                │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ page_pool                │ Ağ sürücülerinin RX ring'leri için ayrılmış page;            │
+    │                          │ DMA adresi ile birlikte tutulur                              │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ ZONE_DEVICE              │ Aygıt belleğini temsil eden page: DAX, pmem, GPU;            │
+    │                          │ dev_pagemap'e bağlı                                          │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ RCU serbest              │ Geçici ölüm durumu: RCU gecikmesiyle serbest bırakılırken    │
+    │                          │ rcu_head olarak kullanım                                     │
+    └──────────────────────────┴──────────────────────────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -10055,7 +10106,7 @@ clean:
     Üç konfigürasyon parametresini erişim bakımından da şöyle karşılaştırabiliriz:
 
     ┌──────────────────────┬────────────────────────────────────────────┐
-    │  Konfigürasyon       │       pfn_to_page() yöntemi                │
+    │  Konfigürasyon       │         pfn_to_page yöntemi                │
     ├──────────────────────┼────────────────────────────────────────────┤
     │ CONFIG_FLATMEM       │ mem_map + (pfn - ARCH_PFN_OFFSET)          │
     │                      │ → tek global dizi, tek toplama             │
@@ -10399,19 +10450,19 @@ clean:
             │
             ▼
     Interrupt / IRQ bağlamı içerisinde miyim?
-    ├── Evet ──► kmap_atomic() veya kmap_local_page()
+    ├── Evet ──► kmap_atomic veya kmap_local_page
     │              │
     │              ▼
     │         Çok kısa bir erişim mi? (birkaç satır)
-    │         ├── Evet ──► kmap_atomic()
-    │         └── Hayır ─► kmap_local_page() (kernel 5.x+)
+    │         ├── Evet ──► kmap_atomic
+    │         └── Hayır ─► kmap_local_page (kernel 5.x+)
     │
     └── Hayır ─► Process bağlamı içerisinde miyim?
                    │
                    ▼
               Uzun süreli erişim gerekli mi?
-              ├── Evet ──► kmap()  (proses uyuyabilir)
-              └── Hayır ─► kmap_local_page() tercih et
+              ├── Evet ──► kmap (proses uyuyabilir)
+              └── Hayır ─► kmap_local_page tercih et
 
     Aynı karar ağacı güncel çekirdekler için şöyle oluşturulabilir:
 
@@ -10421,22 +10472,22 @@ clean:
     Eşlenen adres başka bir task'a/CPU'ya verilecek
     ya da fonksiyon kapsamı dışında saklanacak mı?
     │
-    ├── Evet ──► kmap()
+    ├── Evet ──► kmap
     │            (tek meşru kullanım alanı; process bağlamı
     │             gerektirir, slot beklerken uyuyabilir)
     │
-    └── Hayır ─► kmap_local_page()   ◄── varsayılan tercih
+    └── Hayır ─► kmap_local_page   ◄── varsayılan tercih
                     │
                     ▼
             Eşleştirme sırasında page fault
             olmaması mı gerekiyor?
-            ├── Evet ──► kmap_local_page() + pagefault_disable()
+            ├── Evet ──► kmap_local_page + pagefault_disable
             └── Hayır ─► olduğu gibi kullan
                     │
                     ▼
             (IRQ / softirq / spinlock altı dahil her
             bağlamdan çağrılabilir; LIFO sırayla
-            kunmap_local(), task başına en çok 16 iç içe)
+            kunmap_local, task başına en çok 16 iç içe)
 
     Aşağıdaki tabloda bu üç fonksiyonu karşılaştırıyoruz:
 
@@ -14142,9 +14193,9 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Her vmalloc çağrısı yaıldığında çekirdek yukarıda da belirttiğimiz gibi bir vm_struct nesnesi bir de vmap_area 
+    Her vmalloc çağrısı yazıldığında çekirdek yukarıda da belirttiğimiz gibi bir vm_struct nesnesi bir de vmap_area 
     nesnesi oluşturmaktadır. vm_struct nesnesini de vmap_area nesnesinin içerisine yerleştirmektedir. Peki belli bir 
-    sanal bellek alanının tahsis edlip edilmediğini çekirdek nasıl anlamakta ve tahsisat için gereken boş sanal bellek 
+    sanal bellek alanının tahsis edilip edilmediğini çekirdek nasıl anlamakta ve tahsisat için gereken boş sanal bellek 
     alanını nasıl tespit etmektedir? İşte çekirdek burada hash tablosu yerine "kırmızı-siyah ağacı (red-black tree)"
     denilen ikili arama ağacı kullanmaktadır. Biz de önce kırmızı-siyah ikili arama ağacı konusunda bazı bilgiler 
     vereceğiz. 
@@ -14153,45 +14204,45 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 /*----------------------------------------------------------------------------------------------------------------------
     Her düğümün en fazla iki alt düğüme (child nodes) sahip olabildiği ağaçlara "ikili ağaçlar (binary trees)" denilmektedir. 
     Örneğin:
-
                             ┌───────┐
-                            │ değer │
+                            │ düğüm │
                             └───┬───┘
                     ┌───────────┴───────────┐
                 ┌───┴───┐               ┌───┴───┐
-                │ değer │               │ değer │
+                │ düğüm │               │ düğüm │
                 └───┬───┘               └───┬───┘
             ┌───────┴───────┐           ┌───┘
         ┌───┴───┐       ┌───┴───┐   ┌───┴───┐ 
-        │ değer │       │ değer │   │ değer │   
+        │ düğüm │       │ düğüm │   │ düğüm │   
         └───┬───┘       └───────┘   └───┬───┘   
-      ┌─────┴─────┐               ┌─────┘   
-    ┌─┴───┐   ┌───┴─┐         ┌───┴───┐     
-    │değer│   │değer│         │ değer │     
-    └─────┘   └─────┘         └───────┘
+        ┌───┴──────┐              ┌─────┘   
+    ┌───┴────┐  ┌──┴────┐     ┌───┴───┐     
+    │ düğüm  │  │ düğüm │     │ düğüm │     
+    └────────┘  └───────┘     └───────┘
 
-    Görüldüğü gibi burada her düğümün en fazla iki alt düğümü vardır. Eğer eğer düğümün tam olarak iki düğümü varsa 
-    böyle ikili ağaçlara "tam ikili ağaçlar (complete binary tree)" denilmektedir. Örneğin:
+    Görüldüğü gibi burada her düğümün en fazla iki alt düğümü vardır.  Ağacın hiç alt düğümü olmayan düğümlerine "yaprak (leaf)" 
+    denilmektedir. Bir ağacın yüksekliği (height) kök düğümden en dipteki yaprağa ulaşmak için kaç kenardan geçildiği ile 
+    belirlenmektedir. Örneğin yukarıdaki ağacın yüksekliği 3'tür. 
 
-           
+    Eğer düğümün tam olarak iki düğümü varsa böyle ikili ağaçlara "tam ikili ağaçlar (complete binary tree)" denilmektedir. 
+    Örneğin:
+         
                                            ┌───────┐
-                                           │ değer │
+                                           │ düğüm │
                                            └───┬───┘
                         ┌──────────────────────┴──────────────────────┐
                     ┌───┴───┐                                     ┌───┴───┐
-                    │ değer │                                     │ değer │
+                    │ düğüm │                                     │ düğüm │
                     └───┬───┘                                     └───┬───┘
             ┌───────────┴───────────┐                     ┌───────────┴───────────┐
         ┌───┴───┐               ┌───┴───┐             ┌───┴───┐               ┌───┴───┐
-        │ değer │               │ değer │             │ değer │               │ değer │
+        │ düğüm │               │ düğüm │             │ düğüm │               │ düğüm │
         └───┬───┘               └───┬───┘             └───┬───┘               └───┬───┘
       ┌─────┴─────┐           ┌─────┴─────┐         ┌─────┴─────┐           ┌─────┴─────┐
     ┌─┴───┐     ┌─┴───┐     ┌─┴───┐     ┌─┴───┐   ┌─┴───┐     ┌─┴───┐     ┌─┴───┐     ┌─┴───┐
-    │değer│     │değer│     │değer│     │değer│   │değer│     │değer│     │değer│     │değer│
+    │düğüm│     │düğüm│     │düğüm│     │düğüm│   │düğüm│     │düğüm│     │düğüm│     │düğüm│
     └─────┘     └─────┘     └─────┘     └─────┘   └─────┘     └─────┘     └─────┘     └─────┘
 
-    Ağacın hiç alt düğümü olmayan düğümlerine "yaprak (leaf)" denilmektedir. Bir ağacın yüksekliği (height) kök düğümden 
-    en dipteki yaprağa ulaşmak için kaç kenardan geçildiği ile blirlenmektedir. Örneğin yukarıdaki ağacın yüksekli 3'tür. 
     Tam ikili ağaçlardaki düğüm sayısının 2ʰ⁺¹ - 1 olduğuna dikkat ediniz. Bir düğümün yüksekliği kökten o düğüme 
     gitmek için geçilen kenar saısını belirtmektedir. Ağacın yükseliği de zaten en yüksek düğümünün yüksekliğidir. 
 
@@ -14223,13 +14274,13 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
        └───┘
 
     İkili arama ağaçlarında arama yapılırken kökten girilir, aranacak anahtarla düğümün anahtarları karşılaştırılır. 
-    Aranack anahtar düğümün anahtarında büyükse sağa, küçükse sola sapılır. Yapraklara gelindiğinde hala değer bulunamamışsa
-    aramanın başarısz olduğu sonucu çıkartılır. 
+    Aranacak anahtar düğümün anahtarından büyükse sağa, küçükse sola sapılır. Yapraklara gelindiğinde hala değerin 
+    bulunamamış olması aramanın başarısız olduğu anlamına gelmektedir. 
 
-    Aslında ikili arama ağacı "değerleri sıraya dizmeden ikili arama (binary search)" yapabilme olanağını sağlamaktadır. 
-    Ancak yukarıdaki ikili ağaçta bir sorun vardır. Bu ağaç dengesizdir. İki alt düğüme sahip olmayan düğümlerin yükseliği 
-    arasında belli bir sınırlama getirilmiş olan ağaçlara "dengeli ağaçlar (balanced trees)" denilmektedir. Örneğin biz
-    bu sınırlamayı 1 olarak alalım. Bu durumda yukarıdaki ağacımız dengesizdir. Ancak aşağıdaki ağaç dengelidir:
+    İkili arama ağaçları "değerleri sıraya dizmeden ikili arama (binary search)" yapabilme olanağını sağlamaktadır. 
+    Ancak yukarıdaki ikili ağaçta bir sorun vardır. Bu ağaç dengesizdir. Yaprakların yükseklikleri arasında belli bir 
+    sınırlama getirilmiş olan ağaçlara "dengeli ağaçlar (balanced trees)" denilmektedir. Örneğin biz bu sınırlamayı 
+    1 olarak alalım. Bu durumda yukarıdaki ağacımız dengesizdir. Ancak aşağıdaki ağaç dengelidir:
 
                    ┌────┐
                    │ 13 │
@@ -14247,16 +14298,17 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
                           │ 21 │ │ 39│ │ 42│
                           └────┘ └───┘ └───┘
 
-    Burada iki alt düğüme sahip olmayan düğümlerin yüksekliği arasında fark 1'dir. 
+    Burada yapraklar arasındaki yükseklik farkı en fazla 1'dir. 
 
     Peki ikili ağaçta denge nasıl sağlanmaktadır? İşte eleman eklenirken dengenin bozulduğu tespit edilip denge sağlanmaktadır. 
     Bunun için iki temel dengeleme algoritması kullanılmaktadır: "AVL (Adelson-Velsky ve Landis) dengelemesi" ve "kırmızı-siyah
-    (red-black)" dengelemesi. AVL dengelemesiyle oluşturulmuş ikili arama ağaçlarına "AVL Ağacı (AVL Tree)", "kırmızı-siyah 
-    dengelemesi" ile oluşturulmuş ikili arama ağaçlarına ise "kırzmı-siyah ağacı (red-black tree)" denilmejtedir. İki
-    dengeleme algoritmasının da birbirlerine göre avantaqj ve dezavantajları vardır. Peki dengeleme nasıl yapılmaktadır? 
-    İşte eleman insert edilirken dengenin bozulduğu tespit edilir, sonra dengeyi korumak içim az sayıda düğüm yer değiştirilerek 
-    işlem yapılır. İşte dengenin korunması için yapılan işlemler AVL dengelemesinde farklı kırmızı-siyah dengelemesinde 
-    farklıdır. 
+    (red-black)" dengelemesi. AVL dengelemesiyle oluşturulmuş ikili arama ağaçlarına "AVL ağacı (AVL tree)", "kırmızı-siyah 
+    dengelemesi" ile oluşturulmuş ikili arama ağaçlarına ise "kırmızı-siyah ağacı (red-black tree)" denilmektedir. İki
+    dengeleme algoritmasının da birbirlerine göre avantajı ve dezavantajları vardır. 
+    
+    Peki dengeleme nasıl yapılmaktadır? İşte eleman insert edilirken dengenin bozulduğu tespit edilir, sonra az sayıda 
+    düğüm bağlantısı üzerinde değişiklik yapılarak denge korunuz. İşte dengenin korunması için yapılan işlemler AVL 
+    dengelemesinde farklı kırmızı-siyah dengelemesinde farklıdır. 
     
     AVL dengelemesi Georgy Adelson-Velsky ve Evgenii Landis tarafından 1962'de, kırmızı siyah ağacı ise "Leo Guibas ve 
     Robert Sedgewick" tarafından 1978'de ortaya atılmıştır. Biz burada AVL ve kırmızı-siyah dengeleme algoritmaları 
@@ -14270,19 +14322,21 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 /*----------------------------------------------------------------------------------------------------------------------
     Kırmızı-siyah ağaçlarında düğümlere "kırmızı" ya da "siyah" renkleri verilmektedir. Yani bir düğüm ya kırmızı 
     olabilir ya da siyah olabilir. (Buradaki kırmızı ve siyah renkleri o zamanın lazer yazıcısı tarafından en iyi basılan 
-    renkler olduğu için tercih edilmiştir.) Kırmızı siyah ağacında bir düğüm önce yine ikili arama ağacında olduğu gibi 
-    küçükler sola büyükler sağa biçiminde ağaca eklenir. Sonra aşağıda belirteceğimiz kuralların ihlal edilip edilmediğine
-    bakılır. Eğer bu kurallardan biri ihlal edilmişse uygun düğüm hareketleri yapılarak dengeleme sağlanır. Kırmızı-siyah
-    ağacının kuralları şunlardır:
+    renkler olduğu için tercih edilmiştir.) Kırmızı-siyah ağacında bir anahtar önce yine ikili arama ağacında olduğu gibi 
+    küçükler sola büyükler sağa biçiminde yeri tespit edilerek ağaca eklenir. Sonra aşağıda belirteceğimiz kuralların 
+    ihlal edilip edilmediğine bakılır. Eğer bu kurallardan biri ihlal edilmişse uygun düğüm hareketleri yapılarak dengeleme 
+    sağlanır. Dengelemenin sağlanması için yapılan işlemlere "döndürme (rotation)" de denilmektedir. 
+    
+    Kırmızı-siyah ağacının kuralları şunlardır:
 
-    1) Renk kuralı: Her düğüm ya kırmızı ya da siyahtır. 
+    1) Renk kuralı: Her düğüm ya kırmızıdır ya da siyahtır. 
     2) Kök kuralı: Kök düğüm her zaman siyahtır.
-    3) Yaprak (NIL) kuralı: Tüm yaprak düğümler, yani NULL göstericilerle temsil edilen dış düğümler, siyah kabul edilir.
+    3) NIL (NULL) düğüm kuralı: NIL düğümler siyah kabul edilir.
     4) Kırmızı kuralı: Kırmızı bir düğümün alt düğümleri siyah olmak zorundadır. Başka bir deyişle, kökten yaprağa giden 
-    herhangi bir yol üzerinde ardışık iki kırmızı düğüm bulunamaz. (Yani kırmızı düğümün alt düğümü kırmızı olamaz. Başka
-    bir deyişle kırmızı düğümün üst düğümü her zaman siyahtır. Siyah yükseklik kuralı: Herhangi bir düğümden, o düğümün 
-    altındaki tüm yapraklara giden her yol üzerinde eşit sayıda siyah düğüm bulunur. Bu sayıya o düğümün "siyah yüksekliği" 
-    (black height) denir.
+    herhangi bir yol üzerinde ardışık iki kırmızı düğüm bulunamaz. (Yani kırmızı düğümün alt düğümü kırmızı olamaz. Kırmızı 
+    düğümün üst düğümü her zaman siyahtır.) 
+    5) Siyah yükseklik kuralı: Herhangi bir düğümden, o düğümün altındaki tüm yapraklara giden her yol üzerinde eşit 
+    sayıda siyah düğüm bulunur. Bu sayıya o düğümün "siyah yüksekliği" (black height) denir.
 
     4 ve 5 numaralı kurallarla şu garanti verilmiş olur : Kökten yaprağa giden en uzun yol, en kısa yolun en fazla 
     iki katı olabilir. Çünkü en kısa yol tamamen siyah düğümlerden oluşur; en uzun yol ise siyah ve kırmızı düğümlerin 
@@ -14308,10 +14362,17 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     │ NIL │ │ NIL │   │ NIL │ │ NIL │      │ NIL │ │ NIL │
     └─────┘ └─────┘   └─────┘ └─────┘      └─────┘ └─────┘
 
-    Yukarıdaki ağaçta kuralın uygulandığını görüyorsunuz. Burada yaprakları temsil eden NIL dğümler her zaman siyahtır.
-    İşte yeni düğüm önce ağaca yerleştirilir, sonra kuralın bozulup bozulmadığına bakılır, eüer kural bozulmuşsa
-    bazı düğüm harketleriyle kuralın bozulması engellenir. Aşağıdaki tabloda AVL ağacı ile kırmızı-siyah ağacı 
-    çeşitli özelliklere göre karşılaştırılmıştır. 
+    Yukarıdaki ağaçta kuralın uygulandığını görüyorsunuz. Burada yaprakları temsil eden NIL düğümler her zaman siyahtır.
+    İşte yeni düğüm önce ağaca yerleştirilir, sonra kuralın bozulup bozulmadığına bakılır, eğer kural bozulmuşsa
+    bazı düğüm hareketleriyle kuralın bozulması engellenir. Kırmızı-siyah ağacının gerçekleştiriminde düğümlerde 
+    şu bilgilerin tutulması gerekir:
+
+    - Sol alt düğümün adresi
+    - Sağ alt düğümün adresi
+    - Düğümün rengi
+    - Üst düğümün adresi 
+    
+    Aşağıdaki tabloda AVL ağacı ile kırmızı-siyah ağacı çeşitli özelliklere göre karşılaştırılmıştır. 
 
     ┌──────────────────────────┬─────────────────────────────────┬─────────────────────────────────┐
     │         Özellik          │       Kırmızı-Siyah Ağacı       │           AVL Ağacı              │
@@ -14319,7 +14380,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     │ Denge ölçütü             │ Renk kuralları ve siyah         │ Her düğümde sol/sağ alt ağaç    │
     │                          │ yükseklik eşitliği              │ yükseklik farkı en fazla 1      │
     ├──────────────────────────┼─────────────────────────────────┼─────────────────────────────────┤
-    │ Denge sıkılığı           │ Gevşek: en uzun yol en kısa     │ Katı: ağaç neredeyse tam        │
+    │ Denge sıkılığı           │ Gevşek; en uzun yol en kısa     │ Katı; ağaç neredeyse tam        │
     │                          │ yolun en fazla 2 katı olabilir  │ dengeli tutulur                 │
     ├──────────────────────────┼─────────────────────────────────┼─────────────────────────────────┤
     │ En kötü durum yüksekliği │ h <= 2 * log2(n + 1)            │ h <= 1.44 * log2(n + 2)         │
@@ -14360,28 +14421,26 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Yukarıda da belirttiğimiz gibi eskiden (çekirdeğin 5.15 verisyonundan önce) sanal bellekteki boş alanlarla dolu alanlar 
+    Yukarıda da belirttiğimiz gibi eskiden (çekirdeğin 5.15 versiyonundan önce) sanal bellekteki boş alanlarla dolu alanlar 
     ayrı kırmızı-siyah ağaçlarında tutuluyordu. Ancak çekirdeğin 5.15 versiyonuyla birlikte iki ağaç yerine tek bir ağaç 
     kullanılmaya başlanmıştır. Eskiden dolu alanlara ilişkin ağacın kökü vmap_area_root değişkeninde, boş alanlara ilişkin 
     ağacın kökü ise free_vmap_cache değişkeninde tutuluyordu. Çekirdeğin 5.15 versiyonuyla birlikte teke düşürülen 
-    ağacın kökü "mm/vmalloc.c" dosyası içeirisindeki free_vmap_area_root değişkeninde tutulmaktadır:
+    ağacın kökü "mm/vmalloc.c" dosyası içerisindeki free_vmap_area_root değişkeninde tutulmaktadır:
 
     static struct rb_root free_vmap_area_root = RB_ROOT;
 
-     Burada rb_root yapısı kırmızı-siyah ağacının kök düğümünü belirtmektedir. Yapı güncel çekirdeklerde "include/linux/
-     rbtree_types.h" dosyası içerisinde iöyle tanımlanmıştır:
+    Burada rb_root yapısı kırmızı-siyah ağacının kök düğümünü belirtmektedir. Yapı güncel çekirdeklerde "include/linux/
+    rbtree_types.h" dosyası içerisinde şöyle tanımlanmıştır:
 
      struct rb_root {
         struct rb_node *rb_node;
     };
 
-    Görüldüğü gibi yapıda yalnızca kök düğümün adresi tutulmaktadır. Kırmızı-siyah ağacının gerçekleştiriminde düğümlerde 
-    şu bilgilerin tutulması gerekir:
+    RB_ROOT makrosu da şöyşe tanımlanmıştır:
 
-    - Sol alt düğümün adresi
-    - Sağ alt düğümün adresi
-    - Düğümün rengi
-    - Üst düğümün adresi 
+    #define RB_ROOT (struct rb_root) { NULL, }
+
+    Görüldüğü gibi yapıda yalnızca kök düğümün adresi tutulmaktadır. 
 
     Kırmızı-siyah ağacının düğümleri aynı dosyada rb_node yapısıyla temsil edilmiştir:
 
@@ -14392,15 +14451,15 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     } __attribute__((aligned(sizeof(long))));
 
     Burada yapının __rb_parent_color elemanı hem üst düğümün adresini hem de düğümün kendi rengini tutmaktadır. Düğümler 
-    long türünün uzunlupuna (32 bit sistemde 4, 64 bit sistemde 8) adresin düşük anlamlı bitleri zaten sıfırdır. İşte
-    __rb_parent_color elemanının en düşük anlamlı biti düğümün rengini tutmaktadır. En düşük anlamlı bit 0 ise düğüm
-    kırmızı, 1 ise siyahtır. 
+    long türünün uzunluğuna (32 bit sistemde 4, 64 bit sistemde 8) hizalandığından adresin düşük anlamlı bitleri zaten 
+    sıfırdır. İşte __rb_parent_color elemanının en düşük anlamlı biti düğümün rengini tutmaktadır. En düşük anlamlı bit 
+    0 ise düğüm kırmızı, 1 ise siyahtır. 
 
-    Görüldüğü gibi düğümlerin içerisinde bilgi tutulmamaktadır. Çünkü kırmızı-siyah ağaçları da gömme tekniğiyle oluşturulmaktadır. 
-    Yani aslında bu düğüm başka bir yapının elemanı durumundadır, container_of makrosuyla ana yapı nesnesinin adresi 
-    elde edilmektedir. 
+    Görüldüğü gibi düğümlerin içerisinde bilgi tutulmamaktadır. Çünkü kırmızı-siyah ağaçları da gömme tekniğiyle 
+    oluşturulmaktadır. Yani aslında bu düğüm başka bir yapının elemanı durumundadır, container_of makrosuyla ana yapı 
+    nesnesinin adresi elde edilmektedir. 
     
-    vmalloc işlemlerinde aslında kırmızı-siyah ağacının düğümlerinde vmap_area nesneleri bulunmaktadır. vmap_area yapısını 
+    vmalloc işlemlerinde kırmızı-siyah ağacının düğümlerinde vmap_area nesneleri bulunmaktadır. vmap_area yapısını 
     yeniden anımsatmak istiyoruz:
 
     struct vmap_area {
@@ -14423,27 +14482,26 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         unsigned long flags;            /* mark type of vm_map_ram area */
     };
 
-    İşte yapının rb_node elemanı aslında ağacın düğümünü belirtmektedir. 
+    İşte yapının rb_node elemanı aslında kırmızı-siyah ağacının düğümünü belirtmektedir. vmap_area nesnesinin adresi bu 
+    düğümden yukarı çıkılarak elde edilmektedir. vmalloc gerçekleştiriminde kullanılan kırmızı-siyah ağacındaki anahtar 
+    va_start adresidir. Yani arama işlemi va_start değerine göre yapılmaktadır. Ancak izleyen paragraflarda da açıklayacağımız
+    gibi ağaçta aralık tabanlı aramalarda yapılabilmektedir. 
 
-    vmalloc gerçekleştirimind ekullanılan kırmızı-siyah ağacındaki anahtar va_start adresidir. Yni arama işlemi va_start 
-    değerine göre yapılmaktadır. 
-
-    Şimdi siz "mademki kırmızı-siyah ağacı aramada kullanılıyor, o halde neden kırmızı-siyah ağacı yerine hash 
-    tablolarının kullanılmadığını" merak edebilirsiniz. İkili arama ağaçları aynı zamanda bir sıralama da oluşturmaktadır. 
-    Hash tablolarında böyle bir sıralama oluşturulamamaktadır. vmalloc gerçekleştiriminde sıralamadan da faydalanılmaktadır. 
-    Örneğin free hale getirme işleminde iki komşunun birleştirilmesi gerekir. Hash tabloları iki komşuyu tek bir aramada 
-    bulamamaktadır. 
+    Şimdi siz "neden kırmızı-siyah ağacı yerine hash tablolarının kullanılmadığını" merak edebilirsiniz. İkili arama 
+    ağaçları aynı zamanda bir sıralama da oluşturmaktadır. Hash tablolarında böyle bir sıralama oluşturulamamaktadır. 
+    vmalloc gerçekleştiriminde sıralamadan da faydalanılmaktadır. Örneğin free hale getirme işleminde iki komşunun 
+    birleştirilmesi gerekir. Hash tablolarında iki komşu tek bir aramayla bulunamamaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi tahsisat ve free işlemlerinin kırmızı-siyah ağacında nasıl yapıldığına bakalım. free işlemi oldukça kolaydır. 
-    vfree fonksiyonun parametrik yapısını anımsayınız:
+    Şimdi tahsis etme ve serbest bırakma işlemlerinin kırmızı-siyah ağacı kullanılarak nasıl yapıldığına bakalım. Tahsis 
+    edilmiş alanın serbest bırakılması oldukça basittir. vfree fonksiyonunun parametrik yapısını anımsayınız:
 
     void vfree(const void *addr);
 
-    free hale getirme işleminde ağacın kökündne girilir. vm_area nesnesinin içerisindeki va_start elemanı ile karşılaştırma 
-    yapılarak sola ya da sağa ilerlenir, ilgili düğüm bulunur. vfree fonksiyonun çağrı grafındaki önemli foonksiyonlar 
-    şunlardır:
+    Serbest bırakma işlemi için ağacın kökünden girilir. vmap_area nesnesinin içerisindeki va_start elemanı ile karşılaştırma 
+    yapılarak sola ya da sağa ilerlenir, ilgili düğüm bulunur. Boş komşu bloklar varsa bunlar da birleştirilir. vfree 
+    fonksiyonun çağrı zincirindeki önemli fonksiyonlar şunlardır:
 
     vfree(addr)
     │
@@ -14468,16 +14526,16 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     │                   │
     │                   └── purge_vmap_node()
     │                        └── merge_or_add_vmap_area_augment(va,
-    │                                 &free_vmap_area_root, ...)  (boş alan ağacına iade)
+    │                                 &free_vmap_area_root, ...)  (boş alan ağacına iade et)
     │
-    ├── vm_area_free_pages(vm, ...)                 (fiziksel sayfaları arkadaş sistemine iade)
+    ├── vm_area_free_pages(vm, ...)                 (fiziksel sayfaları arkadaş sistemine iade et)
     │
     ├── kvfree(vm->pages)                           (gösterici dizisini serbest bırak)
     │
     └── kfree(vm)                                   (vm_struct'ı serbest bırak)
             
     
-    Güncel çekirdeklerde bu arama işlemi aşağıdaki fonksiyonla yapılmıştır:
+    Güncel çekirdeklerde kırmızı-siyah ağacında blok araması aşağıdaki fonksiyonla yapılmaktadır:
 
     static struct vmap_area *__find_vmap_area(unsigned long addr, struct rb_root *root)
     {
@@ -14500,30 +14558,33 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         return NULL;
     }
 
-    Burada rb_entry fonksiyonu container_of makrosuyla düğümün içinde bulunduğu vmap_area nesnesinin adresini elde 
+    Burada rb_entry fonksiyonu container_of makrosunu kullanarak düğümün içinde bulunduğu vmap_area nesnesinin adresini elde 
     etmektedir. Arama sırasında yapılan karşılaştırmalara dikkat ediniz:
 
     /* ... */
+
     if (addr < va->va_start)
         n = n->rb_left;
     else if (addr >= va->va_end)
         n = n->rb_right;
     else
         return va;
+
     /* ... */
 
-    addr değeri va->va_start değerindne küçükse ağaçta sola gidilmiştir, ancak ikinci karşılaştırma addr > va->va_start
-    biçimind değil addr > va->va_end biçiminde yapılmıştır. Bunun nedeni aslında bu fonksiyonun genel olarak kapsama 
-    amaçlı kullanılmasındandır. Yani aslında yukarıdaki fonksiyon addr adresinden başlayan düğümü değil, addre adresini 
+    addr değeri va->va_start değerinden küçükse ağaçta sola gidilmiştir, ancak ikinci karşılaştırma addr > va->va_start
+    biçiminde değil addr >= va->va_end biçiminde yapılmıştır. Bunun nedeni aslında bu fonksiyonun genel olarak kapsama 
+    amaçlı kullanılmasındandır. Yani aslında yukarıdaki fonksiyon addr adresinden başlayan düğümü değil, addr adresini 
     içeren düğümü bulmaktadır. Biz bu fonksiyona tahsis edilmiş alandaki herhangi bir adresi versek de bu fonksiyon 
-    o alana ilişkin düğümü bulmaktadır. Örneğin biz tahsis edilen alan içesinde herhangi bir adres verdiğimizde 
-    ilk deyiminden else kısma sapılacak ama ikinci if deyiminden de else kısma sapılacaktır.    
+    o alana ilişkin düğümü bulmaktadır. Örneğin biz tahsis edilen alan içerisinde herhangi bir adres verdiğimizde 
+    ilk if deyiminden de ikinci if deyiminden de else kısmına sapılacaktır.    
 
-    vfree fonksiyonunun gerçekleştirimi biraz daha ayrıntılıdır. Bu fonksiyon free işlemini yaparken ona komşu olan 
-    boş alan varsa onları da birleştirmektedir. Bir alan free hale getirilirken o alan için yaratılmış olan vm_struct
-    nesnesi hemen vmap_area nesnesi ise "purge listesi" denilen listeye yerleştirilip gecikmeli bir biçimde free hale
-    getirilmektedir. "purge listeleri" vmap_node yapısının çerisindedir. vmap_node yapısı güncel çekirdeklerde "mm/vmalloc.c"
-    dosyası içerisinde şöyle tanımlanmıştır:
+    vfree fonksiyonunun gerçekleştirimi biraz daha ayrıntılıdır. Bu fonksiyon serbest bırakma işlemini yaparken ona 
+    komşu olan boş alan varsa onları da birleştirmektedir. Bir alan serbest bırakılırken o alan için yaratılmış olan 
+    vm_struct nesnesi hemen, vmap_area nesnesi ise "purge listesi" denilen listeye yerleştirilip gecikmeli bir biçimde 
+    serbest bırakılmaktadır. "purge listeleri" vmap_node yapısının içerisindedir (buradaki "node" terimi ağaç düğümünü 
+    ya da NUMA düğümünü belirtmiyor). vmap_node yapısı güncel çekirdeklerde "mm/vmalloc.c" dosyası içerisinde şöyle 
+    tanımlanmıştır:
 
     static struct vmap_node {
         /* Simple size segregated storage. */
@@ -14543,15 +14604,15 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         unsigned long nr_purged;
     } single;
 
-    Buradaki purge_list elemanı daha sonra silinecek vm_area nesnelerini tutmaktadır. vmap_node nesneleri genellikle 
+    Buradaki purge_list elemanı daha sonra silinecek vmap_area nesnelerini tutmaktadır. vmap_node nesneleri genellikle 
     CPU sayısına bağlı olarak birden fazla oluşturulmaktadır. İlgili tanımlamalar "/mm/vmalloc.c" dosyasında tutulmaktadır:
 
     static struct vmap_node *vmap_nodes = &single;
     static __read_mostly unsigned int nr_vmap_nodes = 1;
     static __read_mostly unsigned int vmap_zone_size = 1;
 
-    Burada default 1 değerini görüyor olsanız da bu değerler sistemin ilklenmesi (initialize edilmesi) sırasında 
-    artırılmkatadır. 
+    Tanımalamalarda varsayılan değer olarak 1 görüyor olsanız da bu değerler sistemin ilklenmesi (initialize edilmesi) 
+    sırasında işlemci ya da çekirdek sayısına bağlı olarak artırılmaktadır. 
 
     Burada bir noktayı yeniden vurgulamak istiyoruz: vfree fonksiyonu bir bloğu serbest bıraktığında o bloğun bilgileri 
     kırmızı-siyah ağacında kalmaya devam etmektedir. Çünkü free_vmap_area_root ağacı hem tahsis edilmiş blokları hem de
@@ -14562,9 +14623,9 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 
 /*----------------------------------------------------------------------------------------------------------------------
     vmalloc fonksiyonunun gerçekleştirimi biraz daha karmaşıktır. vmalloc boş bir bloğu bulabilmek için "first fit" 
-    yöntemini kullanmaktadır. Yani talep edilen uzunluğu içeren ilk boş bloğu bulmaktadır. Yukarıda da belirttiğimiz gibi
-    güncel çekirdeklerdeki free_vmap_area_root ağacı hem tahsis edilmiş blokları hem de boş blokları tutmaktadır. vmap_area 
-    yapısının içerisindeki birliği anımsayınız:
+    yöntemini kullanmaktadır. Yani talep edilen uzunluğu içeren ilk boş bloğu bulmaktadır. Güncel çekirdeklerdeki 
+    free_vmap_area_root ağacının hem tahsis edilmiş blokları hem de boş blokları tuttuğunu anımsayınız. vmap_area 
+    yapısının içerisindeki birlik şöyleydi:
 
     struct vmap_area {
         /* ... */
@@ -14578,9 +14639,9 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     };
 
     Birliğin iki elemanı çakışık yerleştirilmektedir. Eğer blok doluysa birliğin vm elemanı aktiftir (yani NULL değildir),
-    eğer blok boşsa burada ilgili düğümden itibaren en büyük boş alana sahip bloğun uzunluğu birliğin subtree_max_size 
-    elemanında tutulmaktadır. Bu eleman ağaçta boş alan aranırken eüer ilgili dalda istenilen uzunlukta boş alan yoka
-    o dalda geresiz arama yapmayı engellemektedir. vmalloc fonksiyonunun çağrı grafındaki önemli fonksiyonlar şunlardır:
+    eğer blok boşsa ilgili düğümden itibaren en büyük boş alana sahip bloğun uzunluğu birliğin subtree_max_size 
+    elemanında tutulmaktadır. Bu eleman ağaçta boş alan aranırken eğer ilgili dalda istenilen uzunlukta boş alan yoksa
+    o dalda gereksiz arama yapmayı engellemektedir. vmalloc fonksiyonunun çağrı zincirindeki önemli fonksiyonlar şunlardır:
 
     vmalloc(size)
     │
@@ -14588,7 +14649,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         │
         └── __vmalloc_node_range(...)
             │
-            ├── __get_vm_area_node(...)                (sanal Adres Alanı'ndan aralık ayır)
+            ├── __get_vm_area_node(...)                (sanal adres alanı'ndan aralık ayır)
             │    │
             │    ├── kzalloc_node(sizeof(*area), ...)  (vm_struct tahsisi)
             │    │
@@ -14628,7 +14689,6 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
             │
             └── clear_vm_uninitialized_flag(area)      (alan artık kullanıma hazır)
         
-
     Güncel çekirdeklerde yukarıdaki fonksiyonlara _noprof sonekleri getirilmiştir. Biz grafta bu sonekli fonksiyonlar 
     yerine soneksiz olanları bulundurduk. 
 
@@ -14708,17 +14768,21 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     vmalloc her zaman en düşük adresteki ilk bulunan yeterli uzunluğa sahip bloğu tahsis etmektedir. Düşük adresten 
     tahsisat yapmanın "bölünme (fragmentation)" üzerinde olumlu etkileri vardır. Aynı zamanda düşük adres temel alınarak 
     tahsisat yapılması boş blokların birleştirilmesi üzerinde de faydalar sağlamaktadır. Bilindiği gibi ikili arama 
-    ağaçlarında küçükten-büyüğe dolaşım aslında özyinelemeyle (buna "in-order" doalaşım denilmektedir) sağlanmaktadır. 
+    ağaçlarında küçükten-büyüğe dolaşım aslında özyinelemeyle (buna "in-order" dolaşım denilmektedir) sağlanmaktadır. 
     Ancak burada kırmızı-siyah ağaçlarında her düğüm üst düğümün yerini de tuttuğu için özyinelemeye gerek kalmamaktadır. 
     (Kırmızı-siyah ağacında sürekli sola gittiğimizde yapraklara ulaşınca geri dönüş özyinelemeyle değil üst düğümün 
     adresi yoluyla yapılabilmektedir.) find_vmap_lowest_match fonksiyonu dikkatle incelendiğinde şu işlemlerin yapıldığı
     görülmektedir:
 
-    1) Ağaçta önce eğer sol kolda uygun büyüklükte yer varsa sürekli sol koldanilerlenmektedir. 
+    1) Ağaçta önce eğer sol kolda uygun büyüklükte yer varsa sürekli sol koldan ilerlenmektedir. 
     2) Eğer sol kolda istenilen büyüklükte yer bulunamazsa düğümün kendisine bakılmaktadır ("in-order" dolaşım)
-    3) Eğer düğümün kendisinde de yeterli boş yer yoksa bu kez sağ koldan ilerlenmektedir. Tabi sağ kolun da sol 
-    kollarından itibaren bu işlemler yapılmaktadır. Tabii dolaşım sırasında ilgili düğümün "boş mu dolu mu olduğuna" 
-    da bakılmıştır. get_subtree_max_size fonksiyonu şöyle yazılmıştır:
+    3) Eğer düğümün kendisinde de yeterli boş yer yoksa bu kez sağ koldan ilerlenmektedir. Tabii sağ kolun da sol 
+    kollarından itibaren bu işlemler yapılmaktadır.
+    
+    find_vmap_lowest_match fonksiyonunda bir düğüme girilmeden önce o alt ağaçta talep edilen miktarda boş yerin olup 
+    olmadığının sorgulandığına dikkat ediniz.  Böylece talep edilen miktarda boş yer olmayan alt ağaçlarda arama 
+    yapılmamaktadır. Dolaşım sırasında ilgili düğümün "boş mu dolu mu olduğuna" dolaylı olarak bakılmıştır. 
+    get_subtree_max_size fonksiyonu şöyle yazılmıştır:
 
     static __always_inline unsigned long
     get_subtree_max_size(struct rb_node *node)
@@ -14729,13 +14793,15 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         return va ? va->subtree_max_size : 0;
     }
 
-    Görüldüğü gibi eğer düğüm doluysa zaten bu fonksiyon sıfır değerini vermektedir. Yani dolu düğümler geçilmektedir. 
+    Görüldüğü gibi eğer düğüm doluysa zaten bu fonksiyon sıfır değerini döndürmektedir. Yani dolu düğümler geçilmektedir.    
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Biz şimdiye kadar Linux çekirdeğindeki bellek yönetimiyla ilgili önemli konuları gördük. Şimdi dikkatimizi "sayfa 
-    önbelleğine (page cache)" çevirceğiz. Sayfa önbelleği hem bellek yönetimi ile hem de dosya sistemi ile ilişkili
-    bir konudur. Çünkü sayfa önbelleği büyük ölçüde dosya işlemlerinde devreye girmektedir. 
+    Biz şimdiye kadar Linux çekirdeğindeki bellek yönetimiyle ilgili önemli konuları gördük. Şimdi dikkatimizi "sayfa 
+    önbelleğine (page cache)" yönelteceğiz. Sayfa önbelleği hem bellek yönetimi ile hem de dosya sistemi ile ilişkili
+    bir konudur. Çünkü sayfa önbelleği ağırlıklı olarak dosya işlemlerinde devreye girmektedir. Biz sayfa önbelleğine 
+    dosya sistemini ele aldığımız beşinci ve altıncı bölümlerde kavramsal olarak değinmiştik. Bu bölümde bu alt sistemi
+    ayrıntılarıyla ele alacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -14743,7 +14809,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     hedefleyen bir önbellek sistemidir. Böylece read/write gibi işlemlerde diske başvurulmadan istek sayfa önbelleğinden 
     karşılanabilmektedir. Sayfa önbelleğinin kullanımını aşağıdaki şekille betimleyebiliriz:
 
-      Kullanıcı Alanı
+                        Kullanıcı Alanı
     ┌──────────────────────────────────────────────────────────┐
     │  read(fd, buf, n)    write(fd, buf, n)    mmap(fd, ...)  │
     └─────────────┬────────────────┬─────────────────┬─────────┘
@@ -14760,7 +14826,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     ┌─────────────────────────────────────────────────────────┐
     │                   Sayfa Önbelleği                       │
     │  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
-    │  │  Page 0  │  │  Page 1  │  │  Page 2  │  ...          │
+    │  │ Sayfa 0  │  │  Sayfa 1 │  │  Sayfa 2 │  ...          │
     │  │ (4 KB)   │  │ (4 KB)   │  │ (4 KB)   │               │
     │  └──────────┘  └──────────┘  └──────────┘               │
     │          address_space (XArray tabanlı)                 │
@@ -14778,14 +14844,14 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     │       struct bio → I/O Scheduler → Sürücü               │
     └─────────────────────────────────────────────────────────┘
 
-    Biz simplefs dosya sistemimizde sayfa önbelleğini "tampon (buffer)" işlemleriyle dolaylı bir biçimdekullandık. Daha 
+    Biz simplefs dosya sistemimizde sayfa önbelleğini "tampon (buffer)" işlemleriyle dolaylı bir biçimde kullandık. Daha 
     önceden de belirttiğimiz gibi eskiden Linux çekirdeklerinde "tampon önbelleği (buffer cache)" ile "sayfa önbelleği 
     (page cache)" birbirinden ayrılıyordu. Sonra bunlar birleştirildi. Ancak tampon önbelleği ile sayfa önbelleği 
     birleştirildiği için biz aslında simplefs dosya sistemimizde tampon işlemleri yapmış olsak da dolaylı olarak sayfa 
     önbelleğini de kullanmış olduk. Sayfa önbelleğini tampon işlemleriyle kullanmak oldukça kolaydır. Bu nedenle biz 
     simplefs dosya sisteminde bu yola saptık. Ancak modern dosya sistemleri (örneğin ext4 gibi) dosyaların önbelleklenmesinde 
     tampon işlemleri yapmadan sayfa önbelleğini doğrudan kullanmaktadır. (Bu dosya sistemleri yine disk bloklarının okunması 
-    ve yazılamsı işlemlerini tampon yoluyla yapmaktadır.) Biz de dosya sistemlerşnde doğrudan sayfa önbelleğinin kullanılmasını 
+    ve yazılaması işlemlerini tampon yoluyla yapmaktadır.) Biz de dosya sistemlerinde doğrudan sayfa önbelleğinin kullanılmasını 
     ayrı bir başlık altında ele alacağız. 
 
     Önce simplefs dosya sistemimizdeki tampon işlemleriyle sayfa önbelleğini nasıl kullandığımızı kullanımını anımsatmak 
@@ -14896,13 +14962,13 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 /*----------------------------------------------------------------------------------------------------------------------
     Linux'un sayfa önbelleği belli bir uzunluğu olan global bir bellek bölgesi değildir. Dosya işlemleri sırasında dosya 
     temelinde önbellekleme yapılmaktadır. Yani adeta her dosyanın sanki ayrı bir önbelleği varmış gibi bir durum söz 
-    konusudur. Sayfa önbelleği sayfalardan oluşmaktadır. Önbellekteki sayfalar dosyanın sayfa büyüklüğündeki kısımlarını 
+    konusudur. Sayfa önbelleği sayfalardan oluşmaktadır, önbellekteki sayfalar da dosyanın sayfa büyüklüğündeki kısımlarını 
     tutmaktadır.  
     
     Anımsanacağı gibi Linux çekirdeğinde inode nesneleri dosyanın diskteki varlığını temsil ediyordu. Aynı dosyayı 
-    birden fazla kez açıkça ya da katı bağ (hard link) youyla açtığımızda aslında birden fazla file nesnesi oluşturulurken 
-    tek bir inode nesnesi oluşturuluyordu. İşte bir dosyanın önbellek sayfaları inode elemanının i_mapping elemanında 
-    tutulmaktadır:
+    birden fazla kez açıkça ya da katı bağ (hard link) yoluyla açtığımızda aslında birden fazla dosya nesnesi (struct file)
+    nesnesi oluşturulurken tek bir inode nesnesi oluşturuluyordu. İşte bir dosyanın önbellek sayfaları inode elemanının 
+    i_mapping elemanında tutulmaktadır:
 
     struct inode {
         /* ... */
@@ -14912,11 +14978,11 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         /* ... */
     };
 
-    Burada i_mapping elemanının address_space isimli bir yapı türünden olduğuna dikkat ediniz. İşte address_space 
+    Burada i_mapping elemanının address_space isimli bir yapı türünden olduğuna dikkat ediniz. Bu address_space 
     yapısı dosyanın sayfa önbelleğinin giriş noktasıdır. Her dosya için çekirdek bir address_space nesnesi 
     oluşturmaktadır.
     
-    İşte bu address_space yapısı dosyaya ilişkin önbellek işlemlerinde gereksinim duyulacak tüm bilgileri içermektedir. 
+    address_space yapısı dosyaya ilişkin önbellek işlemlerinde gereksinim duyulacak tüm bilgileri içermektedir. 
     Nesneler arasındaki ilişkiyi aşağıdaki şekille betimleyebiliriz:
 
     ┌───────────────┐      ┌───────────────┐      ┌─────────────────┐      ┌──────────────────────────────────┐
@@ -14925,21 +14991,46 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     │               │      │               │      │                 │      │  (sayfa önbelleği / page cache)  │
     └───────────────┘      └───────────────┘      └─────────────────┘      └──────────────────────────────────┘
 
-    Peki bir dosyanın önbelleklenmiş sayfaları addres_space nesnesi içrisinde nasıl tutulmaktadır? Çekirdek dosyanın 
+    Peki bir dosyanın önbelleklenmiş sayfaları address_space nesnesi içerisinde nasıl tutulmaktadır? Çekirdek dosyanın 
     okunacak ya da yazılacak kısmının önbellekte olup olmadığını nasıl anlamaktadır? İşte bunun için daha önce 
-    görmüşolduğumuz XArray veri yapısı kullanılmaktadır. Anımsanacağı gibi XArray aslında "radix ağaçlarının (radix tree)" 
-    bir gerçekleştirimiydi. Radix ağaçlarının sayısal anahtarlara sahip sistemlerde hızlı arama amacıyla kullanıldığını 
-    anımsayınız. Radix ağaçlarında her düğümün n tane alt düğümü olabilmektedir. İşte sayfa önbelleğinde kullanılan radix 
-    ağaçlarında dosyaya ilişkin sayfa indeksi (sayfa offset'i de diyebiliriz) anahtar durumundadır. Bu ağaçlarda her 
-    kademede 6 bitlik değer tutulmaktadır. Yani ağacın her düğümü 64 bit temel alındığından 64 alt düğüm içermektedir. 
-    Tabii XArray gerçekleştiminde düğümler ancak gerektiğinde yaratılmaktadır. Yani her düğümün 64 alt düğümü olmakla 
-    birlikte bu alt düğümlere ilişkin slotlar kullanılmadıktan sonra NULL adres içermektedir. Böylece belli bir sayfa 
-    numarası ağaçta 64 / 6 + 1 = 11  karşılaştırmayla bulunabilmektedir. 
+    görmüş olduğumuz XArray veri yapısı kullanılmaktadır. Anımsanacağı gibi XArray aslında "radix ağaçlarının (radix 
+    tree)" Linux'a özgü bir gerçekleştirimiydi. Radix ağaçlarının sayısal anahtarlara sahip sistemlerde hızlı arama 
+    amacıyla kullanıldığını anımsayınız. Radix ağaçlarında her düğümün n tane alt düğümü olabilmektedir. İşte sayfa 
+    önbelleğinde kullanılan radix ağaçlarında dosyaya ilişkin sayfa indeksi (sayfa offset'i de diyebiliriz) anahtar 
+    durumundadır. Bu ağaçlarda her kademede 6 bitlik değer tutulmaktadır. Yani ağacın her düğümü 64 bit temel 
+    alındığından 64 alt düğüm içermektedir. Tabii XArray gerçekleştiriminde düğümler ancak gerektiğinde yaratılmaktadır. 
+    Yani her düğümün 64 alt düğümü olmakla birlikte bu alt düğümlere ilişkin slotlar kullanılmadığı sürece NULL 
+    adres içermektedir. Böylece belli bir sayfa numarası ağaçta 64 / 6 + 1 = 11  karşılaştırmayla bulunabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Bu nokada inode elemanına ilişkin sayfa önbelleği hakkında bilgileri tutan address_space yapısını ele alabiliriz. 
-    address_space yapısı güncel çekirdeklerde "include/linux.fs.h" dosyasında aşağıdaki gibi tanımlanmıştır:
+    Biz yukarıda sayfa önbelleğinin yalnızca disk tabanlı dosya işlemlerinde kullanıldığı yönünde bir izlenim vermiş 
+    olabiliriz. Ancak sayfa önbelleği disk dosyalarının dışında başka çekirdek mekanizmaları tarafından da kullanılmaktadır: 
+
+    ┌──────────────────────────────────────────────────────────┐
+    │               SAYFA ÖNBELLEĞİ KULLANICILARI              │
+    │                                                          │
+    │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+    │  │  VFS     │  │  mmap/   │  │  Swap    │  │  tmpfs/  │  │
+    │  │  I/O     │  │  fault   │  │  subsys  │  │  shmem   │  │
+    │  │  path    │  │  handler │  │          │  │          │  │
+    │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
+    │       └─────────────┴─────────────┴─────────────┘        │
+    │                            │                             │
+    │                            ▼                             │
+    │              ┌──────────────────────┐                    │
+    │              │    Sayfa Önbelleği   │                    │
+    │              │   (address_space /   │                    │
+    │              │   struct folio)      │                    │
+    │              └──────────────────────┘                    │
+    └──────────────────────────────────────────────────────────┘
+
+    Buradaki VFS kutucuğu disk tabanlı dosya işlemlerini belirtmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi address_space yapısını inceleyelim. address_space yapısı güncel çekirdeklerde "include/linux.fs.h" dosyasında 
+    aşağıdaki gibi tanımlanmıştır:
 
     struct address_space {
         struct inode		*host;
@@ -14963,17 +15054,16 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         void *			    i_private_data;
     } __attribute__((aligned(sizeof(long)))) __randomize_layout;
 
-    address_space yapısının i_pages elemanı xarray yapısı türündendir. Yani XArray ağacı (radix ağacının bir versiyonu) 
-    yapının bu elemanında tutulmaktadır. Başka bir deyişle önbellekte arama bu elemanın belirttiği ağaç kullanılarak 
-    yapılmaktadır. Yapının nrpages elemanı bu dosyanın önbelleğinde tutulan sayfaların toplam sayısını belirtmektedir. 
-    Bazı durumlarda elde bir address_space nesnesi varken geriye dönüp ona ilişkin inode nesnesine erişilmesi gerekebilmektedir. 
-    Yapının host elemanı address_aspace nesnesinin sahibi olan inode nesnesini göstermektedir. Yapının içersinde bazı 
-    senkronizasyon nesnelerini görüyorsunuz. Bunlar dosyanın önbellek işlemlerinde eşzamanlı erişimlerde koruma sağlamak 
-    için kullanılmaktadır. Yapının flags elemanında işleyiş sırasında kullanılan bazı bayraklar tutulmaktadır. Yapının 
-    i_mmap elemanı "belek tabanlı dosyalarda ve genel olarak bellek haritalama (memory mapping)" işlemlerinde kullanılmaktadır. 
-    Yapının a_ops elemanı çokbiçimli davranış için kullanılan fonksiyon göstericilerinden oluşan bir yapı nesnesnin adresini 
-    turmaktadır. Biz bu konuları ayrı bir paragrafta ele alacağız. Aşağıdaki tabloda yapı elemanlarının işlevlerini özet 
-    olarak veriyoruz:
+    address_space yapısının i_pages elemanı xarray yapısı türündendir. Yani XArray ağacı yapının bu elemanında tutulmaktadır. 
+    Başka bir deyişle önbellekte arama bu elemanın belirttiği ağaç kullanılarak yapılmaktadır. Yapının nrpages elemanı 
+    bu dosyanın önbelleğinde tutulan sayfaların toplam sayısını belirtmektedir. Bazı durumlarda elde bir address_space 
+    nesnesi varken geriye dönüp ona ilişkin inode nesnesine erişilmesi gerekebilmektedir. Yapının host elemanı address_space 
+    nesnesinin sahibi olan inode nesnesini göstermektedir. Yapının içerisinde bazı senkronizasyon nesnelerini görüyorsunuz. 
+    Bunlar dosyanın önbellek işlemlerinde eşzamanlı erişimlerde koruma sağlamak için kullanılmaktadır. Yapının flags elemanında 
+    işleyiş sırasında kullanılan bazı bayraklar tutulmaktadır. Yapının i_mmap elemanı "bellek tabanlı dosyalarda (memory 
+    mapped files) ve genel olarak bellek haritalama (memory mapping)" işlemlerinde kullanılmaktadır. Yapının a_ops elemanı 
+    çokbiçimli davranış için kullanılan fonksiyon göstericilerinden oluşan bir yapı nesnesinin adresini tutmaktadır. Biz bu 
+    konuları ayrı bir paragrafta ele alacağız. Aşağıdaki tabloda yapı elemanlarının işlevlerini özet olarak veriyoruz:
 
     ┌──────────────────┬─────────────────────────────────────────────────────────┐
     │    Eleman İsmi   │                    Kısa İşlevi                          │
@@ -15010,7 +15100,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     │                  │ değeri                                                  │
     ├──────────────────┼─────────────────────────────────────────────────────────┤
     │ i_private_lock   │ Sahibin özel verilerini (klasik olarak buffer_head      │
-    │                  │ listesini) korumak için kullandığı spinlock             │
+    │                  │ listesini) korumak için kullandığı spinlock nesnesi     │
     ├──────────────────┼─────────────────────────────────────────────────────────┤
     │ i_mmap_rwsem     │ i_mmap ağacını ve i_mmap_writable sayacını koruyan rw   │
     │                  │ semaphore                                               │
@@ -15022,36 +15112,36 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Her dosyanın ayrı bir sayfa önbelleği olduğunu ve sayfa önbelleğinde dosyaya ilişkin kısımların tutulduğunu, arama 
-    işleminin de XArray yani radix ağacı yoluyla yapıldığını belirttik. Şimdi önbelleğin organizasyonunun nasıl yapıldığı 
-    üzerinde duralım. Önbellekte anahtar dosyaya ilişkin sayfa indeksidir. Yani dosyanın parçaları sayfa temelinde (tipik 
-    olarak 4K) sayfa önbelleğinde tutulmaktadır. Örneğin bir dosyanın 80000 byte olduğunu düşünelim. Aslında bu dosya 
-    4K'lık sayfaların söz konusu olduğu tipik sistemlerde 80000 / 4096 / 4096 = 19.53125 yani 20 sayfa olarak düşünülebilir. 
-    Tabii dosyaya offset yoluyla erişilmektedir. Dosya offset'inin dosyanın kaçıncı sayfasında olduğunun hesabı basittir: 
-    offset >> PAGE_SHIFT. Burada PAGE_SHIFT bir sayfanın 2 üzeri kaç byte'tan oluştuğunu belirtmektedir. (4K sayfalar 
-    için bu PAGE_SHIFT değeri 12'dir.) Tabii offset % PAGE_SHIFT değeri ile ilgili sayfadaki offset de elde edilebilir. 
-    İşte çekirdek belli bir dosya offset'ten hareketle önce dosya offset'ini sayfa indeksine (sayfa offset'i de diyebiliriz) 
-    dönüştürüp sonra ilgili sayfayı dosyanın sayfa önbelleğinde aramaktadır. Örneğin biz aşağıdaki gibi bir çağrı yapmış 
-    olalım:
+    Her inode nesnesinin ayrı bir sayfa önbelleği olduğunu ve sayfa önbelleğinde dosyaya ilişkin kısımların tutulduğunu, 
+    arama işleminin de XArray yani radix ağacı yoluyla yapıldığını belirttik. Şimdi önbelleğin organizasyonunun nasıl 
+    yapıldığı üzerinde duralım. Önbellekte anahtar dosyaya ilişkin sayfa indeksidir. Yani dosyanın parçaları sayfa 
+    temelinde (tipik olarak 4K) sayfa önbelleğinde tutulmaktadır. Örneğin bir dosyanın 80000 byte olduğunu düşünelim. 
+    Aslında bu dosya 4K'lık sayfaların söz konusu olduğu tipik sistemlerde 80000 / 4096 = 19.53125 yani 20 sayfa olarak 
+    düşünülebilir. Tabii dosyaya offset yoluyla erişilmektedir. Dosya offset'inin dosyanın kaçıncı sayfasında olduğunun 
+    hesabı oldukça basittir: offset >> PAGE_SHIFT. Burada PAGE_SHIFT bir sayfanın 2 üzeri kaç byte'tan oluştuğunu 
+    belirtmektedir. (4K sayfalar için bu PAGE_SHIFT değeri 12'dir.) Tabii offset % PAGE_SIZE değeri ile ilgili sayfadaki 
+    offset de elde edilebilir. İşte çekirdek belli bir dosya offset'inten hareketle önce dosya offset'ini sayfa indeksine 
+    (sayfa offset'i de diyebiliriz) dönüştürüp sonra ilgili sayfayı dosyanın sayfa önbelleğinde aramaktadır. Örneğin 
+    biz aşağıdaki gibi bir çağrı yapmış olalım:
 
     result = read(fd, buf, 100);
 
     Dosya göstericisinin konumu da 10254 olsun. Çekirdek önce dosya nesnesine, oradan dosyaya ilişkin inode nesnesine, 
     oradan da dosyanın önbellek bilgilerinin bulunduğu address_space nesnesine erişir. XArray yani radix ağacının kökünün 
-    address_space nesnesi içerisinde olduğunu belirtmiştik. İşte radix ağacında anahtar sayfa indeksidir. Çekirdek 10254 
+    address_space nesnesi içerisinde olduğunu belirtmiştik. İşte radix ağacındaki anahtar sayfa indeksidir. Çekirdek 10254 
     numaralı dosya offset'ini 4096'ya tam bölerek sayfa indeksini elde eder. Örneğimizde bu değer 2'dir. İşte bu 2 değerini 
     radix ağacına anahtar yapmaktadır. 
 
     XArray radix ağacının anahtarının sayfa indeksi (dosya offset'i değil) olduğunu söyledik. Peki aramadan elde edilecek 
     değer nedir? İşte güncel çekirdeklerde sayfa önbelleğindeki aramadan folio isimli bir yapı türünden nesne adresi elde 
     edilmektedir. Yani radix ağacındaki anahtarlar sayfa indeksidir, elde edilecek değerler ise folio nesneleridir. 
-    Eskiden çekirdeğin 5.16 versiyonundan önce folio nesneleri yerine doğrudan page nesneleri kulanılıyordu. Yani çekirdeğin 
+    Eskiden (çekirdeğin 5.16 versiyonundan önce) folio nesneleri yerine doğrudan page nesneleri kulanılıyordu. Yani çekirdeğin 
     5.16 versiyonundan önce buradaki radix ağacı bize dosyanın bellekteki kısmına ilişkin page nesnenin adresini veriyordu. 
     Ancak 5.16'dan itibaren sistem biraz daha iyileştirilmiş ve folio yapısı kullanılmaya başlanmıştır. Tabii izeleyen 
-    paragraflarda ele alacağımız gibi folio nesnesinden page nesnesine, dolayısıyla da dosyanın ilgili kısmının bellekteki 
-    yerine erişilmektedir.
+    paragraflarda ele alacağımız gibi folio nesnesinden page nesnesine, dolayısıyla da dosyanın ilgili kısmının fiziksel 
+    bellekteki kısmına erişilmektedir.
 
-    Örneğin bir dosyaya ilişkin önbelleğin XArray ağacını sembolik biçimde şöyle betimleyebiliriz:
+    Bir dosyaya ilişkin önbelleğin XArray ağacını sembolik biçimde şöyle betimleyebiliriz:
 
     ┌───────┬─────────────────────────────────────────┐
     │ index │ Değer                                   │
@@ -15064,49 +15154,27 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     └───────┴─────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-    Biz yukarıda sayfa önbelleğinin yalnızca disk tabanlı dosya işlemlerinde kullanıldığı yönünde bir izlenim vermiş 
-    olabiliriz. Ancak sayfa önbelleği disk dosyalarının dışında başka çekirdek mekanizmaları tarafından da kullanılmaktadır: 
-
-    ┌──────────────────────────────────────────────────────────┐
-    │               SAYFA ÖNBELLEĞİ KULLANICILARI              │
-    │                                                          │
-    │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-    │  │  VFS     │  │  mmap/   │  │  Swap    │  │  tmpfs/  │  │
-    │  │  I/O     │  │  fault   │  │  subsys  │  │  shmem   │  │
-    │  │  path    │  │  handler │  │          │  │          │  │
-    │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
-    │       └─────────────┴─────────────┴─────────────┘        │
-    │                          │                               │
-    │                          ▼                               │
-    │              ┌──────────────────────┐                    │
-    │              │    Sayfa Önbelleği   │                    │
-    │              │   (address_space /   │                    │
-    │              │   struct folio)      │                    │
-    │              └──────────────────────┘                    │
-    └──────────────────────────────────────────────────────────┘
-
-    Buradaki VFS kutucuğu disk tabanlı dosya işlemlerini belirtmektedir. 
-----------------------------------------------------------------------------------------------------------------------*/
-
 /*---------------------------------------------------------------------------------------------------------------------- 
     Sayfa önbelleğinde saklanan önbellek blokları genellikle sayfa büyüklüğündedir. Yani genellikle bir dosyanın çeşitli 
-    kısımlarınının birer sayfalık (tipik olarak 4K'lık) bölümleri önbelleğe alınmaktadır. Ancak bazı durumlarda ilgili 
-    dosyanın (genellikle bellek haritalama işlemlerinde karşımıza çıkmaktadır) daha büyük kısımları da önbelleğe alınabilmektedir. 
-    Biz bir dosyanın 4K'lık değil de 64K'lık kısımlarının önbelleğe alınacağını düşünelim. Bu durumda organizasyon 
-    nasıl olacaktır? İşte Linux çekirdeğinde sayfa önbelleiğinde bir sayfadan daha fazla bilgi bulunması durumuna
-    "bileşik sayfa (compound page)" denilmektedir. Önbellekte 64K'lık bileşik sayfa denilen daha büyük birimlerin de 
-    tutulduğunu düşünelim. Çekirdek bu 64K'lık bileşik sayfayı aslında 16 tane normal sayfa gibi XArray ağacında tutmaktadır. 
-    Bu 16 sayfanın ilk sayfasına "baş (head)" diğerlerine ise "kuyruk (tail)" sayfaları denilmektedir. (Buradaki kuyruk 
-    sayfası baş sayfa dışındaki sayfaları temsil etmektedir.) 
+    kısımlarının birer sayfalık (tipik olarak 4K'lık) bölümleri önbelleğe alınmaktadır. Ancak bazı durumlarda ilgili 
+    dosyanın (genellikle bellek haritalama işlemlerinde karşımıza çıkmaktadır) daha büyük kısımları da önbelleğe 
+    alınabilmektedir. Biz bir dosyanın 4K'lık değil de 64K'lık kısımlarının önbelleğe alınacağını düşünelim. Bu durumda 
+    organizasyon nasıl olacaktır? İşte sayfa önbelleğindeki bir sayfadan büyük bloklara "bileşik sayfa (compound page)" 
+    denilmektedir. Örneğin önbellekte 64K'lık blokların da tutulduğunu düşünelim. Çekirdek bu 64K'lık bileşik sayfayı 
+    aslında 16 tane normal sayfa gibi XArray ağacında tutmaktadır. Bu 16 sayfanın ilk sayfasına "baş (head)" sayfa 
+    diğerlerine ise "kuyruk (tail)" sayfaları denilmektedir. Yani kuyruk sayfaları bloğun baş sayfa dışındaki sayfalarını 
+    temsil etmektedir.
     
-    XArray ağacında her zaman sayfa temelinde arama yapılmaktadır. Bu durumda örneğin dosyanın 64K'lık bir birimi tek 
-    bir birim gibi sayfa önbelleğine yerleştirilip belli bir offaset'e dayalı arama yapıldığında bulunan sayfa bu 16 
-    sayfanın baş sayfası olabileceği gibi kuyruk sayfası da olabilecektir. Bir sayfadan daha büyük birimlerin önbelleğe 
-    yerleştirilmesi durumunda sayfa önbelleği için metadata bilgileri her zaman baş sayfada tutulmaktadır. O halde 
-    çekirdek bir sayfa indeksiyle XArray ağacında arama yapıldığında o sayfanın bir baş sayfa mı yoksa kuyruk sayfası 
-    mı olduğunu anlayabilmeli eğer erişilen sayfa bir kuyruk sayfası ise onun baş sayfasını bulabilmelidir. İşte page 
-    yapısının içerisinde compound_page isimli bir eleman vardır:
+    XArray ağacında her zaman sayfa temelinde arama yapılmaktadır. Bu durumda örneğin dosyanın 64K'lık bir kısmı tek 
+    bir birim gibi sayfa önbelleğine yerleştirilip belli bir offset'e dayalı arama yapıldığında bulunan sayfa bu 16 
+    sayfanın baş sayfası olabileceği gibi kuyruk sayfalarından biri de olabilecektir. Bir sayfadan daha büyük birimlerin 
+    önbelleğe yerleştirilmesi durumunda sayfa önbelleği için metadata bilgileri her zaman baş sayfada tutulmaktadır. 
+    O halde çekirdek bir sayfa indeksiyle XArray ağacında arama yaptığında o sayfanın bir baş sayfa mı yoksa kuyruk 
+    sayfası mı olduğunu anlayabilmeli, eğer erişilen sayfa bir kuyruk sayfası ise onun baş sayfasını bulabilmelidir. 
+    XArray aramasında baş sayfanın nasıl bulunduğunu izleyen paragraflarda açıklayacağız. Ancak bazen çekirdeğin 
+    bir page nesnesinden hareketle o page nesnesinin ilişkin olduğu büyük bloğun baş sayfasına ilişkin page nesnesine
+    de erişmesi gerekebilmektedir. İşte bu işlem page yapısının içerisindeki compound_head isimli eleman yardımıyla 
+    yapılmaktadır:
 
     struct page {
         /* ... */
@@ -15115,24 +15183,20 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         
         /* ... */
     };
-    
-    Bir sayfdan (tipik olarak 4K'dan) büyük birimlerin önbelleklerde tutulması Linux çekirdeğine 4.8 versiyonuyla 
-    eklenmiş bir özelliktir. Dolayısıyla daha önceki çekirdeklerin page yapılarında compound_head elemanı yoktu.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
                                             89. Ders 12/07/2026 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-    Peki elimizde önbellekteki bileşik bir sayfaya ilişkin bir page nesnesi varsa, bu page nesnesinin baş (head) bir  
-    page nesnesi mi yoksa bir kuyruk (tail) page nesnesi mi olduğunu nasıl anlayabiliriz? İşte page yapısının içerisindeki 
-    compound_head elemanının en düşük anlamlı biti (0 numaralı biti) eğer set edilmişse sayfa bir kuyruk sayfasıi set 
-    edilmemişse baş sayfadır. Sayfa eğer kuyruk sayfasıysa compound_head elemanının en düşük anlamlı biti sıfırlandığında 
+/*---------------------------------------------------------------------------------------------------------------------- 
+    compound_head elemanının en düşük anlamlı biti (0 numaralı biti) 1 ise page nesnesi bir kuyruk sayfasına, 0 ise  
+    baş sayfaya ilişkindir. Sayfa eğer kuyruk sayfasıysa compound_head elemanının en düşük anlamlı biti sıfırlandığında 
     (bu işlem 1 çıkartılarak da yapılabilir) compound_head elemanı baş sayfaya ilişkin page nesnesinin adresini vermektedir. 
-    Eğer compound_head elemanının en düşük anlamlı biti 1 değilse zaten ilgili sayfa bir baş sayfadır ve bu compound_head 
-    elemanı sayfasının page nesnesinin adresini vermektedir. Çekirdekte bir page nesnesinin adresini parametre olarak 
-    alıp nesnesinin baş sayfasına ilişkin page nesne adresini elde eden _compound_head isimli bir fonksiyon bulunmaktadır:
+    Eğer compound_head elemanının en düşük anlamlı biti 1 değilse zaten ilgili sayfa bir baş sayfadır. Bu durumda bu 
+    eleman artık page içerisindeki birlik yoluyla LRU listesindeki sonraki elemanı gösteren düğümle çakıştırılmış durumda 
+    olur. Çekirdekte bir page nesnesinin adresini parametre olarak alıp nesnesinin baş sayfasına ilişkin page nesne adresini 
+    elde eden _compound_head isimli bir fonksiyon bulunmaktadır:
 
     static __always_inline unsigned long _compound_head(const struct page *page)
     {
@@ -15142,6 +15206,9 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
             return head - 1;
         return (unsigned long)page_fixed_fake_head(page);
     }
+
+    Bir sayfadan (tipik olarak 4K'dan) büyük birimlerin önbelleklerde tutulması Linux çekirdeğine 4.8 versiyonuyla 
+    eklenmiş bir özelliktir. Dolayısıyla daha önceki çekirdeklerin page yapılarında compound_head elemanı yoktu.
 
     Aslında sayfa önbelleğinde bir sayfadan (yani 4K'dan) daha büyük birimlerle seyrek karşılaşılmaktadır. Bir sayfadan 
     büyük önbellek birimleri kullanan başlıca kaynaklar şunlardır:
@@ -15155,7 +15222,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
     │ tmpfs / shmem             │ 4.8        │ 4.8: PMD boyutlu THP (huge= bağlama seçeneği)        │
     │                           │            │ 5.16: mapping_set_large_folios() ile bayrak          │
-    │                           │            │ 6.11: herhangi bir order (mTHP, shmem_allowable_     │
+    │                           │            │ 6.11: herhangi bir düzey (mTHP, shmem_allowable_     │
     │                           │            │ huge_orders)                                         │
     ├───────────────────────────┼────────────┼──────────────────────────────────────────────────────┤
     │ XFS                       │ 5.17       │ Büyük folio kullanan ilk genel amaçlı disk dosya     │
@@ -15193,10 +15260,11 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     Yukarıda da belirttiğimiz gibi eskiden sayfa önbelleğine ilişkin XArray ağacına dosyanın sayfa indeksi verildiğinde 
     o bize doğrudan sayfaya ilişkin page nesnesinin adresini veriyordu. Ancak daha sonra folio nesneleri kullanılmaya 
     başlandı. Mevcut çekirdeklerde sayfa önbelleğinden yapılan başarılı aramalarda folio nesnelerinin adresleri elde 
-    edilmektedir. 
+    edilmektedir. folio nesneleri için ayrıca bir tahsisat yapılmamaktadır. Yani folio nesneleri aslında page nesneleri 
+    ile aynı alanı kullanmaktadır. 
     
     folio yapısı birlikler içeren oldukça karmaşık bir görünümdedir. Yapının tanımlaması "include/linux/mm_types.h" 
-    dosyası içeisinde şöyle yapılmıştır:
+    dosyası içerisinde şöyle yapılmıştır:
 
     struct folio {
         /* private: don't document the anon union */
@@ -15321,11 +15389,10 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         /* ... */
      };
 
-    folio yapısının baş kısmı birlik kullanılarak tamamen page yapısının üzerine oturtulmuştur. folio nesneleri için ayrıca 
-    bir tahsisat yapılmamaktadır. Yani folio nesneleri aslında page nesneleri ile aynı alanı kullanmaktadır. folio yapısının 
-    page yapısı dışında kalan alanlarına ancak folio yapısı birden fazla sayfadan oluşan bir önbellek birimine ilişkinse 
+    folio yapısının baş kısmı birlik kullanılarak tamamen page yapısının üzerine oturtulmuştur. folio yapısının 
+    page yapısı dışında kalan alanlarına ancak folio yapısı birden fazla sayfadan oluşan bir önbellek bloğuna ilişkinse 
     erişilmektedir. Bu alanlar folio nesnesi bir sayfadan büyük birimleri tutuyorsa onun sonraki page nesnesi içerisinde 
-    bulunmaktadır. Bir sayfadan büyük önbellek birimlerinin ikinci page nesnesinde de bazı folio bilgileri saklanmaktadır.
+    bulunmaktadır. Bir sayfadan büyük önbellek bloklarının ikinci page nesnesinde de bazı folio bilgileri saklanmaktadır.
     Bunu aşağıdaki çizimle görselleştirebiliriz: 
 
                  ...
@@ -15766,17 +15833,52 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Sayfa önbelleğinin dosyaya ilişkin inode nesnesinin içerisinde tutulduğunu gördük. Peki inode nesnesi içerisindeki 
+    bu sayfa önbelleği ne zaman yok edilmektedir? İşte anımsayacağınız gibi biz başkalarının kullanmadığı bir dosyayı 
+    açıp kapatsak bile dosyaya ilişkin inode nesnesi inode önbelleğinde kalmaya devam etmektedir. Bu önbellek sayfalarının 
+    sisteme iade edilmesi bellek baskısı altında "kswapd" isimi çekirdek thrad'i yoluyla yapılmaktadır. Bellek baskısı 
+    oluştuğunda bu çekirdek thread'i inode nesnelerinin sayfa önbelleklerini LRU listeleri yardımıyla ikiz blok tahsisat 
+    sistemine iade etmektedir. Ancak inode nesnesine ilişkin sayfa önbellekleri bazı işlemler sonucunda da sisteme iade 
+    edilebilmektedir. Örneğin truncate ya da ftruncate fonksiyonlarıyla bir dosyanın uzunşuğu küçültülürse ve küçültülen 
+    kısımda inode nesnesinin sayfa önbelleğindeyse o kısımlara ilişkin önbellek sayfaları ikiz blok tahsisat sistemine 
+    iade edilmeketdir. 
+    
+    Bellek baskısı altında sayfaların ikiz blok tahsisat sistemine iade edilmesine "sayfa geri alımı (page reclaiming)" 
+    denilmektedir. Bu geri alım işlemi bazen "kswapd" çekirdek thread'ini beklemeden doğrudan da (buna "doğrudan geri 
+    alım (direct reclaim) da denilmektedir) yapılabilmektedir. Biz sayfa geri alımı konusunu ayrı bir başlık altında 
+    inceleyeceğiz. 
+
+    Bir inode nesnesine ilişkin çok sayıda sayfa önbellekte olabilir. Bu durumda geri alım sırasında (bu işlemi temel 
+    olarak "kswapd" isimli çekirdek thread'inin yaptığını belirtmiştik) son zamanlarda en az kullanılan önbellek 
+    sayfaları öncelikle geri alınmaktadır. Çekirdek son zamanlarda en az kullanılan folio nesnelerini inode nesnesinden 
+    hareketle tespit etmez, onları LRU bağlı listelerinde saklar. Yani aslında çekirdek inode nesnelerinden hareketle 
+    değil bu LRU listelerinden hareketle  sayfa önbelleğindeki sayfaları geri almaktadır. 
+
+    Biz dosya sistemini incelediğimiz bölümde inode nesnelerinin de bellek baskısı oluştuğunda sisteme iade edildiğini 
+    belirtmiştik. Ancak o zamanlar dilimli tahsisat sisteminde bahsetmemiştik. Inode nesneleri aslında bu amaçla 
+    oluşturulmuş dilim önbelleklerindne tahsis edilmektedir. Dolayısıyla bunların sisteme iade edilmesi doğrudan değil 
+    dilim önbelleği yoluyla yapılmaktadır. Yani "kswapd" çekirdek thread'i inode önbelleğindeki inode nesnelerini 
+    önce inode dilim önbelleğine iade etmekte, oradaki sayfalar ikiz blok tahsisat sistemine iade edilmektedir. 
+    Biz bu bilgileri sayfa geri alımı bölümünde göreceğiz. 
+
+    Inode besbesinin önbelleğindeki tüm sayfalar sisteme iade edilmeden inode nesnesi de inode önbelleğinden atılmamaktadır. 
+    Bu durumda siz "sayfalarının çoğu önbellekten atılmış ancak çok azı kalmış inode nesnelerinin önbellekten atılamayacağını"
+    düşünebilirsiniz. Ancak genellikle bellek baskısı altında uzun süre kullanılmayan inode nesnesine ilişkin önbellek 
+    sayfalarının hepsi birka turda sisteme iade edilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
     Biz sayfa önbelleğinin veri yapısını ve kullanılan algoritmaları gördük. Şimdi küçük bir çalışma yapalım. Bu çalışmada 
     bir karakter aygıt sürücüsü oluturalım. Karakter aygıt sürücüsünün içerisinde ioctl işlemiyle prosesin açmış olduğu 
     bir dosyadan sayfa önbelleğini manuel bir biçimde kullanarak okuma yapmaya çalışalım. ioctl fonksiyonuna geçirilecek 
     okuma bilgilerini aşağıdaki yapıyla temsil edebiliriz:
 
     struct read_info {
-        int fd;		            /* okunacak dosyanin descriptor'i    */
-        char *buf;		        /* kullanici tamponunun adresi       */
-        size_t size;		    /* okunacak bayt sayisi              */
-        off_t offset;		    /* dosya icindeki baslangic konumu   */
-        size_t count;           /* gerçekte okunan miktar            */
+        int fd;		        /* okunacak dosyanin betimleyicisi */
+        char *buf;		    /* kullanici tamponunun adresi */
+        size_t size;	    /* okunacak bayt sayısı */
+        off_t offset;		/* dosya icindeki baslangıç konumu */  
+        size_t count;       /* gerçekte okunan bye miktarı */
     };
 
     Burada dosya offset'i için -1 girilirse dosya göstericisinin gösterdiği yerdne okuma yapılacaktır. Kullanacağımız 
@@ -15787,29 +15889,37 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     
     Örneğin kullanıcı modundaki test programı şöyle olabilir:
 
-    int fd_dev;
-    int fd_file;
-    struct read_info ri;
-    char buf[10 + 1];
+    int main(void)
+    {
+        int fd_dev;
+        int fd_file;
+        struct read_info ri;
+        char buf[8192];
 
-    if ((fd_file = open("test.txt", O_RDONLY)) == -1)
-        exit_sys("open");
+        if ((fd_file = open("test.txt", O_RDONLY)) == -1)
+            exit_sys("open");
 
-    if ((fd_dev = open("pcache-driver", O_RDONLY)) == -1)
-        exit_sys("open");
+        read(fd_file, buf, 8192);       /* sayfa önbelleğine girsin diye */
 
-    ri.fd = fd_file;
-    ri.buf = buf;
-    ri.size = 10;
-    ri.offset = 100;
+        if ((fd_dev = open("pcache-driver", O_RDONLY)) == -1)
+            exit_sys("open");
 
-    if (ioctl(fd_dev, IOC_CACHE_READ, &ri) == -1)
-        exit_sys("ioctl");
-    buf[ri.count] = '\0';
-    printf("%s\n", buf);
+        ri.fd = fd_file;
+        ri.buf = buf;
+        ri.size = 10;
+        ri.offset = 4090;
 
-    close(fd_dev);
-    close(fd_file);
+        if (ioctl(fd_dev, IOC_CACHE_READ, &ri) == -1)
+            exit_sys("ioctl");
+        buf[10] = '\0';
+        printf("%s\n", buf);
+        printf("bytes read: %zu\n", ri.count);
+
+        close(fd_dev);
+        close(fd_file);
+        
+        return 0;
+    }
     
     Burada biz sayfa önbelleğini manuel bir biçimde kullanarak "test.txt" dosyasının 100'üncü offset'inden 10 byte 
     okumak istiyoruz. Aygıt sürücümüzün ioctl fonksiyonu şöyle olabilir:
@@ -15842,6 +15952,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 
         if (copy_from_user(&ri, (void *)arg, sizeof(struct read_info)) != 0)
             return -EFAULT;
+        ri.count = 0;
 
         filp = fget(ri.fd);
         if (filp == NULL)
@@ -15890,7 +16001,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     }
 
     Dosya betimleyicisinin bir disk dosyasına ilişkin olduğunu doğrulamak gerekir. Çünkü örneğin bir 
-    dizin dosyasından okuma yapmak kullanıcı için anlamlı değildir. Kontolü şöyşe yapabiliriz:
+    dizin dosyasından okuma yapmak kullanıcı için anlamlı değildir. Kontolü şöyle yapabiliriz:
 
     if (!S_ISREG(inode->i_mode)) {
 		result = -EBADF;
@@ -16071,7 +16182,9 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
     }
    
     Bu noktada artık biz önbellek bloğundaki yeri ve o bloktaki transfer edilecek uzunluğu tespit etmiş olduk. Bu 
-    kısmı kullanıcı modundaki alana kopyalayabiliriz:
+    kısmı kullanıcı modundaki alana kopyalayabiliriz. Bu kopyalama işleminden sonra artık left, ri.count, posve 
+    ri.buf değerlerini güncellemeliyiz. Çünkü birden fazla sayfaya yayılmış olan bilgilerin okunması sırasında 
+    siğer sayfalara geçmek için bu nesnelerin güncellenmesi gerekmektedir:
 
     folio = filemap_get_folio(mapping, index);
     if (!IS_ERR(folio)) {
@@ -16088,8 +16201,322 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
             result = -EFAULT;
             goto EXIT;
         }
+        kunmap_local(offaddr);
+        left -= chunk;
+        ri.count += chunk;
+        pos += chunk;
+        ri.buf += chunk;
+        folio_put(folio);
     }
+    else    
+        goto EXIT;
+
+    Eğer dosyanın ilgili kısmı sayfa önbelleğinde yoksa okunabilen kadar bilgi okunup okuma işlemi hemen sonlandırılmaktadır. 
+    Buradaki ioctl kodunda birden fazla akışın bu işlemi aynı anda yaptığı bir durumda bir senkronizasyon sorunu oluşmayacaktır. 
+    Çünkü buradaki kodda ağırlıklı olarak zaten yerel kullanılmıştır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                    92. Ders 25/07/2026 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki örneği bir bütün olarak aşağıda veriyoruz. Örneğimizde test kodunda "test.txt" isimli bir dosyayı açıp 
+    onun ilk 8192 byte'lık kısmı sayfa önbelleğine girsin diye bir okuma yaptık. Yine önce aygıt sürücüyü aşağıdaki 
+    derlemelisiniz:
+
+    $ make file=pcache-driver
+
+    Sonra "load" betiği ile yüklemelisiniz:
+
+    $ sudo ./load pcache-driver
+
+    Test programını da şöyle derleyebilirsiniz:
+
+    $ gcc -Wall -o pcache-driver-test pcache-driver-test.c
+
+    Test programını şöyle çalıştırabilirsiniz:
+
+    $ ./pcache-driver-test
+
+    Test işlemi bittikten sonra aygıt sürücüyü "unload" betiği ile sistemden atabilirsiniz:
+
+    $ sudo ./unload pcache-driver
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* pcache-driver.h */
+
+#ifndef PCACHE_DRIVER_H_
+#define PCACHE_DRIVER_H_
+
+#include <linux/stddef.h>
+#include <linux/ioctl.h>
+
+struct read_info {
+	int fd;		        /* okunacak dosyanin betimleyicisi */
+	char *buf;		    /* kullanici tamponunun adresi */
+	size_t size;		/* okunacak bayt sayısı */
+	off_t offset;		/* dosya icindeki baslangıç konumu */  
+    size_t count;       /* gerçekte okunan bye miktarı */
+};
+
+#define PCACHE_DRIVER_MAGIC		'c'
+#define IOC_CACHE_READ	        _IOR(PCACHE_DRIVER_MAGIC, 0, struct read_info)
+
+#endif
+
+/* pcache-driver.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/fdtable.h>
+#include <linux/file.h>
+#include <linux/pagemap.h>
+#include "pcache-driver.h"
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("pcache-driver");
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+static long ioctl_cache_read(unsigned long arg);
+
+static dev_t g_dev;
+static struct cdev g_cdev;
+static struct file_operations g_fops = {
+	.owner = THIS_MODULE,
+    .unlocked_ioctl = test_driver_ioctl
+};
+
+static int __init test_driver_init(void)
+{
+	int result;
+
+	printk(KERN_INFO "pcache-driver module initialization...\n");
+
+	if ((result = alloc_chrdev_region(&g_dev, 0, 1, "pcache-driver")) < 0) {
+		printk(KERN_INFO "cannot alloc char driver!...\n");
+		return result;
+	}
+	cdev_init(&g_cdev, &g_fops);
+	if ((result = cdev_add(&g_cdev, g_dev, 1)) < 0) {
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot add device!...\n");
+		return result;
+	}
+
+	return 0;
+}
+
+static void __exit test_driver_exit(void)
+{
+	cdev_del(&g_cdev);
+	unregister_chrdev_region(g_dev, 1);
+
+	printk(KERN_INFO "pcache-driver module exit...\n");
+}
+
+static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long result;
+	
+    printk(KERN_INFO "test_driver_ioctl...\n");
+
+    switch (cmd) {
+        case IOC_CACHE_READ:
+		   result = ioctl_cache_read(arg);
+           break;
+        default:
+            result = -ENOTTY;
+    }
+
+    return result;
+}
+
+static long ioctl_cache_read(unsigned long arg)
+{
+	struct file *filp;
+	struct inode *inode;
+	struct address_space *mapping;
+	struct folio *folio;
+	struct read_info ri;
+	pgoff_t index;
+	loff_t pos, isize;
+	u64 left, chunk;
+	size_t foff;
+	void *offaddr;
+	int result;
+
+	if (copy_from_user(&ri, (void *)arg, sizeof(struct read_info)) != 0)
+		return -EFAULT;
+	ri.count = 0;
+
+	filp = fget(ri.fd);
+	if (!filp)
+		return -EBADF;
+
+	result = 0;
+	if (!(filp->f_mode & FMODE_READ)) {
+		result = -EBADF;
+		goto EXIT;
+	}
+	inode = file_inode(filp);
+
+	if (!S_ISREG(inode->i_mode)) {
+		result = -EBADF;
+		goto EXIT;
+	}
+	mapping = inode->i_mapping;
+	
+	pos = ri.offset;
+	left = ri.size;
+	
+	while (left > 0) {
+		isize = i_size_read(inode);
+		if (pos >= isize)
+			goto EXIT;
+
+		index = pos >> PAGE_SHIFT;
+		chunk = min_t(u64, left, isize - pos);
+		
+		folio = filemap_get_folio(mapping, index);
+		if (!IS_ERR(folio)) {
+			foff = offset_in_folio(folio, pos);
+			if (folio_test_highmem(folio))
+				chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
+			else 
+				chunk = min_t(u64, chunk, folio_size(folio) - foff);
+	
+        	offaddr = kmap_local_folio(folio, foff);
+				
+			if (copy_to_user(ri.buf, offaddr, chunk) != 0) {
+				kunmap_local(offaddr);
+				folio_put(folio);
+				result =-EFAULT;
+				goto EXIT;
+			}
+			kunmap_local(offaddr);
+			left -= chunk;
+			ri.count += chunk;
+			pos += chunk;
+			ri.buf += chunk;
+            folio_put(folio);
+    	}
+		else 
+			goto EXIT;
+	}
+
+   if (copy_to_user((void *)arg, &ri, sizeof(struct read_info)) != 0) 
+		result = -EFAULT;
+EXIT:
+
+	fput(filp);
+    return result;
+}
+
+module_init(test_driver_init);
+module_exit(test_driver_exit);
+
+# Makefile
+
+obj-m += ${file}.o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+/* load (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./${module}.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module c $major 0
+
+/* unload (bu satırı dosyaya kopyalamayınız ) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./${module}.ko || exit 1
+rm -f $module
+
+/* pcache-driver-test.c */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "pcache-driver.h"
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    int fd_dev;
+    int fd_file;
+    struct read_info ri;
+    char buf[8192];
+
+    if ((fd_file = open("test.txt", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    read(fd_file, buf, 8192);
+
+    if ((fd_dev = open("pcache-driver", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    ri.fd = fd_file;
+    ri.buf = buf;
+    ri.size = 10;
+    ri.offset = 4090;
+
+    if (ioctl(fd_dev, IOC_CACHE_READ, &ri) == -1)
+        exit_sys("ioctl");
+    buf[10] = '\0';
+    printf("%s\n", buf);
+    printf("bytes read: %zu\n", ri.count);
+
+    close(fd_dev);
+    close(fd_file);
     
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki örnekte biz önbellekte olmayan bir sayfayı gördüğümüzde işlemimizi sonlandırdık. Alternatif olarak 
+    önbellekte olmayan bir sayfayla karşılaşıldığında çekirdeğin yaptığı okuma işleminin benzeri kernel_read fonksiyonuyla 
+    yapılarak sayfanın önbelleğe çekilmesi de sağlanabilir. kernel_read belli bir offset'ten itibaren belli bir 
+    tampona okuma yapan yüksek seviyeli bir çekirdek fonksiyonudur. Bu fonksiyon önce dosyadaki bilgileri sayfa önbelleğine 
+    çekip sonra aynı zamanda parametresiyle belirtilen tampona da kopyalamaktadır. kernel_read fonksiyonunun prototipi 
+    şöyledir:
+
+    ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos);
+
+    Fonksiyonun birinci parametresi dosya nesnesinin adresini, ikinci parametresi tampon adresini, üçüncü parametresi 
+    okunacak byte miktarını ve dördüncü parametresi okunacak odsya offset'inin yerleştirileceği nesnenin adresini 
+    belirtmektedir. Bu offset okumadan sonra güncellenmektedir. Fonkisyon başarı durumunda okunan byte sayısına, 
+    başarısızlık durumunda negatif errno değerine geri dönmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+       
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -16099,31 +16526,9 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 /*----------------------------------------------------------------------------------------------------------------------
 
 ----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
 
 /*----------------------------------------------------------------------------------------------------------------------
                                                 GEÇİCİ NOTLAR
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    
-   
-  
-
-
-    
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
