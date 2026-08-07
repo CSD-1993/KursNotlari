@@ -15684,8 +15684,8 @@ void exit_sys(const char *msg)
     }
 
     register_blkdev fonksiyonunun yalnızca bir majör numara aldığına dikkat ediniz. Habuki register_chrdev_region fonksiyonunda
-    register ettirilecek minör numaralar da belirtiliyordu. Blok aygıt sürücüleri için minör numara tahsisatı disk tahsis edilirken 
-    (yani eski versiyonlarda alloc_disk, yeni versiyonlarda blk_alloc_disk fonksiyonunda) yapılmaktadır. 
+    register ettirilecek minör numaralar da belirtiliyordu. Blok aygıt sürücüleri için minör numara tahsisatı disk tahsis 
+    edilirken (yani eski versiyonlarda alloc_disk, yeni versiyonlarda blk_alloc_disk fonksiyonunda) yapılmaktadır. 
 
     Modül boşaltılırken bu işlemin geri alınması için unregister_blkdev fonksiyonu kullanılmaktadır:
 
@@ -15729,36 +15729,135 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+    Aşağıdaki örnekte bir blok aygıt sürücüsü register_blkdev fonksiyonuyla register ettirilip unregister_blkdev fonksiyonuyla 
+    unregister ettirilmiştir.
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/* generic-blkdev.c */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/blkdev.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kaan Aslan");
+MODULE_DESCRIPTION("generic-blkdev");
+
+static int g_major;
+
+static int __init generic_blkdev_init(void)
+{
+	printk(KERN_INFO "generic-blkdev initialization...\n");
+
+    if ((g_major = register_blkdev(0, "generic-blkdev")) < 0) {
+        printk(KERN_INFO "cannot register block device!..\n");
+        return g_major;
+    }
+
+	return 0;
+}
+
+static void __exit generic_blkdev_exit(void)
+{
+	unregister_blkdev(g_major, "generic-bloc-driver");
+    
+	printk(KERN_INFO "generic-blkdev exit...\n");
+}
+
+module_init(generic_blkdev_init);
+module_exit(generic_blkdev_exit);
+
+# Makefile
+
+obj-m += $(file).o
+
+all:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
+clean:
+    make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
+
+ /* loadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+mode=666
+
+/sbin/insmod ./$module.ko ${@:2} || exit 1
+major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
+rm -f $module
+mknod -m $mode $module b $major 0
+
+/* unloadblk (bu satırı dosyaya kopyalamayınız) */
+
+#!/bin/bash
+
+module=$1
+
+/sbin/rmmod ./$module.ko || exit 1
+rm -f $module
+
+/*-----------------------------------------------------------------------------------------------------------------------------
     Blok aygıt sürücüleri için en önemli nesne gendisk isimli nesnesidir. Blok aygıt sürücüsü çekirdekte bu nesne ile temsil 
     edilmektedir. gendisk nesnesi eski çekirdeklere alloc_disk isimli fonksiyonla (aslında bir makro olarak yazılmıştır) tahsis 
     ediliyordu. Ancak 5'li çekirdeklerle birlikte fonksiyonun ismi blk_alloc_disk biçiminde değiştirildi. Ayrıca aşağıdaki 
     fonksiyonların bir bölümünün bulunduğu <linux/genhd.h> dosyası da çekirdeğin 5.18 versiyonunda kaldırılmış buradaki 
-    fonksiyonların prototipleri <linux/blkkdev.h> dosyasına taşınmıştır.
+    fonksiyonların prototipleri <linux/blkkdev.h> dosyasına taşınmıştır. gendisk tahsis etmekte kullanılan fonksiyonların 
+    evrimini aşağıdaki tabloda veriyoruz:
 
-    #include <linux/genhd.h>                           /* #include <linux/blkkdev.h> */
+    #include <linux/genhd.h>                  /* #include <linux/blkkdev.h> */
 
-    struct gendisk *alloc_disk(int minors);            /* eski çekirdek versiyonları bu fonksiyonu kullanıyor */
-    struct gendisk *blk_alloc_disk(int minors);        /* yeni çekirdek versiyonları bu fonksiyonu kullanıyor */
+    ┌────────────────────────────────────┬──────────────┐
+    │               İmza                 │     Sürüm    │
+    ├────────────────────────────────────┼──────────────┤
+    │ alloc_disk(minors)                 │ 2.6.0 … v5.15│
+    │                                    │              │
+    │ alloc_disk_node(minors, node_id)   │ 2.6.x … v5.15│
+    │                                    │              │
+    │ blk_alloc_disk(node_id)            │ v5.14 … v6.8 │
+    │                                    │              │
+    │ blk_alloc_disk(lim, node_id)       │ v6.9 →       │
+     └────────────────────────────────────┴──────────────┘
+    
+    İlk iki versiyon minör numaraların sayısını parametre olarak almaktadır. Ancak son iki versiyon NUMA düğümünün numarasını 
+    parametre olarak almaktadır. Buradaki NUMA düğümü yapının ve kuyrukların tahsis edileceği düğüm belirtmektedir. Eğer 
+    default deüğüm kullanılacaksa burada NUMA_NO_NODE sembolik sabiti kullanılmalıdır. Örneğin 5.14 ile 6.9 arasındaki 
+    versiyonlarda gendsk nesnesi şöyle tahsis edilebilir:
 
-    Fonksiyonlar parametre olarak aygıt sürücünün destekleyeceği minör numara sayısını almaktadır. Fonksiyonların geri dönüş 
-    değerleri diski temsil eden gendisk isimli yapı türünden nesnenin adresidir. (Birden fazla minör numaranın söz konusu olduğu 
-    durumda geri döndürülen adres aslında gendisk türünden bir dizinin adresidir.) Fonksiyonlar başarısızlık durumunda NULL adrese 
-    geri dönmektedir. Başarısızlık durumunda bu fonksiyonları çağıran fonksiyonları -ENOMEM değeri ile geri döndürmek uygun olur.
-    Örneğin:
+    static struct gendisk *g_disk;
 
-    static struct gendisk *g_gdisk;
-
-    if ((g_gdisk = blk_alloc_disk(1)) == NULL) {
-        ...
+    if ((g_disk = blk_alloc_disk(NUMA_NO_NODE)) == NULL) {
+        /* ... */
         return -ENOMEM;
     }
 
-    disk sözcüğü bu bağlamda aslında fiziksel bir diskten ziyade bir blok aygıtını temsil etmektedir. Blok aygıtları tipik olarak
-    disk biçiminde bulunduğu için disk terimi tercih edilmiştir.
+    6.9'dan sonraki versiyonlarda fonksiyonun birinci parametresine queue_limits isimli bir yapı nesnesinin adresi geçirilmelidir. 
+    Yaratılacak kuyruk için bilgiler 6.9 öncesinde tek tek fonksiyonlarla set ediliyordu. Artık bu queue_limits yapısı yoluyla 
+    çekirdeğe iletilmektedir. Örneğin:
 
-    Son versiyonlarda Linux çekirdeğinin bu blok aygıt sürücülerine ilişkin fonksiyonlarında yine bazı değişiklikler olmuştur. 
+    struct queue_limits g_lim = {
+        .logical_block_size  = 512,
+        .physical_block_size = PAGE_SIZE,
+    };
+    /* .. */
+
+    if ((g_disk = blk_alloc_disk(&g_lim, NUMA_NO_NODE)) == NULL) {
+        /* ... */
+        return -ENOMEM;
+    }
+
+    Programcı queue_limits yapısının tüm elemanlarını doldurmak zorunda değildir. Değer verilmemiş elemanlar için default 
+    değerler kullanılmaktadır. Örneğimizde logical_block_size kuruğua yerleştirilecek transfer isteklerinin en büyük değerini
+    belirtmektedir. İzleyen paragraflarda bu transfer isteklerinin io_vec yapısıyla elde edileceğini göreceğiz. physical_block_size
+    elemanı aslında çekirdek tarafından kullanılmamaktadır. Ancak dosya sistemini geliştirenler bu bilgiyi blok aygıt sürücüsünden 
+    alıp etkin blok büyüklüğünü buna dayanarak oluşturabilmektedir. Aslında bu elemana da biz değer atamayabiliriz. Bu durumda
+    dosya sistemleri default değerler kullanmaktadır. 
+
+    disk sözcüğü bu bağlamda aslında fiziksel bir diskten ziyade bir blok aygıtını temsil etmektedir. Blok aygıtları tipik 
+    olarak disk biçiminde bulunduğu için disk terimi tercih edilmiştir.
+
     Örneğin 5.14 çekirdeği ile birlikte gendisk tahisatı ile kuyruk tahsisatını birlikte yapan blk_alloc_mq_disk isimli bir 
-    fonksiyon eklenmiştir. Bu fonksiyon her iki tahsisatı da birlikte yaptığı için en yeni çekirdeklerde tercih edilebilir. 
+    fonksiyon da eklenmiştir. Bu fonksiyon her iki tahsisatı da birlikte yaptığı için en yeni çekirdeklerde tercih edilebilir. 
 
     blk_alloc_disk fonksiyonu ile elde edilen gendisk nesnesi henüz add_disk işlemi yapılmamışsa (ya da add_disk başarısız 
     olduğunda) put_disk fonksiyonu ile serbest bırakılır. 
@@ -15768,16 +15867,16 @@ void exit_sys(const char *msg)
 
     - Yapının major isimli elemanına aygıt sürücünün majör numarası yerleştirilmelidir. Örneğin:
 
-    g_gdisk->major = g_major;
+    g_disk->major = g_major;
 
     - Yapının first_minor elemanına aygıt sürücünün ilk minör numarası yerleştirilmelidir (Tipik olarak 0). Örneğin:
 
-    g_gdisk->first_minor = 0;
+    g_disk->first_minor = 0;
 
     - Yapının minors elemanı first_minor numaradan itibaren kaç minör numaranın kullanılacağını belirtmektedir. Biz tek bir 
     minör numara kullanacaksak buraya 1 değerini yerleştiririz:
 
-    g_gdisk->minors = 1;
+    g_disk->minors = 1;
 
     - Yapının disk_name elemanına diske (yani blok aygıtına) ilişkin bir isim yerleştirilir. Örneğin:
 
@@ -15786,7 +15885,7 @@ void exit_sys(const char *msg)
     - Yapının flags elemanına duruma göre bazı bayraklar girilebilmektedir. Örneğin bir ramdisk uygulaması için bu bayrak 
     GENHD_FL_NO_PART biçiminde girilebilir. Örneğin:
 
-    g_gdisk->flags = GENHD_FL_NO_PART;
+    g_disk->flags = GENHD_FL_NO_PART;
 
     - Yapının fops elemanına aygıt sürücü açıldığında, kapatıldığında, ioctl gibi işlemler yapıldığında çağrılacak fonksiyonların 
     bulunduğuğu block_device_operations isimli yapı türünden nesnenin adresi atanmalıdır. Yaı şöyle tanımlanmıştır:
@@ -15833,7 +15932,7 @@ void exit_sys(const char *msg)
         .release = generic_blkdev_release
     };
 
-    g_gdisk->fops = &g_blkdev_ops;
+    g_disk->fops = &g_blkdev_ops;
 
     - Eskiden gendisk yapısının queue elemanı için istek kuyruğunu (request queue) programcı yaratıyordu. Ancak blk_alloc_disk 
     fonksiyonu artık bu yaratımı da kendisi yapmaktadır. İstek kuyruğu aygıt sürücüden read/write işlemi yapıldığında çekirdeğin 
@@ -15842,28 +15941,40 @@ void exit_sys(const char *msg)
     için gerekli çekirdek fonksiyonları çekirdeğin çeşitli versiyonlarında çok kereler değiştirilmiştir. Eskiden 4'lü çekirdeklerde 
     istek kuyruğu oluşturmak için blk_init_queue isimli bir fonksiyon kullanılıyordu. Sonra 5'li çekirdeklerle birlikte istek 
     kuyruğu işlemleri üzerinde değişiklikler yapıldı. Artık en yeni çekireklerde bu istek kuyruklarının yaratımı alloc_blk_disk 
-    fonksiyonu tarafından ya da alloc_mq_blk_disk fonksiyonu tarafından yapılmaktadır. Son çekirdeklerde blk_alloc_disk fonksiyonu 
-    tarafından yaratılan kuyruk nesnesinin bazı elemanlarının da programcı tarafından doldurulması gerekmektedir. 
-    Bu işlemler çekirdeğe eklenmiş olan blk_queue_xxx fonksiyonları tarafından yapılmaktadır. Tipik olarak programcı 
-    kuyruğun bazı özelliklerini aşağıdaki fonksiyonlarla belirlemelidir. 
+    fonksiyonu tarafından ya da alloc_mq_blk_disk fonksiyonu tarafından yapılmaktadır. 5.14 versiyonundan 9.9'a ladarki 
+    çekirdeklerde blk_alloc_disk fonksiyonu tarafından yaratılan kuyruk nesnesinin bazı elemanlarının da programcı tarafından 
+    doldurulması gerekmektedir. Bu işlemler çekirdeğe eklenmiş olan blk_queue_xxx fonksiyonları tarafından yapılmaktadır. 
+    Tipik olarak programcı kuyruğun bazı özelliklerini aşağıdaki fonksiyonlarla belirlemelidir. 
 
-    blk_queue_logical_block_size(g_disk->queue, 512);       /* Mantıksal blok boyutu */
+    blk_queue_logical_block_size(g_disk->queue, 512);      /* Mantıksal blok boyutu */
     blk_queue_physical_block_size(g_disk->queue, 4096);    /* Fiziksel blok boyutu */
     blk_queue_max_segments(g_disk->queue, 128);            /* Max segment sayısı */
     blk_queue_max_segment_size(g_disk->queue, 65536);      /* Max segment boyutu */
 
+    Ancak 6.9 ile birlikte kuyruğun özellikleri yukarıdaki fonksiyonlar yerine doğrudan artık bu bilgiler queue-limits 
+    yaısının içeisine yerleştirilmektedir. Yukarıdaki fonksiyonlara karşı gelen queue_limits elemanlarını aşağıda veriyoruz:
+
+    ┌──────────────────────────────────┬────────────────────────────┬────────────────────┐
+    │           Eski Fonksiyon         │   queue_limits Elemanı     │        Tip         │
+    ├──────────────────────────────────┼────────────────────────────┼────────────────────┤
+    │ blk_queue_logical_block_size()   │ lim.logical_block_size     │ unsigned int       │
+    │ blk_queue_physical_block_size()  │ lim.physical_block_size    │ unsigned int       │
+    │ blk_queue_max_segments()         │ lim.max_segments           │ unsigned short     │
+    │ blk_queue_max_segment_size()     │ lim.max_segment_size       │ unsigned int       │
+    └──────────────────────────────────┴────────────────────────────┴────────────────────┘
+
     - gendisk yapısının içerisine diskin (blok aygıt sürücüsünün temsil ettiği medyanın) kapasitesi set edilmelidir. Bu işlem 
     set_capacity fonksiyonuyla yapılmaktadır. Fonksiyonun prototipi şöyledir:
 
-    #include <linux/genhd.h>
+    #include <linux/genhd.h>            /* #include <linux/blkdev.h> */
 
     void set_capacity(struct gendisk *disk, sector_t size);
 
-    Fonksiyonun birinci parametresi gendisk yapısının adresini, ikinci parametresi aygıtın sektör uzunluğunu almaktadır. (Aslında 
-    bu fonksiyon gendisk yapısının ilgili elemanını set etmektedir.) Fonksiyonun ikinci parametresi aygıt sürücünün temsil 
-    ettiği aygıtın sektör uzunluğunu belirtmektedir. Bir sektör 512 byte'tır. Örneğin:
+    Fonksiyonun birinci parametresi gendisk yapısının adresini, ikinci parametresi aygıtın sektör uzunluğunu almaktadır. 
+    (Aslında bu fonksiyon gendisk yapısının ilgili elemanını set etmektedir.) Fonksiyonun ikinci parametresi aygıt sürücünün 
+    temsil ettiği aygıtın sektör uzunluğunu belirtmektedir. Bir sektör 512 byte'tır. Örneğin:
 
-    set_capacity(g_gdisk, 1000);
+    set_capacity(g_disk, 1000);
 
      - Nihayet gendisk yapısının private_data elemanına programcı kendi belirlediği bir yapı nesnesinin adresini yerleştirebilir. 
     Örneğin daha önce karakter aygıt sürücülerinde yaptığımız gibi bu private_data elemanına gendisk nesnesinin içinde bulunduğu 
@@ -15879,7 +15990,7 @@ void exit_sys(const char *msg)
     };
     static struct BLOCKDEV g_bdev;
     ...
-    g_gdisk->private_data = &g_bdev;
+    g_disk->private_data = &g_bdev;
 
     Tabii buradaki örnekte g_bdev zaten global bir nesne olduğu için ona private_data yoluyla erişmeye gerek kalmamaktadır. 
     Ancak aygıt sürücümüz birden fazla minör numarayı destekliyorsa her aygıtın ayrı bir BLOCKDEV yapısı olacağı için ilgili 
@@ -15897,7 +16008,7 @@ void exit_sys(const char *msg)
 
     Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda negatif errno değerine geri dönmektedir. Örneğin:
 
-    if ((result = add_disk(g_gdisk)) != 0) {
+    if ((result = add_disk(g_disk)) != 0) {
         ...
         return result;
     }
@@ -15911,7 +16022,7 @@ void exit_sys(const char *msg)
 
     Örneğin:
 
-    if ((g_gdisk = alloc_disk(1)) == NULL) {
+    if ((g_disk = alloc_disk(1)) == NULL) {
         ...
         return -ENOMEM;
     }
@@ -15921,10 +16032,10 @@ void exit_sys(const char *msg)
         return result;
     }
     ...
-    del_gendisk(g_gdisk);
+    del_gendisk(g_disk);
 
     Aşağıda şimdiye kadar görmüş olduğumuz fonksiyonların kullanıldığı bir blok aygıt sürücüsü iskeleti verilmiştir. Ancak 
-    aşağıdakii kodda henüz istek kuyruğuna yönelik bir işlem yapılmamıştır. 
+    aşağıdkai kodda henüz istek kuyruğuna yönelik bir işlem yapılmamıştır. 
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /* generic-blkdev.c */
