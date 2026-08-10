@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                      Son Güncelleme: 05/08/2026 - Çarşamba
+                                      Son Güncelleme: 10/08/2026 - Pazartesi
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -16334,7 +16334,8 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 
     if deyimiin else kısmına dikkat ediniz. Eğer dosyanın ilgili kısmı sayfa önbelleğinde yoksa okunabilen kadar bilgi 
     okunup okuma işlemi hemen sonlandırılmaktadır. Buradaki ioctl kodunda birden fazla akışın bu işlemi aynı anda 
-    yaptığı bir durumda bir senkronizasyon sorunu oluşmayacaktır. Çünkü buradaki kodda ağırlıklı olarak zaten yerel değişkenler kullanılmıştır. 
+    yaptığı bir durumda bir senkronizasyon sorunu oluşmayacaktır. Çünkü buradaki kodda ağırlıklı olarak zaten yerel 
+    değişkenler kullanılmıştır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -17176,7 +17177,8 @@ void exit_sys(const char *msg)
         return ret;
     }
 
-    Güncel çekirdeklerde kilit işlemi için spinlock kullanılmamıştır, kilit mekanizması folio nesnesindeki memdesc_flags_t elemanının PG_locked biti ile manuel biçimde oluşturulmuştur. Bunun gerekçesi bellek maliyetini azaltmak ve uykuya 
+    Güncel çekirdeklerde kilit işlemi için spinlock kullanılmamıştır, kilit mekanizması folio nesnesindeki memdesc_flags_t 
+    elemanının PG_locked biti ile manuel biçimde oluşturulmuştur. Bunun gerekçesi bellek maliyetini azaltmak ve uykuya 
     dalma mekanizmasını daha etkin hale getirmektir. 
 
     Aşağıdaki örnekte oluşturduğumuz aygıt sürücüye yazma desteği de verdik. Burada yazma işlemini yapan ioctl 
@@ -17831,19 +17833,24 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Aslında Linux sistemlerinde kullanıcı modundaki dosya işlemlerinde sayfa önbelleği büyük ölçüde devre dışı bırakılabilir. Bunun için Linux sistemlerinde open fonksiyonunda açış moduna O_DIRECT bayrağı eklenmelidir. Örneğin:
+    Aslında Linux sistemlerinde kullanıcı modundaki dosya işlemlerinde sayfa önbelleği büyük ölçüde devre dışı bırakılabilir.
+    Bunun için Linux sistemlerinde open fonksiyonunda açış moduna O_DIRECT bayrağı eklenmelidir. Örneğin:
 
     fd = open("test.txt",O_RDWR|O_DIRECT);
 
-    O_DIRECT bayrağı POSIX standartlarında bulunmamaktadır. Bu bayrak Linux çekirdeklerine 2.4 versiyonuyla girmiştir. 
-    Linux'ta dosya O_DIRECT ile açılıp okuma işlemi yapıldığında dosyadan okunanlar hiç sayfa önbelleğine alınmadan 
-    doğrudan kullanıcı modundaki tampona aktarılmaktadır. O_DIRECT bayrağı ile dosya açılıp dosyaya yazma yapıldığında 
-    yine yazılacak byte'lar hiç önbelleğe alınmadan doğrudan aygıta yapılmaktadır. Ancak yazma durumunda yazılacak yer
-    daha önce önbelleğe alınmışsa ve bu önbellek bloğu kirliyse önce ilgili blok diske geri yazılmaktadır
+    ``O_DIRECT`` bayrağı POSIX standartlarında bulunmamaktadır. Bu bayrak Linux çekirdeklerine 2.4
+    versiyonuyla girmiştir. Linux'ta dosya ``O_DIRECT`` ile açılıp okuma işlemi yapıldığında dosyadan
+    okunanlar hiç sayfa önbelleğine alınmadan doğrudan kullanıcı modundaki tampona aktarılmaktadır.
+    ``O_DIRECT`` bayrağı ile dosya açılıp dosyaya yazma yapıldığında yine yazılacak byte'lar hiç
+    önbelleğe alınmadan doğrudan blok aygıtına aktarılmaktadır. Ancak yazma durumunda yazılacak yer
+    daha önce önbelleğe alınmışsa ve bu önbellek bloğu kirliyse önce ilgili blok diske geri
+    yazılmaktadır. (``O_DIRECT`` bayrağı dosya açıldıktan sonra da ``fcntl`` fonksiyonuyla set
+    edilebilmektedir.)
 
     Dosyalardan O_DIRECT modu ile okuma/yazma yapabilmek için dosya sisteminin de bu modu destekliyor olması gerekir. 
     Güncel çekirdeklerde O_DIRECT bayrağı birkaç yerde kontrol edilmektedir. Güncel çekirdeklerde okuma işlemlerinde 
-    sayfa önbelleği asıl olarak "mm/filemap.c" dosyasındaki generic_file_read_iter ve generic_file_write_iter fonksiyonlarında devre dışı bırakılmaktadır:
+    sayfa önbelleği asıl olarak "mm/filemap.c" dosyasındaki generic_file_read_iter ve generic_file_write_iter 
+    fonksiyonlarında devre dışı bırakılmaktadır. file_read_iter fonksiyonu şöyle tanımlanmıştır:
     
     ssize_t
     generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
@@ -17901,12 +17908,64 @@ void exit_sys(const char *msg)
     }
 
     Burada O_DIRECT bayrağının set edilip edilmediği kontrol edilmiş ve akış dosya sistemine geçirilmiştir. ext2, ext4
-    gibi dosya sistemleri generic_file_read_iter fonksiyonu çağırmadan önce O_DIRECT kontrolünü kendileri yapıp 
+    gibi dosya sistemleri generic_file_read_iter fonksiyonu çağrılmadan önce O_DIRECT kontrolünü kendileri yapıp 
     durumu ele almaktadır. Sayfa önbelleğini devreye sokmadan doğrudan okuma/yazma işlemlerini dosya sistemine geri 
     döndüğümüz ilerideki bir bölümde ele alacağız.
 
+    O_DIRECT bayrağının kullanılmasının gerekebildiği bazı durumları aşağıda bir tablo halinde veriyoruz:
+
+    ┌────────────────────────────┬──────────────────────────────────────────────────────────────┐
+    │      Kullanım Durumu       │                          Açıklama                            │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Veritabanı yönetim         │ Oracle, PostgreSQL, MySQL/InnoDB gibi sistemler kendi tampon │
+    │ sistemleri                 │ havuzlarını (buffer pool) yönetir. Çekirdeğin sayfa önbelleği│
+    │                            │ ile çift tamponlama (double buffering) hem RAM israfına hem  │
+    │                            │ de gereksiz kopyalamaya yol açar. O_DIRECT ile veri tek kopya│
+    │                            │ olarak uygulamanın kendi önbelleğinde tutulur.               │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Kendi önbellekleme         │ Uygulama, erişim örüntüsünü çekirdekten daha iyi bildiği     │
+    │ algoritmalarını uygulama   │ için LRU yerine kendi  bellekten atma algoritmalarını        │
+    │                            │ (örneğin LRU-K, ARC, clock-pro) uygulamak isteyebilir.       │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Büyük ardışıl (streaming)  │ Yalnızca bir kez okunacak/yazılacak çok büyük dosyalarda     │
+    │ IO işlemleri               │ (yedekleme, video akışı, bilimsel veri setleri gibi) sayfa   │
+    │                            │ önbelleğini doldurmak, sistemdeki diğer proseslerin sıcak    │
+    │                            │ sayfalarının geri kazanılmasına (cache pollution) neden      │
+    |                            | olabilmektedir.                                              |                    
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Sanallaştırma / hipervizör │ QEMU/KVM'de cache=none seçeneği O_DIRECT kullanır. Konuk     │
+    │ disk imajları              │ işletim sistemi zaten kendi sayfa önbelleğini tuttuğu için   │
+    │                            │ ana makinede ikinci bir önbellek katmanı gereksizdir ve      │
+    │                            │ tutarlılık riskleri doğurur.                                 │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Öngörülebilir IO           │ Gerçek zamanlı ya da gecikmeye duyarlı sistemlerde sayfa     │
+    │ gecikmesi gereksinimi      │ önbelleğinin yol açtığı belirsizlikler (writeback dalgaları, │
+    │                            │ bellek geri kazanımı, readahead) istenmez. O_DIRECT ile IO   │
+    │                            │ gecikmesi aygıtın davranışına daha yakın ve öngörülebilirdir.│
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Bellek baskısını azaltma   │ Sayfa önbelleği büyüdükçe kswapd ve doğrudan geri kazanım    │
+    │                            │ (direct reclaim) tetiklenir. Büyük G/Ç yapan ama önbellekten │
+    │                            │ yararlanmayan uygulamalar bu baskıyı O_DIRECT ile ortadan    │
+    │                            │ kaldırabilir.                                                │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ IO performans ölçümü ve    │ fio, dd (oflag=direct) gibi araçlarla aygıtın gerçek ham     │
+    │ kıyaslama (benchmark)      │ performansını ölçmek için önbellek etkisinin dışlanması      │
+    │                            │ gerekir; aksi halde RAM hızı ölçülmüş olur.                  │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Veri bütünlüğü denetimi    │ Yazılan verinin gerçekten aygıta ulaştığından emin olunmak   │
+    │ (O_DIRECT + O_SYNC/fsync)  │ istenen senaryolarda (WAL/journal dosyaları) önbellek        │
+    │                            │ katmanının aradan çıkarılması davranışı sadeleştirir. Ancak  │
+    │                            │ tek başına O_DIRECT kalıcılık garantisi vermez; aygıt yazma  │
+    │                            │ önbelleği için yine fsync/fdatasync gerekir.                 │
+    ├────────────────────────────┼──────────────────────────────────────────────────────────────┤
+    │ Kullanıcı alanı dosya      │ SPDK benzeri yığınlar, dağıtık depolama sistemleri (Ceph     │
+    │ sistemleri ve depolama     │ BlueStore öncesi FileStore, MinIO vs) blok katmanına en az   │
+    │ motorları                  │ müdahale ile erişmek için O_DIRECT kullanır.                 │
+    └────────────────────────────┴──────────────────────────────────────────────────────────────┘
+
     Kullanıcı alanında dosya açarken kullanılan O_SYNC, O_DSYNC ve O_RSYNC bayraklarının da davranışları sayfa önbelleği 
-    ile ilgilidir. Bu bayraklar POSIX standartlarında da bulunmaktadır. O_RSYNC ve O_DSYNC bayrakları O_SYNC bayrağı ile kullanılmak zorundadır. Önce bu bayrakların görünen işlevlerini anımsatmak istiyoruz:
+    ile ilgilidir. Bu bayraklar POSIX standartlarında da bulunmaktadır. O_RSYNC ve O_DSYNC bayrakları O_SYNC bayrağı ile 
+    birlikte kullanılmak zorundadır. Önce bu bayrakların işlevlerini anımsatmak istiyoruz:
 
     O_DSYNC (Synchronized I/O data integrity): write fonksiyonu geri döndüğünde veri ve o veriyi geri okumak için gereken 
     metadata bilgileri diske (blok aygıtına) ulaşmış olmalı. Dosya büyüdüyse i_size ve blok eşlemesi (extent/block map) 
@@ -17920,9 +17979,10 @@ void exit_sys(const char *msg)
     O_RSYNC sembolik sabitini O_SYNC ile aynı değerde olacak biçimde define etmiştir. Yani Linux'ta O_SYNC|O_RSYNC 
     ile O_SYNC arasında bir fark yoktur.
 
-    Linux çekirdeğinde O_SYNC bayrağı set edilmiş dosyaya write fonksiyonyla yazma yapıldığında çekirdek yazmayı normal yolla sayfa önbelleğine yapar,  ardından aynı write() çağrısı içinde senkron bir fsync benzeri adım eklenir. Yani O_SYNC adeta
-    her write işleminden sonra otomatik olarak fsync yapılmasına yol açmaktadır. Bu durumu şekilsel olarak şöyle de 
-    açıklayabiliriz:
+    Linux çekirdeğinde O_SYNC bayrağı set edilmiş dosyaya write fonksiyonyla yazma yapıldığında çekirdek yazmayı normal 
+    yolla sayfa önbelleğine yapar,  ardından aynı write() çağrısı içinde senkron bir fsync benzeri adım eklenir. Yani 
+    O_SYNC adeta her write işleminden sonra otomatik olarak fsync yapılmasına yol açmaktadır. Bu durumu şekilsel olarak 
+    şöyle de açıklayabiliriz:
     
     O_SYNC ile write (yeni blok tahsisli)   
     ├─ veri folio'su yazılır              
@@ -17930,8 +17990,8 @@ void exit_sys(const char *msg)
     ├─ bitmap bloğu yazılır                                                          
     └─ Disk üzerinde yazma işlemi bitirilir
 
-    Linux çekrdeğinde O_SYNC|O_DSYNC de yazma  işleminden sonra fsync işlevini yerine getirmektedir. Ancak bu fsync yolunda 
-    O_SYNC|O_DSYNC durumu kontrol edilmiş ve inode nesnesinin mtime dışındaki elemanları yazılmıştır.
+    Linux çekrdeğinde O_SYNC|O_DSYNC de yazma  işleminden sonra fsync işlevini yerine getirmektedir. Ancak bu fsync 
+    yolunda O_SYNC|O_DSYNC durumu kontrol edilmiş ve inode nesnesinin mtime dışındaki elemanları yazılmıştır.
 
     O_DSYNC write (overwrite)                        
     ├─ veri folio'su yazılır              
@@ -17967,17 +18027,53 @@ void exit_sys(const char *msg)
     int fdatasync(int fd);
 
     Fonksiyon yine dosyaya ilişkin betimleyicisini parametre olarak alır, başarı durumunda 0 değerine, başarısızlık 
-    durumunda -1 değerine geri döner. 
+    durumunda -1 değerine geri döner. fdatasync fonksiyonu da çekirdekte sync fonksiyonu ile aynı yolu izlemektedir, 
+    yalnızca fsync callback fonksiyonuna geçirilen argüman farklıdır:
 
-    Son olarak sync isimli POSIX fonksiyonundan da bahsetmek istiyoruz. sync fonksiyonu tüm dosya sistemlerinin önbellek bloklarını 
-    ve metadata alanlarını diske flush etmektedir. Fonksiyonun prototipi şöyledir:
+    fdatasync(fd)
+    └─ SYSCALL_DEFINE1(fdatasync, ...)    
+        └─ do_fsync(fd, 1)                
+                └─ vfs_fsync(file, 1)
+                    └─ vfs_fsync_range(file, 0, LLONG_MAX, 1)
+                        └─ file->f_op->fsync(file, start, end, 1)
+
+    Son olarak sync isimli POSIX fonksiyonundan da bahsetmek istiyoruz. sync fonksiyonu tüm dosya sistemlerinin önbellek
+    bloklarını ve metadata alanlarını diske flush etmektedir. Fonksiyonun prototipi şöyledir:
 
     #include <unistd.h>
 
     void sync(void); 
 
     Ancak sync senkron bir fonksiyon değildir. Yani işlemi başlatır ve geri döner. İşlem bitene kadar akışı bekletmez. 
-    sync fonksiyonunu uygulayan sync isimli bir kabuk komutu da bulunmaktadır.
+    sync fonksiyonunu uygulayan sync isimli bir kabuk komutu da bulunmaktadır. ``sync``fonksiyonun çağrı zinciri de şöyledir:
+
+    sync()                                    
+    └─ SYSCALL_DEFINE0(sync)                
+        └─ ksys_sync()
+                ├─ 1. wakeup_flusher_threads(WB_REASON_SYNC)
+                │        └─ her bdi_writeback için wb_start_writeback()   
+                │
+                ├─ 2. iterate_supers(sync_inodes_one_sb, NULL)
+                │        └─ sync_inodes_sb(sb)                            
+                │             ├─ bdi_split_work_to_wbs(WB_SYNC_ALL, for_sync=1)
+                │             │     └─ wb_writeback → __writeback_single_inode
+                │             │           └─ do_writepages → a_ops (iomap_writepages)
+                │             └─ wait_sb_inodes(sb)     ← her inode'da writeback bekle
+                │
+                ├─ 3. iterate_supers(sync_fs_one_sb, &nowait)   ← wait=0 geçişi
+                ├─ 4. iterate_supers(sync_fs_one_sb, &wait)     ← wait=1 geçişi
+                │        └─ sb->s_op->sync_fs(sb, wait)
+                │
+                ├─ 5. sync_bdevs(false)                          
+                ├─ 6. sync_bdevs(true)
+                │        └─ blockdev_superblock'un inode listesi gezilir
+                │             └─ her bdev'in bd_mapping'inde filemap_fdatawrite / fdatawait
+                │
+                └─ 7. laptop_mode ise laptop_sync_completion()
+
+    Bu fonksiyonların çalışma mekazizmaları sayfa önbelleğinin flush edilme süreciyle ve dosya sisteminin henüz 
+    görmediğimiz bazı özellikeriyle de ilgilidir. Biz bu açıkları izleyen paragraflarda ve dosya sistemine yeniden 
+    döndüğümüzde kapatacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -17991,71 +18087,70 @@ void exit_sys(const char *msg)
     çok "writeback" sözcüğü kullanılmaktadır. Biz de "writeback" sözcüğü yerine Türkçe "geri yazım" sözcüklerini 
     kullanacağız.
 
-    Linux çekirdeğinde geri yazım için evrimsel süreç içerisinde çeştli modeller kullanılmıştır. Linux'un 1'li versiyonlarında 
-    devre sokulan ilk geri yazım mekanizmasına "budflush/kupdate" denilmektedir. Bu mekanizma 2.6 çekirdeğne kadar 
-    kullanılmıştır. Bu mekanizmada kirli tampon sayısı (o zamanlar sayfa önbeleği yerine tampon önbelleği (buffer cache) 
-    kullanılıyordu) bir eşiği aştığında ndflush isimli çekirdek thread'i, uyanıyor ve kirlenmiş tamponları diske geri 
+    Linux çekirdeğinde geri yazım için evrimsel süreç içerisinde çeşitli modeller kullanılmıştır. Linux'un 1'li versiyonlarında 
+    kullanıma sokulan ilk geri yazım mekanizmasına bdflush/kupdate denilmektedir. Bu mekanizma 2.6 çekirdeğine kadar 
+    kullanılmıştır. Bu mekanizmada kirli tampon sayısı (o zamanlar sayfa önbelleği yerine tampon önbelleği (buffer cache) 
+    kullanılıyordu) bir eşiği aştığında bdflush isimli çekirdek thread'i uyandırılıyor ve kirlenmiş tamponları diske geri 
     yazıyordu. Bu geri yazıma ilişkin parametreler de sys_bdflush sistem fonksiyonuyla ayarlanabiliyordu. Daha sonra 
-    bu sistem fonksiyonu da kaldırıldı. Aynı zamanda bu versiyonlarda "kupdate" ve sonraki ismiyle "kupdated" isimli 
-    çekirdek thread'i 5 saniyede bir (bu süre de ayarlanabiliyordu) devreye girip kirleniş ve belirli süre geçmiş tamponları 
-    geri yazıyordu. 
+    bu sistem fonksiyonu da kaldırıldı. Aynı zamanda bu versiyonlarda kupdate ve sonraki ismiyle kupdated isimli 
+    çekirdek thread'i 5 saniyede bir (bu süre de ayarlanabiliyordu) devreye girip kirlenmiş ve belirli süre geçmiş tamponları 
+    diske geri yazıyordu. Bu sistem tampon (buffer) tabanlıydı ve sayfa önbelleği ile uyumsuzdu.
 
     2.6 çekirdeğiyle birlikte "tampon önbelleği (buffer cache)" yerine merkezi bir "sayfa önbelleği (page cache)" 
-    kullanılmaya başlanmıştır. Tampon (buffer) kullanımı hala geçerliliğini sürdürmekle birlikte sayfa önbelleği 
-    içerisine alınmıştır. Bu dönemde geri yazım için "pdflush" isimli bir çekirdek thread'leri oluşturulmuştu. Bu 
-    thread'ler bir tane değildi ve bir thread havuzu gibi sayıları artırılıp eksiltilebiliyordu. Tipik olarak havuzda
-    2 ile 8 arasında değişen pdflush thread'leri bulunuyordu. Bu tasarımın da iki problemi görülmeye başlandı. Birincisi 
-    farklı pdflush thread'lerin aynı aygıta yazması durumunda oluşan tıkanıklıktı. İkincisi yavaş bir aygıtın tüm pdflush 
-    thread'lerini etkilemesi ve sistem performansını düşürmesiydi. 
+    kullanılmaya başlandı. Tampon (buffer) kullanımı hala geçerliliğini sürdürmekle birlikte sayfa önbelleği içerisine 
+    alınmıştır. Bu dönemde geri yazım için "pdflush" isimli çekirdek thread'leri oluşturulmuştu. Bu thread'ler bir 
+    tane değildi ve bir thread havuzu gibi sayıları artırılıp eksiltilebiliyordu. Tipik olarak havuzda 2 ile 8 arasında 
+    değişen pdflush thread'leri bulunuyordu. Bu tasarımın da iki problemi görülmeye başlandı. Birincisi farklı pdflush 
+    thread'lerinin aynı aygıta yazması durumunda oluşan tıkanıklıktı. İkincisi yavaş bir aygıtın tüm pdflush thread'lerini 
+    etkilemesi ve sistem performansını düşürmesiydi. 
 
-    Çekirdeğin 2.6.32 versiyonuyla birlikte 3.10 versiyonuna kadar yine geri alım mekanizmasında değişiklikler yapılmıştır. 
+    Çekirdeğin 2.6.32 versiyonuyla birlikte 3.10 versiyonuna kadar yine geri yazım mekanizmasında değişiklikler yapılmıştır. 
     Bu yeni mekanizmada her blok aygıt sürücüsü için (backing device) ayrı bir flusher thread oluşturuldu. Böylece 
-    yavaş aygıtlar da kendi flusher therad'lerine sahip oldu. Ancak zamanla bu modelin de dezavantajları görüülmeye 
+    yavaş aygıtlar da kendi flusher thread'lerine sahip oldu. Ancak zamanla bu modelin de dezavantajları görülmeye 
     başlandı. Bu modelde sistemde çok sayıda blok aygıtı olduğunda (örneğin yüzlerce LUN'lu bir depolama sunucusu)
-    uyuyan yüzlerce çekirdek thread'i oluştutluyordu. Bu da sistem kaynaklarının kullanımı konusunda bir dezavantaj 
+    uyuyan yüzlerce çekirdek thread söz konusu oluyordu. Bu da sistem kaynaklarının kullanımı konusunda bir dezavantaj 
     oluşturuyordu.
 
     Nihayet çekirdeğin 3.10 versiyonuyla birlikte bugünkü sisteme geçildi. Biz kursumuzda güncel çekirdeklerde kullanılan
     bu sistemi ele alacağız. Güncel çekirdeklerde kullanılan geri yazım sistemi "çalışma kuyrukları (workqueue)" denilen
-    çekirdek mekanizmasını kullanmaktadır. Çalışma kuyrukları Linux çerkirdeğine 2.6 versiyonlarıyla girdi. Ancak 
+    çekirdek mekanizmasını kullanmaktadır. Çalışma kuyrukları Linux çekirdeğine 2.6 versiyonlarıyla girdi. Ancak 
     zaman içerisinde bu mekanizma gittikçe geliştirildi. 
     
     Tarihsel süreci aşağıdaki tabloyla da özetlemek istiyoruz:
 
-    ┌───────────────┬──────────────────┬───────────────────────────┬─────────────────────────────────┐
-    │    Dönem      │    Mekanizma     │      Thread modeli        │          Temel sorunu           │
-    ├───────────────┼──────────────────┼───────────────────────────┼─────────────────────────────────┤
-    │ 1.x – 2.4     │ bdflush+kupdated │ 2 sabit çekirdek thread'i │ Tampon merkezli, page cache     │
-    │               │                  │                           │ ile uyumsuz                     │
-    ├───────────────┼──────────────────┼───────────────────────────┼─────────────────────────────────┤
-    │ 2.6.0–2.6.31  │ pdflush          │ Dinamik havuz (2–8)       │ Aygıt adaleti yok, tıkanıklık   │
-    │               │                  │                           │ tahmini, havuz kilitlenmesi     │
-    ├───────────────┼──────────────────┼───────────────────────────┼─────────────────────────────────┤
-    │ 2.6.32–3.9    │ per-BDI flusher  │ Aygıt başına 1 thread     │ Çok aygıtlı sistemlerde yüzlerce│
-    │               │ (flush-x:y)      │                           │ boşta thread                    │
-    ├───────────────┼──────────────────┼───────────────────────────┼─────────────────────────────────┤
-    │ 3.10 – bugün  │ bdi_wq workqueue │ Paylaşımlı kworker'lar +  │ (güncel model)                  │
-    │               │ + wb_workfn      │ WQ_MEM_RECLAIM rescuer    │                                 │
-    └───────────────┴──────────────────┴───────────────────────────┴─────────────────────────────────┘
+    ┌──────────────┬──────────────────┬───────────────────────────┬──────────────────────────────────┐
+    │    Dönem     │    Mekanizma     │      Thread modeli        │          Temel sorunu            │
+    ├──────────────┼──────────────────┼───────────────────────────┼──────────────────────────────────┤
+    │ 1.x – 2.4    │ bdflush+kupdated │ 2 sabit çekirdek thread'i │ Tampon merkezli, page cache      │
+    │              │                  │                           │ ile uyumsuz                      │
+    ├──────────────┼──────────────────┼───────────────────────────┼──────────────────────────────────┤
+    │ 2.6.0–2.6.31 │ pdflush          │ Dinamik havuz (2–8)       │ Aygıt adaleti yok, tıkanıklık    │
+    │              │                  │                           │ tahmini, havuz kilitlenmesi      │
+    ├──────────────┼──────────────────┼───────────────────────────┼──────────────────────────────────┤
+    │ 2.6.32–3.9   │ per-BDI flusher  │ Aygıt başına 1 thread     │ Çok aygıtlı sistemlerde yüzlerce │
+    │              │ (flush-x:y)      │                           │ boşta thread                     │
+    ├──────────────┼──────────────────┼───────────────────────────┼──────────────────────────────────┤
+    │ 3.10 – bugün │ bdi_wq workqueue │ Paylaşımlı kworker'lar +  │ (güncel model)                   │
+    │              │ + wb_workfn      │ WQ_MEM_RECLAIM rescuer    │                                  │
+    └──────────────┴──────────────────┴───────────────────────────┴──────────────────────────────────┘
     
-    Biz çalışma kuyruklarını "kesmeleri (interrupts)" bölümde gecikmeli (deferred) işlemleri incelediğimiz bölümde 
-    ele alacağız. Her ne kadar çalışma kuyruklarını biz o bölümde ele alacaksa olsak da burada konunun daha iyi 
-    anlaşılması için izleyen paragraflarda çalışma kuyrukları ile ilgili temel bilgileri de vereceğiz. 
+    Biz çalışma kuyruklarını ayrı bir bölümde ayrıntılarıyla ele alacağız. Ancak bu bölümde geri yazım konusunun 
+    daha iyi anlaşılmasını sağlamak için çalışma kuyrukları hakkında temel bazı bilgileri de vermek istiyoruz.
+----------------------------------------------------------------------------------------------------------------------*/
 
-    Çalışma kuyrukları geri yazım genel bir çekirdek mekanizmasıdır. Geri yazım mekanizması da gümncel çekirdeklerde 
-    çalışma kuyruklarını kullanmaktadır. Çalışma kuyruğu (workqueue) terimi mekanizmanın kendisini betimlemektedir. 
-    Bu mekanizmada "çalışma havuzları (work pools) vardır. Bu havuzlara iş öğeleri (workqueue tems) yerleştirilmektedir. 
-    (Burada iş öğesi demekle çağrılacak fonksiyonları kastediyoruz. Çalışma kuyruğu terminoljisinde havuzlardaki kuyruklara 
-    burakılan iş öğelerine İngilizce "workqueue item") da denilmektedir. Yani havuzlar üretici-tüketici (producer-consumer) 
-    mekanizmasını oluşturmaktadır. Çekirdek ya da aygıt sürücü geliştirenler bu havuzlara iş öğelerini yerleştirirler. 
-    Bu havuzlardan iş öğelerini alan ve oradaki fonksiyonlaır çalıştıran tüketici rolğnde thread'ler vardır. Bu thread'lere 
-    "kworker" thread'leri de denilmektedir. Sisteminizdeki bu thread'leri aşağdıdaki komutla görebilirsiniz:
+/*----------------------------------------------------------------------------------------------------------------------
+    Çalışma kuyrukları genel bir çekirdek mekanizmasıdır. Geri yazım mekanizması da güncel çekirdeklerde çalışma kuyruklarını 
+    kullanmaktadır. Çalışma kuyruğu (workqueue) terimi mekanizmanın kendisini betimlemektedir. Bu mekanizmada "çalışma havuzları 
+    (work pools)" vardır. Bu havuzlara iş öğeleri (workqueue items) yerleştirilmektedir. (Burada iş öğesi demekle çağrılacak 
+    fonksiyonları kastediyoruz.) Havuzlar üretici-tüketici (producer-consumer) mekanizmasını oluşturmaktadır. Çekirdeğin 
+    kendisi ya da aygıt sürücü geliştirenler bu havuzlara iş öğelerini yerleştirirler. Bu havuzlardan iş öğelerini alan 
+    ve oradaki fonksiyonları çalıştıran tüketici görevini yapan thread'ler vardır. Bu thread'lere "kworker" thread'leri denilmektedir. Sisteminizdeki bu thread'leri aşağıdaki komutla görebilirsiniz:
 
     $ ps -e | grep kworker
 
-    Örnek bir çıktı şöyledir:
+    Komuttan elde edilecek örnek bir çıktı şöyledir:
 
-     4 ?        00:00:00 kworker/R-rcu_gp
+      4 ?        00:00:00 kworker/R-rcu_gp
       5 ?        00:00:00 kworker/R-sync_wq
       6 ?        00:00:00 kworker/R-kvfree_rcu_reclaim
       7 ?        00:00:00 kworker/R-slub_flushwq
@@ -18074,40 +18169,79 @@ void exit_sys(const char *msg)
      67 ?        00:00:00 kworker/u516:0-events_power_efficient
     ...
 
-    Peki her havuzdaki iş öğelerini kuyruktan alıp çalıştıran kaç "kworker thread" vardır? İşte bu sayı dinamik bir 
-    biçimde artırılıp eksiltilmektedir. Havuzlaradaki kuruklar büyüdfüğü zaman yeni "kworker" thread'leri yaratılır, 
-    havuzlardaki kuyruklar küçüldüğü zaman bunlar yok dedilir. Ancak işin başında tipik olarak her işlemci ya da çekirdek 
-    için 2 havuz ve her havuz için 2 thread yaratılmaktadır. Sonra yukarıda da belirtitğimiz gibi bunların sayısı dinamik 
+    Peki her havuzdaki iş öğelerini kuyruktan alıp çalıştıran kaç "kworker" thread vardır? İşte bu sayı dinamik bir 
+    biçimde artırılıp eksiltilmektedir. Havuzlardaki kuyruklar büyüdüğü zaman yeni "kworker" thread'ler yaratılır, 
+    havuzlardaki kuyruklar küçüldüğü zaman bunlar yok edilir. Ancak işin başında tipik olarak her işlemci ya da çekirdek 
+    için 2 havuz ve her havuz için 2 thread yaratılmaktadır. Sonra yukarıda da belirttiğimiz gibi bunların sayısı dinamik 
     bir biçimde ayarlanmaktadır. 
 
     Çalışma kuyruğu mekanizmasında her işlemci ya da çekirdek için işin başında 2 ayrı havuz yaratıldığını belirttik. 
-    Havuzlardan biri normal öncelikli iş öeğeleri için (nice = 0), diğerleri de yüksek öncelikli iş öğeleri için 
-    (nice = 20) oluşturulmaktadır. Bu havuzları tüketen kworker thread'leri her zmaan havuzun ilişkin olduğu işlemci 
+    Havuzlardan biri normal öncelikli iş öğeleri için (nice = 0), diğerleri de yüksek öncelikli iş öğeleri için 
+    (nice = -20) oluşturulmaktadır. Bu havuzları tüketen kworker thread'leri her zaman havuzun ilişkin olduğu işlemci 
     ya da çekirdek tarafından çalıştırılmaktadır. (Yani bu thread'ler bu işlemci ya da çekirdeklere bağlanmış durumdadır.) 
-    Bir iş öğesi (yani çalıştırılacak fonksiyonu) hangi işlemci ya da çekirdekteki akış oluşturmuşsa iş o işlemci ya da 
-    çekirdeğin havuzuna yerleştirilmektedir. 
+    Bir iş öğesini (yani çalıştırılacak fonksiyonu) hangi işlemci ya da çekirdekteki akış oluşturmuşsa iş o işlemci ya da 
+    çekirdeğin havuzuna yerleştirilmektedir. Çekirdeğin 6.10 versiyonuyla birlikte işlemci ya da çekirdek için havuz sayısı 
+    ikiden dörde çıkarılmıştır. 
 
-    İşlemci ya da çekirdeklere bağlanmış havuzların dışında başlangıça işlemci ya da çekirdeklere bağlanmamış (unbound)
-    iki havuz da oluşturulmaktadır. Bağlanmamış (unbound) havuzlar herhangi bir işlemci ya da çekirdek tarafından 
-    oluşturulan işleri çalıştırabilirler. 
+    İşlemcilere bağlı (bound) havuzların dışında, hiçbir işlemciye bağlı olmayan (unbound) havuzlar da bulunmaktadır. 
+    Bu havuzların sayısı sabit değildir; istenen ayrık nitelik kümesi sayısına ve makinenin pod (varsayılan olarak son seviye önbellek) topolojisine göre değişebilmektedir. Başlangıçta tipik olarak işlemciye bağlı olmayan tek bir havuz bulunmaktadır.
 
-    Çalışma kuyruğuan iş bırakmaya "işin çizelgelenmesi" denilmektedir. Çalışma kuyruğu havuzlarına iş öğeleri "belli 
-    bir zaman sonra çalışsın" biçiminde de bırakılabilmektedir. Havuza bırakılan iş öğeleri yalızca bir kez çalıştırılır. 
-    Ancak bu iş öeğeleri içinde  çizelgelenirse çalışma devam ettirilebilir. 
+    Çalışma kuyruğuna iş bırakmaya "işin çizelgelenmesi" denilmektedir. Çalışma kuyruğu havuzlarına iş öğeleri "belli 
+    bir zaman sonra çalışsın" biçiminde de bırakılabilmektedir. Havuza bırakılan iş öğeleri yalnızca bir kez çalıştırılmaktadır. 
+    Ancak bu iş öğeleri içinde yeniden çizelgeleme yapılırsa çalışma devam ettirilebilir. 
+
+    Biz burada çalışma kuyruklarının temel yapısını kolaylaştırarak açıkladık. Aslında çalışma kuyruklarının organizasyonunda
+    beş aktör vardır:
+
+    1) İş öğeleri. Bunlar work_struct yapısıyla temsil edilmektedir:
+
+    struct work_struct {
+        atomic_long_t data;
+        struct list_head entry;
+        work_func_t func;
+    #ifdef CONFIG_LOCKDEP
+        struct lockdep_map lockdep_map;
+    #endif
+    };
+
+    Yapının func elemanı çalıştırılacak fonksiyonu belirtmektedir.
+
+    2) Havuzlar. Bunlar worker_pool yapısıyla temsil edilmektedir. Havuzlar iş öğelerini tutmaktadır. 
+
+    3) Kullanıcının gördüğü çalışma kuyruğu nesnesi. Bunlar workqueue_struct yapısıyla temsil edilmektedir. Kullanıcılar 
+    (burada kullanıcı demekle aygıt sürücülerini ve mekanizmayı kullanan çekirdek kodlarını kastediyoruz) çalışma 
+    kuyruğu nesnesi oluşturup iş öğelerini çalışma kuyruğu nesnesi yoluyla çizelgelemektedir. 
+
+    4) Havuz kuyruğu. Bunlar pool_workqueue yapısıyla temsil edilmektedir. Havuz kuyrukları havuzlarla çalışma kuyruğu 
+    nesneleri arasında aracılık görevi yaparlar.
+
+    5) Havuzlardaki iş öğelerini çalıştıran çekirdek thread'leri. Bunlara "kworker" thread'ler denilmektedir. 
+
+    Bu nesnelerin arasındaki ilişkileri de aşağıdaki şekille betimleyebiliriz:
+
+    work_struct ── queue_work()──▶ workqueue_struct
+                                        │
+                                        ▼  (CPU'ya / niteliklere göre seçim)
+                                pool_workqueue (pwq)
+                                        │
+                                        ▼
+                                worker_pool ◀── kworker, kworker, kworker ...
+                                (worklist)         (kworker thread'leri)
+
+    Çalışma kuyruklarının ayrıntılı incelemesini ayrı bir bölümde ele alacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Güncel çekirdeklerde geri alım mekanizması yukarıda açıkladığımız çalışma kuyrukları yoluyla sağlanmaktadır. Yani 
-    geri alım için özel thread'ler yoktur. Zaten yaratılmış olan "kworker" thread'leri bu çizelgelenmiş geri alım 
-    işlemini yapan fonksiyonları da çalıştırmaktadır. Geri alım işlemleri için kullanılan çalışma kuyrukları WQ_UNBOUND
+    geri alım için özel çekirdek thread'leri yoktur. Zaten yaratılmış olan "kworker" thread'leri bu çizelgelenmiş geri 
+    alım işlemini yapan fonksiyonları da çalıştırmaktadır. Geri alım işlemleri için kullanılan çalışma kuyrukları WQ_UNBOUND
     parametresiyle bağlanmamış (unbound) yaratılmaktadır. Yani bu havuzlara bırakılan iş öğeleri herhangi bir işlemci 
-    ya da çekirdek tarafındna çalıştırılabilmektedir. Geri alım için oluşturulan çalışma kuyruk "mm/backing-dev.c" dosyası 
-    içeisinde global bdi_wq nesnesi ile temsil edilmektedir:
+    ya da çekirdek tarafından çalıştırılabilmektedir. Geri alım için oluşturulan çalışma kuyruğu nesnesi "mm/backing-dev.c" dosyası içeisinde global bdi_wq nesnesi ile temsil edilmektedir:
 
     struct workqueue_struct *bdi_wq;
 
     Geri alım için oluşturulan iş öğesindeki callback fonksiyon wb_workfn isimli fonksiyondur. Bu fonksiyon geri alım
-    faaliyetlerini yapan ana fonksiyondur. Bu fonksiyon güncel çekirdeklerde "fs/fs-writeback.c" dosyası içerisinde 
+    işlemlerini yapan ana fonksiyondur. Bu fonksiyon güncel çekirdeklerde "fs/fs-writeback.c" dosyası içerisinde 
     aşağıdaki gibi tanımlanmıştır:
 
     void wb_workfn(struct work_struct *work)
@@ -18148,24 +18282,22 @@ void exit_sys(const char *msg)
     }
 
     Tabii fonksiyon başka fonksiyonları çağırarak izleyen paragraflarda açıklayacağımız işlemleri yapmaktadır. Default 
-    durumda geri yazımı yapan bu fonksiyon 5 saniye periyotlarla çizelgelenmektedir. Ancak bu sürecin bazı ayrıntıları 
-    vardır. 
+    durumda geri yazımı yapan bu fonksiyon 5 saniye periyotlarla çizelgelenmektedir. Ancak bu süre değiştirilebilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Peki geri yazım işleminde neler yapılmaktadır? Geri yazımda temel olarak şunlar yapılmaktadır: "Sistemdeki inode 
-    nesneleri dolaşılır, o inode nesnelerinin sayfa önbelleklerinde kirli olan sayfalar diske flush edilir". Ancak 
-    bu işlemin ayrıntıları vardır. Örneğin sistmede farklı dosya sistemlerine ilişkin binlerce hatta on binlerce inode
-    nesneleri bukunuyor olabilir bu nesneler içerisinde de binlerce on binlerce kirlenmiş sayfalar olabilir. O halde 
-    bu işlemin belli bir verimlilikte yapılması gerekmektedir. Örneğin sistemde tüm inode nesnelerinin dolaşılması 
-    mümkün olmayabilir. Bir inode nesnesindeki tüm kirli sayfaların flush edilmesi diğerlerine haksızlık anlamına 
-    gelebilir. 
+    Şimdi geri yazım sürecini ele alalım. Geri yazımda kabaca şunlar yapılmaktadır: "Sistemdeki inode nesneleri 
+    dolaşılır, o inode nesnelerinin sayfa önbelleklerinde kirli olan sayfalar ve inode nesneleri diske geri yazılır". 
+    Ancak bu işlemin ayrıntıları vardır. Örneğin sistemde farklı dosya sistemlerine ilişkin binlerce hatta on binlerce 
+    inode nesnesi bulunuyor olabilir bu nesneler içerisinde de binlerce on binlerce kirlenmiş sayfalar olabilir. 
+    O halde bu işlemin belli bir verimlilikte yapılması gerekmektedir. Örneğin sistemde tüm inode nesnelerinin dolaşılması 
+    mümkün olmayabilir. Bir inode nesnesindeki tüm kirli sayfaların flush edilmesi diğerlerine haksızlık yapıldığı anlamına 
+    gelir.
 
-    Güncel çekirdeklerde diskler blok aygıt sürücüleri tarafından yönetilmektedir. (Aygıt sürücü mimarisini kursumuzda 
-    ayrı bir bölümde ele alacağız. Disk terimi yerine "blok aygıtı (block device)" terimi de kullanılmaktadır. Çekirdekte 
-    her blok aygıt sürücüsü için gendisk isimli bir yapı nesnesi oluşturulmaktadır. gendisk yapısı güncel çekirdeklerde 
-    "include/linux/blkdev.h" dosyası içerisinde tanımlanmıştır. Bu yapının bdi elemanı backing_dev_info isimli bir yapı 
-    nesnesini göstermektedir:
+    Güncel çekirdeklerde diskler blok aygıt sürücüleri tarafından yönetilmektedir. Aygıt sürücü mimarisini kursumuzda 
+    ayrı bir bölümde ele alacağız. (Biz kursumuzda disk terimini genel bir terim olarak kullanacağız. Aslında disk terimi 
+    yerine "blok aygıtı (block device)" terimi daha kapsayıcıdır.) Çekirdekte her blok aygıt sürücüsü için gendisk isimli 
+    bir yapı nesnesi oluşturulmaktadır. gendisk yapısı güncel çekirdeklerde "include/linux/blkdev.h" dosyası içerisinde tanımlanmıştır. Bu yapının bdi elemanı backing_dev_info isimli bir yapı nesnesini göstermektedir:
 
     struct gendisk {
         /* ... */
@@ -18175,20 +18307,19 @@ void exit_sys(const char *msg)
         /* ... */
     };
 
-    Bu "bdi" kısaltması "backing device info" sözcüklerinden kısaltma yapılarak uydurulmuştur. Bu backing_dev_info 
-    yapısının wb elemanı bdi_writeback isimli bir yapı türündendir (yapı buraya gömülmüştür, dolayısıyla bu eleman 
-    bir gösterici değil yapı nesnesidir):
+    Bu "bdi" kısaltması "backing device info" sözcüklerinden kısaltma yapılarak uydurulmuştur. backing_dev_info 
+    yapısının wb elemanı bdi_writeback isimli bir yapı türündendir:
 
     struct backing_dev_info {
         /* ... */
 
         struct bdi_writeback wb;  /* the root writeback info for this bdi */
 
-        /* ... /*
+        /* ... */
     };
 
-    İşte bu yapıdaki elemanlar geri yazım için gerekli olan tüm bilgileri içermektedir. bdi_writebak yapısının önemli 
-    elemanlarını aşağıda veriyoruz:
+    wb elemanının bir gösterici olmadığına doğrudan yapıya gömüldüğüne dikkat ediniz. İşte bu wb elemanı geri yazım için 
+    gerekli olan tüm bilgileri içermektedir. bdi_writeback yapısının önemli elemanlarını aşağıda veriyoruz:
 
     struct bdi_writeback {
         /* ... */
@@ -18201,33 +18332,262 @@ void exit_sys(const char *msg)
         struct list_head b_dirty_time;	    /* time stamps are dirty */
         spinlock_t list_lock;		        /* protects the b_* lists */
 
-        atomic_t writeback_inodes;	     /* number of inodes under writeback */
+        atomic_t writeback_inodes;	        /* number of inodes under writeback */
        
        /* ... */
     };
 
-    Yapının b_dirty elemanı o blok aygıtındaki kirlenmiiş olan inode nesnelerini tutmaktadır. Bu liste LRU tarzındadır. 
+    Yapının b_dirty elemanı o blok aygıtındaki kirlenmiş olan inode nesnelerini tutmaktadır. Bu liste LRU tarzındadır. 
     Yani yeni kirlenenler listenin başına yerleştirilmektedir. Dolayısıyla liste kesin olmasa da yaklaşık kirlenme 
     zamanına göre sıralı gibidir. Başka bir deyişle bu listenin sonundakiler daha uzun süre kirli biçimde kalan inode 
-    nesneleridir. Örneğin son uygulamamızda bir folio nesnesini folio_mark_dirty fpnksiyonuyla kirli hale getirmiştik. 
+    nesneleridir. Örneğin son uygulamamızda bir folio nesnesini folio_mark_dirty fonksiyonuyla kirli hale getirmiştik. 
     Bu fonksiyonun aynı zamanda inode nesnesini de kirli olarak işaretlediğini söylemiştik. İşte bu fonksiyon da aslında 
     kirlenmiş inode nesnesini ilgili blok aygıtına ilişkin gendisk nesnesinden hareketle bu b_dirty listesine yerleştirmektedir. 
     Buradan da görüldüğü gibi sistemdeki tüm kirlenmiş inode nesneleri tek bir bağlı listede tutulmamaktadır. Her 
-    blok aygıtının kendisine ilişkin ayrı bir liste vardır. 
+    blok aygıtı için ayrı bir LRU listesi vardır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                            95. Ders 09/08/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki geri yazım işlemi yapılırken bu işlemden sorumlu olan "kworker" thread'lerin çağırdığı wb_workfn fonksiyonu blok 
+    aygıt sürücüsüne ilişkin gendisk yapısından hareketle tüm b_dirty listesindeki kirlenmiş inode nesnelerinin önbellek 
+    sayfalarını diske (blok aygıtına) geri yazmakta mıdır? İşte çok fazla kirli inode nesnesi bulunabileceği için tüm 
+    inode nesnelerinin kirlenmiş önbellek sayfalarının diske geri yazılması performans kaybına yol açabilmektedir. Bu 
+    nedenle yalnızca belli bir süredir kirli kalan inode nesneleri diske geri yazılmaktadır. Bu süre güncel çekirdeklerde 
+    default durumda 30 saniyedir. Yani "kworker" thread'lerin çağırdığı wb_workfn fonksiyonu b_dirty bağlı listesinin 
+    sonundan başına doğru en az 30 saniyedir kirli durumda olan inode nesnelerinin önbellek sayfalarını diske geri 
+    yazmaktadır. Aslında bu 30 saniye değeri de değiştirilebilir. Bu değer "proc" dosya sisteminde "/proc/sys/vm/dirty_expire_centisecs" dosyasında tutulmaktadır. Bu dosyadaki değeri manuel bir biçimde ya da sysctl komutu ile değiştirebiliriz. Örneğin:
+
+    $  cat /proc/sys/vm/dirty_expire_centisecs
+    3000
+
+    "/proc/sys/vm/dirty_expire_centisecs" dosyasının değeri santisaniye cinsinden tuttuğuna dikkat ediniz. Bu değeri 
+    manuel bir biçimde şöyle değiştirebiliriz:
+
+    $ echo 3500 | sudo tee /proc/sys/vm/dirty_expire_centisecs
+
+    Bu tür işlemlerin daha kolay yapılabilmesi için "sysctl" isimli bir komutun da bulunduğunu anımsayınız. "sysctl" 
+    komutu aslında "proc/sys" dizini içerisindeki dosyalardan okuma ve  yazma yapmaktadır. Aynı işlem sysctl komutu ile 
+    şöyle de yapılabilmektedir:
+
+    $ sudo sysctl vm.dirty_expire_centisecs=35000
+    vm.dirty_expire_centisecs = 35000
+
+    Bu değerler yukarıdaki komutların konfigürasyon dosyalarına ya da kabuğun startup dosyalarına yazılarak açılışta kalıcı 
+    hale getirilebilir. Bunun için "/etc/sysctl.conf" dosyasını kullanabilirsiniz. Örneğin:
+
+    vm.dirty_expire_centisecs = 35000
+
+    Çekirdeğin 5.8 versiyonuyla birlikte "sysctl" komutları boot parametreleri haline de getirilmiştir. Eğer bu komutlar
+    boot parametresi olarak çekirdeğe geçirilirse çekirdek kernel_write fonksiyonuyla bunları "proc/sys" girişlerini 
+    kullanarak ilgili dosyalara yazmaktadır. Biz de aynı işlemi boot işlemi sırasında aşağıdaki gibi bir boot parametresi 
+    yoluyla da yapabiliriz:
+
+    sysctl.vm.dirty_expire_centisecs=35000
+
+    Peki bu "kworker" thread'ler hangi periyotlarla geri yazımı yapan wb_workfn fonksiyonunu çağırmaktadır. Biz yukarıda 
+    çalışma kuyruklarındaki çalışma öğelerinin belli bir zaman sonra işlem görecek biçimde çizelgelenebildiğini 
+    belirtmiştik. İşte çekirdek geri yazımı yapan iş öğelerini  5 saniye sonra çalıştırılacak biçimde çalışma kuyruğuna 
+    çizelgelemektedir. Çalışma öğesi her çalıştığında kendini yeniden 5 saniye sonraya çizelgeler. Böylece wb_workfn 
+    fonksiyonu 5 saniyede bir devreye girmektedir. Burada sözünü ettiğimiz 5 saniyelik periyot da 30 saniyelik eskime 
+    süresinde olduğu gibi değiştirilebilmektedir. Bu değer "/proc/sys/vm/dirty_writeback_centisecs" dosyası yoluyla 
+    değiştirilebilmektedir. Örneğin:
+
+    $ echo 600 | sudo tee /proc/sys/vm/dirty_writeback_centisecs
+    
+    Bu değişiklik "sysctl" komutu ile de şöyle yapılabilir:
+
+    $ sysctl vm.dirty_writeback_centisecs=1000
+    
+    Çekirdeğin 5.8 versiyonundan itibaren aynı komut çekirdek boot parametresi ile de çekirdeğe verilebilmektedir:
+
+    sysctl.vm.dirty_writeback_centisecs=1000
+
+    Özetle geri yazım işlemini yapan kodlar 5 saniyede bir çalışıp en az 30 saniyedir kirli kalmış olan inode nesnelerinin 
+    önbelleklerini diske geri yazmaktadır.
+
+    ┌───────────────────────────┬──────────────────────────────┬───────────────────┐
+    │         Parametre         │            Anlam             │  Varsayılan Değer │
+    ├───────────────────────────┼──────────────────────────────┼───────────────────┤
+    │ dirty_writeback_centisecs │ kworker uyanma periyodu      │ 500 cs (5 sn)     │
+    │ dirty_expire_centisecs    │ inode eskime (expire) süresi │ 3000 cs (30 sn)   │
+    └───────────────────────────┴──────────────────────────────┴───────────────────┘
+
+    Burada bazı ayrıntılardan da bahsetmek istiyoruz. Geri yazım sırasında bdi_writeback nesnesinin b_dirty bağlı 
+    listesi üzerinde doğrudan dolaşım yapılmamaktadır. Önce bu bağlı listede en az 30 saniye yaşlanmış inode nesneleri bdi_writeback nesnesinin b_io listesine alınmakta ve geri yazım için bu liste dolaşılmaktadır. Burada bir noktaya 
+    dikkatinizi çekmek istiyoruz. Bir bağlı listenin sondaki bir grup düğümünü başka bir bağlı listeye taşıma işlemi 
+    aslında taşınacak yerdeki bağların taşınmasıyla sağlanabilmektedir. Yani taşıma sırasında düğümler tek tek 
+    taşınmamaktadır. Peki yaşlanmış inode nesnelerinin başka bir bağlı listeye taşınıp işlemlerin oradan yürütülmesinin 
+    faydası nedir? İşte bunun sağladığı faydaları aşağıda bir tablo biçiminde veriyoruz:
+
+    ┌──────────────────────────┬──────────────────────────────────────────────────────────────────┐
+    │           Neden          │                             Açıklama                             │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────────┤
+    │ Livelock'tan kaçınma     │ b_dirty listesine sürekli yeni inode nesnesi eklenir (kuyruk     │
+    │ (snapshot alma)          │ başına). Doğrudan bu liste dolaşılsaydı, geri yazım sırasında    │
+    │                          │ kirlenen yeni inode'lar da işleme girer ve döngü hiç             │
+    │                          │ bitmeyebilirdi. b_io, o anki adayların "fotoğrafını" (snapshot)  │
+    │                          │ alır; işlem sınırlı bir küme üzerinde tamamlanır.                │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────────┤
+    │ b_dirty'nin zaman sıralı │ b_dirty, dirtied_when elemanına göre sıralı tutulmak             │
+    │ yapısını koruma          │ zorundadır (en eski kuyruğun sonunda). Liste üzerinde yerinde    │
+    │                          │ (in-place) işlem yapılıp inode'lar çıkarılıp geri eklenseydi     │
+    │                          │ bu sıralama ve yaşlanma takibi bozulurdu. Taşıma modeli,         │
+    │                          │ sıralamayı hiç bozmadan kuyruk sonundan kesip almaya (splice)    │
+    │                          │ izin verir.                                                      │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────────┤
+    │ Kilit tutma süresini     │ b_dirty ve b_io, wb->list_lock (spinlock) ile korunur. Taşıma    │
+    │ kısaltma                 │ işlemi kilit altında hızlıca yapılır; asıl (uyuyabilen) yazma    │
+    │                          │ işlemi sırasında liste kilidi kısa aralıklarla bırakılabilir.    │
+    │                          │ Böylece yeni kirlenen inode'ların b_dirty'ye eklenmesi yazma     │
+    │                          │ işlemiyle çakışmadan sürebilir.                                  │
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────────┤
+    │ Yeniden kuyruklama       │ İşlenirken yazılamayan (kilitli, meşgul, tıkanmış, kısmen        │
+    │ semantiği (b_more_io)    │ yazılmış) inode'lar requeue_io() ile b_more_io'ya alınır;        │
+    │                          │ sonraki turda b_io'ya geri eklenir (list_splice_init). Bu üçlü   │
+    │                          │ liste modeli, "bu tur işlenecekler / sonra denenecekler / henüz  │
+    │                          │ genç olanlar" ayrımı ile adil ve öngörülebilir bir ilerleme      │
+    │                          │ sağlar.                                                          │  
+    ├──────────────────────────┼──────────────────────────────────────────────────────────────────┤
+    │ Eşzamanlı redirty ile    │ Taşınan inode'lara I_SYNC_QUEUED bayrağı set edilir; böylece     │
+    │ yarışın yönetimi         │ inode yazılırken yeniden kirlense bile liste konumu değişmez     │
+    │                          │ (__mark_inode_dirty bu bayrağı görüp yeniden konumlandırmayı     │
+    │                          │ atlar). b_dirty'nin zaman sıralaması korunur, yarış koşulu       │
+    │                          │ liste düzeyinde basitleşir.                                      │
+    └──────────────────────────┴──────────────────────────────────────────────────────────────────┘
+
+    b_dirty listesinden b_io listesine alınmış olan yaşlanmış inode nesnelerinin önbellek sayfaları diske geri yazılırken 
+    bu yazma nsnenin kilitli olması, meşgul olması, tıkanmış olması, ya da bütçe dolayısıyla kısmen yazılmış olması 
+    gerekçeciyle temiz hale geitirileyebilir. İşte tam oalrak temizlenemeyen inode mnesneeleri bdi_writeback nesnesinin 
+    b_more_io listesine alınmaktadır. Sonra bu listeden yeniden b_io listesine taşınmaktadır. Bu süreci aşağıdaki 
+    şekille özetliyoruz:
+
+                    write(2) / chmod(2) / ...
+                            │
+                            ▼
+                __mark_inode_dirty()
+                            │  (ilk kirlenmede)
+                            │  dirtied_when = jiffies
+                            ▼
+    ┌──────────────────  b_dirty  ──────────────────┐
+    │        (dirtied_when sıralı bekleme)          │
+    └──────────────────────┬────────────────────────┘
+                           │ queue_io():
+                           │ dirtied_when <= eşik olanlar
+                           ▼
+    ┌──────────────────   b_io   ──────────────────┐
+    │          (bu turun çalışma listesi)          │
+    └───────┬──────────────────────────┬───────────┘
+            │ tamamen yazıldı          │ bütçe bitti / kilitli
+            ▼                          ▼
+    i_state &= ~I_DIRTY         ┌── b_more_io ──┐
+    liste dışı (temiz)          │  (ertelendi)  │
+                                └───────┬───────┘
+                                        │ sonraki queue_io()
+                                        └────────► b_io kuyruğuna   
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki geri yazım işlemini yapan akış kirli bir inode nesnesinin kirlenmiş olan önbellek bloklarının hepsini mi 
+    diske yazmaktadır? Örneğin bir indeo nesnesinin 5000 tane kirlenmiş önbellek sayfası olabilir. Bu durumda bunların 
+    hepsinin geri yazımı zaman alabilir ve diğer bekleyen inode nesnelerine karşı bir haksızlık yapılma durumuj oluşabilir. 
+    İşte bunun için her inode temelinde bir bütçe kullanılmaktadır. Tipik olarak geri yazım akışı bir inode nesnesinin 
+    en fazla 1024 (4 MB) tane kirli sayfasını diske geri yazmaktadır. Çekirdeğin 3.0 ve önceki versiyonlarında inode 
+    başına bütçe değeri statik bir biçimde bir sembolik sabitle belirleniyordu:
+
+   /* v3.0, fs/fs-writeback.c:621 */
+    
+    #define MAX_WRITEBACK_PAGES     1024
+
+    Daha sonra bu bütçe dinamik hale geitirildi. Güncel çekirdeklerde bu dinamik bütçe hesabı writeback_chunk_size
+    isimli çekirdek fonksiyonu tarafından yapılmaktadır. Bu dinamik değer en az 1024 sayfadan oluşmaktadır:
+
+    /* include/linux/writeback.h:376 */
+    
+    #define MIN_WRITEBACK_PAGES	(4096UL >> (PAGE_SHIFT - 10))
+
+    Buradaki bütçe b_io listesindeki her inode nesnesi üzerinde işlem yapılmadan önce o inode nesnesi için yeniden 
+    hesaplanmaktadır.  Bütçe değerinin nasıl oluşturulduğu ve dinamik olarak nasıl değiştirildiğine ilişkin ayrıntılara 
+    burada değinmeyeceğiz. 
+
+    Benzer biçimde geri yazım işlemi sırasında b_io listesine alınmış ve yeterince yaşlanmış olan (tipik olarak 30 saniye)
+    bütün inode nesneleri de işleme sokulmak zorunda değildir. Burada da bir kota uygulanmaktadır. Kota, geri yazım akışı 
+    sırasında toplam geri yazılacak sayfa sayısı temelinde oluşturulmaktadır. Bu toplam sayfa sayısına ulaşıldığında artık 
+    b_io listesindeki diğer inode nesnelerin geri yazımı b_more_io listesi yoluyla sonraki tura bırakılmaktadır. Buradaki 
+    kota çalışam birimi tarafından belirlenmektedir. Örneğin 16 GB fiziksle bellek için kota değerleri aşağıdakine 
+    benzer değerlerden oluşmaktadır:
+
+    ┌──────────────────────────────┬──────────────────┬───────────────┐
+    │            Eşik              │  Sayfa (4 KB)    │    Bellek     │
+    ├──────────────────────────────┼──────────────────┼───────────────┤
+    │ dirty limit (%20)            │   ~720.000       │   ~2,8 GB     │
+    │ background eşiği (%10)       │   ~360.000       │   ~1,4 GB     │
+    └──────────────────────────────┴──────────────────┴───────────────┘
+
+    Aşağıda uygulanan kota ve bütçeler bir tablo ile özetlenmektedir:
+
+    ┌─────────────────────────┬──────────────────────────────┬─────────────────────────────┐
+    │         Seviye          │             Alan             │            Amaç             │
+    ├─────────────────────────┼──────────────────────────────┼─────────────────────────────┤
+    │ İş (work) kotası        │ work->nr_pages               │ Tek geri yazım işlemindeki  │
+    │                         │                              │ toplam sayfa hedefi         │
+    │ Inode başına bütçe      │ wbc.nr_to_write=write_chunk  │ Inode'lar arası adalet      │ 
+    └─────────────────────────┴──────────────────────────────┴─────────────────────────────┘
+
+    Buradaki wbc writeback_control türünden bir nesneyi belirtmektedir. Bu bilgiler bu nesnesnin içerisine yazılmaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Syafa önbelleğinden geri yazım yalnızca "kworker" thread'lern tipik olarak 5 saniyede bir devreye girmesi yoluyla 
+    yapılmamaktadır. Geri yazımı tetikleyen başka süreçler de vardır. Bu süreçlerin bir bölümü henüz ele almadığımız 
+    mekanizmalar tarafından tetiklenmektedir. Aşağdaki tabloda "kworker" thread'leri dışında geri alımın tetiklendiği 
+    tipik durumlar listelenmiştir:
+
+    ┌───────────────────────────────┬─────────────────────────┬──────────────────────────────┬───────────────────────┐
+    │          Tetikleyici          │        wb_reason        │        Giriş Noktası         │    Yürütme Bağlamı    │
+    ├───────────────────────────────┼─────────────────────────┼──────────────────────────────┼───────────────────────┤
+    │ Kirli eşik aşımı (write yolu) │ WB_REASON_BACKGROUND    │ balance_dirty_pages()        │ kworker yoluyla       │
+    │                               │                         │ mm/page-writeback.c          │                       │
+    │ sync() sistem fonksiyonu      │ WB_REASON_SYNC          │ ksys_sync()                  │ kworker yoluyla +     │
+    │                               │                         │ fs/sync.c                    │ çağıran bekler        │                        
+    │ Bellek geri alımı             │ WB_REASON_VMSCAN        │ shrink_inactive_list()       │ kworker yoluyla       │
+    │ (kswapd / direct reclaim)     │                         │ mm/vmscan.c                  │                       │
+    │ FS boş alan sıkışıklığı       │ WB_REASON_FS_FREE_SPACE │ try_to_writeback_inodes_sb() │ kworker yoluyla       │
+    │ (örn. ext4 ENOSPC)            │                         │ fs/ext4/inode.c              │                       │
+    │ memcg yabancı yazım           │ WB_REASON_FOREIGN_FLUSH │ mem_cgroup_flush_foreign()   │ kworker yoluyla       │
+    │ lazytime süresi dolumu        │ (b_dirty_time listesi)  │ wakeup_dirtytime_writeback() │ kworker yoluyla       │
+    │ (12 saatlik dirtytime_work)   │                         │ fs/fs-writeback.c            │                       │
+    │ RWF_DONTCACHE birikimi        │ WB_REASON_DONTCACHE     │ wb_check_start_dontcache()   │ kworker yoluyla       │
+    │ (6.14+)                       │                         │ fs/fs-writeback.c            │                       │
+    │ sysctl değişikliği            │ WB_REASON_PERIODIC      │ dirty_writeback_centisecs    │ kworker yoluyla       │
+    │                               │                         │ mm/page-writeback.c          │                       │
+    ├───────────────────────────────┼─────────────────────────┼──────────────────────────────┼───────────────────────┤
+    │ fsync() / fdatasync()         │ —                       │ vfs_fsync_range()            │ çağıran süreç bağlamı │
+    │ msync(MS_SYNC)                │ —                       │ vfs_fsync_range()            │ çağıran süreç bağlamı │
+    │ sync_file_range()             │ —                       │ filemap_fdatawrite_range()   │ çağıran süreç bağlamı │
+    │                               │                         │ fs/sync.c:283                │                       │
+    │ O_SYNC / O_DSYNC yazımları    │ —                       │ generic_write_sync()         │ çağıran süreç bağlamı │
+    │ pageout() (reclaim içi)       │ —                       │ shrink_folio_list()          │ kswapd bağlamı        │
+    │ umount / remount / freeze     │ —                       │ sync_filesystem()            │ çağıran süreç bağlamı │
+    └───────────────────────────────┴─────────────────────────┴──────────────────────────────┴───────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+<Bu noktada sayfa geri yazımı ile kirli inode nesnelerinin indeo bilgilerinin geri yazımı arasındaki ilişkiler de 
+anlatılacak>
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
 
 ----------------------------------------------------------------------------------------------------------------------*/
-
 
 /*----------------------------------------------------------------------------------------------------------------------
                                                 GEÇİCİ NOTLAR
