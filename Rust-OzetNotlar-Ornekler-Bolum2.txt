@@ -20584,9 +20584,9 @@ fn main() {
     Prosedürel makrolar isminden de anlaşıldığı gibi bir fonksiyon biçiminde yazılmaktadır. Bildirmsel makrolara göre daha 
     esnek kullanımlar sunmaktadır. Prosedürel makrolar da kendi aralarında üç gruba ayrılmaktadır:
 
-    1) #[proc_macro] özniteligi ile oluşturulanlar
-    2) #[proc_macro_derive(isim)] özniteliği ile oluşturulanlar3
-    3) #[proc_macro_attribute] özniteliğiyle oluşturulanlar
+    1) #[proc_macro] özniteligi ile oluşturulanlar.
+    2) #[proc_macro_derive(isim)] özniteliği ile oluşturulanlar. Bunlara türetme makroları da denilmektedir.
+    3) #[proc_macro_attribute] özniteliğiyle oluşturulanlar. Bunlara öznitlik makroları da denilmektedir. 
 
     Birinci gruba İnlizce "function like macros", ikinci gruba "derive macros" ve üçncü gruba da "attribute macros" 
     da denilmektedir. Bunlardna en fazla kullanılan prosedürel makrolar #[proc_macro] özniteliği ile oluşturulan makrolardır. 
@@ -21417,25 +21417,268 @@ fn main() {
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Prosedürel makroların yazımında kolaylık sağlayan diğer bir pakette syn isimli pakettir. Bu paketin en son sürümü "2.0"
+                                            125. Ders 05/08/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Prosedürel makroların yazımında kolaylık sağlayan diğer bir paket de syn isimli pakettir. Bu paketin en son sürümü "2.0"
     idi. Ancak birkaç hafta önce "3.0.0" sürümü de kullanıma sunulmuştur. Tabii paketi kullanabilmek için yine [dependencies]
     bölümünde paketi belirtmemiz gerekir:
 
     [dependencies]
     proc-macro2 = "1.0"
-    syn = "3.0.0"
+    syn = { version = "3.0.0", features = ["full"] }
 
-    
+    syn paketinin tüm özelliklerinin kullanılabilmesi için features = ["full"] bağımlılık parametresinin de kullanılması 
+    gerekmektedir.
 
-    
+    syn paketi atomlardan bir parse ağacı (abstract syntax tree, kısaca AST) oluşturmak için kullanılmaktadır. syn paketi 
+    içerisinde bir grup makro vardır. Bunlar arasında en çok kullanılanı parse_macro_input isimli makrodur. Bu makronun tipik 
+    kullanımı şşyledir:
 
+    ast = parse_macro_input!(input as T);
 
+    Burada input TokenStream olmalıdır. T ise bu TokenStream'deki atomların dönüştürüleceği hedef sentaks ağacını belirtmektedir. 
+    Örneğin türetme tarzı prosedürel makrolarda buradaki T tipik olarak DeriveInput olur:
 
+    ast = parse_macro_input!(input as DeriveInput);
+
+    Makro içerisindeki as anahtar sözcüğünün tür dönüştürme operatöryle bir ilgisi yoktur. Bu makroda bir eşleş görevindedir. 
+    Yani kalıbın bir parçasıdır. Genel biçimde belirttiğimiz T aslında syn paketindeki başka sentaktik öğeler de olabilir. 
+    Örneğin:
+
+    Syn::Expr
+    syn::ItemFn        // fn foo() { ... }
+    syn::ItemStruct    // struct S { ... }
+    syn::ItemEnum      // enum E { ... }
+    syn::ItemImpl      // impl S { ... } / impl Tr for S { ... }
+    syn::ItemTrait     // trait T { ... }
+    syn::ItemMod       // mod m { ... }
+    syn::ItemUse       // use std::fmt;
+    syn::ItemConst     // const N: usize = 3;
+    syn::ItemStatic    // static X: u8 = 0;
+    syn::ItemType      // type Alias = Vec<u8>;
+    syn::Item          // umbrella enum over all of the above
+
+    syn::Ident         // a single identifier: my_name
+    syn::Path          // a::b::C (each segment may carry generic args)
+    syn::Lifetime      // 'a
+    syn::Type          // any type; TypePath, TypeReference, TypeSlice,
+                    //   TypeArray, TypeTuple, TypeBareFn, ...
+    syn::Lit           // umbrella over literals
+    syn::LitStr        // "text"  (.value() resolves escapes)
+    syn::LitInt        // 42u8    (.base10_parse::<usize>() for the value)
+    syn::LitBool       // true
+
+    Biz bu makro ile TokenStream ile belirtilen atom yığınını sentaks ağacına dönüştürerek oardaki sentaktik öğeleri daha
+    rahat kullanabiliriz. Tabii geçerli sentaks ağacının oluşturulabilmesi için TokenStream ile belirtilen atom yığının da 
+    geçerli bir Rust sentaksına ilişkin olması gerekir. Örneğin:
+
+    #[proc_macro]
+    pub fn syn_test(input: TokenStream) -> TokenStream {
+        let ast: ItemFn = parse_macro_input!(input as ItemFn);
+
+        let function_name = &ast.sig.ident;
+        eprintln!("FUNCTION NAME: {}", function_name);
+
+        TokenStream::new()
+    }
+
+    Burada test işlemi sırasında prosedürel makrolarda stderr dosyasına yazdırma yaptığımızda yazılanlar "cargo build" 
+    ile makronun kullanıldığı crate derlenirken ekranda gözükecektir. Bu makro binary crate içerisinden şöyle kullanılabilir:
+
+    syn_test!(fn foo() {});
+
+    Örneğin biz bir fonksiyonun ismini şöyle elde edip iki tırnaklı bir biçimde dışarıya verebiliriz:
+
+    #[proc_macro]
+    pub fn syn_test(input: TokenStream) -> TokenStream {
+        let ast: ItemFn = parse_macro_input!(input as ItemFn);
+        let s: String = ast.sig.ident.to_string();
+        quote! {#s}.into()
+    }
+
+    parse_macro_input makrosu en çok türetme tarzı prosedürel makrolarda kullanılmaktadır. 
+
+    syn paketindeki makroların bazıları doğrudan binary crate'lerden de kullanılabilmektedir. Örneğin parse_str fonksiyonu 
+    string alır ve ondan parse ağacı oluşturup bize verir. Oluşturduğu parse ağacının türü bizim makroya girdiğimiz Rust 
+    kod parçasına göre değişmektedir. Örneğin:
+
+    let ast: ItemFn = parse_str("fn foo() {}").unwrap();
+
+    parse_str fonksiyonu generic biçimde yazılmıştır. Dolayısıyla atama sırasında hedef türün belli olması gerekir. 
+    Fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn parse_str<T: Parse>(s: &str) -> Result<T>
+
+    syn paketindeki diğer faydalı bir makro da parse_quote makrosudur. Bu makro doğrudan atom yığınını argüman olarak aşır. 
+    Bize parse ağacına ilişkin ilgili türden değer verir. Örneğin:
+
+     let ast: ItemFn = parse_quote!{
+        fn foo() {
+            println!("foo");
+        }
+    };
+
+    Burada da yime hedef türün belli olması gerekir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    #[proc_macro_derive(isim)] özniteliği ile oluşturulan makrolara türetme makroları (derive macros) da denilmektedir. Şimdi 
+    bu türetme makrolarını ele alacağız. 
 
+    Türetme makroları struct, enum ve union türlerine uygulanabilmektedir. Aslıda biz türetme makrolarını kursumuzda kullandık.
+    Türetme makroları #[derive(isim)] biçiminde kullanılmaktadır Örneğin:
+
+    #[derive(my_derive_macro)]
+    struct Sample {
+        // ...
+    }
+
+    Türetmek makroları yine kütüphane crate'i içerisinde pub görünürlüğe sahip biçimde, crate'in kökünde oluşturulmaktadır. 
+    Türetmek makrolarını oluşturmanın genel biçimi şöyledir:
+
+    #[proc_macro_derive(isim)]
+    pub fn func_name(input: TokenStream) -> TokenStream {
+        //...
+    }
+
+    Buradaki öznitelik içerisinde bulunan isim derive özniteliği uygulanırken kullanılan ismi belirtmektedir. Örneğin:
+
+    #[proc_macro_derive(my_derive_macro)]
+    pub fn my_derive_macro_proc(input: TokenStream) -> TokenStream {
+        TokenStream::new()
+    }
+
+    Biz bu türetme makrosunu binary crate'ten aşağıdaki gibi kullanabiliriz:
+
+    #[derive(my_derive_macro)]
+    struct Sample {
+        //...
+    }
+
+    türetme makrosundaki fonksiyonun isminin bir önemi yoktur. Peki bir türetme makrosu yukarıdaki gibi kullanıldığında 
+    ne olmaktadır? İşte parse işlemi sırasında makronun uygulandığı tür (örneğimizde Sample yapısı) türetme makrosuna 
+    TokenStream olarak geçirilmektedir. Yani örneğimizde türetme makrosunun input değişkeni struct Sample tanımlamasına 
+    ilişkin atomları tutmamaktadır. Türetme makroları söz konusu türü koddan kaldırmaz. Yani yukarıdaki örnek kullanımda 
+    türetme makrosu boş bir TokenStream verse bile Sample yapısı tanımlanmış olmaya devam eder. Türetme makroları mevcut 
+    tanımlamaya bir ek oluşturmaktadır. 
+
+    Örneğin biz bir türe impl bloğu ile foo isminde bir ilişkili fonksiyon eklemek isteyelim. Bunun için bizim aşağıdaki
+    gibi bir TokenStream üretmemiz gerekir:
+
+    impl Sample {
+        fn foo() {
+            println!("Sample::foo");
+        }
+    }
+
+    Tabii buradaki Smaple ismini biizm input parametresinden elde etmemiz gerekir. İşte daha önceden de belirttiğimiz gibi 
+    syn paketindeki parse_öacro_input makrosu bu tür durumlarda oldukça kullanışlıdır. Çünkü parse edillmemiş bir atom 
+    yığınından tür ismini elde etmek sanıldığı kadar kolay değildir. Örneğin:
+
+    #[derive(my_derive_macro)]
+    struct Sample {
+        //...
+    }
+
+    Siz burada TokenStream içerisindeki ikinci atomun türün ismini verdiğini düşünebilirsiniz. Ancak örneğin yapının başına 
+    görünürlük belirten pub gibi anahtar sözcük getirildiğinde artık yapının ismi üçüncü atomda olacaktır:
+
+    #[derive(my_derive_macro)]
+    struct Sample {
+        //...
+    }
+
+    İşte parse_macro_input makrosu tüm parse işlemini zaten bizim yapmaktadır. parse_macro_input makrosunda as eşleşinden 
+    sonra DeriveInput kullanılırsa türetme makrolarının uygulandığı tüm türler için parse işlemi yapılmaktadır. Dolayısıyla
+    türetme makrosu hangi türe uygulanmış olursa olsun onun bilgilerin aynı biçimde elde edebiliriz. Örneğin:
+
+    #[proc_macro_derive(my_derive_macro)]
+    pub fn my_derive_macro_proc(input: TokenStream) -> TokenStream {
+        let ast = parse_macro_input!(input as DeriveInput);
+        let name = &ast.ident;
+        let name_str = name.to_string();
+
+        quote! {
+            impl #name {
+                fn foo() {
+                    println!("{}::foo", #name_str);
+                }
+            }
+        }.into()
+    }
+
+    Burada ast artık DeriveInput türündendir. Bu türün ident alanı proc_macro2::Ident türünden türün ismini vermektedir. 
+    Biz bu tür ismini quote makrosu içerisinde # ile kullanırsak türün ismini elde ederiz. Bu örneğin kütüphane ve binary 
+    crate'ini aşağıda veriyoruz.
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+// lib.rs 
+
+use proc_macro::{TokenStream};
+use quote::quote;
+use syn::{parse_macro_input, DeriveInput};
+
+#[proc_macro_derive(my_derive_macro)]
+pub fn my_derive_macro_proc(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    let name = &ast.ident;
+    let name_str = name.to_string();
+
+    quote! {
+        impl #name {
+            fn foo() {
+                println!("{}::foo", #name_str);
+            }
+        }
+    }.into()
+}
+
+// main.rs
+
+use procmacro::{my_derive_macro};
+
+#[derive(my_derive_macro)]
+struct Sample {
+    //...
+}
+
+#[derive(my_derive_macro)]
+struct Mample {
+    //...
+}
+
+fn main() {
+    Sample::foo();
+    Mample::foo();
+}
+
+// Kütüphane crate'inin Cargo.toml dosyası
+
+[package]
+name = "procmacro"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "3.0.0", features = ["full"] }
+
+[lib]
+proc-macro = true
+
+// Binary crate'inin Cargo.toml Dosyası
+
+[package]
+name = "macrotest"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+procmacro = { path = "../procmacro" }
 
 /*---------------------------------------------------------------------------------------------------------------------------
 
@@ -21451,21 +21694,6 @@ fn main() {
                                             GEÇİCİ NOTLAR
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-syn paketindeki parse_macro_input makrosu girdi olarak bir proc_macro::TokenStream alıp çıktı olarak onun parse edilmiş 
-halini vermektedir. Anımsayacağınız gibi TokenStream aslında TokenTree değerlerindne oluşan bir dizilimdir. Yani TokenStream 
-içerisindeki aotomların bir organizasyonu yoktur. Derleyici ve yorumlayıcı yazımında atomarından organize eidlmiş 
-ağaç elde etme sürecine "parsing" denilmektedir. Parsing işlemi sonucunda bir parse apacı oluşturulmaktadır. Bu parse 
-ağacına kavramsal olarak "AST (Abstract Syntax Tree)" de denilmektedir. İşte parse_macro_input makrosu bizden aldığı 
-atom grubunu parse ederek organize edilmiş bir ağaç haline getirmektedir. Bu sayede biz bazı işlemleri daha kolay 
-yapabilir hale geliriz. 
 
-parse_macro_input makrosu iki biçimde kullanılmaktadır:
-
-1) ast = parse_macro_input!(token_stream) 
-2) ast = parse_macro_input!(token_stream as DeriveInput) 
-
-İkinci biçimdeki as sözcüğünün Rust'taki tür dönüştürme operatörü ile hiçbir ilgisi yoktur. Buradaki as kalıbın ikinci 
-biçimini oluşturmak için uydurulmuş bir eşleştir. Her iki durumda da makro syn::DeriveInput türündne bir değer vermektedir. 
-syn::DeriveInput parse ağacını temsil eden bir yapıdır. Bu yapının alanları şunlardır:
 
     
