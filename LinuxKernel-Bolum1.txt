@@ -7645,8 +7645,8 @@ unsigned int hash_func(unsigned int key)
     performansı üzerinde en önemli olumlu etkilerden birini oluşturmaktadır. Eğer işletim sistemlerinde böyle bir disk 
     önbellek sistemi olmasaydı sistemler çok yavaş çalışırdı.
 
-    Linux'ta sistem genelinde tek bir sayfa önbelleği yoktur. Her dosyanın ayrı bir sayfa önbelleği vardır. Ancak biz 
-    bu bölümde sayfa önbelleğini genel bir kavram olarak kullanacağız. Sayfa önbelleğin kursumuzun başka bir bölümünde 
+    Linux'ta sistem genelinde tek bir sayfa önbelleği yoktur. Her inode nesnesinin ayrı bir sayfa önbelleği vardır. Ancak 
+    biz bu bölümde sayfa önbelleğini genel bir kavram olarak kullanacağız. Sayfa önbelleğin kursumuzun başka bir bölümünde 
     ayrıntılarıyla ele alacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -10570,7 +10570,7 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi dosyanın açılması ve kapatılması süreciniinceleyelim. Bir dosya açılırken çekirdek kabaca neler yapmaktadır? 
+    Şimdi dosyanın açılması ve kapatılması sürecini inceleyelim. Bir dosya açılırken çekirdek kabaca neler yapmaktadır? 
     Bilindiği gibi kullanıcı modundan open POSIX fonksiyonuyle bir dosya açılmak istendiğinde open fonksiyonu sys_open 
     sistem fonksiyonunu çağırmaktadır. Dosya açma işlemi sys_open fonksiyonu tarafından yapılmaktadır. 2.6 çekirdeğinden 
     itibaren sys_open sistem fonksiyonun kodlarında önemli bir değişiklik olmamıştır. Güncel çekirdeklerde sys_open 
@@ -10775,9 +10775,9 @@ void exit_sys(const char *msg)
     │          do_sys_openat2()                                    │
     │                  │                                           │
     │                  │                                           │
-    │       ┌──────────┴──────────┐                                │
-    │       │                     │                                │
-    │       ▼                     ▼                                │
+    │                  ┴──────────┐                                │
+    │                             │                                │
+    │                             ▼                                │
     │  filp_open()         ┌─────────────────┐                     │
     │       └─────────────►│ do_filp_open()  │  ◄─── Ortak Nokta   │
     │                      └─────────────────┘                     │
@@ -10786,9 +10786,11 @@ void exit_sys(const char *msg)
     │                    [Dosya Açma İşlemleri]                    │
     └──────────────────────────────────────────────────────────────┘
 
-    Burada son çekirdek sürümlerine (7'li sürümleri kastediyoruz) ilişkin bir uyrıda bulunmak istiyoruz. do_filp_open 
-    fonksiyonu çok eskiden beri Linux çekirdeklerinde bulunmaktadır. Ancak çekirdeğin 7'li versiyonlarından itibaren 
-    bu fonksiyonun ismi do_file_open biçiminde değiştirilmiştir. Buna dikkat ediniz. 
+    filp_open fonksiyonu 2.6 versiyonlarıyla birlikte sys_open yolundan çıkartılmıştır. Ancak ayrı bir fonksiyon olarak 
+    güncel çekirdeklerde de bulundurulmaktadır. Burada ayrıca son çekirdek sürümlerine (7'li sürümleri kastediyoruz) 
+    ilişkin bir uyrıda bulunmak istiyoruz. do_filp_open fonksiyonu çok eskiden beri Linux çekirdeklerinde bulunmaktadır. 
+    Ancak çekirdeğin 7'li versiyonlarından itibaren bu fonksiyonun ismi do_file_open biçiminde değiştirilmiştir. Buna 
+    dikkat ediniz. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -10870,9 +10872,14 @@ void exit_sys(const char *msg)
         return 0;
     }
 
-    Burada dosyanın filp_open fonksiyonuyla açıldığını, kernel_read fonksiyonuyla dosyadan okuma yapıldığını ve dosyanın 
-    filp_close fonksiyonuyla kapatıldığını görüyorsunuz. kzalloc fonksiyonu çekirdek alanında içi 0'larla dolu dinamik 
-    tahsisat yapmaktadır. Modülü yükledikten sonra okunanları görmek için "dmesg" komutunu çalıştırmalısınız.
+    Örnek kodda dosyanın filp_open fonksiyonuyla açıldığını, kernel_read fonksiyonuyla dosyadan okuma yapıldığını ve 
+    dosyanın filp_close fonksiyonuyla kapatıldığını görüyorsunuz. kzalloc fonksiyonu çekirdek alanında içi 0'larla dolu 
+    dinamik tahsisat yapmaktadır. Modülü yükledikten sonra okunanları görmek için "dmesg" komutunu çalıştırmalısınız.
+
+    Burada bir noktayı da vurgulamak istiyoruz. Çekirdek modüller ve aygıt sürücüler tarafından dosyaların filp_open 
+    ile açılması, kernel_read ve kernel_write fonksiyonlarıyla okuma yazma işlemleri yapılarak filp_close ile kapatılması
+    gereksinim duyulan bir durum değildir. Genel olarak çeekirdek modüllerinde ve aygıt sürücülerde kullanıcı modundaki 
+    gibi dosya işlemlerin yapılamsı kötü bir tekniktir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 #include <linux/module.h>
@@ -11103,9 +11110,9 @@ clean:
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi de dosya açım işleminde kullanılan çekirdek mekanizmaları üzerinde duracağız. Yukarıda da belirttiğimiz gibi 
-    bu ana işlevler güncel çekirdeklerde do_filp_open fonksiyonu tarafından ilk versiyonlarda da open_namei fonksiyonu 
-    tarafından yapılmaktadır.
+    Peki bri aygıt sürücü içerisinde biz tamamen kullanıcı modundaki gibi bir dosya açıp, onun üzerinde okuma ve yazma
+    işlemleri yapıp dosyayı kapatmak istersek bunları nasıl yapabiliriz? Aslında aygıt sürücülerde ve çekirdke ieçrisinde
+    bu biçimde işlemler yapmaya gereksinim duyulmamaktadır. Ancak nu işlemler tipik olarak 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -14897,7 +14904,7 @@ void exit_sys(const char *msg)
     
     void brelse(struct buffer_head *bh);
 
-    Pek çok çekirdek nesnesinde olduğu gibi buffer_head nesnelerinde de bir sayaç bulunmaktadır. sb_read bu sayacı artırmaktadır. 
+    Pek çok çekirdek nesnesinde olduğu gibi buffer_head nesnelerinde de bir sayaç bulunmaktadır. sb_bread bu sayacı artırmaktadır. 
     brelse önce sayacğı 1 azaltır, eğer sayaç 0'a düşerse buffer_head nesnesini "dilim önbelleğine (slab cache)" iade eder. 
     buffer_head nesneleri ayrı bir dilim önbelleğinden tahsis edilmektedir. Dilimli tahsisat sistemi konusunu "Bellek Yönetimi"
     bölümünde ayrıntılı bir biçimde ele alacağız. 
@@ -16277,7 +16284,7 @@ struct simplefs_disk_dentry {
 };
 
 #define SIMPLEFS_DISK_DENTRY_SIZE			sizeof(struct simplefs_disk_dentry)
-#define SIMPLEFS_MAX_DENTRIES			(SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
+#define SIMPLEFS_MAX_DENTRIES			    (SIMPLEFS_BLOCK_SIZE / SIMPLEFS_DISK_DENTRY_SIZE)
 
 #define SIMPLEFS_SB(sb)						((struct simplefs_super_block *)(((sb)->s_fs_info)))
 #define SIMPLEFS_DISK_SB(sb)				(SIMPLEFS_SB(sb)->sbd)
