@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                      Son Güncelleme: 18/08/2026 - Salı
+                                        Son Güncelleme: 18/08/2026 - Salı
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -14978,22 +14978,104 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
         /* ... */
 
         struct address_space	*i_mapping;
+        /* ... */
+        struct address_space	i_data;
 
         /* ... */
     };
 
-    Burada i_mapping elemanının address_space isimli bir yapı türünden olduğuna dikkat ediniz. Bu address_space 
-    yapısı dosyanın sayfa önbelleğinin giriş noktasıdır. Her dosya için çekirdek bir address_space nesnesi 
-    oluşturmaktadır.
-    
-    address_space yapısı dosyaya ilişkin önbellek işlemlerinde gereksinim duyulacak tüm bilgileri içermektedir. 
-    Nesneler arasındaki ilişkiyi aşağıdaki şekille betimleyebiliriz:
+    Burada i_mapping elemanının address_space isimli yapı türünden olduğuna dikkat ediniz. address_space nesnesi dosyaya 
+    ilişkin sayfa önbelleğinin giriş noktasıdır. address_space yapısı dosyaya ilişkin önbellek işlemlerinde gereksinim 
+    duyulan tüm bilgileri içermektedir. Aslında i_mapping elemanı genellikle aynı yapıdaki i_data nesnesini göstermektedir.
 
+    struct inode {
+        /* ... */
+
+        struct address_space   *i_mapping;  ──┐
+        /* ... */                             │
+        struct address_space    i_data;    ◄──┘
+        
+        /* ... */
+    };
+
+    Bazı seyrek durumlarda i_mapping elemanı başka bir inode nesnesindeki i_data elemanını gösterir duruma da getirilebilmektedir. 
+    Ancak çekirdek her zaman i_mapping göstericisinden hareketle address_space nesnesine erişmektedir. Her inode nesnesi 
+    yaratıldığında onun içerisinde bir address_space nesnesinin de yaratılmış olduğuna dikkat ediniz:
+
+    Aslında dosya nesnelerini temsil eden file yapısının da inode yapısına uğramadan doğrudan address_space nesnesine
+    erişilmesini sağlayan bir f_mapping elemanı da bulunmaktadır. Çekirdek dosya nesnesi yoluyla dosyaya ilişkin 
+    sayfa önbelleğine bu gösterici yardımıyla erişir. 
+
+    struct file {
+        /* ... */
+
+        struct address_space	*f_mapping;
+        /* ... */
+        struct inode			*f_inode;
+
+        /* ... */
+    };
+
+    Birkaç istisna durum dışında f_mapping elemanı ile f_inode->i_mapping elemanı aynı address_space nesnesini göstermektedir. 
+    (İstisnalardan biri bir aygıt dosyası open ile açıldığında oluşmaktadır. open fonksiyonu ile açılan aygıt dosyasından
+    elde edilen dosya nesnesinin f_inode elemanı bu dosyaya ilişkin inode nesnesini gösterirken f_mapping elemanı 
+    blok aygıtı için yaratılan address_space nesnesini göstermektedir. Bu durum tampon önbelleğinin anlatıldığı 12. Bölümde 
+    ele alınacaktır.) Dosya nesnesinin f_mapping elemanına inode nesnesinin i_mapping elemanının atanması dosya açılırken 
+    çağrı zinciri içerisindeki do_dentry_open fonksiyonunda yapılmaktadır. open fonksiyonundan itibaren çağrı zincirini
+    özetleyerek aşağıda veriyoruz:
+
+    open("/dev/sda1", O_RDONLY)
+        │
+        ▼
+        sys_open → do_sys_open → do_sys_openat2             [fs/open.c]
+        │
+        ├─► getname                                         yol ifadesi kullanıcı alanından kopyalanır
+        ├─► get_unused_fd_flags()                           boş betimleyici elde edilir
+        │
+        ▼
+    do_filp_open → path_openat                              [fs/namei.c]
+        │
+        ├─► alloc_empty_file()                              struct file ayrılır
+        │                                                   (f_mapping henüz NULL/boş)
+        ├─► link_path_walk + open_last_lookups              yol çözümlenir,
+        │                                                   dentry/inode bulunur
+        ▼
+        vfs_open(path, file)                                [fs/open.c]
+        │
+        ▼
+        do_dentry_open(file, inode, open)                   [fs/open.c]
+        │
+        │   file->f_path  = *path;
+        │   file->f_inode = inode;                          ◄── (1) inode bağlanır
+        │   file->f_mapping = inode->i_mapping;             ◄── (2) ATAMA BURADA
+        │   file->f_wb_err = filemap_sample_wb_err(file->f_mapping);
+        │   file->f_sb_err = file_sample_sb_err(file);
+        │   ...
+        │   file->f_op = fops_get(inode->i_fop);            ◄── (3) f_op inode'dan alınır
+        │   ...
+        │   if (file->f_op->open)
+        │       error = file->f_op->open(inode, file);      ◄── (4) sürücüye/fs'e söz
+        │                    │                                    hakkı: blkdev_open
+        │                    ▼                                    BURADA f_mapping'i
+        │               blkdev_open():                            EZEBİLİR
+        │               filp->f_mapping = bdev->...;
+        │               filp->f_wb_err  = filemap_sample_wb_err(filp->f_mapping);
+        │
+        ▼
+        fd_install(fd, file)                                fd tablosuna takılır;
+                                                            bu andan sonra kullanıcı alanı
+                                                            fd'yi kullanabilir
+    
+    Dosya nesnesinden ilgili dosyaya ilişkin önbellek bilgilerine erişimin nasıl yapıldığını aşağıdaki şekille de
+    betimleyebiliriz:
     ┌───────────────┐      ┌───────────────┐      ┌─────────────────┐      ┌──────────────────────────────────┐
     │               │      │               │      │                 │      │  Dosyanın önbelleğindeki         │
     │ dosya nesnesi │ ───> │ inode nesnesi │ ───> │  address_space  │ ───> │  sayfalara ilişkin bilgiler      │
     │               │      │               │      │                 │      │  (sayfa önbelleği / page cache)  │
-    └───────────────┘      └───────────────┘      └─────────────────┘      └──────────────────────────────────┘
+    └───────┬───────┘      └───────────────┘      └────────▲────────┘      └──────────────────────────────────┘
+            │                                              │
+            │                  f_mapping                   │
+            └──────────────────────────────────────────────┘
 
     Peki bir dosyanın önbelleklenmiş sayfaları address_space nesnesi içerisinde nasıl tutulmaktadır? Çekirdek dosyanın 
     okunacak ya da yazılacak kısmının önbellekte olup olmadığını nasıl anlamaktadır? İşte bunun için daha önce 
@@ -18875,32 +18957,35 @@ void exit_sys(const char *msg)
 /*----------------------------------------------------------------------------------------------------------------------
     Linux çekirdeğinde blok aygıtlarının "blok aygıt sürücüsü (block device driver)" denilen aygıt sürücüler tarafından 
     yönetildiğini belirtmiştik. İşte bir blok aygıtı kullanıldığı zaman ona ilişkin bir inode nesnesi de sistem tarafından 
-    yaratılmaktadır. Yani blok aygıtları da birer dosya gibi ele alınmaktadır. O halde blok aygıtları için de bir 
-    sayfa önbelleği bulunmaktadır. Örneğin sistemimizdeki diski temsil eden "/dev/sda1" blok aygıtını kullandığımızı 
-    düşünelim. Bu aygıt kullanıldığı zaman sistem onun için bir inode nesnesi oluşturmaktadır. Bu blok aygıtındaki 
-    okumalar ve yazmalarda bu inode nesnesinin sayfa önbelleği kullanılmaktadır. 
+    yaratılmaktadır. Yani blok aygıtları da birer dosya gibi ele alınmaktadır. O halde blok aygıtları için de bir sayfa 
+    önbelleği bulunmaktadır. Örneğin sistemimizdeki diski temsil eden "/dev/sda1" blok aygıtını göz önüne alalım. Bu blok 
+    aygıtı için çekirdek blok aygıt sürücüsünün ön ayak olmasıyla bir inode nesnesi oluşturmaktadır. Bu blok aygıtındaki 
+    okumalarda ve yazmalarda bu inode nesnesinin sayfa önbelleği kullanılmaktadır. Blok aygıtları için oluşturulan inode 
+    nesneleri "bdevfs" isimli bir dosya sistemi içerisindedir. Bu dosya sistemi "/proc/filesystems" içerisinde görünmesine 
+    karşın mount edilememektedir. 
     
     Blok aygıtları için yaratılan inode nesneleri kullanıcı tarafından görülmez. Bu inode nesneleri güncel çekirdeklerde 
-    block aygıtları için gendisk nesneleri oluşturulurken çağrılan blk_alloc_disk ya da blk_mq_alloc_disk fonksiyonlarının 
-    çağrı zincirinde bdev_alloc fonksiyonunda yaratılmaktadır. Güncel çekirdeklerdeki blk_alloc_disk ve blk_mq_alloc_disk 
+    blok aygıtları için gendisk nesneleri oluşturulurken çağrılan blk_alloc_disk ya da blk_mq_alloc_disk fonksiyonlarının 
+    çağrı zincirindeki bdev_alloc fonksiyonunda yaratılmaktadır. Güncel çekirdeklerdeki blk_alloc_disk ve blk_mq_alloc_disk 
     fonksiyonlarından bdev_alloc fonksiyonuna kadar giden çağrı zinciri şöyledir:
+
+    blk_alloc_disk(lim, node_id)                                 ← bio tabanlı sürücü
+    ├─ blk_alloc_queue(lim, node_id)
+    └─ __alloc_disk_node(q, node_id, &__key)
+            └─ bdev_alloc(disk, 0)                          
 
     blk_mq_alloc_disk(set, lim, queuedata)                       ← blk-mq tabanlı sürücü
     └─ __blk_mq_alloc_disk(set, lim, queuedata, &__key)
            ├─ blk_mq_alloc_queue(set, lim, queuedata)
            └─ __alloc_disk_node(q, set->numa_node, lkclass)
-                    └─ disk->part0 = bdev_alloc(disk, 0)
-                             └─ new_inode(blockdev_superblock)  ◄── Inode
-    blk_alloc_disk(lim, node_id)                    ← bio tabanlı sürücü
-        ├─ blk_alloc_queue(lim, node_id)
-        └─ __alloc_disk_node(q, node_id, &__key)
-                └─ bdev_alloc(disk, 0)                          ◄── aynı yer
-
+                └─ disk->part0 = bdev_alloc(disk, 0)             ◄── aynı yer
+                             
     Blok aygıt sürücülerine ilişkin çekirdek mimarisi ve fonksiyonları çekirdeğin çeşitli versiyonlarında defalarca 
-    değiştirilmiştir. Biz kursumuzda ayrı bir bölümde güncel çekirdeklere ilişkin aygıt sürücü mimarisini ele alacağız. 
-
-    Linux çekirdeklerinde blok aygıtları için en genel yapı gendisk isimli yapıdır. Bu yapıyla daha önce tanışmıştık. 
-    Blok aygıtlarının bilg,leri ise block_device isimli bir yapıyla temsil edilmektedir. gendisk nesnesi içerisinde 
+    değiştirilmiştir. Biz blk_alloc_disk ve blk_mq_alloc_disk fonksiyonlarını aygıt sürücü mimarilerini konu aldığımız 
+    bölümde ele alacağız. 
+    
+    Linux çekirdeklerinde blok aygıtları için en genel yapı gendisk isimli yapıdır. Biz bu yapıyla daha önce tanışmıştık. 
+    Blok aygıtlarının bilgileri ise block_device isimli bir yapıyla temsil edilmektedir. gendisk nesnesi içerisinde 
     block_device nesnesinin adresi tutulmaktadır:
 
     struct gendisk {
@@ -18908,7 +18993,7 @@ void exit_sys(const char *msg)
 
         struct block_device *part0;
 
-        /* .. */
+        /* ... */
     };
 
     Blok aygıtına ilişkin inode nesnesinin adresi eskiden doğrudan block_device nesnesinin içerisindeki bd_inode elemanında 
@@ -18922,9 +19007,9 @@ void exit_sys(const char *msg)
         /* ... */
     };
 
-    Ancak 6.9'danitibaren artık blok aygıtına ilişkin inode nesnesinin adresi block_device nesnesi içerisinde tutulmamaktadır. 
-    Bunun yerine artık güncel çekirdeklerde block_device nesnesi içerisinde doğrudan blok aygıtına ilişkin address_space 
-    nesnesinin (yani sayfa önbelleğinin) adresi tutulmaktadır:
+    Ancak çekirdeğin 6.9 versiyonundan itibaren artık blok aygıtına ilişkin inode nesnesinin adresi block_device nesnesi 
+    içerisinde tutulmamaktadır. Bunun yerine artık güncel çekirdeklerde block_device nesnesi içerisinde doğrudan blok 
+    aygıtına ilişkin address_space nesnesinin (yani sayfa önbelleğinin) adresi tutulmaktadır:
 
      struct block_device {
         /* ... */
@@ -18934,9 +19019,9 @@ void exit_sys(const char *msg)
         /* ... */
     };
 
-    Tabii yeni çekirdeklerde de address_space nesnesinden hareketle inode nesnesine erişilebilir. address_space yapısının 
-    host elemanının o adress_space nesnesine ilişkin inode nesnesinin adresini tuttuğunu anımsayınız. Aslında güncel 
-    çekirdeklerde block_device nesnesi ile bu nesneye ilişkin inode nesnesi bdev_inode denilen bir yapıda alt alta 
+    Tabii yeni çekirdeklerde de address_space nesnesinden hareketle inode nesnesine erişilebilmektedir. address_space 
+    yapısının host elemanının o address_space nesnesine ilişkin inode nesnesinin adresini tuttuğunu anımsayınız. Aslında 
+    güncel çekirdeklerde block_device nesnesi ile bu nesneye ilişkin inode nesnesi bdev_inode denilen bir yapıda alt alta 
     bulundurulmuştur:
 
     struct bdev_inode {
@@ -18944,7 +19029,7 @@ void exit_sys(const char *msg)
         struct inode vfs_inode;
     };
 
-    Bunu şekilsel olarak şöyle de gösterebiliria:
+    Bu yerleşimi şekilsel olarak şöyle de gösterebiliriz:
 
             struct bdev_inode
     ┌──────────────────────────────┐  ← düşük adres
@@ -18954,7 +19039,7 @@ void exit_sys(const char *msg)
     └──────────────────────────────┘
         
     Dolayısıyla aslında eğer elimizde block_device nesnesinin adresi varsa container_of işlemiyle yapının vfs_inode 
-    elemanına erişebiliriz. Tabii bunun tersini de yapabiliriz. Güncel çekirdeklerde "/block/bdev.c" dosyası içerisinde bu 
+    elemanına erişebiliriz. Tabii bunun tersini de yapabiliriz. Güncel çekirdeklerde "block/bdev.c" dosyası içerisinde bu 
     erişimleri yapan inline fonksiyonlar bulundurulmuştur:
 
     static inline struct bdev_inode *BDEV_I(struct inode *inode)
@@ -18968,20 +19053,77 @@ void exit_sys(const char *msg)
     }
 
     gendisk nesnesi ve block_device nesnesi blok aygıt sürücüsü çekirdeğe yüklenirken blok aygıt sürücülerinin 
-    init fonksiyonları tarafından yaratılmaktadır. 
+    init fonksiyonları tarafından yaratılmaktadır. Bu konuyu aygıt sürücü mimarisinin açıklandığı bölümde ele alacağız.
 
     Blok aygıtlarına ilişkin inode nesneleriyle blok aygıtını open fonksiyonuyla açtığımızda elde ettiğimiz inode 
-    nesnesini karıştırmayınız. Örneğin bizim Linux dosya sistemimiz "/dev/sda1" aygıt dosyası ile temsil ediliyor olsun. 
-    Bu aygıt sürücü sistem boot edilirken çekirdeğe yüklenmektedir. Biz bu aygıt sürücüyü open fonksiyonu ile şöyle 
-    açmış olalım:
+    nesnesini karıştırmayınız. Örneğin diskimizi yöneten aygıt sürücüye ilişkin aygıt dosyası "/dev/sda1" olsun. 
+    Bu aygıt dosyasına ilişkin aygıt sürücü sistem boot edilirken çekirdeğe yüklenmektedir. Biz bu aygıt sürücüyü open 
+    fonksiyonuyla şöyle açmış olalım:
 
     fd = open("/dev/sda1", O_RDONLY);
 
-    Buradan hareketle bir dosya nesnesi ve bir inode nesnesi oluşturulmaktadır. Ancak bu inode nesnesi yukarıda 
-    sözünü ettiğimiz blok aygıt sürücüsünün inode nesnesi değildir. Dolayısıyla biz fd betimleyicisini kullanarak read 
-    fonksiyonuyla okuma yaptıpımızda burada oluşturulan inode nesnesinin önbelleği kullanılmaz, blok aygıt sürücüsünün 
-    önbelleği kullanılır. Aslında bir blok aygıtını açtığımızda oluşturulan inode nesnesi blok aygıtına erişmekte 
-    kullanılan bir anahtar gibidir. Blok aygıtının önbelleği blok aygıtına ilişkin inode nesnesinin içerisindedir. 
+    Buradan hareketle bir dosya nesnesi ve bir inode nesnesi oluşturulmaktadır. Ancak fd dosya nesnesine ilişkin bu 
+    inode nesnesi yukarıda sözünü ettiğimiz blok aygıt sürücüsünün inode nesnesi değildir. Dolayısıyla biz fd betimleyicisini 
+    kullanarak read fonksiyonuyla okuma yaptıpımızda burada oluşturulan inode nesnesinin önbelleği kullanılmaz, blok 
+    aygıt sürücüsünün önbelleği kullanılır. Aslında bir blok aygıtını açtığımızda oluşturulan inode nesnesi blok aygıtına 
+    erişmekte kullanılan bir anahtar gibidir. Blok aygıtının önbelleği blok aygıtına ilişkin inode nesnesinin içerisindedir. 
+
+    <BURADA KALDIM>
+    ┌─────────────────────────────────────┐  ◄─ struct file
+    │ struct file                         │
+    │  ...  (f_lock, f_mode, f_count...)  │
+    │  f_path                             │
+    │  f_inode   ────────────────────┐    │
+    │  f_op = &def_blk_fops          │    │
+    │  ...                           │    │
+    │  f_mapping ────────────────┐   │    │
+    │  ...                       │   │    │
+    └────────────────────────────┼───┼────┘
+                                 │   │
+            ┌────────────────────┼───┘
+            ▼                    │
+    ╔═══════════════════════════╗│    (İnode #1: devtmpfs, ayrı bir slab nesnesi)
+    ║ struct inode (ofset 0)    ║│
+    ║  i_mode = S_IFBLK|...     ║│
+    ║  ...                      ║│
+    ║  i_rdev = MKDEV(8,1) ──┐  ║│
+    ║  i_mapping → i_data    │  ║│   ◄─ okuma yolunda KULLANILMAZ
+    ║  ...                   │  ║│
+    ║  i_data (boş kalır)    │  ║│
+    ╚════════════════════════╪══╝│
+                             │   │
+    blkdev_get_no_open(      │   │
+            inode->i_rdev)   │   │
+    ilookup ile bdev_cache   │   │
+    içinde arama; dönüş      │   │
+    değeri = &bdev           │   │
+                             │   │
+    ╔════════════════════════╪═══╪═════════════╗  (İnode #2: bdev_cache,
+    ║ struct bdev_inode      │   │             ║   TEK slab nesnesi)
+    ║                        │   │             ║
+    ║  ┌─────────────────────▼───┼──────────┐  ║  ◄─ ofset 0: bdev alanı
+    ║  │ struct block_device bdev│          │  ║     (blkdev_get_no_open
+    ║  │   bd_start_sect         │          │  ║      BURAYI döndürür)
+    ║  │   ...                   │          │  ║
+    ║  │   bd_dev = MKDEV(8,1)   │          │  ║
+    ║  │   bd_inode ─────────────┼───┐      │  ║
+    ║  │   ...                   │   │      │  ║
+    ║  └─────────────────────────┘   │      │  ║
+    ║                                │      │  ║
+    ║  ┌─────────────────────────────▼───┐  │  ║  ◄─ daha yüksek ofset:
+    ║  │ struct inode vfs_inode          │  │  ║     vfs_inode alanı
+    ║  │   ...                           │  │  ║
+    ║  │   i_mapping ──────────┐         │. │  ║
+    ║  │   ...                 │         │  │  ║  (f_mapping buraya değil,
+    ║  │   i_data ◄────────────┘ ◄──────────┘  ║   i_data'ya bağlanır ↓)
+    ║  │    ▲  SAYFA ÖNBELLEĞİ BURADA    │     ║
+    ║  └────┼────────────────────────────┘     ║
+    ╚═══════╪══════════════════════════════════╝
+            │
+            └───────  filp->f_mapping = bdev->bd_inode->i_mapping   (v6.6–v6.8)
+                      filp->f_mapping = bdev->bd_mapping            (v6.9+)
+
+
     Yukarıda da belirttiğimiz gibi zaten bu önbelleğe artık block_device nesnesi yoluyla doğrudan erişilebilmektedir. 
     Aşağıdaki tabloda blok aygıt sürücüsünün inode nesnesi ile blok aygıtını açtığımızda elde ettiğimz inode nesnesinin
     nelerden sorumlu olduğu belirtilmektedir. Burada "Dosya Inode" blok aygıtını açarak elde edilen inode nesnesini, 
