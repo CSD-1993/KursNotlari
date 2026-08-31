@@ -16,7 +16,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                          Son Güncelleme: 30/08/2026 - Pazar
+                                          Son Güncelleme: 01/09/2026 - Salı
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -5161,10 +5161,34 @@ void exit_sys(const char *msg)
     Buna "stdin dosya betimleyicisi" de denilmektedir. 1 ve 2 numaralı betimleyiciler yine terminal aygıt sürücüsü için oluşturulmuş 
     dosya betimleyicisini gösterir (1 ve 2 numaralı betimleyiciler aynı nesneyi göstermektedir) Bu betimleyicilere de sırasıyla 
     "stdout ve stderr dosya betimleyicileri" denilmektedir. Böylece ilk boş betimleyici genellikle 3 numaralı betimleyici olmaktadır. 
-    Yukarıda da belirttiğimiz gibi open fonksiyonun dosya betimleyici tablosunda ilk boş betimleyiciyi vermesi POSIX standartlarında 
-    garanti edilmiştir.
+    
+    open fonksiyonun dosya betimleyici tablosunda ilk boş betimleyiciyi vermesi POSIX standartlarında garanti edilmiştir. Örneğin
+    open fonksiyonunun çağrıldığı durumda dosya betimleyici tablosunun durumu şöyle olsun:
 
-    Her prosesin proses kontrol bloğu ve dolayısıyla dosya betimleyici tablosu birbirinden farklıdır. O halde dosya betimleyicileri 
+                     Dosya Betimleyici Tablosu
+    ─────────►      ┌──────────────────┐
+                0   │      adres       │───────────► dosya nesnesi
+                    ├──────────────────┤
+                1   │      adres       │────────┐
+                    ├──────────────────┤        ├──► dosya nesnesi
+                2   │      adres       │────────┘
+                    ├──────────────────┤
+                3   │      adres       │───────────► Dosya nesnesi
+                    ├──────────────────┤
+                4   │      NULL        │
+                    ├──────────────────┤
+                5   │      adres       │───────────► Dosya nesnesi
+                    ├──────────────────┤
+                6   │      NULL        │
+                    ├──────────────────┤
+                ... │      ...         │
+                    ├──────────────────┤
+               1023 │      NULL        │
+                    └──────────────────┘
+
+    Bu durumda open fonksiyonunun 4 ile geri dönecektir. Çünkü ilk boş slot 4 numaralı slottur.  
+
+    Her prosesin proses kontrol bloğu ve dolayısıyla dosya betimleyici tablosu birbirinden farklıdır. Dosya betimleyicileri 
     kendi prosesinin dosya betimleyici tablosunda bir indeks belirtmektedir. Yani dosya betimleyicileri prosese özgü bir anlama 
     sahiptir. Biz bir prosesteki dosya betimleyicisini proseler arası haberleşme yöntemleriyle başka bir prosese göndersek o 
     betimleyici  o proseste farklı bir dosyaya referans edebilir ya da geçersiz olabilir. 
@@ -5172,20 +5196,22 @@ void exit_sys(const char *msg)
     Bu durumda tipik olarak işletim sisteminin dosya açan sistem fonksiyonu sırasıyla şu işlemleri yapmaktadır:
 
     1) Dosya betimleyici tablosunda ilk boş betimleyiciyi bulmaya çalışır. Boş bir betimleyici bulamazsa başarısız olur ve errno 
-    değerini EMFILE ile set eder.
+    değerini EMFILE ("Too many open files") ile set eder.
 
-    2) Dosya nesnesini tahsis eder ve bunun içini diskten elde ettiği bilgilerle doldurur. Bunun adresini de dosya betimleyici 
-    tablosunda ilk boş betimleyiciye ilişkin slota yerleştirir.
+    2) Dosya nesnesini ve gereken diğer nesneleri tahsis eder, bunların içini diskten elde ettiği bilgilerle doldurur. Dosya 
+    nesnesinin adresini de dosya betimleyici tablosunda ilk boş betimleyiciye ilişkin slota yerleştirir.
 
     3) Dosya betimleyici tablosunda indeks belirten betimleyici değeri ile geri döner.
 
     C'nin fopen fonksiyonunda dosya açımı sırasında "text mode", "binary mode" gibi bir kavram vardır. Halbuki işletim sisteminde 
     böyle bir kavram yoktur. İşletim sistemine göre dosya byte'lardan oluşmaktadır. Text mode, binary mode C ve diğer diller 
-    tarafından uydurulmuş olan yapay bir kavramdır.
+    tarafından kullanılan yapay bir kavramdır.
 
-    Bir proses her open işlemi yaptığında kesinlikle yeni bir dosya nesnesi oluşturulmaktadır. Bu durumda bir proses aynı 
-    dosyayı aynı biçimde ikinci kez açmış olsa bile aynı dosya nesnesi kullanılmaz. Her iki open iki farklı dosya nesnesinin 
-    ve dosya betimleyicisinin oluşmasına yol açmaktadır. 
+    Bir proses her open işlemi yaptığında yeni bir dosya nesnesi oluşturulmaktadır. Bu durumda bir proses aynı dosyayı aynı 
+    biçimde ikinci kez açmış olsa bile aynı dosya nesnesi kullanılmaz. Her iki open iki farklı dosya nesnesinin ve dosya 
+    betimleyicisinin oluşmasına yol açmaktadır. 
+
+    Aşağıda örnek bir dosya açım kodu verilmiştir:
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -5216,9 +5242,13 @@ void exit_sys(const char *msg)
 /*---------------------------------------------------------------------------------------------------------------------------
     Linux sistemlerinde default olarak proseslerin dosya betimleyici tabloları 1024 slottan oluşmaktadır. Yani default durumda 
     bu sistemlerde bir proses kapatmadan en fazla 1024 dosyayı açık olarak tutabilmektedir. Yukarıda da belirttiğimiz gibi 
-    eğer dosya betimleyici tablosunda boş yer yoksa open fonksiyonu başarısız olur ve EMFILE errno değeri set edilir. Aşağıdaki
-    örnekte döngü içerisinde dosya hiç kapatılmadan sürekli açılmıştır. Açım işlemi başarısız olduğunda döngüden çıkılmış ve 
-    errno değerini gözlemlemek için dosya bir kez daha açılmak istenmiştir. En sonunda şöyle bir hata ile karşılaşılacaktır:
+    eğer dosya betimleyici tablosunda boş yer yoksa open fonksiyonu başarısız olur ve EMFILE ("Too many open files") errno 
+    değeri set edilir. (Her ne kadar Linux sistemlerinde işin başında dosya betimleyici tablosu 1024 slottan oluşuyorsa da 
+    bu değer çeşitli biçimlerde artırılabilmektedir. Bu konuyu "proseslerin kaynak limitlerini" anlattığımız bölümde ele 
+    alacağız.)
+    
+    Aşağıdaki örnekte döngü içerisinde "var olan bir dosya" kapatılmadan sürekli yeniden açılmıştır. En sonunda şöyle bir 
+    hata ile karşılaşılacaktır:
 
     open: Too many open files
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -5235,12 +5265,9 @@ int main(void)
 
     for (int i = 0;; ++i) {
         if ((fd = open("test.txt", O_RDONLY)) == -1)
-            break;
+            exit_sys("open");
         printf("%d\n", fd);
     }
-
-    if ((fd = open("test.txt", O_RDONLY)) == -1)
-        exit_sys("open");
 
     return 0;
 }
@@ -5253,9 +5280,10 @@ void exit_sys(const char *msg)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     Açılan her dosyanın kapatılması gerekir. Bir dosyanın kapatılması sırasında işletim sistemi dosyanın açılması sırasında 
-    yapılan işlemleri geri almaktadır. Tipik olarak UNIX/Linux sistemlerinde dosya kapatıldığında şunlar yapılmaktadır:
+    yapılan işlemleri geri almaktadır. Kabaca (tabii ayrıntıları var) olarak UNIX/Linux sistemlerinde dosya kapatıldığında 
+    şunlar yapılmaktadır:
 
-    1) Dosya nesnesi eğer onu gösteren tek bir betimleyici varsa yok edilir. 
+    1) Dosya nesnesi ve bununla ilgili diğer çekirdek nesneleri yok edilir.
     2) Dosya betimleyici tablosundaki betimleyiciye ilişkin slot boşaltılır.
 
     İleride de göreceğimiz gibi dosya betimleyici tablosunda birden fazla betimleyici aynı dosya nesnesini gösteriyor durumda 
@@ -5265,13 +5293,13 @@ void exit_sys(const char *msg)
 
     Bir dosya artık kullanılmayacaksa onu kapatmak iyi bir tekniktir. Çünkü bu sayede:
 
-    1) Dosya betimleyici tablosundaki slot serbest bırakılır.
-    2) Dosya nesnesi gereksiz bir biçimde çekirdek alanı içerisinde yer kaplamaz. 
-
+    1) Dosya nesnesi ve bununla ilgili dğer çekirdek nesneleri gereksiz bir biçimde çekirdek alanı içerisinde yer kaplamaz. 
+    2) Dosya betimleyici tablosundaki slot serbest bırakılır.
+ 
     Tabii işletim sistemi, proses dosyayı kapatmasa bile proses sonlandırılırken prosesin dosya betimleyici tablosunu inceler
-    ve açık dosyaları close işlemi ile kapatır. Yani biz bir dosyayı kapatmasak bile proses bittiğinde dosyalar zaten 
-    kapatılmaktadır. Ancak dosyaların kullanım bittikten sonra erken bir biçimde programcı tarafından kapatılması iyi bir 
-    tekniktir.
+    ve açık dosyaları close fonksşyonu çağrılmış gibi kapatır. Yani biz bir dosyayı kapatmasak bile proses bittiğinde dosyalar 
+    zaten kapatılmaktadır. Ancak dosyaların kullanım bittikten sonra erken bir biçimde programcı tarafından kapatılması iyi 
+    bir tekniktir.
 
     Dosyanın kapatılması için close isimli POSIX fonksiyonu bulundurulmuştur. Bu POSIX fonksiyonu doğrudan işletim sisteminin 
     dosyayı kapatan sistem fonksiyonunu (Linux'ta sys_close) çağırmaktadır. close fonksiyonunun prototipi şöyledir:
@@ -5280,9 +5308,11 @@ void exit_sys(const char *msg)
 
     int close(int fd);
 
-    Fonksiyon parametre olarak dosya betimleyicisini alır. close fonksiyonu başarı durumunda 0, başarısızlık durumunda -1 
-    değerine geri dönmektedir. Fonksiyonun geri dönüş değeri genellikle kontrol edilmez. Eğer programcı fonksiyona geçerli 
+    Fonksiyon parametre olarak dosya betimleyicisini alır. close fonksiyonu başarı durumunda 0 değerine, başarısızlık durumunda 
+    -1 değerine geri dönmektedir. Fonksiyonun geri dönüş değeri genellikle kontrol edilmez. Eğer programcı fonksiyona geçerli 
     bir dosya betimleyicisini argüman olarak geçmişse fonksiyonun başarısız olması mümkün değildir.
+
+    Aşağıda bir dosyayı açıp kapatan örnek bir program veriyoruz.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -5335,8 +5365,8 @@ void exit_sys(const char *msg)
 /*---------------------------------------------------------------------------------------------------------------------------
     Dosyadaki her bir byte'a bir offset numarası karşı getirilmiştir. Buna ilgili byte'ın offset'i denilmektedir. Dosya 
     göstericisi (file pointer) okuma ve yazma işlemlerinin hangi offset'ten itibaren yapılacağını gösteren bir offset 
-    belirtmektedir. Okuma ya da yazma miktarı kadar dosya göstericisi otomatik olarak ilerletilmektedir. Dosya ilk açıldığında 
-    dosya göstericisi 0 durumundadır. Örneğin dosyanın içerisinde "ankara" byte'ları olsun:
+    belirtmektedir. Okunan ya da yazılan byte sayısı kadar dosya göstericisi otomatik olarak ilerletilmektedir. Dosya ilk 
+    açıldığında dosya göstericisi 0 konumundadır. Örneğin dosyanın içerisinde "ankara" byte'ları olsun:
 
     0123456
     ankara
@@ -5354,17 +5384,17 @@ void exit_sys(const char *msg)
     0123456
     ankara
         ^
-    Dosya göstericisinin dosyanın son byte'ından sonraki byte'ı göstermesi durumuna "EOF (End of File) durumu denir. EOF durumunda 
-    dosyadan okuma yapılamaz. Çünkü okunacak bir şey yoktur. Ancak EOF durumunda dosyaya yazma yapılabilir. Bu durumda yazılanlar 
-    dosyaya eklenmiş olur. Dosyada araya bir şey eklemek (insert) diye bir kavram yoktur. Dosya boyutunu değiştirmek 
-    için dosya göstericisini EOF'a çekilip yazma yapmak gerekir. Örneğin:
+    Dosya göstericisinin dosyanın son byte'ından sonraki byte'ı göstermesi durumuna "EOF (End of File) durumu denilmektedir. 
+    EOF durumunda dosyadan okuma yapılamaz. Çünkü okunacak bir şey yoktur. Ancak EOF durumunda dosyaya yazma yapılabilir. 
+    Bu durumda yazılanlar dosyaya eklenmiş olur. Dosyada araya bir şey eklemek (insert) diye bir kavram yoktur. Dosya boyutunu 
+    değiştirmek için dosya göstericisini EOF'a durumuna çekip yazma yapmak gerekir. Şimdi dosyadan 2 byte daha okuyalım:
 
     0123456
     ankara
           ^
     
-    Burada dosya göstericisi EOF konumundadır. Şimdi biz bu dosyaya "istanbul" yazısının byte'larını yazacak olsak bunlar 
-    artık dosyaya eklenecektir:
+    Burada dosya göstericisi artık EOF konumundadır. Şimdi biz bu dosyaya "istanbul" yazısının byte'larını yazacak olsak 
+    bunlar artık dosyaya eklenecektir:
 
     012345678901234
     ankaraistanbul
@@ -5375,7 +5405,8 @@ void exit_sys(const char *msg)
     0
     ^
 
-    Biz yeni yaratılmış bir dosyaya yazma yaparsak ona ekleme yapmış oluruz. Örneğin:
+    Biz yeni yaratılmış bir dosyaya yazma yaparsak ona ekleme yapmış oluruz. Örneğin boş bir dosyaya "istanbul" yazısının 
+    karakterlerine iişkin byte'ları yazmış olalım:
 
     012345678
     istanbul
@@ -5400,14 +5431,14 @@ void exit_sys(const char *msg)
 
     Fonksiyonun birinci parametresi okuma işleminin yapılacağı dosya betimleyicisini belirtmektedir. İşletim sistemi bu 
     betimleyiciden hareketle dosya nesnesine erişir. İkinci parametre dosyadan okunan byte'ların yerleştirileceği bellek 
-    transfer adresini, üçüncü parametre okunacak byte sayısını belirtmektedir
+    transfer adresini, üçüncü parametre de okunacak byte sayısını belirtmektedir
 
     Fonksiyon başarı durumunda okuyabildiği byte ile geri döner. read fonksiyonu ile eğer dosya göstericisinin gösterdiği 
     yerden itibaren dosya sonuna kadar mevcut olan byte miktarından daha fazla byte okunmak istenirse, read fonksiyonu 
     okuyabildiği kadar byte'ı okur ve okuyabildiği byte sayısına geri döner. Dosya göstericisi EOF durumunda ise read hiç 
     okuma yapılamayacağı için 0 ile geri dönmektedir. Ancak argümanların yanlış girilmesinde ya da IO hatalarında read 
-    başarısız olur ve -1 değerine geri döner, errno uygun bir biçimde set edilmektedir. ssize_t türü <unistd.h> ve 
-    <sys/types.h> dosyaları içerisinde "işaretli bir tamsayı türü olacak biçiminde typedef edilmek zorunda olan 
+    başarısız olur ve -1 değerine geri döner, errno uygun bir biçimde set edilir. ssize_t türü <unistd.h> ve 
+    <sys/types.h> dosyaları içerisinde "işaretli bir tamsayı türünü belirtecek biçiminde typedef edilmek zorunda olan 
     POSIX'e özgü bir tür ismidir. ssize_t türünü size_t türünün işaretli biçimi olarak düşünebilirsiniz. size_t türü
     C standartlarında olduğu halde ssize_t türü C standartlarında bulunmamaktadır. read fonksiyonunu tipik olarak 
     şöyle kullanmalısınız:
@@ -5419,7 +5450,7 @@ void exit_sys(const char *msg)
     if ((result = read(fd, buf, BUFFER_SIZE)) == -1)
         exit_sys("read");
 
-    Talep ettiğiniz kadar bilginin okunup okunmadığını anlayabilmek için ayrıca kontrol yapabilirsiniz:
+    Talep ettiğiniz kadar bilginin okunup okunmadığını anlayabilmek için ayrıca bir kontrol de yapabilirsiniz:
 
     if ((result = read(fd, buf, BUFFER_SIZE)) != BUFFER_SIZE) {
         if (result == -1)
@@ -5428,7 +5459,8 @@ void exit_sys(const char *msg)
         exit(EXIT_FAILURE);
     }
 
-    Eğer bir text dosyadan okuma yapıp okunanı yazdırmak istiyorsanız null karakteri eklemey unutmayınız. Örneğin:
+    Eğer bir text dosyadan okuma yapıp okunanı yazdırmak istiyorsanız null karakteri yazının sonuna eklemeyi unutmayınız. 
+    Örneğin:
 
     char buf[BUFFER_SIZE + 1];
     ssize_t result;
@@ -5440,9 +5472,13 @@ void exit_sys(const char *msg)
     buf[result] = '\0';
     puts(buf);
 
-    read fonksiyonu ile dosyadan 0 byte okunmak istendiğinde read fonksiyonu temel bazı kontrolleri yapar. (Örneğin dosyanın 
-    okuma modunda açılmış olup olmadığı kontrol edilir.) Eğer bu kontrollerde bir sorun çıkarsa fonksiyon başarısız olur ve 
-    -1 değerine geri döner. Eğer bu kontrollerde bir sorun çıkmazsa 0 değerine geri döner ve herhangi bir okuma işlemi yapmaz. 
+    read fonksiyonu ile dosyadan 0 byte okunmak istendiğinde read fonksiyonu temel bazı kontrolleri yapar (örneğin dosyanın 
+    okuma modunda açılmış olup olmadığını kontrol eder), eğer bu kontrollerde bir sorun çıkarsa fonksiyon başarısız olur ve 
+    -1 değerine geri döner. Eğer bu kontrollerde bir sorun çıkmazsa on fonksiy0 değerine geri döner ve herhangi bir okuma 
+    işlemi yapmaz. 
+
+    Aşağıda "içerisinde yazıların bulunduğu bir dosyadan" 10 byte okuma yapılıp okunanlar ekrana (stdout dosyasına) 
+    yazdırılmıştır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -5540,8 +5576,8 @@ void exit_sys(const char *msg)
 
     ssize_t write(int fd, const void *buf, size_t nbyte);
 
-    Fonksiyonun birinci parametresi yazma yapılacak dosyaya ilişkin dosya betimleyicisini, ikinci parametre yazılacak bilgilerin 
-    bulunduğu belllek transfer adresini, üçüncü parametre ise yazılacak byte sayısını belirtmektedir. write fonksiyonu 
+    Fonksiyonun birinci parametresi yazma yapılacak dosyaya ilişkin dosya betimleyicisini, ikinci parametresi yazılacak bilgilerin 
+    bulunduğu belllek transfer adresini, üçüncü parametresi ise yazılacak byte sayısını belirtmektedir. write fonksiyonu 
     başarılı olarak yazılan byte sayısı ile geri dönmektedir. Normal olarak bu değer üçüncü parametrede belirtilen yazılmak 
     istenen byte sayısıdır. Ancak çok seyrek bazı durumlarda write fonksiyonu talep edilenden daha az byte'ı da dosyaya yazabilir. 
     Bu durumda write fonksiyonu yazabildiği byte sayısı ile geri dönmektedir. write fonksiyonu başarısız olursa -1 değerine geri 
@@ -5552,20 +5588,29 @@ void exit_sys(const char *msg)
 
     Disk doluysa ya da yazılmak istenen dosya işletim sisteminin kullandığı dosya sisteminin izin verilen uzunluğunu aşıyorsa 
     write fonksiyonu yazabildiği kadar byte'ı yazar, yazabildiği byte sayısına geri döner (partial write), ancak bu nedenlerle 
-    write hiç byte yazamazsa başarısız olup -1 değeri ile değeri ile geri dönmektedir. Bu durumda errno EFBIG değeri ile set 
-    edilmektedir. write fonksiyonunun boru gibi özel dosyalardaki davranışı farklıdır. Bu konu ileride ele alınacaktır. 
+    write hiç byte yazamazsa başarısız olup -1 değeri ile değeri ile geri dönmektedir. Bu durumda errno değişkeni ENOSPC 
+    ("No space left on device") değeri ile set edilmektedir. write fonksiyonunun boru gibi özel dosyalardaki davranışı farklıdır. 
+    Bu konu ileride ele alınacaktır. Eğer taleep ettiğiniz kadar byte'ın yazıldığından emin olmak istiyorsanız ek bir kontrol 
+    daha yapmalısınız:
 
-    write fonksiyonu yazmayı EOF ötesine yapabilir, bu durumda yazılanlar dosya eklenmektedir. Örneğin dosya yeni yaratılmış 
-    olsun. Bu durumda write fonksiyonuyla her yazılan dosyaya eklenmiş olacaktır.
+    if ((result = write(fd, buf, size)) != size) {
+        if (result == -1)
+            exit_sys("write");
+        fprintf(stderr, "partial write error!..\n");
+        exit(EXIT_FAILURE);
+    }
+
+    Daha önceden de belirttiğimiz gibi write fonksiyonu yazmayı EOF ötesine yapabilir, bu durumda yazılanlar dosyaya 
+    eklenmektedir. Örneğin yeni yaratılmış bir dosyaya yazma yapılırsa yazılanlar dosyaya eklenmiş olur.
 
     write fonksiyonu ile dosyaya 0 byte yazılmak istendiğinde gerçek bir yazma yapılmaz. write fonksiyonu bu durumda yazma 
-    için gerekli kontrolleri yapar (örneğin dosyanın yazma modunda açılıp açılmadığı gibi). Eğer bu kontrollerde başarısızlık 
-    oluşursa write başarısız olur ve -1 değeri ile geri döner. Eğer bu kontrollerde başarısızlık oluşmazsa write 0 ile geri 
-    döner. Ancak yukarıda da belirttiğimiz gibi bu durumda gerçek bir yazma yapılmamaktadır. POSIX standartları normal 
-    dosyaların dışında (yani "regular" olmayan dosyaların dışında) 0 byte yazma işlemini "unspecified" olarak belirtmiştir. 
-    Dolayısıyla ileride göreceğimiz boru gibi dosyalara 0 byte yazıldığında ne olacağı o sisteme bağlı bir durumdur. 
+    için gerekli kontrolleri yapar (örneğin dosyanın yazma modunda açılıp açılmadığı gibi), eğer bu kontrollerde başarısızlık 
+    oluşursa -1 değeriyle, eğer bu kontrollerde başarısızlık oluşmazsa 0 değeriyle geri döner. Ancak yukarıda da belirttiğimiz 
+    gibi bu durumda gerçek bir yazma yapılmamaktadır. POSIX standartları normal dosyaların dışında (yani "regular" dosyaların 
+    dışında) 0 byte yazma işlemininin "belirsiz (unspecified) davranışa yol açacağını belirtmektedir. Dolayısıyla ileride 
+    göreceğimiz boru gibi dosyalara 0 byte yazıldığında ne olacağı o sisteme bağlı bir durumdur. 
 
-    Aşağdadaki programda klavyeden (stdin dosyasından) yazılar alınıp write fonksiyonu ile dosyaya yazdırılmıştır. fgets
+    Aşağdadaki programda klavyeden (stdin dosyasından) yazılar okunup write fonksiyonu ile dosyaya yazdırılmıştır. fgets
     fonksiyonunun '\n' karakterini de diziye yerleştirdiğini anımsayınız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -5583,6 +5628,8 @@ int main(void)
 {
     int fd;
     char buf[BUFFER_SIZE];
+    size_t len;
+    ssize_t result;
     
     if ((fd = open("test.txt", O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
         exit_sys("open");
@@ -5593,9 +5640,14 @@ int main(void)
         if (fgets(buf, BUFFER_SIZE, stdin) == NULL)
             continue;
         if (!strcmp(buf, "quit\n"))
-            break;
-        if (write(fd, buf, strlen(buf)) == -1)
-            exit_sys("write");
+            break;      
+        len = strlen(buf);
+        if ((result = write(fd, buf, len)) != len) {
+            if (result == -1)
+                 exit_sys("write");
+            fprintf(stderr, "partial write error!..\n");
+            exit(EXIT_FAILURE);
+        }      
     }
 
     close(fd);
@@ -5608,7 +5660,6 @@ void exit_sys(const char *msg)
     perror(msg);
     exit(EXIT_FAILURE);
 }
-
 
 /*---------------------------------------------------------------------------------------------------------------------------
     UNIX/Linux sistemlerinde dosya kopyalama tipik olarak bir döngü içerisinde kaynak dosyadan hedef dosyaya blok blok okuma 
@@ -5628,10 +5679,13 @@ void exit_sys(const char *msg)
     if ((fdd = open(argv[2], O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
         exit_sys(argv[2]);
 
-    while ((result = read(fds, buf, BUFFER_SIZE)) > 0) 
-        if (write(fdd, buf, result) == -1)
-            exit_sys(argv[2]);
-    
+     while ((result = read(fds, buf, BUFFER_SIZE)) > 0)
+        if (write(fdd, buf, result) == -1) {
+            if (result == -1)
+                exit_sys(argv[2]);
+            fprintf(stderr, "partial write error!..\n");
+            exit(EXIT_FAILURE);
+        }
     if (result == -1)
         exit_sys(argv[1]);
     
@@ -5643,15 +5697,15 @@ void exit_sys(const char *msg)
     "x" hakkı hedef dosyada olmadığı kopyasını çalıştıramayız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-#include <stdio.h>
+ #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 
-void exit_sys(const char *msg);
-
 #define BUFFER_SIZE         8192
+
+void exit_sys(const char *msg);
 
 int main(int argc, char *argv[])
 {
@@ -5663,58 +5717,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "wrong number of arguments!..\n");
         exit(EXIT_FAILURE);
     }
-    
-    if ((fds = open(argv[1], O_RDONLY)) == -1)
-        exit_sys(argv[1]);
-
-    if ((fdd = open(argv[2], O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
-        exit_sys(argv[2]);
-
-    while ((result = read(fds, buf, BUFFER_SIZE)) > 0) 
-        if (write(fdd, buf, result) == -1)
-            exit_sys(argv[2]);
-    
-    if (result == -1)
-        exit_sys(argv[1]);
-
-    close(fds);
-    close(fdd);
-
-    return 0;
-}
-
-void exit_sys(const char *msg)
-{
-    perror(msg);
-    exit(EXIT_FAILURE);
-}
-
-/*---------------------------------------------------------------------------------------------------------------------------
-    write çok çok seyrek de olsa başarılı olduğu halde talep edilen miktar kadar hedef dosyaya yazamayabilir. Örneğin diskin dolu 
-    olması durumunda ya da bir sinyal oluşması durumunda write talep edilen miktar kadar yazma yapamayabilir. Bu tür durumları diğer
-    durumlardan ayırmak için ayrı bir kontrol yapmak gerekebilir. 
----------------------------------------------------------------------------------------------------------------------------*/
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#define BUFFER_SIZE        4096
-
-void exit_sys(const char *msg);
-
-int main(int argc, char *argv[])
-{
-    char buf[BUFFER_SIZE];
-    int fds, fdd;
-    ssize_t size, result;
-
-    if (argc != 3) {
-        fprintf(stderr, "wrong number of arguments!...\n");
-        exit(EXIT_FAILURE);
-    }
 
     if ((fds = open(argv[1], O_RDONLY)) == -1)
         exit_sys(argv[1]);
@@ -5722,17 +5724,15 @@ int main(int argc, char *argv[])
     if ((fdd = open(argv[2], O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
         exit_sys(argv[2]);
 
-    while ((result = read(fds, buf, BUFFER_SIZE)) > 0) {
-        if ((size = write(fdd, buf, result)) == -1)
-            exit_sys("write");
-        if (size != result) {
-            fprintf(stderr, "cannot write file!...\n");
+    while ((result = read(fds, buf, BUFFER_SIZE)) > 0)
+        if (write(fdd, buf, result) == -1) {
+            if (result == -1)
+                exit_sys(argv[2]);
+            fprintf(stderr, "partial write error!..\n");
             exit(EXIT_FAILURE);
         }
-    }
-
     if (result == -1)
-        exit_sys("read");
+        exit_sys(argv[1]);
 
     close(fds);
     close(fdd);
@@ -5749,7 +5749,7 @@ void exit_sys(const char *msg)
 /*---------------------------------------------------------------------------------------------------------------------------
     read ve write POSIX fonksiyonları yukarıda da belirttiğimiz gibi dosya göstericisinin gösterdiği yerden itibaren okuma 
     ve yazma işlemlerini yapmaktadır. Bu fonksiyonlar dosya göstericisinin konumunu okunan ya da yazılan miktar kadar ilerletmektedir. 
-    İşte read ve write fonksiyonlarının pread ve pwrite biçiminde bir versiyonu daha bulunmaktadır. pread ve pwrite fonksiyonları
+    İşte read ve write fonksiyonlarının pread ve pwrite biçiminde versiyonları da bulunmaktadır. pread ve pwrite fonksiyonları
     işlemlerini dosya göstericisinin gösterdiği yerden itibaren değil, parametreleriyle belirtilen offset'ten itibaren yapmaktadır. 
     Bu fonksiyonlar dosya göstericisinin konumunu değiştirmezler. Uygulamada pread ve pwrite fonksiyonları seyrek kullanılmaktadır. 
     Örneğin dosyanın farklı yerlerinden sürekli okuma/yazma yapıldığı durumlarda bu fonksiyonlar kullanım kolaylığı sağlayabilmektedir. 
@@ -5790,34 +5790,35 @@ void exit_sys(const char *msg)
 
     off_t lseek(int fd, off_t offset, int whence);
 
-    Fonksiyonun birinci parametresi dosya göstericisi konumlandırılacak dosyaya ilişkin dosya betimleyicisini belirtir. Dosya 
-    göstericisi dosya nesnesinin (Linux'ta struct file yapısının) içerisinde tutulmaktadır. İkinci parametre konumlandırma 
+    Fonksiyonun birinci parametresi dosya göstericisi konumlandırılacak dosyaya ilişkin dosya betimleyicisini almakatdır. 
+    Dosya göstericisi dosya nesnesinin (Linux'ta struct file yapısının) içerisinde tutulmaktadır. İkinci parametre konumlandırma 
     offset'ini belirtir. off_t türü <unistd.h> ve <sys/types.h> içerisinde işaretli bir tamsayı türü biçiminde typedef edilmiş 
     olmak zorundadır. Fonksiyoonun Üçüncü parametresi konumlandırma orijinini belirtmektedir. Bu üçüncü parametre 0, 1 ya da 2 
-    olarak girilebilir. Tabii sayısal değer girmek yerine yine SEEK_SET (0), SEEK_CUR (1) ve SEEK_END (2) sembolik sabitlerini 
+    olarak girilebilir. Sayısal değer girmek yerine yine SEEK_SET (0), SEEK_CUR (1) ve SEEK_END (2) sembolik sabitlerini de
     kullanabiliriz. Bu sembolik sabitler <unistd.h> ve <stdio.h> dosyaları içerisinde define edilmiştir. Fonksiyon başarı 
     durumunda dosyanın başından itibaren konumlandırılan offset'e, başarısızlık durumunda -1 değerine geri dönmektedir.
 
     SEEK_SET konumlandırmanın dosyanın başından itibaren yapılacağını, SEEK_CUR o anda dosya göstericisinin gösterdiği yerden 
     itibaren yapılacağını ve SEEK_END de EOF durumundan itibaren yapılacağını belirtmektedir. En normal durum SEEK_SET 
     orijininde ikinci parametrenin >= 0, SEEK_END orijininde <= 0 biçiminde girilmesidir. SEEK_CUR orijininde ikinci 
-    parametre pozitif ya da negatif girilebilir. Pozitif bulunulan yerdne ileriye doğru, negatif ise bulunulan yerden 
+    parametre pozitif ya da negatif girilebilir. Pozitif bulunulan yerden ileriye doğru, negatif ise bulunulan yerden 
     geriye doğru anlamına gelmektedir. Örneğin dosya göstericisini EOF durumuna şöyle konumlandırabiliriz:
 
     lseek(fd, 0, SEEK_END);
 
-    lseek fonksiyonun başarısı bariz durumlarda genellikle programcı tarafından kontrol edilmemektedir. Örneğin yukarıdaki 
-    çağrıda zaten disk dosyalarında (regular files) dosya göstericisinin EOF durumuna konumlandırılamaması mümkün değildir. 
-    Yukarıdaki çağrının başarısız olmasının tek nedeni geçersiz bir betimleyicinin kullanılmış olmasıdır. 
+    lseek fonksiyonun başarısı genellikle programcı tarafından kontrol edilmemektedir. Örneğin yukarıdaki çağrıda zaten 
+    disk dosyalarında (regular files) dosya göstericisinin EOF durumuna konumlandırılamaması mümkün değildir. Yukarıdaki 
+    çağrının başarısız olmasının tek nedeni geçersiz bir betimleyicinin kullanılmış olmasıdır. 
 
-    Dosya sistemine de bağlı olarak UNIX/Linux sistemleri dosya göstericisini EOF'un ötesine konumlandırmaya izin verebilmektedir. 
-    Bu özel bir durumdur. Bu tür durumlarda dosyaya yazma yapıldığında "dosya delikleri (file holes)" oluşmaktadır. Dosya 
-    delikleri konusu ileride ele alınacaktır.
+    Dosya sistemine de bağlı olarak UNIX/Linux sistemleri (Windows sistemlerinde de bu özellik vardır) dosya göstericisini 
+    EOF'un ötesine konumlandırmaya izin verebilmektedir. Bu özel bir durumdur. Bu tür durumlarda dosyaya yazma yapıldığında 
+    "dosya delikleri (file holes)" oluşmaktadır. Dosya delikleri konusu ileride ele alınacaktır.
 
-    Aslında dosya açarken O_APPEND modu atomik bir biçimde her write işleminden önce dosya göstericisini EOF durumuna çekmektedir. 
-    Bu nedenle her yazılan dosyanın sonuna eklenmektedir.
+    Aslında dosya açarken kullanılan O_APPEND bayrağı her write işleminden önce atomik bir biçimde dosya göstericisini
+    EOF durumuna çekmektedir. Bu nedenle her yazılan dosyanın sonuna eklenmektedir.
 
-    Aşağıdaki örnekte "test.txt" O_WRONLY modunda açılmış ve dosya göstericisi EOF durumuna çekilerek dosyaya ekleme yapılmıştır. 
+    Aşağıdaki örnekte "test.txt" dosyası O_WRONLY modunda açılmış ve dosya göstericisi EOF durumuna çekilerek dosyaya 
+    ekleme yapılmıştır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -5833,14 +5834,20 @@ int main(void)
 {
     int fd;
     char buf[] = "\nthis is a test";
+    size_t len;
+    ssize_t result;
 
     if ((fd = open("test.txt", O_WRONLY)) == -1)
         exit_sys("open");
 
+    len = strlen(buf);
     lseek(fd, 0, SEEK_END);
-
-    if (write(fd, buf, strlen(buf)) == -1)
-        exit_sys("write");
+    if ((result = write(fd, buf, len)) != len) {
+        if (result == -1)
+                exit_sys("write");
+        fprintf(stderr, "partial write error!..\n");
+        exit(EXIT_FAILURE);
+    } 
 
     close(fd);
 
@@ -5860,12 +5867,13 @@ void exit_sys(const char *msg)
     2) POSIX dosya fonksiyonlarını kullanmak.
     3) Sistem fonksiyonlarını kullanmak.
 
-    Burada en taşınabilir olan standart C/C++ fonksiyonlarıdır. Dolayısıyla ilk tercih bunlar olmalıdır. Ancak C ve C++'ın 
-    standart dosya fonksiyonları spesifik bir sistemin gereksinimini karşılayacak biçimde tasarlanmamıştır. Bu nedenle bazen 
-    doğrudan POSIX fonksiyonlarının kullanılması gerekebilmektedir. Genellikle dosya işlemleri yapan sistem fonksiyonlarının 
-    kullanılması hiç gerekmez. Çünkü Linux'ta olduğu gibi pek çok UNIX türevi sistemde yukarıda da belirttiğimiz gibi POSIX 
-    fonksiyonları zaten doğrudan sistem fonksiyonlarını çağırmaktadır. Biz kursumuzda dosya işlemlerini daha çok POSIX 
-    fonksiyonlarını kullanarak gerçekleştireceğiz. 
+    Burada en taşınabilir olan standart C/C++ fonksiyonlarıdır. Bu fonksiyonlar kullanıcı alanında oluşturulan tamponlama 
+    mekanizmasını da kullanmaktadırDolayısıyla ilk tercih bunlar olmalıdır. Ancak C ve C++'ın standart dosya fonksiyonları 
+    spesifik bir sistemin gereksinimini karşılayacak biçimde tasarlanmamıştır. Bu nedenle bazen doğrudan POSIX fonksiyonlarının 
+    kullanılması gerekebilmektedir. Genellikle dosya işlemleri yapan sistem fonksiyonlarının kullanılması hiç gerekmez. 
+    Çünkü Linux'ta olduğu gibi pek çok UNIX türevi sistemde yukarıda da belirttiğimiz gibi POSIX fonksiyonları zaten doğrudan 
+    sistem fonksiyonlarını çağırmaktadır. Biz kursumuzda dosya işlemlerini daha çok POSIX fonksiyonlarını kullanarak 
+    gerçekleştireceğiz. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -5874,11 +5882,32 @@ void exit_sys(const char *msg)
     yazar. Tabii hangi prosesin önce yazacağını bilemeyiz. Ancak burada önemli olan nokta iç içe geçmenin olmamasıdır. Benzer 
     biçimde bir read bir disk dosyasının bir yerinden n byte okumak istediğimizde başka bir proses aynı dosyanın aynı yerine 
     yazma yaptığında biz ya o prosesin yazdıklarını okuruz ya da onun yazmadan önceki dosya içeriğini okuruz. Yarısı eski yarısı 
-    yeni bir bilgi okumayız. Ancak işletim sistemi farklı read ve write çağrılarını bu anlamda senkronize etmemektedir. Yani 
+    yeni bir bilgi okumayız. Bu durum POSIX standartlarında "2.9.7 Thread Interactions with Regular File Operations" başlığı 
+    altında şu cümlelerle ifade edilmiştir:
+    
+        "All of the following functions shall be atomic with respect to each other in the effects specified in
+        POSIX.1-2024 when they operate on files in the file hierarchy:
+
+        chmod(), chown(), creat(), fchmod(), fchmodat(), fchown(), fchownat(), fstat(),
+        fstatat(), ftruncate(), futimens(), lchown(), link(), linkat(), lstat(), open(),
+        openat(), readlink(), readlinkat(), rename(), renameat(), stat(), symlink(),
+        symlinkat(), truncate(), unlink(), unlinkat(), utimensat(), utimes()
+    
+        If two threads each call one of these functions, each call shall either see all of the specified effects of the
+        other call, or none of them.
+        
+        Except where specified otherwise, all of the following functions shall be atomic with respect to each other in
+        the effects specified in POSIX.1-2024 when they operate on file descriptors that are open, or being opened, to
+        files in the file hierarchy:
+
+        close(), dup2(), dup3(), fcntl(), fstat(), fstatat(), ftruncate(), futimens(),
+        lseek(), open(), openat(), pread(), read(), readv(), pwrite(), write()"
+
+    Ancak işletim sistemi farklı read ve write çağrılarını bu anlamda senkronize etmemektedir. Yani 
     örneğin biz bir dosyanın belli bir yerine iki farklı write fonksiyonu ile ardışık şeyler yazdığımızı düşünelim. Birinci 
     write işleminden sonra başka bir proses artık orayı değiştirebilir. Dolayısıyla bu anlamda bir iç içe girme durumu oluşabilir. 
-    Veritabanı programlarında bu tür durumlarla sık karşılaşılmaktadır. Örneğin veritabanı programı bir kaydı "data" dosyasına 
-    yazıp ona ilişkin indeksleri de "index" dosyasına yazıyor olabilir. Bu durumda iki write işlemi söz konusudur. Data dosyasına 
+    Veritabanı programlarında bu tür durumlarla sık karşılaşılmaktadır. Örneğin veritabanı programı bir kaydı "data dosyasına" 
+    yazıp ona ilişkin indeksleri de "index dosyasına" yazıyor olabilir. Bu durumda iki write işlemi söz konusudur. Data dosyasına 
     bilgiler yazıldıktan sonra henüz indeks dosyasına bilgi yazılmadan başka bir proses bu iki işlemi hızlı davranarak yaparsa 
     "data" ve "indeks" bütünlüğü bozulabilir. İşletim sisteminin burada bir sorumluluğu yoktur. Bu tarz işlemlerde senkronizasyon 
     programcılar tarafından sağlanmak zorundadır. Bu tür senkronizasyonlar senkronizasyon nesneleriyle (semaphore gibi, mutex 
