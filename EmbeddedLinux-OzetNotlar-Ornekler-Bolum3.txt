@@ -2146,7 +2146,7 @@ void exit_sys(const char *msg)
 
     Aşağıdaki örnekte 10 kez LED yakılıp söndürülmüştür.
 ---------------------------------------------------------------------------------------------------------------------------*/
-<BURADA KALDIM>
+
 /* gpio-driver-ioctl.c */
 
 #include <stdio.h>
@@ -5179,7 +5179,7 @@ void exit_sys(const char *msg)
     tcflag_t  c_iflag       Input modes
     tcflag_t  c_oflag       Output modes
     tcflag_t  c_cflag       Control modes
-    tcflag_t c_lflag;		local mode flags 
+    tcflag_t  c_lflag;		local mode flags 
     cc_t      c_cc[NCCS]    Control characters
 
     Tabii yukarıda da belirttiğimiz gibi aslında bu elemanların sıfırdan doldurulması yerine önce tcgetattr fonskiyonu ile
@@ -7567,7 +7567,7 @@ void exit_sys(const char *msg)
     belirtmektedir. Yukarıda da belirttiğimiz gibi bu alarm bitleri 1 olduğunda bizim bunları programlama yoluyla 0'lamamız 
     gerekir. Aksi takdirde bir daha alarm ve kesme oluşmayacaktır. 
 
-    Kesme tekniği kullanılacaksa DS3231 RTC modülünün SQW/INTR ucunun kesme oluşturacak kaynağa bağlanmaıs gerekemektedir. 
+    Kesme tekniği kullanılacaksa DS3231 RTC modülünün SQW/INTR ucunun kesme oluşturacak kaynağa bağlanması gerekemektedir. 
     DS3231'in SQW/INTR pini "open-drain" durumdadır. Dolayısıyla normal olarak araya bir 10K civarında bir pull-up direncinin 
     eklenmesi gerekir:
 
@@ -10531,7 +10531,7 @@ void exit_sys(const char *msg)
 
     Kernel binary format (zImage)  --->
 
-    Bu sçenek seçildiğinde aşağıdaki gibi bir alt menü görüntülenecektir:
+    Bu seçenek seçildiğinde aşağıdaki gibi bir alt menü görüntülenecektir:
 
     [X] gzip compression
     ( ) lz4 compression
@@ -17854,8 +17854,108 @@ void exit_sys(const char *msg)
 -----------------------------------------------------------------------------------------------------------------------------*/
 
 /*-----------------------------------------------------------------------------------------------------------------------------
+                                            190. Ders 14/07/2026 - Salı                                 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Bazı tarif dosyalarında yinelenen öğeler olabilmektedir. Örneğin ortak görevler buşunabilmektedir. Nesne yönelimli programlama
+    tekniğinde tekrarlanan öğelerin bir taban sınıfta toplandığını ve diğer sınıfların ondan türetildiğini anımsayınız. İşte 
+    Yocto'da da ortak öğeler ".bbclass" uzantılı dosyalarda toplanıp o dosyalardan türetme yapılabilmektedir. Bir ".bbclass" 
+    dosyasını tarif dosyasının bünyesine katabilmek için inherit komutu kullanılmaktadır. inherit komutunun genel biçimi 
+    şöyledir:
+
+    inherit <sınıf-adı> [<sınıf-adı> ...]
+
+    Burada <sınıf-adı> ".bbclass" dosyasının yalnızca ismini belirtmektedir. 
+
+    Bitbake derleme sırasında bu ".bbclass" dosyalarını katmanların bulunduğu ana dizinlerin altında şu isimdeki dizinlerde
+    aramaktadır:
+
+    classes-recipe/
+    classes-global/
+    classes/
+
+    Scarthgap'in de dahil olduğu güncel sürümlerde (Mickledore 4.2'den itibaren) sınıf dizinleri üçe ayrılmıştır:
+
+    ┌─────────────────────┬────────────────────────────────────────────────┐
+    │       Dizin         │                   Anlamı                       │
+    ├─────────────────────┼────────────────────────────────────────────────┤
+    │ classes-recipe/     │ Yalnızca recipe'lerden inherit edilebilir      │
+    │                     │ (autotools, cmake, systemd, image...)          │
+    ├─────────────────────┼────────────────────────────────────────────────┤
+    │ classes-global/     │ Yalnızca global olarak (INHERIT ile conf       │
+    │                     │ dosyasından) dahil edilebilir (base,           │
+    │                     │ package_ipk, sstate, uninative...)             │
+    ├─────────────────────┼────────────────────────────────────────────────┤
+    │ classes/            │ Her iki şekilde de kullanılabilir              │
+    │                     │ (cve-check, buildhistory...)                   │
+    └─────────────────────┴────────────────────────────────────────────────┘
+
+    "classes-recipe" dizinlerindekiler yalnızca tarif dosyalarından inherit edilebilmektedir. "classes-global" dizini içerisinde 
+    buunanlar glonal olarak örneğin ".conf" dosyalarından da inherit edilebilmektedir. "classes" dizini içerisinde bulunanlar 
+    ise her iki biçimde de inherit edilebilmektedir. 
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------------------------------------------------------
+    Örneğin kendi katmanımızda bir ".bbclass" dosyası oluşturacak olalım. Bunun için önce kendi katmanımızın ana dizininde 
+    "classes" isimli bir dizin yaratırız. Bu dizinin içerisinde de ".bbclass" dosyasımızı oluştururuz:
+
+    meta-mylayer/
+    ├── classes
+    │   └── mylayer.bbclass
+    ├── conf
+    │   └── layer.conf
+    ├── COPYING.MIT
+    ├── README
+    ├── recipes-app1
+    │   └── app1
+    │       ├── app1_1.0.bb
+    │       ├── app1_1.0.bbappend
+    │       └── files
+    │           ├── app1.c
+    │           ├── app1-new.c
+    │           └── Makefile
+    └── recipes-app2
+        └── app2
+            ├── app2_1.0.bb
+            └── files
+                └── app2.c
+
+    ".bbclass" dosyası içerisinde tariflerden kullanılacak çeşitli değişkenler ve görevler bulundurulabilir. Örneğin ekstra 
+    install işlemi için aşağıdaki gibi bir görev bulundurulabilir:
+
+    do_install:append() {
+        bbplain "extra install"    
+    }
+
+    Bu ".bbclass" dosyası bir tarif dosyasındna inherit edildiğinde do_install görevine ek yapılmış olacaktır. Tarif dosyamızın 
+    içerisinde inherit işlemini şöyle yapabiliriz:
+
+    inherit mylayer
+
+    Biz daha önce "include" etme yöntemini de görmüştük. include etme işleminde bir dosya tıpkı C'de olduğu gibi başka 
+    bir dosyanın bir noktasından itibaren ona ekleniyordu. Hangi durumlarda inherit işleminin hangi durumlarda include 
+    işleminin daha uygun olduğunu aşağıdaki tabloda veriyoruz:
+
+    ┌───────────────────────────────────────┬───────────────────────────┐
+    │         Paylaşılacak İçerik           │       Doğru Araç          │
+    ├───────────────────────────────────────┼───────────────────────────┤
+    │ Görev, fonksiyon, addtask, anonim     │ .bbclass + inherit        │
+    │ Python, EXPORT_FUNCTIONS              │                           │
+    ├───────────────────────────────────────┼───────────────────────────┤
+    │ Aynı yazılımın sürümleri arasında     │ .inc + require            │
+    │ ortak SRC_URI/LICENSE/bağımlılıklar   │                           │
+    ├───────────────────────────────────────┼───────────────────────────┤
+    │ Opsiyonel, "varsa dahil et" içerik    │ .inc + include            │
+    └───────────────────────────────────────┴───────────────────────────┘  
+                                            
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*-----------------------------------------------------------------------------------------------------------------------------
                                                
 -----------------------------------------------------------------------------------------------------------------------------*/
+
 
 /*-----------------------------------------------------------------------------------------------------------------------------
                                                
