@@ -16,7 +16,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                          Son Güncelleme: 01/09/2026 - Salı
+                                          Son Güncelleme: 07/09/2026 - Pazartesi
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -6302,9 +6302,9 @@ void exit_sys(const char *msg)
 
     #include <sys/stat.h>
 
-    int stat(const char *path, struct stat *buf);
-    int fstat(int fd, struct stat *buf);
-    int lstat(const char *path, struct stat *buf);
+    int stat(const char *restrict path, struct stat *restrict buf);
+    int fstat(int fildes, struct stat *buf);
+    int lstat(const char *restrict path, struct stat *restrict buf);
 
     stat fonksiyonları dosyaya ilişkin inode elemanından dosyaya ilişkin metadata bilgilerini elde etmektedir. Örneğin 
     dosyanın erişim hakları, kullanıcı ve grup ID'leri, dosyanın uzunluğu, dosyanın tarih-zaman bilgileri bu stat 
@@ -6313,7 +6313,7 @@ void exit_sys(const char *msg)
 
     stat fonksiyonunun prototipi şöyledir:
 
-    int stat(const char *path, struct stat *buf);
+    int stat(const char *restrict path, struct stat *restrict buf);
 
     Fonksiyonun birinci parametresi metadata bilgisi elde edilecek dosyanın yol ifadesini, ikinci parametresi ise dosyanın 
     metadata bilgilerinin yerleştirileceği struct stat isimli yapı türündne nesnesinin adresini almaktadır. stat isimli yapı
@@ -7235,11 +7235,12 @@ void exit_sys(const char *msg)
 
     int fstat(int fd, struct stat *buf);
 
-    Genel olarak işletim sisteminin dosya betimleyicisinden hareketle inode bilgilerine erişmesi yol ifadesinden hareketle 
-    erişmesinden daha hızlı olmaktadır. Çünkü open fonksiyonuyla dosya açıldığında zaten dosyanın disk üzerindeki inode
-    bilgileri elde edilip çekirdek alanına çekilmektedir. Linux sistemlerinde diskteki dosyanın bilgilerinin yerleştirildiği 
-    çekirdek nesnelerine "inode nesneleri" denilmektedir. Dolayısıyla eğer dosya zaten açılmışsa onun dosya betimleyicisinden
-    hareketle dosya bilgilerine erişilmesi çekirdek için daha zahmetsiz ve hızlıdır. Örneğin:
+    Genel olarak iUNIX türevi işletim sistemleri inode bilgilerine dosya betimleyicisinden hareketle daha hızlı erişmektedir. 
+    Çünkü open fonksiyonuyla dosya açıldığında zaten dosyanın disk üzerindeki inode bilgileri elde edilip çekirdek alanına 
+    çekilmektedir. (Linux sistemlerinde diskteki dosyanın bilgilerinin yerleştirildiği çekirdek nesnelerine "inode nesneleri" 
+    denilmektedir. Dosya nesnesinin içerisinde inode nesnesinin adresi de tutulmaktadır.) Dolayısıyla eğer dosya zaten 
+    açılmışsa onun dosya betimleyicisinden hareketle dosya bilgilerine erişilmesi çekirdek için daha zahmetsiz ve hızlıdır. 
+    Örneğin:
 
     int fd;
     struct stat finfo;
@@ -7361,13 +7362,13 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    lstat fonksiyonunun stat fonksiyonundan tek farkı sembolik bağlantı dosyaları söz konusu olduğunda lstat fonksiyonunun 
-    sembolik bağlantıyı izlememesi, sembolik bağlantı dosyasının kendisine ilişkin bilgileri vermesidir. Dizinler için sembolik
-    bağlantılar oluşturulduğunda dizin ağacı özyinelemeli bir biçimde dolaşılırkn sembolik bağlantıların izlenmesi bu tür 
-    dolaşımların sonsuz döngüye girmesine yol açabilmektedir. Bu tür durumlarda stat yerine lstat fonksiyonu kullanılmalıdır. 
-    lstat fonksiyonun parametrik yapısı tamamen stat fonksiyonu gibidir:
+    lstat fonksiyonunun stat fonksiyonundan tek farkı sembolik bağ dosyaları söz konusu olduğunda sembolik bağı izlememesi, 
+    sembolik bağ dosyasının kendisine ilişkin bilgileri vermesidir. Dizinler için sembolik bağlar oluşturulduğunda dizin 
+    ağacı özyinelemeli bir biçimde dolaşılırken sembolik bağların izlenmesi bu tür dolaşımların sonsuz döngüye girmesine yol 
+    açabilmektedir. Bu tür durumlarda stat yerine lstat fonksiyonu kullanılmalıdır. Linux sistemleri dizinler üzerinde
+    sembolik bağ oluşturulmasına izin vermemektedir. lstat fonksiyonunun parametrik yapısı tamamen stat fonksiyonu gibidir:
 
-    int lstat(const char *path, struct stat *buf);
+    int lstat(const char *restrict path, struct stat *restrict buf);
 
     İzleyen paragraflarda katı bağların (hard link) ve sembolik bağların (soft link) ne anlama geldiğini açıklayacağız.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -7387,43 +7388,46 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Dizinler de aslında tamamen dosyalar gibi organze edilmektedir. Bir dosyanın içerisinde dosyanın içeriğindeki bilgiler 
-    vardır. Ancak bir dizinin içerisinde o dizin içerisindeki dosyaların isimleri ve inode numaraları bulunmaktadır. Dizinlerin
-    içerisindeki her bir elemana "dizin girişi (directory entry)" denilmektedir. Dizin girişlerinin formatının ayrıntıları dosya 
-    sisteminden sistemine değişebilmektedir. Ancak temel olarak dizin girişlerinde dosyanın ismi ve inode numarası tutulmaktadır. 
-    Dosyanın metadata bilgilerinin (yani erişim hakları, uzunluk gibi) inode bloktaki inode elemanında tutulduğunu ve stat 
-    fonksiyonlarının bu bilgileri inode elemanından aldığını anımsayınız. Biz ext dosya sistemlerini kursumuzun sonlarına 
-    doğru ele alacağız. Ancak şimdilik bir dizinin aşağıdaki formatta dizin girişlerine sahip olduğunu varsayabiliriz:
+    Biz daha önce dizin organizasyonu hakkında kabaca bazı şeyler söylemiştik. Burada dizin organizasyonu hakkında biraz 
+    daha bilgi vermek istiyoruz. Dizinler de aslında tamamen dosyalar gibi organize edilmektedir. Bir dosyanın içerisinde 
+    dosyanın bilgileri vardır, ancak bir dizinin içerisinde o dizinin içeriğine ilişkin dizin girişleri bulunmaktadır. 
+    Dizinlerin içerisindeki her kayda "dizin girişi (directory entry)" denilmektedir. Dizin girişlerinin formatları dosya 
+    sisteminden dosya sistemine değişebilmektedir. Ancak inode tabanlı dosya sistemlerine ilişkin dizin girişlerinde en 
+    azından girişin ismi ve inode numarası tutulmaktadır. Dosyanın ya da dizinin metadata bilgilerinin (erişim hakları, 
+    uzunluk gibi) inode bloktaki inode elemanında tutulduğunu ve stat fonksiyonlarının bu bilgileri inode elemanından 
+    ya da çekirdek içerisindeki inode nesnesinden elde ettiğini anımsayınız. Biz inode tabanlı dosya sistemlerini kursumuzun 
+    sonlarına doğru ayrı bir bölümde ayrıntılarıyla ele alacağız. Ancak şimdilik bir dizinin aşağıdaki formatta dizin 
+    girişlerine sahip olduğunu varsayabilirsiniz:
 
     ┌────────────┬──────────┐
-    │ dosya_ismi │ inode_no │
+    │   İsim     │ Inode No │
     ├────────────┼──────────┤
-    │ dosya_ismi │ inode_no │ 
-    │ dosya_ismi │ inode_no │
+    │   isim     │ inode_no │ 
+    │   isim     │ inode_no │
     │    ...     │   ...    │
-    │ dosya_ismi │ inode_no │
+    │   isim     │ inode_no │
     └────────────┴──────────┘
 
     Örneğin:
 
     ┌────────────┬──────────┐
-    │ Dosya İsmi │ Inode No │
+    │   İsim     │ Inode No │
     ├────────────┼──────────┤
-    │ sanmple.C  │ 342678   │
+    │ sample.c   │ 342678   │
     │ test.txt   │ 422119   │
     │ sample     │ 214567   │
     │    ...     │   ...    │
     └────────────┴──────────┘
 
-    Biz bir POSIX fonksiyonuna yol ifadesi verdiğimizde çekirdek içerisindeki sistem fonksiyonları önce yol ifadesini 
-    çözümlemektedir (pathname resoltion). Yol ifadesi çözümlendiğinde çekirdek dosya ilişkin inode numarasını elde etmiş 
-    olmaktadır. Sonra da "inode blok" içerisinde o indeksteki elemana başvurarak dosyanın bilgilerini ele geçirmektedir. 
-    Ancak bundan sonra dosya üzerinde işlemler yapabilir hale gelmektedir. 
+    Biz bir POSIX fonksiyonuna bir doaya ya da dizinin yol ifadesini verdiğimizde çekirdek içerisindeki sistem fonksiyonları 
+    önce yol ifadesini çözümlemektedir (pathname resoltion). Yol ifadesi çözümlendikten sonra çekirdek dosyaya ilişkin inode 
+    numarasını elde etmiş olur. Sonra da "inode blok" içerisinde o indeksteki elemana başvurarak dosyanın ya da dizinin 
+    metadata bilgilerini ele geçirmektedir. Dosya üzerinde işlemler ancak bu aşamadan sonra gerçekleştirilebilmektedir. 
 
     Bir yola ifadesi verildiğinde çekirdeğin önce dizin girişine erişip, inode numarasından hareketle inode elemanına erişmesi 
     göreli olarak yavaş bir işlemdir. İşletim sistemleri bu işlemlerin daha hızlı yapılmasını sağlamak için daha önce erişilen
-    dizin girişlerini ve inode elemanlarını RAM'de oluşturdukları önbelleklerde saklamaktadır. Böylece eğer başvurulan bilgiler
-    zaten önbellekte varsa boşuna disk okumaları yapılmamaktadır. Linux işletim sisteminde erişilen dizin girişlerinin 
+    dizin girişlerini ve inode elemanlarını çekirdek alanında oluşturdukları önbelleklerde saklamaktadır. Böylece eğer başvurulan 
+    bilgiler zaten önbellekte varsa boşuna disk okumaları yapılmamaktadır. Linux işletim sisteminde erişilen dizin girişlerinin 
     saklandığı önbellek sisteminde "dentry cache", erişilen indode elemanlarının saklandığı önbellek sistemind ise "inode 
     cache" denilmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -7437,7 +7441,7 @@ void exit_sys(const char *msg)
     denilmektedir. Örneğin farklı dizinlerde (aynı dizinde de olabilir) aşağıdaki gibi iki giriş olsun:
 
     ┌────────────┬──────────┐
-    │ Dosya İsmi │ Inode No │
+    │ İsim.      │ Inode No │
     ├────────────┼──────────┤
     │    ...     │   ...    │
     │   x.txt    │  34718   │
@@ -7445,7 +7449,7 @@ void exit_sys(const char *msg)
     └────────────┴──────────┘
 
     ┌────────────┬──────────┐
-    │ Dosya İsmi │ Inode No │
+    │  İsim.     │ Inode No │
     ├────────────┼──────────┤
     │    ...     │   ...    │
     │   y.txt    │  34718   │
@@ -7453,11 +7457,12 @@ void exit_sys(const char *msg)
     └────────────┴──────────┘    
 
     Burada her iki dizin girişinin de aynı inode elemanına sahip olduğuna dikkat ediniz. Dosyaya erişmek için gereken tüm 
-    bilgiler inode elemanının içerisinde olduğuna göre bu dosyaya "x.txt" yol ifadesiyle erişmekle "y.txt" yol ifadesiyle 
-    erişmek arasında hiçbir farklılık yoktur. İşte "x.txt" ve "y.txt" dizin girişleri "katı bağ (hard link)" oluşturmuştur. 
-    Tabii katı bağa sahip dizin girişleri ikiden fazla da olabilir. Katı bağ oluşturmak için link isimli POSIX fonksiyonu 
-    kullanılmaktadır. Linux sistemlerinde bu POSIX fonksiyonu sys_link isimli sistem fonksiyonunu çağırmaktadır. link 
-    fonksiyonunun prototipi şöyledir:
+    metadadata bilgileri inode elemanının içerisinde olduğuna göre bu dosyaya "x.txt" yol ifadesiyle erişmekle "y.txt" yol 
+    ifadesiyle erişmek arasında hiçbir farklılık yoktur. İşte "x.txt" ve "y.txt" dizin girişleri "katı bağ (hard link)" 
+    oluşturmuştur. Tabii katı bağa sahip dizin girişleri ikiden fazla da olabilir. 
+    
+    Katı bağ oluşturmak için link isimli POSIX fonksiyonu kullanılmaktadır. Linux sistemlerinde bu POSIX fonksiyonu sys_link 
+    isimli sistem fonksiyonunu çağırmaktadır. link fonksiyonunun prototipi şöyledir:
 
     #include <unistd.h>
 
@@ -7492,10 +7497,11 @@ void exit_sys(const char *msg)
     desteklemek zorunda değildir. Bu durumda link fonksiyonu başarısızlıkla geri dönecektir. Örneğin Microsoft'un FAT
     dosya sistemleri katı bağları desteklememektedir. 
     
-    Disk bölümleri arasında da katı bağ oluşturulamamaktadır. Çünkü her disk bölümünün inode tablosu farklıdır. Farklı 
-    disk bölümlerinde aynı inode numaraları bulunabilmektedir. Yani inode numaraları sistem genelinde değil disk bölümü  
-    genelinde tektir. Farklı bir disk bölümündeki dosyanın farklı bir disk bölümüne katı bağı oluşturulmak istendiğinde link
-    fonksiyonu başarısız olur ve errno değeri EXDEV ("Invalid cross-device link") olarak set edilmektedir.
+    Disk bölümleri arasında da katı bağ oluşturulamamaktadır. Çünkü her disk bölümünün (dosya sisteminin) inode tablosu 
+    farklıdır. Farklı disk bölümlerinde aynı inode numaraları bulunabilmektedir. Yani inode numaraları sistem genelinde 
+    değil disk bölümü (dosya sistemi) genelinde tektir. Farklı bir disk bölümündeki dosyanın farklı bir disk bölümüne katı 
+    bağı oluşturulmak istendiğinde link fonksiyonu başarısız olur ve errno değeri EXDEV ("Invalid cross-device link") 
+    olarak set edilmektedir.
 
     Kabuk üzerinde katı bağlar "ln" isimli kabuk komutuyla oluşturulmaktadır. Bu kabuk komutu "cp" gibi kullanılmaktadır. 
     Örneğin:
@@ -7539,10 +7545,10 @@ void exit_sys(const char *msg)
 /*---------------------------------------------------------------------------------------------------------------------------
     Dizinlerin katı bağlarının oluşturulması bazı sorunlara yol açabilmektedir. Yukarıda da belirttiğimiz gibi bu tür durumlarda
     dizin ağacını dolaşan programlar sonsuz döngüye girebilmektedir. Bu nedenle bazı UNIX/Linux sistemlerinde dizinlerin katı 
-    bağlarının oluşturulması mümkün olmayabilmektedir. Bazı sistemlerde ise dizinlerin katı bağları ancak "root" kullanıcısı 
-    tarafından (yani "sudo" ile) oluşturulabilmektedir. Linux dizinler üzerinde katı bağ oluşturulmasına izin vermemektedir.
-    Linux'ta dizinler üzerinde katı bağı oluşturulmak istendiğinde link fonksiyonu başarısız olur ve errno değeri EPERM 
-    ("Permission denied") ile set edilir. POSIX standartları bu konuda şunları söylemektedir:
+    bağlarının oluşturulması engellenmiştir. Bazı sistemlerde ise dizinlerin katı bağları ancak "root" kullanıcısı tarafından 
+    (yani "sudo" ile) oluşturulabilmektedir. Linux dizinler üzerinde katı bağ oluşturulmasına izin vermemektedir. Linux'ta 
+    dizinler üzerinde katı bağ oluşturulmak istendiğinde link fonksiyonu başarısız olur ve errno değeri EPERM ("Permission 
+    denied") ile set edilir. POSIX standartları bu konuda şunları söylemektedir:
     
     "If path1 names a directory, link() shall fail unless the process has appropriate privileges and the implementation 
     supports using link() on directories."
@@ -7579,7 +7585,7 @@ void exit_sys(const char *msg)
 
     Bir dizinin içerisinde başka bir dizin yarattığımızda yarattığımız dizindeki ".." girişi üst dizine katı bağ belirttiği 
     için üst dizinin katı bağ sayacı da artırılmaktadır. O halde dizin içerisinde yaratılan her dizin üst dizinin katı 
-    bağ sayacını 1 artırmaktadır. "xxx" dizinini silerek yeniden şu denemeyi yapalım:
+    bağ sayacını da 1 artırmaktadır. "xxx" dizinini silerek yeniden şu denemeyi yapalım:
 
     $ mkdir xxx
     $ ls -ld xxx
@@ -7608,7 +7614,7 @@ void exit_sys(const char *msg)
 /*---------------------------------------------------------------------------------------------------------------------------
     Aynı dosyaya referans eden "x.txt" ve "y.txt" biçiminde iki katı bağ girişi olsun. Biz bunlardan birini silersek ne olur?
     Bu durumda eğer dosyanın kendisi silinirse diğer dizin girişi geçersiz duruma gelir. İşte işletim sistemi inode elemanın 
-    içerisinde (stat yapısının st_nlink elemanı) ilgili dosyaya ilişkin kaç katı bağın bulunduğu bilgisini tutmaktadır. 
+    içerisinde (stat yapısının st_nlink elemanı) ilgili dosyaya referans eden kaç katı bağın bulunduğu bilgisini tutmaktadır. 
     Bir dosyanın katı bağı silinmek istendiğinde işletim sistemi dizin girişini siler, dosyanın inode elemanındaki katı bağ
     sayacını 1 eksiltir. Katı bağ sayacı 0'a düştüğünde diskten dosyayı gerçekten siler. Örneğin:
 
@@ -7625,16 +7631,16 @@ void exit_sys(const char *msg)
     $ ls -li y.txt
     6076082 -rw-r--r-- 1 kaan study 41 Haz 23 13:43 y.txt
 
-    Dosyanın katı bağ sayacının 1'e düştüğüne dikkat ediniz. Artık biz bu "y.txt" dosyasını da sildiğimizde katı bağ sayacı 0'a
-    düştüğü için gerçekten dosya da silinecektir.
+    Dosyanın katı bağ sayacının 1'e düştüğüne dikkat ediniz. Artık biz bu "y.txt" dosyasını da sildiğimizde katı bağ sayacı 
+    0'a düştüğü için dosya da gerçekten silinecektir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    UNIX/Linux sistemlerinde "gevşek bağ (soft link)" ya da "sembolik bağ (symbolic link)" denilen bir bağ biçimi de vardır. 
+    UNIX/Linux sistemlerinde "sembolik bağ (symbolic link)" ya da "gevşek bağ (soft link)" denilen bir bağ türü de vardır. 
     Sembolik bağlar Windows sistemlerindeki "kısa yol dosyalarına" benzemektedir. UNIX/Linux sistemlerinde sembolik bağlar 
     katı bağlardan daha yaygın kullanılmaktadır. Sembolik bağ "başka bir dosyaya referans eden dosya" anlamına gelmektedir. 
-    Sembolik bağın hangi dosyaya referans ettiği sembolik dosyanın diskteki inode elemanında tutulmaktadır. Anımsayacağınız 
-    gibi stat fonksiyonlarıyla dosya bilgileri elde edildiğinde dosyanın sembolik bağlantı dosyası olup olmadığı bilgisi stat 
+    Sembolik bağın hangi dosyaya referans ettiği sembolik bağ dosyasının diskteki inode elemanında tutulmaktadır. Anımsayacağınız 
+    gibi stat fonksiyonlarıyla dosya bilgileri elde edildiğinde dosyanın sembolik bağ dosyası olup olmadığı bilgisi stat 
     yapısının st_mode elemanında kodlanmış olarak bulunuyordu. Biz de dosyanın sembolik bağ dosyası olup olmadığını 
     S_IFLNK makrosuyla anlayabiliyorduk. Örneğin "y.txt" dosyası "x.txt" dosyasına sembolik bağ yapılmış olsun. Biz bu durumu
     şöyle temsil edebiliriz:
@@ -7642,25 +7648,25 @@ void exit_sys(const char *msg)
     y.txt -> x.txt
 
     Bazı POSIX fonksiyonları sembolik bağ dosyasına ilişkin bir yol ifadesi ile karşılaştığında sembolik bağı izleyerek 
-    ve sembolik bağın hedefine ilişkin dosyayı tespit edip onun üzerinde işlem yapmaktadır. Yukarıdaki örneğimizde biz 
+    sembolik bağın hedefine ilişkin dosyayı tespit edip onun üzerinde işlem yapmaktadır. Yukarıdaki örneğimizde biz 
     "y.txt" dosyasını open fonksiyonuyla açmış olalım:
 
     fd = open("y.txt", O_RDONLY);
 
     Burada işletim sistemi "y.txt" dosyasının bir sembolik bağ dosyası olduğunu anlar ve onun referans ettiği dosyayı 
     tespit eder ve gerçekte o dosyayı açmaya çalışır. Buna sembolik bağın izlenmesi de denilmektedir. Yukarıda open 
-    işleminde aslında open "y.txt" sembolik bağ dosyasını değil "x.txt" dosyasını açmaya çalışacaktır. Sembolik bağların 
-    kullanım amacı olarak katı bağlara oldukça benzediğine dikkat ediniz. Yukarıdaki örneğimizde biz "y.txt" 
+    işleminde aslında open fonksiyonu "y.txt" sembolik bağ dosyasını değil "x.txt" dosyasını açmaya çalışacaktır. Sembolik 
+    bağların kullanım amacı olarak katı bağlara oldukça benzediğine dikkat ediniz. Yukarıdaki örneğimizde biz "y.txt" 
     dosyası üzerinde işlem yapmak istediğimizde sistem aslında onun referans ettiği "x.txt" dosyası üzerinde işlem
     yapmaktadır.
 
     Her POSIX fonksiyonu sembolik bağları izlememektedir. Örneğin biz bir sembolik bağ dosyasını unlink fonksiyonuyla
     ya da komut satırında "rm" komutuyla silmek istediğimizde onun referans ettiği dosya değil sembolik bağ dosyasının 
-    kendisi silinmektedir. Eğer dosya silmekte kullanılan unlink fonksiyonu sembolik bağı izleseydi yukarıdaki örneğimizde 
-    biz "y.txt" dosyasını silmeye çalıştığımızda "x.txt" dosyası silinirdi. Örneğin stat fonksiyonu sembolik bağı izlediği 
-    halde lstat fonksiyonu onu izlememektedir. Yani biz stat fonksiyonuna bir sembolik bağ dosyası verdiğimizde stat fonksiyonu
-    bağı izleyerek bize onun referans ettiği dosyanın bilgilerini vermektedir. Ancak lstat fonksiyonu sembolik bağı izlememekte
-    onun kendisine ilişkin dosya bilgilerini elde etmektedir. 
+    kendisi silinmektedir. (Eğer dosya silmekte kullanılan unlink fonksiyonu sembolik bağı izleseydi yukarıdaki örneğimizde 
+    biz "y.txt" dosyasını silmeye çalıştığımızda "x.txt" dosyası silinirdi.) Örneğin stat fonksiyonu sembolik bağı izlediği 
+    halde lstat fonksiyonu sembolik bağı izlememektedir. Yani biz stat fonksiyonuna bir sembolik bağ dosyası verdiğimizde 
+    stat fonksiyonu sembolik bağı izleyerek bize onun referans ettiği dosyanın bilgilerini vermektedir. Ancak lstat 
+    fonksiyonu sembolik bağı izlememekte, sembolik bağ dosyasının kendisine ilişkin dosya bilgilerini vermektedir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -7697,7 +7703,9 @@ void exit_sys(const char *msg)
     Onun ayrı bir inode elemanı vardır. Ancak inode elemanında o sembolik bağ dosyasının gerçekte hangi dosyaya referans 
     ettiği bilgisi de tutulmaktadır. "ls -l" komutunda sembolik bağlar ok işaretiyle gösterilmektedir. Sembolik bağ dosyalarının 
     tür belirten karakterinin 'l' olduğuna da dikkat ediniz. Sembolik bağlantı dosyalarının kendi erişim hakları her zaman 
-    "rwxrwxrwx" biçiminde oluşturulmaktadır. 
+    "rwxrwxrwx" biçiminde oluşturulmaktadır. Linux'ta sembolik bağlantı dosyasının kendisine ilişkin errişim hakları herhangi 
+    bir biçimde değiştirilememektedir. Ancak örneğin BSD sistemleri buna izin vermektedir POSIX standartları ise bu konuda 
+    açık bir belirlemede bulunmamıştır (unpesicifed).
 
     symlink fonksiyonunda kaynak dosyanın var olması gerekmez. Bu durumu izleyen paragraflarda açıklayacağız. 
 
@@ -7708,7 +7716,7 @@ void exit_sys(const char *msg)
 
 /* makesymlink.c */
 
-#include <stdio.h>
+##include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -7716,22 +7724,16 @@ void exit_sys(const char *msg);
 
 int main(int argc, char *argv[])
 {
-    /*
     if (argc != 3) {
         fprintf(stderr, "wrong number of arguments!");
         exit(EXIT_FAILURE);
     }
 
-    if (link(argv[1], argv[2]) == -1)
-        exit_sys("link");
-
-    */
-
-    if (symlink("x.txt", "y.txt") == -1)
+    if (symlink(argv[1], argv[2]) == -1)
         exit_sys("symlink");
 
     printf("Ok\n");
-    
+
     return 0;
 }
 
@@ -7739,7 +7741,7 @@ void exit_sys(const char *msg)
 {
     perror(msg);
     exit(EXIT_FAILURE);
-}
+}>
 
 /*---------------------------------------------------------------------------------------------------------------------------
     Sembolik bağ dosyası komut satırından yine "ln" komutuyla oluşturulmaktadır. Ancak "ln" komutuna "-s" seçeneği de girilmelidir. 
