@@ -4128,8 +4128,14 @@ void exit_sys(const char *format, ...)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     open fonksiyonu ile dosya açım işlemi sırasında eğer open fonksiyonu yukarıda açıkladığımız erişim hakları testinde 
-    başarısız olursa bu durumda errno değişkeni EACCESS değeriyle set edilmektedir. EACCESS errno değerinin İngilizce 
-    mesaj yazısı "Permission denied" biçimindedir. 
+    başarısız olursa bu durumda errno değişkeni EACCES değeriyle set edilmektedir. EACCES errno değerinin İngilizce 
+    mesaj yazısı "Permission denied" biçimindedir. UNIX/Linux sistemlerinde proseslerin bazı işlemleri yapabilmesi için (bu 
+    işlemler dosya sistemine ilişkin olabileceği gibi olmayabilir de) bazı koşulların sağlanması gerekebilmektedir. (Örneğin
+    işlemi yapan prosesin etkin kullanıcı ID'sinin 0 olması (root proses) ya da Linux sistemlerinde ilgili yetenekliliğe 
+    sahip olması gibi.) Eğer proses bu koşulları sağlamıyorsa ilgili fonksiyon errno değişkenini EPERM değeri ile set ederek 
+    başarısız olmaktadır. UNIX/Linux programcıları EACCES ile EPERM değerlerinin anlamları konusunda tereddüt yaşayabilmektedir. 
+    EACCES dosya erişimlerinde ortaya çıkarken EPERM kaynak erişimleri ve özel bazı işlemlerin yapılması sırasında ortaya 
+    çıkmaktadır.
     
     Peki yeni yaratılan bir dosyanın ya da dizinin erişim hakları nasıl belirlenmektedir? İşte dosyalar open POSIX
     fonksiyonuyla, dizinler de  mkdir POSIX fonksiyonuyla yaratılmaktadır. open ve mkdir fonksiyonlarında yaratım sırasında 
@@ -4437,6 +4443,9 @@ void exit_sys(const char *msg)
         exit_sys("chdir");
 
     Burada prosesin çalışma dizini "/home/student/notes" biçiminde olacaktır.
+
+    chdir fonksiyonunun dizinin yol ifadesini değil dizine ilişkin betimleyiciyi parametre olarak alan fchdir isimli bir 
+    biçimi de vardır. Bu fonksiyonu ileride başka bir bölümde ele alacağız.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -5109,7 +5118,7 @@ void exit_sys(const char *msg)
     Yukarıda da belirttiğimiz gibi erişim hakları open fonksiyonu tarafından (yani open fonksiyonunun çağırdığı sistem fonksiyonu 
     tarafından) kontrol edilmektedir. Örneğin biz dosyayı O_RDWR modunda açmak isteyelim bu durumda prosesimizin dosyaya "r" 
     ve "w" haklarına sahip olması gerekir. Eğer prosesimiz dosya için bu haklara sahip değilse open başarısız olur ve errno 
-    EACCESS ("Permission denied") değeri ile set edilir. Burada önemli olan nokta kontrolün en başta open fonksiyonu tarafından 
+    EACCES ("Permission denied") değeri ile set edilir. Burada önemli olan nokta kontrolün en başta open fonksiyonu tarafından 
     yapılmasıdır. 
 
     open fonksiyonu başarı durumunda int türden "dosya betimleyicisi (file descriptor)" denilen bir değerle geri dönmektedir. 
@@ -6283,7 +6292,7 @@ void exit_sys(const char *msg)
 
     - Dosyanın erişim hakları
     - Dosyanın kullanıcı ve grup ID'si
-    - Dosyanın hard link sayacı
+    - Dosyanın katı bağ sayacı
     - Dosyanın uzunluğu
     - Dosyanın zamansal bilgileri (timestamps)
     - Dosyayı oluşturan bilgilerin Data Blok'taki yerleri
@@ -8067,13 +8076,14 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bir dosyanın silinmesi o dosyanın diskteki inode elemanının inode tablosundan silinmesi ve o dosyaya ilişkin data bloklarının 
-    diskin Data bölümünden silinmesi anlamına gelmektedir. Tabii burada "silinme" kavramını aslında "serbest bırakma" anlamında 
-    kullanıyoruz. Yoksa diskten bir bilginin çıkartılması ve yok edilmesi mümkün değildir. Inode tabanlı dosya sistemleri 
-    diskin inode tablosundaki hangi inode elemanlarının boş olduğunu tutmaktadır. Bir inode elemanı silindiğinde o inode elemanı 
-    "artık kullanılmıyor biçiminde" işaretlenmektedir. Aynı işlem dosyanın data bloklarında da benzer biçimde yürütülür. İşletim 
-    sistemi hangi data bloklarının boş olduğunu tutar. Dosya silindiğinde dosyanın data blokları "artık kullanılmıyor" biçiminde 
-    işaretlenmektedir. Biz yukarıda inode tabanlı dosya sistemlerine ilişkin disk organizasyonunu basit bir biçimde şöyle temsil 
+    Bir dosyanın silinmesi o dosyanın diskteki inode elemanının inode tablosundan silinmesi ve o dosyaya ilişkin data 
+    bloklarının diskin *data bölümünden* silinmesi anlamına gelmektedir. (Tabii burada "silinme" kavramını aslında "serbest 
+    bırakma" anlamında kullanıyoruz. Yoksa diskten bir bilginin çıkartılması ve yok edilmesi mümkün değildir.) Inode tabanlı 
+    dosya sistemleri inode tablosundaki hangi inode elemanlarının boş olduğunu da bir metadata alanında tutmaktadır. Bir 
+    inode elemanı silindiğinde o inode elemanı *artık kullanılmıyor* biçiminde işaretlenmektedir. Aynı işlem dosyanın data 
+    bloklarında da benzer biçimde yürütülmektedir. Dosya sistemi hangi data bloklarının boş olduğunu da bir metadata alanı 
+    içerisinde tutar, dosya silindiğinde dosyanın data bloklarını da "artık kullanılmıyor" biçiminde bu metadata alanında 
+    işaretler. Biz yukarıda inode tabanlı dosya sistemlerine ilişkin disk organizasyonunu basit bir biçimde şöyle temsil 
     etmiştik:
 
     ┌────────────┐
@@ -8115,8 +8125,9 @@ void exit_sys(const char *msg)
     dosyanın silineceği anlamına gelmemektedir. Daha önce de belirttiğimiz gibi aynı inode elemanını gösteren birden fazla dizin 
     girişi söz konusu olabilmektedir. Inode elemanındaki katı bağ sayacı 0'a düştüğünde gerçek dosya silmesi yapılmaktadır. 
 
-    UNIX/Linux sistemlerinde bir dosyayı silmek için remove ve unlink isimli POSIX fonksiyonları kullanılmaktadır. remove 
-    bir standart C fonksiyonudur. unlink ise bir POSIX fonksiyonudur. Bu iki fonksiyon tamamen aynı işlemi yapmaktadır. Fonksiyonların prototipleri şöyledir:
+    UNIX/Linux sistemlerinde bir dosyayı silmek için remove ve unlink isimli fonksiyonlar kullanılmaktadır. remove bir standart C 
+    fonksiyonudur (her standard C fonksiyonun aynı zamanda bir POSIX fonksiyonu da olduğunu anımsayınız) unlink ise bir 
+    POSIX fonksiyonudur. Bu iki fonksiyon tamamen aynı işlemi yapmaktadır. Fonksiyonların prototipleri şöyledir:
 
     #include <stdio.h>
 
@@ -8128,15 +8139,21 @@ void exit_sys(const char *msg)
 
     Fonksiyonlar başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri dönmektedir.
 
-    remove ve unlink fonksiyonlarıyla bir dosyayı silebilmek için prosesin dosyaya "w" hakkına sahip olması gerekmez. 
-    Ancak dosyanın içinde bulunduğu dizin için "w" hakkına sahip olması gerekir. Bizim eğer dosyanın içinde bulunduğu 
-    dizine "w" hakkımız varsa dosyanın sahibi olmasak bile dosyayı silebiliriz. Tabii proses ID'si 0 olan prosesler 
-    ("root" prosesler) her zaman silme işlemini yapabilirler.
+    remove ve unlink fonksiyonlarıyla bir dosyayı silebilmek için prosesin dosyaya "w" hakkına sahip olması gerekmez. Ancak 
+    dosyanın içinde bulunduğu dizin için "w" hakkına sahip olması gerekir. Bizim eğer dosyanın içinde bulunduğu dizine "w" 
+    hakkımız varsa dosyanın sahibi olmasak bile dosyayı silebiliriz. Tabii proses ID'si 0 olan prosesler ("root" prosesler) 
+    ya da Linux'ta CAP_DAC_OVERRIDE yetenekliliğine (capability) sahip olan prosesler her zaman silme işlemini yapabilirler.
 
     Bir dosya remove ya da unlink fonksiyonlarıyla silindiğinde dizin girişi silinir. Ancak yukarıda da belirttiğimiz 
-    gibi dosyanın silinmesi katı bağ sayacı 0'a düştüğünde yapılmaktadır. Yani remove ve unlink fonksiyonları dizin 
+    gibi dosyanın diskten silinmesi katı bağ sayacı 0'a düştüğünde yapılmaktadır. Yani remove ve unlink fonksiyonları dizin 
     girişini silerler. Sonra dosyanın katı bağ sayacını 1 eksiltirler. Eğer dosyanın katı bağ sayacı 0'a düşmüşse 
     dosyayı fiziksel olarak silerler.
+
+    Bir dosya çeşitli prosesler tarafından açıkken de silinebilmektedir. Bu durumda ilgili dizin girişi silinir. Ancak 
+    dosyanın katı bağ sayacı 0'a düşse bile dosyaya ilişkin inode elemanının ve data bloklarının diskten silinmesi dosyayı 
+    açmış olan proseslerin hepsinin dosyayı kapatmasından sonra yapılmaktadır. (Teknik olarak dosyayı açan her proses 
+    çekirdek alanı içerisinde yaratılan inode nesnesi içerisindeki sayacı artırmakta, dosya kapatıldığında da eksiltmektedir. 
+    Dosyanın inode elemanının ve data bloklarının silinmesi bu referans sayacının 0'a düşmesiyle yapılmaktadır.)
 
     Aşağıdaki örnekte komut satırından verilen yol ifadelerine ilişkin dosyalar silinmeye çalışılmıştır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -8160,66 +8177,6 @@ int main(int argc, char *argv[])
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Daha önceden de belirttiğimiz gibi aslında "dizinler" birer dosya gibi organize edilmiştir. Dizin dosyalarının içerisinde 
-    "dizin girişleri (directory entries)" bulunmaktadır. Bir dizin girişinin formatı dosya sisteminden dosya sistemine değişebilmektedir. 
-    Ancak özet olarak bir dizin dosyasının içeriği şöyledir:
-
-    Dizin Dosyası
-    -------------
-    dosya_ismi  inode no
-    dosya_ismi  inode no
-    dosya_ismi  inode no
-    ...
-    dosya_ismi  inode no
-    dosya_ismi  inode no
-    dosya_ismi  inode no
-
-    Dosyaların asıl bilgileri (yani stat fonksiyonuyla elde ettiğimiz bilgiler) Diskte "Inode Block" denilen bir bölgede saklanmaktadır. 
-    Inode Block inode elemanlarından oluşur. Her inode elemanına ilk eleman 0 olmak üzere artan sırada bir numara karşılık düşürülmüştür.
-    İşletim sistemi bir dosya ile ilgili işlem yaparken kesinlikle o dosyanın inode elemanına erişmek ve oradaki bilgileri kullanmak
-    zorundadır.
-
-    Bir dosya unlink ya da remove fonksiyonlarıyla silindiğinde kesinlikle dizin girişi silinmektedir. Ancak dosyanın silinip 
-    silinmeyeceği hard-link sayacına bağlıdır.
-
-    Farklı dizin girişleri farklı isimlerle aynı inode numaralarını işaret ediyorsa buna "hard link" denilmektedir. Örneğin:
-
-    Dizin Dosyası
-    --------------
-    a.txt   12345678
-    b.txt   12345678
-    ...
-
-    Burada bizim open fonksiyonuyla "a.txt" ya da "b.txt" dosyalarını açmamız arasında hiçbir farklılık yoktur. Çünkü dosyanın 
-    bütün bilgileri inode elemanının içerisindedir. İşte biz bu dosyalardan örneğin "a.txt" dosyasını silersek aslında yalnızca 
-    dizin girişini silmiş oluruz. Çünkü işletim sistemi "a.txt" dosyasının işaret ettiği inode elemanının başka bir giriş 
-    tarafından kullanıldığını gördüğü için inode elemanını ve dosyanın diskteki varlığını silmez. İşte bu durum "hard link sayacı" 
-    ile kontrol edilmektedir. Yukarıdaki örnekte dosyanın hard link sayacı 2'dir. Biz bu dizin girişlerinden birini sildiğimizde 
-    hard link sayacı 1'e düşer. Diğerini de sildiğimizde hard link sayacı 0'a düşer ve dosya gerçekten silinir.
-
-    Bir dosyanın hard link'ini oluşturmak için ln kabuk komutu kullanılmaktadır. Örneğin:
-
-    $ ln sample.c mample.c
-
-    $ ls -li sample.c mample.c
-    1207667 -rw-r--r-- 2 kaan study 329 Ara 10 10:59 mample.c
-    1207667 -rw-r--r-- 2 kaan study 329 Ara 10 10:59 sample.c
-
-    Dosyanın hard link sayacının 2 olduğuna dikkat ediniz.
-
-    Bir dizin yaratıldığında onun içerisinde "." ve ".." biçiminde iki dizin girişi otomatik olarak yaratılmaktadır. (UNIX/Linux 
-    sistemlerinde başı "." ile başlayan dizin girişleri ls komutunda default olarak görüntülenmemektedir. Bunların görüntülenmesi 
-    için "-a (all)" seçeneğinin de kullanılması gerekir.) "." dizin girişi kendi dizin dosyasının inode elemanını ".." dizin 
-    girişi ise üst dizinin inode elemanını göstermektedir. Bu nedenle bir dizin yaratıldığında dizin dosyasına ilişkin hard-link 
-    sayacı 2 olur. O dizinin içerisinde yaratılan her dizin ".." girişini içereceğinden dolayı o dizinin hard link sayacını 
-    artıracaktır.
-
-    Belli bir inode elemanını gösteren dizin girişlerinin elde edilmesine yönelik bu sistemlerde pratik bir yol yoktur. 
-    Yapılacak şey diskteki tüm dosyaları gözden geçirip inode numaralarından onların aynı inode elemanını gösterip göstermediğini 
-    anlamaktır.
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
                                             20. Ders 16/07/2026 - Perşembe
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -8239,16 +8196,27 @@ int main(int argc, char *argv[])
     başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri dönmektedir. Anımsayacağınız gibi erişim hakları  
     POSIX'in 2008 standartlarına kadar S_IXXX sembolik sabitleriyle oluşturulmak zorundaydı. Ancak 2008 ve sonrasında artık 
     bu S_IXXX sembolik sabitlerinin sayısal değerleri belirlendiği için programcı doğrudan erişim haklarını octal bir sayı 
-    biçiminde girebilmektedir. Fakat okunabilirlik ve geçmişe uyum göz önüne alındığında erişim haklarının S_IXXX sembolik 
+    biçiminde de girebilmektedir. Fakat okunabilirlik ve geçmişe uyum göz önüne alındığında erişim haklarının S_IXXX sembolik 
     sabitleriyle verilmesi tavsiye edilmektedir. chmod fonksiyonu sembolik bağları izlemektedir. (Yani biz sembolik bağların 
-    kendi erişim haklarını değiştiremeyiz. Anımsayacağınız gibi sembolik bağların kendi erişim hakları her zaman rwxrwxrwx)
-    biçimindedir. 
+    kendi erişim haklarını değiştiremeyiz. Anımsayacağınız gibi sembolik bağların kendi erişim hakları her zaman "rwxrwxrwx"
+    biçimindedir ve Linux gibi bazı sistemlerinde zaten değiştirilememektedir.)
 
     Bir dosyanın erişim haklarını chmod fonksiyonuyla değiştirebilmek için prosesin etkin kullanıcı ID'sinin dosyanın kullanıcı 
     ID'si ile aynı olması ya da prosesin etkin kullanıcı ID'sinin 0 olması (root proses) gerekmektedir. Linux yeteneklilik 
     (capability) özelliğini de kullanmaktadır. Linux'ta prosesin etkin kullanıcı ID'si 0 olmasa bile proses CAP_FSETID yeteneğine
     sahipse herhangi bir dosyanın erişim haklarını değiştirebilmektedir.  
-    
+
+    Dosya zaten açıksa ve onun dosya betimleyicisi biliniyorsa chmod fonksiyonu yerine fchmod fonksiyonu kullanılabilir. 
+    Açık dosyalar üzerinde bu tür işlemlerin daha hızlı yapılabildiğini söylemiştik. Örneğin:
+
+    if ((fd = open("test.txt", O_RDONLY)) == -1)
+        exit_sys("open");
+
+    /* ... */
+
+    if (fchmod(fd, mode) == -1)
+        exit_sys("fchmod");
+
     Biz open fonksiyonunda dosyanın erişim haklarının "rwxrwxrwx" biçiminde üçerli üç gruptan oluştuğunu belirtmiştik. Aslında
     bunlara ek olarak erişim haklarında üçlü bir grup daha vardır. Bu üçlü gruba "set-user-id", "set-group-id" ve "sticky"
     denilmektedir. Bu üçlü sırasıyla S_ISUID, S_ISGID ve S_ISVTX sembolik sabitleriyle temsil edilmektedir. chmod 
@@ -8264,8 +8232,9 @@ int main(int argc, char *argv[])
 
     0666
 
-    Erişim hakları "rw-rw-rw-" anlamına gelmektedir. Yukarıda sözünü ettiğimiz üç erişim hakkı set edilmemiştir. S_ISUID, 
-    S_ISGID ve S_ISVTX  erişim haklarının işlevlerini ileride başka bir bölümde ele alacağız. 
+    Erişim hakları "rw-rw-rw-" anlamına gelmektedir. (Buradaki ilk 0 C'de sayının octal sistemde yazıldığını belirtiyor.) 
+    Yukarıda sözünü ettiğimiz üç erişim hakkı set edilmemiştir. S_ISUID, S_ISGID ve S_ISVTX  erişim haklarının işlevlerini 
+    ileride başka bir bölümde ele alacağız. 
 
     chmod POSIX fonksiyonu prosesin umask değerini dikkate almamaktadır. Yani fonksiyonda belirttiğimiz erişim haklarının hepsi 
     dosyaya yansıtılmaktadır.
@@ -8322,11 +8291,11 @@ bool check_mode(const char *mstr)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Aşağıdaki örnekte eski POSIX standartları da dikkate alınarak mode bilgisi S_IXXX sembolik sabitlerinin bit düzeyinde 
+    Aşağıda aynı örnek POSIX standartları da dikkate alınarak mode bilgisi S_IXXX sembolik sabitlerinin bit düzeyinde 
     OR'lanması ile oluşturulmuştur. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/* mychmod octal path1 path2 ... */
+/* ./mychmod octal path1 path2 ... */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -8389,19 +8358,6 @@ void exit_sys(const char *msg)
     perror(msg);
     exit(EXIT_FAILURE);
 }
-
-/*---------------------------------------------------------------------------------------------------------------------------
-    Dosya zaten açıksa ve onun dosya betimleyicisi biliniyorsa chmod fonksiyonu yerine fchmod fonksiyonu kullanılabilir. 
-    Açık dosyalar üzerinde bu tür işlemlerin daha hızlı yapılabildiğini söylemiştik. Örneğin:
-
-    if ((fd = open("test.txt", O_RDONLY)) == -1)
-        exit_sys("open");
-
-    /* ... */
-
-    if (fchmod(fd, mode) == -1)
-        exit_sys("fchmod");
----------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
     Dosyanın erişim haklarını değiştirmek için "chmod" isimli bir kabuk komutu da bulunmaktadır. Tabii "chmod" kabuk komutu 
@@ -8488,18 +8444,20 @@ void exit_sys(const char *msg)
     1) Eğer prosesin etkin kullanıcı ID'si dosyanın kullanıcı ID'si ile aynı ise bu durumda chown fonksiyonu dosyanın grup 
     ID'sini kendi grup ID'si olarak ya da ek gruplarının (supplementary groups) birinin ID'si olarak değiştirebilmektedir. 
     Ancak dosyanın kullanıcı ID'sinin değiştirilmesi işletim sisteminin iznine bağlıdır. Modern sistemler bu izni vermemektedir. 
-    Ancak bazı eski sistemler bu izni vermektedir. Bu izin "change own restricted" ismiyle ifade edilmektedir. İlgili sistemin 
-    bu izni verip vermediği <unistd.h> dosyası içerisindeki _POSIX_CHOWN_RESTRICTED sembolik sabitiyle derleme aşamasında 
-    sorgulanabilir. Eğer bu mevcutsa sistem bu izni vermemektedir, mevcut değilse sistem bu izni vermektedir. (Bu durumda 
-    sorgulamayı #ifdef önişlemci komutuyla yapmalısınız.) Linux sistemleri de "change own restricted" durumdadır. Yani bu 
-    işleme izin vermemektedir. 
+    Ancak bazı eski sistemler bu izni vermektedir. Bu izin İngilizce "change own restricted" sözcükleriyle ifade edilmektedir. 
+    İlgili sistemin bu izni verip vermediği <unistd.h> dosyası içerisindeki _POSIX_CHOWN_RESTRICTED sembolik sabitiyle derleme 
+    aşamasınd  sorgulanabilir. Eğer bu mevcutsa sistem bu izni vermemektedir, mevcut değilse sistem bu izni vermektedir. (Bu 
+    durumda sorgulamayı #ifdef önişlemci komutuyla yapmalısınız.) Linux sistemleri de "change own restricted" durumdadır. Yani 
+    bu işleme izin vermemektedir. 
 
     2) Proses ID'si 0 olan root prosesler (ya da Linux sistemlerinde CAP_FOWNER yeteneğine sahip prosesler) her zaman dosyanın 
     kullanıcı ve grup ID'sini istedikleri gibi değiştirebilirler. (Yani biz bir dosyanın kullanıcı ve grup ID'sini istediğimiz 
     gibi değiştirmek istiyorsak programımızı "sudo" ile çalıştırmalıyız.)
 
-    Fonksiyonlar ile yalnızca kullanıcı ID'si ya da grup ID'si değiştirilebilir. Bu durumda değiştirilmeyecek değer için -1 
-    girilmelidir. Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri dönmektedir.
+    
+    Bu fonksiyonlar ile yalnızca dosyaların ya da dizinlerin kullanıcı ID'si ya da grup ID'si de değiştirilebilir. Bu durumda 
+    değiştirilmeyecek değer için -1 girilmelidir. Fonksiyonlar başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine 
+    geri dönmektedir.
 
     Change own restricted durumu aşağıdaki gibi #ifdef komutuyla sorgulanabilir:
 
@@ -8547,8 +8505,8 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Dosyanın kullanıcı ve grup ID'lerini değiştirebilmek için chown isimli bir kabuk komutu da bulundurulmuştur. Komut 
-    aşağıdaki biçimlerde kullanılmaktadır:
+    Dosyanın ya da dizinin kullanıcı ve grup ID'lerini değiştirebilmek için chown isimli bir kabuk komutu da bulundurulmuştur. 
+    Komut aşağıdaki biçimlerde kullanılmaktadır:
 
     $ sudo chown kaan:study test.txt
 
@@ -8561,11 +8519,12 @@ void exit_sys(const char *msg)
 
     $ sudo chown kaan: test.txt
 
-    Dosyanın yalnızca grup ID'sini değiştirmek için ':' karakterinin sol tarafı boş bırakılır. Örneğin:
+    Dosyanın ya da dizinin yalnızca grup ID'sini değiştirmek için ':' karakterinin sol tarafı boş bırakılır. Örneğin:
 
     $ sudo chown :study test.txt
 
-    Pek çok kabuk komutunda olduğu gibi chown komutu da birden fazla dosya üzerinde işlem yapabilmektedir. Örneğin:
+    Pek çok kabuk komutunda olduğu gibi chown komutu da birden fazla dosya ya da dizin üzerinde işlem yapabilmektedir. 
+    Örneğin:
 
     $ sudo chown kaan test.txt sample.c
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -8590,8 +8549,8 @@ void exit_sys(const char *msg)
     if (truncate(path, newsize) == -1)
         exit_sys("truncate");
 
-    truncate fonksiyonunun yol ifadesini alarak değil, dosya betimleyicisini alarak aynı işlemi yapan ftruncate isminde bir benzeri 
-    de vardır. ftruncate fonksiyonunun prototipi şöyledir:
+    truncate fonksiyonunun yol ifadesini alarak değil de dosya betimleyicisini alarak aynı işlemi yapan ftruncate isminde bir 
+    benzeri de vardır. ftruncate fonksiyonunun prototipi şöyledir:
 
     #include <unistd.h>
 
@@ -8641,11 +8600,11 @@ void exit_sys(const char *msg)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     truncate işlemini yapan bir kabuk komutu da bulunmaktadır. Komut -s seçeneği ile dosyanın yeni uzunluğunu almaktadır. 
-    Örneğin:
+    (Komut seçeneksiz kullanılamamaktadır.) Örneğin:
 
     $ truncate -s 100 test.txt
 
-    Dosya uzunluklarında uzunluğun sonuna birim belirten karakterler de eklenebilmektedir. Örneğin:
+    Dosya uzunluğuna birim belirten karakterler de eklenebilmektedir. Örneğin:
 
     $ truncate -s 100K test.txt
 
@@ -8668,11 +8627,10 @@ void exit_sys(const char *msg)
     O halde istediğiniz erişim haklarının hepsinin dizine yansıtılmasını istiyorsanız umask(0) çağrısıyla prosesinizin umask 
     değerini sıfırlamalısınız.
 
-    Bir dizin yaratıldığında içerisinde "." ve ".." isminde iki dizin girişi bulunmaktadır. Daha önceden de belirttiğimiz 
-    gibi "." dizin girişi bulunulan dizine, ".." dizin girişi ise üst dizine katı bağ belirtmektedir. Bu nedenle bir dizin 
-    yaratıldığında kendi dizininin ve üst dizinin katı bağ sayaçlarının artırıldığını anımsayınız.
+    Daha önce de belirtmiştik; bir dizin yaratıldığında içerisinde "." ve ".." isminde iki dizin girişi de oluşturulmaktadır. 
+    "." dizin girişinin bulunulan dizine, ".." dizin girişinin ise üst dizine katı bağ belirttiğini anımsayınız.
 
-    Aşağıda komut satırından verilen isimle bir dizin yaratan örnek verilmiştir. 
+    Aşağıda dizin yaratan örnek verilmiştir. Yaratılacak dizinin ismi komut satırından alınmaktadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -8718,23 +8676,23 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bir dizini silmek için unlink ya da remove fonksiyonları kullanılamaz. Dizin silmek için rmdir isimli özel bir POSIX 
-    fonksiyonu bulundurulmuştur. Fonksiyonun prototipi şöyledir:
+    Dizinler  unlink ya da remove fonksiyonlarıyla silinememektedir. Dizin silmek için rmdir isimli bir POSIX fonksiyonu 
+    bulundurulmuştur. Fonksiyonun prototipi şöyledir:
 
     #include <unistd.h>
 
     int rmdir(const char *path);
 
     Fonksiyon parametre olarak silinecek dizinin yol ifadesini alır. Başarı durumunda 0 değerine, başarısızlık durumunda -1 
-    değerine geri döner ve errno uygun biçimde set edilir. Örneğin:
+    değerine geri döner ve errno değişkeni uygun biçimde set edilir. Örneğin:
 
     if (rmdir(path) == -1)
         exit_sys("rmdir");
 
-    rmdir fonksiyonu ile içinde dosya ya da dizin olan dizinler silinememektedir. Bu durum güvenlik amacıyla düşünülmüştür. 
-    İçi boş dizin demek "içinde yalnızca "." ve ".." girişlerinin bulunduğu dizin" demektir. Zaten UNIX/Linux, macOS ve 
+    rmdir fonksiyonu ile içinde dosya ya da dizin bulunan dizinler silinememektedir. Bu durum güvenlik amacıyla düşünülmüştür. 
+    İçi boş dizin demek içinde yalnızca "." ve ".." girişlerinin bulunduğu dizin demektir. Zaten UNIX/Linux, macOS ve 
     Windows sistemlerinde bu iki özel dizin girişi silinememektedir. rmdir fonksiyonuna bir dizini işaret eden sembolik 
-    bağlantı dosyası verilirse fonksiyon bağlantıyı izlemez. Bu durumda rmdir başarısız olur ve errno değeri ENOTDIR biçiminde 
+    bağ dosyası verilirse fonksiyon bağı izlemez. Bu durumda rmdir başarısız olur ve errno değeri ENOTDIR biçiminde 
     set edilir.
 
     rmdir fonksiyonunun başarılı olabilmesi için prosesin silinecek dizin için "w" hakkına sahip olması gerekmez ancak 
@@ -8781,14 +8739,17 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bu bölümde kullanıcı ve grup bilgilerinin nasıl elde edileceği üzerinde duracağız. 
+    Bu bölümde UNIX/Linux sistemlerinde kullanıcı ve grup bilgilerinin nasıl elde edileceği üzerinde duracağız. 
     
-    Anımsanacağınız gibi genel olarak pek çok UNIX/Linux sisteminde kullanıcılar hakkında bilgiler "/etc/passwd" ve "/etc/group" 
-    dosyalarında tutuluyordu. Bu dosyalardaki satırlar ':' ile ayrılmış olan alanlardan oluşmaktaydı. Bu dosyalar ve bunların 
-    formatları POSIX standartlarında belirtilmemiştir. Onun yerine POSIX standartlarında bu dosyalardan kullanıcı ve grup 
-    bilgilerini elde eden özel fonksiyonlar bulundurulmuştur. Yani aslında bir POSIX sisteminde "/etc/passwd" ve "/etc/group" 
-    dosyaları bu isimlerde ve Linux'taki içerikte bulunmak zorunda değildir. Kullanıcı ve grup bilgilerinin elde edilmesi 
-    için taşınabilir POSIX fonksiyonları bulundurulmuştur. 
+    Anımsanacağınız gibi bazı UNIX türevi sistemlerde kullanıcı vee grup bilgileri  "/etc/passwd" ve "/etc/group" dosyalarında 
+    tutuluyordu. Bu dosyalardaki satırlar ':' ile ayrılmış olan alanlardan oluşmaktaydı. Kullanıcı ve grup bilgilerinin nasıl 
+    saklanacağı hakkında POSIX standartlarında bir belirlemede bulunulmamıştır. (Yani UNIX türevi bir sistemde "/etc/passwd" 
+    ve "/etc/group" dosyaları bu isimlerde ve Linux'taki içerikte bulunmak zorunda değildir.) POSIX standartlarında kullanıcı 
+    ve grup bilgilerini elde etmekte kullanılan arayüz fonksiyonlar tanımlanmıştır. Kullanıcı bilgilerinin elde edilmesinde 
+    kullanılan fonksiyonların prototipleri ve bu fonksiyonlar tarafından kullanılan yapıların tanımlamaları <pwd.h> dosyası 
+    içerisinde, grup bilgilerinin elde edilmesinde kullanılan fonksiyonların prototipleri ve bu fonksiyonlar tarafından 
+    kullanılan yapıların tanımlamaları da <grp.h> dosyası içerisinde bulunmaktadır. 
+
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -8805,9 +8766,9 @@ void exit_sys(const char *msg)
 
     struct passwd *getpwnam(const char *name);
 
-    Fonksiyon parametre olarak kullanıcı ismini almaktadır. Başarı durumunda o kullanıcıya ilişkin bilgileri barındıran statik 
-    biçimde tahsis edilmiş olan struct passwd isimli bir yapı nesnesinin adresine, başarısızlık durumunda ise NULL adrese 
-    geri dönmektedir. struct passwd yapısı şöyle bildirilmiştir:
+    Fonksiyon kullanıcı ismini parametre olarak alır, başarı durumunda kullanıcıya ilişkin bilgileri barındıran statik 
+    biçimde tahsis edilmiş olan struct passwd türünden bir yapı nesnesinin adresine, başarısızlık durumunda ise NULL adrese 
+    geri dönmektedir. struct passwd yapısı şöyle tanımlanmıştır:
 
     struct passwd {
         char   *pw_name;       /* username */
@@ -8819,9 +8780,12 @@ void exit_sys(const char *msg)
         char   *pw_shell;      /* shell program */
     };
 
-    Yapının eleman isimlerinin pw_ başladığına dikkat ediniz. Yukarıda da belirttiğimiz gibi aslında bu fonksiyon Linux 
-    sistemlerinde "/etc/passwd" dosyasındaki satır bilgisini okuyup onu static bir nesnesine yerleştirip yapının adresiyle 
-    geri dönmektedir. 
+    Yapının eleman isimlerinin pw_ ile başladığına dikkat ediniz. Yukarıda da belirttiğimiz gibi bu fonksiyon Linux sistemlerinde 
+    tipik olarak şu işlemleri yapmaktadır:
+
+    1. "/etc/passwd" dosyasındaki kullanıcıya ilişkin satırı bulup onu ':' karakterlerinden parse eder.
+    2. Parse sonucunda elde edilen alanları passwd türünden statik bir yapı nesnesine yerleştirir. 
+    3. Yapı nesnesinin adresine geri döner.
 
     Yapının pw_name elemanı kullanıcı ismini, pw_passwd elemanı parola bilgisini, pw_uid ve pw_gid elemanları kullanıcının 
     gerçek kullanıcı ve group ID değerlerini, pw_gecos elemanı yorum bilgisini (yani kullanıcıya ilişkin ek birtakım bilgileri), 
@@ -8830,7 +8794,7 @@ void exit_sys(const char *msg)
 
     getpwnam fonksiyonu iki nedenden dolayı başarısız olabilir. Birincisi belirtilen isme ilişkin kullanıcının kaydının 
     bulunmaması nedeniyle. İkincisi de IO hatası nedeniyle (örneğin "/etc/passwd" dosyasının silinmiş olması durumunda 
-    fonksiyon başarısız olacaktır.) Fonksiyonun başarısı aşağıdaki gibi kontrol edilebilir:
+    fonksiyon başarısız olacaktır). Fonksiyonun başarısı aşağıdaki gibi kontrol edilebilir:
 
     struct passwd *pw;
 
@@ -8838,16 +8802,15 @@ void exit_sys(const char *msg)
         /* ... */
     }
     
-    Ancak "kullanıcı kaydı yok biçiminde" bir errno değeri bulunmamaktadır. Hata raporlamasının aşağıdaki gibi yapılması 
-    uygun değildir:
+    Ancak "kullanıcı kaydı yok" biçiminde bir errno değeri bulunmamaktadır. Bu nedenle hata raporlamasının aşağıdaki gibi 
+    yapılması uygun değildir:
 
     if ((pw = getpwnam(name)) == NULL)      
         exit_sys("getpwnam");               /* dikkat! hatalı raporlama */
     
-    Hata nedenin tespit edilmesi değişik biçimde yapılmaktadır. getpwnam fonksiyonu eğer isme ilişkin bir kayıt bulamazsa 
-    errno değerini değiştirmemektedir. Diğer hatalı durumlarda errno değerini uygun biçimde set etmektedir. Dolayısıyla 
-    programcı fonksiyonu çağırmadan önce errno değerini 0'a çekmeli, fonksiyon başarısız olduğunda errno değerinin hala 0 
-    olup olmadığına bakmalıdır. Örneğin:
+    getpwnam fonksiyonu eğer isme ilişkin bir kayıt bulamazsa errno değerini değiştirmemektedir. Diğer hatalı durumlarda 
+    errno değerini uygun biçimde set etmektedir. Dolayısıyla programcı fonksiyonu çağırmadan önce errno değerini 0'a çekmeli, 
+    fonksiyon başarısız olduğunda errno değerinin hala 0 olup olmadığına bakmalıdır. Örneğin:
 
     errno = 0;
     if ((pw = getpwnam(name)) == NULL) {
@@ -8896,7 +8859,7 @@ int main(int argc, char *argv[])
     printf("Password: %s\n", pw->pw_passwd);
     printf("User ID: %jd\n", (intmax_t)pw->pw_uid);
     printf("Group ID: %jd\n", (intmax_t)pw->pw_gid);
-    printf("Extra Info: %s\n", pw->pw_gecos);
+    printf("Extra info: %s\n", pw->pw_gecos);
     printf("Default Dir: %s\n", pw->pw_dir);
     printf("Shell: %s\n", pw->pw_shell);
 
@@ -8910,16 +8873,16 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    getpwuid fonksiyonu da getpwnam fonksiyonu gibidir. Yalnızca kullanıcı ismi ile değil kullanıcı ID'si ile kullanıcı bilgilerini 
-    elde etmektedir. Fonksiyonun prototipi şöyledir:
+    getpwuid fonksiyonu da getpwnam fonksiyonu gibidir. ancak getpwuid fonksiyonu kullanıcı ismi ile değil kullanıcı ID'si 
+    ile kullanıcı bilgilerini elde etmektedir. Fonksiyonun prototipi şöyledir:
 
     #include <pwd.h>
 
     struct passwd *getpwuid(uid_t uid);
 
-    Fonksiyon yine başarı durumunda statik düzeyde tahsis edilmiş olan struct passwd türünden yapı nesnesinin adresiyle, başarısızlık 
-    durumunda NULL adresle geri dönmektedir. Başarısızlığın nedeni kullanıcı ID'sine ilişkin kullanıcının bulunamaması nedeni ile ise 
-    bu durumda fonksiyon errno değerini değiştirmemektedir. Yine kullanımı şöyle olabilir:
+    Fonksiyon yine başarı durumunda statik düzeyde tahsis edilmiş olan struct passwd türünden yapı nesnesinin adresiyle, 
+    başarısızlık durumunda NULL adresle geri dönmektedir. Başarısızlığın nedeni kullanıcı ID'sine ilişkin kullanıcının 
+    bulunamaması ise fonksiyon errno değerini değiştirmez. Fonksiyonu aşağıdaki gibi çağırabilirsiniz:
 
     errno = 0;
     if ((pw = getpwuid(userid)) == NULL) {
@@ -8930,7 +8893,7 @@ void exit_sys(const char *msg)
         exit_sys("getpwuid");
     }
 
-    Aşağıdaki örnekte komut satırından verilen kullanıcı ID'sine ilişkin kullanıcı bilgileri ekrana (stdout dosyasına) 
+    Aşağıdaki örnekte bu kez komut satırından verilen kullanıcı ID'sine ilişkin kullanıcı bilgileri ekrana (stdout dosyasına) 
     yazdırılmıştır. Programı şöyle çalıştırabilirsiniz:
 
     $ ./uid-info 1000
@@ -8971,8 +8934,8 @@ int main(int argc, char *argv[])
     printf("Password: %s\n", pw->pw_passwd);
     printf("User ID: %jd\n", (intmax_t)pw->pw_uid);
     printf("Group ID: %jd\n", (intmax_t)pw->pw_gid);
-    printf("Extra Info: %s\n", pw->pw_gecos);
-    printf("Default Dir: %s\n", pw->pw_dir);
+    printf("Extra info: %s\n", pw->pw_gecos);
+    printf("Default dir: %s\n", pw->pw_dir);
     printf("Shell: %s\n", pw->pw_shell);
 
     return 0;
@@ -9000,8 +8963,7 @@ void exit_sys(const char *msg)
     NULL adrese geri dönmüşse errno değerini değiştirmemektedir. Dolayısıyla programcı fonksiyonu çağırmadan önce errno değerini 
     0'a set etmeli, fonksiyon NULL ile geri döndüğünde errno değerini kontrol etmelidir. 
     
-    setpwent fonksiyonu kayıt imlecini ilk kayda çekmektedir. Dolaşım işlemi bittikten sonra endpwent fonksiyonu çağrılmalıdır. 
-    Tipik dolaşım şöyle yapılmaktadır:
+    Dolaşım işlemi bittikten sonra endpwent fonksiyonu çağrılmalıdır. Tipik dolaşım şöyle yapılmaktadır:
 
     setpwent();
 
@@ -9018,7 +8980,7 @@ void exit_sys(const char *msg)
     bitirildiğini ve virgül operatöründen elde edilen değerin sağ tarafındaki ifadeden elde edilen değer olduğunu anımsayınız. 
     errno değişkenini döngünün başında bir kez 0'a set etmek uygun değildir:
 
-    errno = 0;
+    errno = 0;      /* hatalı kullanım! */
     while ((pw = getpwent()) != NULL) {
         /* ... */
     }
@@ -9027,6 +8989,10 @@ void exit_sys(const char *msg)
 
     POSIX standartlarına göre bir fonksiyon hataya yol açmasa bile errno değişkenini set edebilmektedir. Ancak hiçbir POSIX
     fonksiyonu errno değerini 0'a set etmemektedir. 
+
+    setpwent fonksiyonu kayıt imlecini ilk kayda çekmektedir. Aslında eğer dolaşım bir kez yaplacaksa setpwent fonksiyonun 
+    çağrılmasına gerek yoktur. Ancak birden fazla kez dolaşım uygulanacaksa kayıt imlecini başa çekmek için `setpwent
+    fonksyonun çağrılması gerekir. 
 
     Aşağıdaki programda tüm kullanıcı bilgileri bir döngü içerisinde elde edilip ekrana (stdout dosyasına) yazdırılmıştır.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -9052,7 +9018,7 @@ int main(void)
         printf("Password: %s\n", pw->pw_passwd);
         printf("User ID: %jd\n", (intmax_t)pw->pw_uid);
         printf("Group ID: %jd\n", (intmax_t)pw->pw_gid);
-        printf("Extra Info: %s\n", pw->pw_gecos);
+        printf("Extra info: %s\n", pw->pw_gecos);
         printf("Default Dir: %s\n", pw->pw_dir);
         printf("Shell: %s\n", pw->pw_shell);
         printf("-----------------------------\n");
@@ -9076,8 +9042,8 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Bilindiği gibi UNIX türevi sistemlerde genellikle grup bilgileri "/etc/group" isimli bir dosyada tutulmaktadır. Aşağıda 
-    Linux sistemlerindeki "/etc/group" dosyasından birkaç satır görüyorsunuz:
+    UNIX türevi sistemlerde genellikle grup bilgilerinin ``/etc/group`` isimli bir dosyasında tutulduğunu belirtmiştik. 
+    Aşağıda Linux sistemlerindeki "/etc/group" dosyasından birkaç satır görüyorsunuz:
 
     ...
     nm-openvpn:x:133:
@@ -9087,14 +9053,14 @@ void exit_sys(const char *msg)
     test:x:1002
     ...
 
-    Linux sistemlerinde "/etc/group" dosyasının satırları ':' ile ayrılmış 4 kısımdan oluşmaktadır:
+    Anımsayacağınız gibi Linux sistemlerinde "/etc/group" dosyasıın satırların ':' ile ayrılmış 4 kısımdan oluşuyordu:
 
     groupname:password:GID:membernames
 
     Grupların da parolaları bulunmaktadır. Ancak grup parolaları pek kullanılan bir kavram değildir. Ek gruplardan daha önce  
     bahsetmiştik. Bir kullanıcının gerçek bir grubu vardı. Ancak kullanıcı ek olarak başka gruplara da üye olabiliyordu. 
     Gerçek grupla ek gruplar arasında erişim kontrollerinde bir fark yoktu. Yani prosesin ek grupları da gerçek grubu gibi 
-    erişim kontrolünde etkili olabiliyordu. 
+    erişim kontrolünde aynı etkiye sahipti.
 
     Grup bilgilerinin elde edilmesi için de standart POSIX fonksiyonları bulundurulmuştur. Grup bilgilerini elde etmek için 
     kullanılan POSIX fonksiyonları şunlardır:
@@ -9116,29 +9082,61 @@ void exit_sys(const char *msg)
         char  **gr_mem;           /* NULL-terminated array of pointers to names of group members */
     };
 
-    Yapının gr_name elemanı grubun ismini, gr_passwd elemanı grubun parola bilgisini, gr_gid elemanı  grubun ID'sini belirtir. 
-    Gruba ek olarak dahil olan kullanıcılar yapının gr_mem elemanından elde edilmektedir. Bu elemanın göstericiyi gösteren 
-    gösterici olduğuna dikkat ediniz:
+    Yapı eleman isimleri ``gr_`` öneki ile başlatılmıştır. Yapının gr_name elemanı grubun ismini, gr_passwd elemanı 
+    grubun parola bilgisini, gr_gid elemanı  grubun ID'sini belirtmektedir. Gruba ek olarak dahil olan kullanıcılar yapının 
+    gr_mem elemanından elde edilmektedir. Bu elemanın göstericiyi gösteren gösterici olduğuna dikkat ediniz:
 
-    gr_mem -----> Gösterici Dizisi
-                  ------> ekgrup\0
-                  ------>  ekgrup\0
+     gr_mem -----> Gösterici Dizisi
+                  ------> kullanıcı_ismi\0
+                  ------> kullanıcı_ismi\0
+                  ...
                   NULL
-           
-    Örneğin "/etc/group" dosyasında aşağıdaki gibi bir satır bulunuyor olsun:
+
+    Gösterici dizisinin ``NULL`` adresle sonlandığına dikkat ediniz.  Örneğin "/etc/group" dosyasında aşağıdaki gibi bir 
+    satır bulunuyor olsun:
 
     project:x:1001:ali,veli,selami
 
-    Burada grup bilgilerinin sonundaki ali, veli, selami bu project grubuna ek grup olarak dahil edilen kullanıcıları belirtmektedir. 
-    Örneğin kaan kullanıcısının gerçek grubu study olabilir. Ancak kaan kullanıcısı aynı zamanda "ek grup (supplementary group)" 
-    olarak project grubuna da dahil olabilir. Bu durumda bir kullanıcının ek gruplarının elde edebilmesi için "/etc/group" 
-    dosyasının baştan sona gözden geçirip kullanıcının hangi satırların ':' ayrılmış son bölümünde geçtiğini belirlemesi 
-    gerekmektedir. İşte group yapısının gr_mem elemanının gösterdiği gösterici dizisinin NULL adresle sonlandığında dikkat ediniz. 
+    Burada grup bilgilerinin sonundaki ali, veli, selami bu project grubuna ek grup olarak dahil edilen kullanıcıları belirtmektedir:
 
-    getgrnam fonksiyonu grubun isminden hareketle grup bilgilerini, getgrgid fonksiyonu ise grup ID'sinden hareketle grup bilgilerini 
-    vermektedir. Tıpkı kullanıcı bilgilerinde olduğu gibi grup bilgilerinin de tek tek elde edilmesi benzer biçimde setgrent, 
-    getgrent ve endgrent fonksiyonlarıyla yapılmaktadır. Bu fonksiyonlarda da yine IO hatası dışındaki hatalarda errno 
-    set edilmemektedir. 
+     gr_mem -----> Gösterici Dizisi
+                  ------> ali\0
+                  ------> veli\0
+                  ------> selami\0
+                  NULL
+
+    Örneğin ali" kullanıcısının gerçek grubu study olabilir. Ancak ali kullanıcısı aynı zamanda "ek grup (supplementary group)" 
+    olarak project grubuna da dahil olabilir. Bu durumda bir kullanıcının ek gruplarının elde edebilmesi için "/etc/group" 
+    dosyasının baştan sona gözden geçirip kullanıcının hangi satırların ':' ayrılmış son bölümünde bulunduğunun belirlemesi 
+    gerekir. 
+
+    getgrnam fonksiyonu grubun isminden hareketle grup bilgilerini, getgrgid fonksiyonu ise grubun ID'sinden hareketle grup 
+    bilgilerini elde etmektedir. Bu fonksiyonlar da (getpwnam ve getpwuid fonksiyonlarıyla benzer biçimde) başarı durumunda 
+    group yapısı türünden statik ömürlü nesnenin adresiyle, başarısızlık durumunda NULL adresle geri dönmektedir. Fonksiyonlar 
+    grubun bulunamaması nedeniyle başarısız olurlarsa errno değerini değiştirmezler. Örneğin:
+
+    struct group *gr;
+    /* ... */
+
+    errno = 0;
+    if ((gr = getgrnam(name)) == NULL) {
+        if (errno == 0) {
+            fprintf(stderr, "invalid grup name!..\n");
+            exit(EXIT_FAILURE);
+        }
+        exit_sys("getgrnam");               
+    }
+
+    Tıpkı kullanıcı bilgilerinde olduğu gibi grup bilgilerinin de tek tek elde edilmesi benzer biçimde setgrent, 
+    getgrent ve endgrent fonksiyonlarıyla yapılmaktadır. Bu fonksiyonların ptorotipleri şöyledir:
+
+    struct group *getgrent(void);
+    void setgrent(void);
+    void endgrent(void);
+
+    getgrent fonksiyonu sıradaki gruba ilişkin grup bilgilerini verir. İşlem bittikten sonra yine endgrent fonksiyonunun 
+    çağrılması gerekir. setgrent fonksiyonu grup imlecini başa çekmektedir. Eğer tek bir dolaşım yapılacaksa bu fonksiyonun 
+    çağrılmasına gerek yoktur. 
 
     Aşağıdaki örnekte tüm gruplara ilişkin grup bilgileri ekrana (stdout dosyasına) yazdırılmıştır.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -9155,18 +9153,15 @@ int main(void)
 {
     struct group *gr;
 
-    setgrent();
-
     while (errno = 0, (gr = getgrent()) != NULL) {
         printf("Group Name: %s\n", gr->gr_name);
         printf("Grou Password: %s\n", gr->gr_passwd);
-        printf("Group Password: %ju\n", (uintmax_t)gr->gr_gid);
-        printf("Group Members: ");
+        printf("Group ID: %ju\n", (uintmax_t)gr->gr_gid);
+        printf("Group members: ");
         for (int i = 0; gr->gr_mem[i] != NULL; ++i) 
             printf("%s%s", i != 0 ? ", " : "", gr->gr_mem[i]);
         printf("\n--------------------\n");
     }
-
     if (errno != 0)
         exit_sys("getgrent");
 
@@ -9181,40 +9176,79 @@ void exit_sys(const char *msg)
     exit(EXIT_FAILURE);
 }
 
-
 /*---------------------------------------------------------------------------------------------------------------------------
     Anımsanacağı gibi dizinler (directories) de aslında tamamen dosyalar gibi organize edilmektedir. Dizinlerin içerisinde 
-    aşağıdaki gibi dizin girişlerinin bulunduğunu söylemiştik:
+    dizin girişlerinin bulunduğunu söylemiştik. Bir dizini erişim hakları yeterliyse open fonksiyonuyla  O_RDONLY ya da 
+    O_SEARCH bayraklarıyla açabliriz. Ancak POSIX standartlarında dizinler üzerinde read ya da pread fonksiyonlarıyla okuma 
+    yapılıp yapılamayacağı işletim sistemini yazanların isteğine bırakılmıştır. Dizinler üzerinde lseek işlemi hakkında ise
+    herhangi bir şey söylenmemiştir. Linux, BSD, macOS gibi sistemler dizinlerden read ile okuma yapmaya izin vermemektedir. 
+    Ancak bu sistemler lseek fonksiyonuyla dizinlerde konumlandırma yapılmasına izin vermektedir. POSIX standartlarına göre 
+    zaten dizinlere yazma yapılamamaktadır.
+    
+    POSIX standartlarına göre işletim sistemi dizinlerden okuma yapmaya izin vermiyor olsa bile eğer prosesin dizine 
+    'r' hakkı varsa O_RDONLY bayrağıyla açılabilmektedir. Şimdi haklı olarak "dizinden okuma yapamadıktan sonra dizinin 
+    O_RDONLY bayrağıyla açılmasının ne anlamı olabilir ki?"  sorusu aklınıza geşebilir. İşte O_RDONLY bayrağıyla açılmış 
+    dizine ilişkin betimleyiciler read ve pread fonksiyonuyla kullanılamıyor olsa da başka bazı fonksiyonlarda kullanılabilmektedir. 
 
-    isim    inode_no
-    isim    inode_no
-    isim    inode_no
-    ...
+    POSIX standartlarına göre bir eğer prosesin dizine 'x' hakkı varsa (okuma ya da yazma hakkı olmayabilir) bir dizin 
+    O_SEARCH bayrağıyla da açılabilmektedir. O_SEARCH bayrağı izleyen paragraflarda açıklayacağımız at'li POSIX fonksiyonları
+    için bulundurulmuştur. Ancak güncel Linux sistemleri O_SEARCH bayrağı desteklememektedir. 
 
-    Dizin dosyalarının ext dosya sistemlerindeki gerçek formatları biraz daha ayrıntı içermektedir. Kursumuzun sonlarında 
-    doğru ext dosya sistemlerinin disk organizasyonu üzerinde duracağız.
+    Aşağıda dizin üzerinde hangi işlemlerin yapılıp yapılamayacağı POSIX standartları ve Linux bağlamında bir tablo
+    biçiminde verilmiştir.
+    
+    ┌──────────────────────────────────┬──────────────────────────────┬─────────────────────────────────┐
+    │              İşlem               │     POSIX'teki Durumu        │       Linux'taki Davranış       │
+    ├──────────────────────────────────┼──────────────────────────────┼─────────────────────────────────┤
+    │ open(dir, O_RDONLY)              │ Zorunlu; başarılı olmalı     │ Başarılı                        │
+    │                                  │ ('r' hakkı gerekir)          │                                 │
+    │ open(dir, O_RDONLY|O_DIRECTORY)  │ Zorunlu; dizin değilse       │ Aynı; dizin değilse ENOTDIR     │
+    │                                  │ ENOTDIR                      │                                 │
+    │ open(dir, O_SEARCH)              │ Zorunlu; yalnızca x izni     │ Uygulanmamış; karşılığı O_PATH  │
+    │                                  │ gerekir                      │ (musl: O_SEARCH == O_PATH)      │
+    │ open(dir, O_WRONLY / O_RDWR)     │ Zorunlu hata: EISDIR         │ EISDIR                          │
+    │ open(dir, O_CREAT) (O_DIRECTORY  │ Zorunlu hata: EISDIR         │ EISDIR                          │
+    │   olmadan)                       │                              │                                 │
+    │ open(dir, O_CREAT|O_DIRECTORY)   │ Belirtilmemiş                │ Tanımsız (sürüme göre EINVAL    │
+    │                                  │                              │ ya da dosya yaratır)            │
+    ├──────────────────────────────────┼──────────────────────────────┼─────────────────────────────────┤
+    │ read() / pread()                 │ Gerçekleştirime bağlı        │ Her zaman EISDIR                │
+    │ write() / pwrite()               │ Fiilen olanaksız (yazma      │ EBADF (yazma modu elde          │
+    │                                  │ modunda açılamaz)            │ edilemez)                       │
+    │ ftruncate()                      │ Hata: EINVAL                 │ EINVAL                          │
+    │ readdir()            )           │ Zorunlu; tek taşınabilir yol │ getdents64() sistem çağrısı     │
+    ├──────────────────────────────────┼──────────────────────────────┼─────────────────────────────────┤
+    │ fdopendir(fd)                    │ Zorunlu; fd okuma için       │ glibc: O_WRONLY ise EINVAL,     │
+    │                                  │ açılmamışsa EBADF            │ O_PATH ise readdir'de EBADF     │
+    │                                  │                              │ musl: O_PATH ise EBADF          │
+    │ fchdir(fd)                       │ Zorunlu                      │ Başarılı (O_PATH ile de)        │
+    │ openat() vb. *at() için dirfd    │ Zorunlu                      │ Başarılı (O_PATH ile de)        │
+    │ fstat(fd)                        │ Zorunlu                      │ Başarılı (O_PATH ile de)        │
+    ├──────────────────────────────────┼──────────────────────────────┼─────────────────────────────────┤
+    │ lseek(fd, 0, SEEK_SET)           │ Belirtilmemiş                │ Başarılı; başa alır             │
+    │ lseek(fd, n, SEEK_SET/CUR)       │ Belirtilmemiş                │ Başarısız olmaz; ofset dosya    │
+    │                                  │                              │ sistemine özgü çerezdir (ext4:  │
+    │                                  │                              │ hash), keyfi değer anlamsız     │
+    │ lseek(fd, 0, SEEK_END)           │ Belirtilmemiş                │ Dosya sistemine özgü özel değer │
+    │ lseek(fd, ., SEEK_DATA/SEEK_HOLE)│ Standart dışı                │ ENXIO                           │
+    │ telldir() / seekdir()            │ Zorunlu; opak çerez, yalnızca│ glibc: lseek + tampon sıfırlama │
+    │                                  │ aynı DIR akışında geçerli    │                                 │
+    │ rewinddir()                      │ Zorunlu; başa çek ve         │ lseek(0) + tampon sıfırlama     │
+    │                                  │ değişiklikleri yansıt        │                                 │
+    │ dirfd() sonrası doğrudan lseek() │ Belirtilmemiş                │ DIR tamponu ile çekirdek konumu │
+    │                                  │                              │ uyumsuz hale gelir; kaçınılmalı │
+    └──────────────────────────────────┴──────────────────────────────┴─────────────────────────────────┘
 
-    Bir dizini erişim hakları yeterliyse open fonksiyonuyla açabiliriz. Ancak POSIX standartlarında dizin dosyalarından okuma, 
-    yazma ve konumlandırma işlemlerinin yapılıp yapılamayacağı işletim sistemini yazanların isteğine bırakılmıştır. Linux, BSD, 
-    macOS gibi sistemler dizin dosyalarından read ve write fonksiyonları ile okuma ve yazma yapmaya izin vermemektedir. Ancak bu 
-    sistemler lseek fonksiyonuyla dizin dosyalarında konumlandırma yapılmasına izin vermektedir. Peki mademki işletim sistemleri 
-    dizin dosyalarından okuma yazma yapmaya izin vermeyebiliyorlar, bu durumda open fonksiyonuyla dizin dosyalarını hangi modda 
-    açabiliriz? İşte dizinlerin açılması için POSIX standartlarında O_SEARCH isimli bir mod da bulunmaktadır. Bu mod aslında 
-    ileride ele alacağımız at'li POSIX fonksiyonları için düşünülmüştür. Eğer O_SEARCH modunda bir dizin açılırsa bu dizinden 
-    okuma/yazma yapılamaz fakat bu at'li fonksiyonlar kullanılabilir. Ancak O_SEARCH modu Linux tarafından desteklenmemektedir. 
-    Bu durumda mecburen Linux'ta bir dizini açacaksak işletim sistemi read fonksiyonu ile okuma yapılmasına izin vermiyor olsa 
-    da biz açış modu olarak O_RDONLY kullanırız. Yani Linux dizinden read ile okuma yapılmasına izin vermiyor olsa da dizinlerin 
-    open fonksiyonu ile O_RDONLY bayrağı kullanılarak açılmasına izin vermektedir. 
+    open fonksiyonunda O_READONLY ve O_SEARCH modları birlikte kullanılamamktadır. open fonksiyonunda aşağıdaki bayrakların 
+    yalnızca birinin kullanılmasının zorunlu olduğunu belirtmiştik:
+    
+    O_RDONLY
+    O_WRONLY
+    O_RDWR
+    O_EXEC
+    O_SEARCH
 
-    Peki Linux'ta bir dizini O_SEARCH modunda açmak ile O_RDONLY modunda açmak arasında ne fark vardır? O_SEARCH modu POSIX 
-    standartlarına dizin üzerinde "read", "write" yapmak için değil başka birtakım işlemler yapmak için eklenmiştir. Dolayısıyla 
-    bir işletim sistemi örneğin dizin dosyalarından read fonksiyonu ile okuma yapmaya izin veriyorsa bu durumda biz o dizini 
-    O_SEARCH modunda açarsak okuma yapamayız. Ancak O_RDONLY modunda açarsak okuma yapabiliriz. Yukarıda da belirttiğimiz gibi 
-    Linux ve macOS sistemleri O_SEARCH modunu desteklememektedir. Ancak BSD türevi sistemler bu modu desteklemektedir.
-
-    Aşağıdaki Linux sistemlerinde bir dizinin open fonksiyonuyla açılmasına örnek verdik. Örneğimizde Linux açış modu 
-    olarak O_SEARCH modunu desteklemediği için O_RDONLY modunu kullandık. İşletim sistemleri genel olarak dizinlerin write 
-    yapılmasına zaten izin vermemektedir. 
+    Aşağıdaki Linux sistemlerinde bir dizinin O_READONLY bayrağıyla bir dizinin açılmasına bir örnek veriyoruz: 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -9374,8 +9408,8 @@ void exit_sys(const char *msg)
     içeriğini bilmek zorunda değildir. (Örneğin C'nin fopen fonksiyonu da bize FILE yapısı türünden bir nesnenin adresini 
     vermektedir. Ancak bu yapının içeriğinin nasıl olduğu programcıları ilgilendirmemektedir.) Fonksiyon başarısızlık 
     durumunda NULL adrese geri döner ve errno uygun biçimde değer alır. opendir fonksiyonun fdopendir isimli bir versiyonu da 
-    vardır. Bu versiyon eğer zaten dizin O_SEARCH modunda (Linux'ta O_RDONLY modunda) açılmışsa o dizine ilişkin betimleyici 
-    yoluyla aynı işlemi yapmaktadır. 
+    vardır. fdopendir fonksiyonu eğer dizin O_READONLY modunda açılmışsa o dizine ilişkin betimleyici yoluyla aynı işlemi 
+    yapmaktadır. 
 
     #include <dirent.h>
 
@@ -10971,7 +11005,7 @@ int callback(const char *path, const struct stat *finfo, int flag, struct FTW *f
 
     access fonksiyonu test olumluysa 0 değerine olumsuzsa -1 değerine geri dönmektedir. Tabii access fonksiyonun başarısızlığının 
     başka nedenleri de olabilir. Ancak programcı genellikle öyle ya da böyle istediği işlemi yapıp yapamayacağı ile ilgilenmektedir. 
-    Ancak yine de fonksiyon başarısız olduğunda errno değeri incelenebilir ve başarısızlığın EACCESS nedeniyle olduğu 
+    Ancak yine de fonksiyon başarısız olduğunda errno değeri incelenebilir ve başarısızlığın EACCES nedeniyle olduğu 
     doğrulanabilir. 
 
     access fonksiyonu Linux sistemlerinde sys_access sistem fonksiyonunu çağırmaktadır. Bu fonksiyon çekirdek kodlarında 
@@ -11045,7 +11079,7 @@ void exit_sys(const char *msg)
     int faccessat(int fd, const char *path, int amode, int flag);
 
     Fonksiyonun birinci parametresi ikinci parametresiyle belirtilen yol ifadesinin göreli olması durumunda aramanın 
-    yapılacağı dizini belirtmektedir. Son parametre 0 geçilebilir ya da AT_EACCESS geçilebilir. Bu AT_EACCESS değeri test 
+    yapılacağı dizini belirtmektedir. Son parametre 0 geçilebilir ya da AT_EACCES geçilebilir. Bu AT_EACCES değeri test 
     işleminin etkin kullanıcı ve grup ID'lerine bakılarak yapılacağı anlamına gelmektedir. (Tabii ikinci parametre ile 
     belirtilen yol ifadesi mutlak olduğunda birinci parametrede belirtilen dizine ilişkin betimleyici yine dikkate alınmaz. 
     Ancak üçüncü parametreyle belirtilen bayrak dikkate alınır)
@@ -11067,23 +11101,23 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (faccessat(AT_FDCWD, argv[1], F_OK, AT_EACCESS) == 0)
+    if (faccessat(AT_FDCWD, argv[1], F_OK, AT_EACCES) == 0)
         printf("file exists...\n");
     else {
         printf("file doesn't exist!...\n");
         exit(EXIT_SUCCESS);
     }
-    if (faccessat(AT_FDCWD, argv[1], R_OK, AT_EACCESS) == 0)
+    if (faccessat(AT_FDCWD, argv[1], R_OK, AT_EACCES) == 0)
         printf("read access ok...\n");
     else
         printf("can't read...\n");
 
-    if (faccessat(AT_FDCWD, argv[1], W_OK, AT_EACCESS) == 0)
+    if (faccessat(AT_FDCWD, argv[1], W_OK, AT_EACCES) == 0)
         printf("write access ok...\n");
     else
         printf("can't write...\n");
 
-    if (faccessat(AT_FDCWD, argv[1], X_OK, AT_EACCESS) == 0)
+    if (faccessat(AT_FDCWD, argv[1], X_OK, AT_EACCES) == 0)
         printf("execute access ok\n...");
     else
         printf("can't execute...\n");
@@ -15977,9 +16011,9 @@ void exit_sys(const char *msg)
     değerini alırsa dosyanın bir kabuk dosyası (shell script) olduğundan çalıştırılamadığı sonucunu çıkartmaktadır ve bu durumda 
     dosyayı /bin/sh (default shell) programı ile çalıştırmaktadır. Ancak exec fonksiyonlarının diğer versiyonları EINVAL ve ENOEXEC 
     hatalarında bunu yapmamaktadır. Bunu yalnızca exec fonksiyonlarının p'li versiyonları yapmaktadır. Exec fonksiyonlarının 
-    p'li versiyonları PATH dizinlerinin birinde dosyayı sistem fonksiyonuyla (execve) çalıştırmaya çalıştığında EACCESS errno 
+    p'li versiyonları PATH dizinlerinin birinde dosyayı sistem fonksiyonuyla (execve) çalıştırmaya çalıştığında EACCES errno 
     değeri ile başarısız olurlarsa dosyayı sonraki PATH dizinlerinde aramaya devam ederler. Ancak bu arama sırasında bu fonksiyonlar 
-    artık dosyayı diğer PATH dizinlerinde bulamazlarsa EACCESS errno değeri ile başarısız olurlar.
+    artık dosyayı diğer PATH dizinlerinde bulamazlarsa EACCES errno değeri ile başarısız olurlar.
 
     Aşağıda execlp fonksiyonuna bir örnek verilmiştir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -16201,7 +16235,7 @@ void exit_sys(const char *msg)
 
     ENOENT (No such file or directory): Dosya bulunamamıştır.
 
-    EACCESS (Permission denied): Dosya bulunmuştur ancak proses dosyaya "x" hakkına sahip değildir.
+    EACCES (Permission denied): Dosya bulunmuştur ancak proses dosyaya "x" hakkına sahip değildir.
 
     ENOEXEC (Exec format error): Dosya bulunmuştur. Prosesin dosyaya "x" hakkı da vardır. Ancak dosyanın formatı çalıştırmaya 
     uygun değildir. Yani dosya çalıştırılabilir bir dosya değildir ya da dosyanın başında "shebang" yoktur.
@@ -16215,8 +16249,8 @@ void exit_sys(const char *msg)
     ve bu durumda dosyayı "/bin/sh (default shell)" programı ile çalıştırmaktadır. Ancak exec fonksiyonlarının diğer versiyonları 
     EINVAL ve ENOEXEC hatalarında bunu yapmamaktadır. Bunu yalnızca exec fonksiyonlarının p'li versiyonları yapmaktadır. exec 
     fonksiyonlarının p'li versiyonları PATH dizinlerinin birinde dosyayı sistem fonksiyonuyla (execve) çalıştırmaya çalıştığında 
-    EACCESS errno değeri ile başarısız olurlarsa dosyayı sonraki PATH dizinlerinde aramaya devam ederler. Ancak bu arama sırasında 
-    bu fonksiyonlar artık dosyayı diğer PATH dizinlerinde bulamazlarsa EACCESS errno değeri ile başarısız olurlar.
+    EACCES errno değeri ile başarısız olurlarsa dosyayı sonraki PATH dizinlerinde aramaya devam ederler. Ancak bu arama sırasında 
+    bu fonksiyonlar artık dosyayı diğer PATH dizinlerinde bulamazlarsa EACCES errno değeri ile başarısız olurlar.
 
     Bu davranışın anlamı izleyen bölümlerde başka paragraflarda açıklanacaktır.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -16777,7 +16811,7 @@ void exit_sys(const char *msg)
     exec işlemini yapan sistem fonksiyonları eğer exec yapılmak istenen dosya çalıştırılabilir bir dosya değilse (muhtemelen bir 
     text dosya) onun birinci satırını okuyarak orada belirtilen çalıştırılabilir dosyayı çalıştırmaktadır. Ancak exec fonksiyonlarının 
     bu işlemi yapabilmesi için exec yapılan dosyanın yine de (text dosyası olmasına karşın) "x" hakkına sahip olması gerekmektedir. 
-    Aksi takdirde exec fonksiyonları başarısız olur ve yine errno değeri EACCESS biçiminde set edilir.
+    Aksi takdirde exec fonksiyonları başarısız olur ve yine errno değeri EACCES biçiminde set edilir.
 
     Yukarıdaki biçimde biz bir script dosyasını çalıştırmaya çalıştığımızda aslında asıl çalıştırılan dosya shebang'te belirtilen 
     dosya olmaktadır. Peki shebang'te belirtilen dosya çalıştırılırken ona komut satırı argümanları olarak ne geçirilecektir? 
@@ -23989,7 +24023,7 @@ void exit_sys(const char *msg)
 
     - Dosyayı bizim mmap fonksiyonundaki sayfa koruma özelliklerine uygun açmamız gerekmektedir. Örneğin biz dosyayı O_RDONLY 
     modunda açıp buna ilişkin sayfaları mmap fonksiyonunda PROT_READ|PROT_WRITE olarak belirlersek mmap başarısız olacak ve errno 
-    EACCESS değeri ile set edilecektir. Eğer biz dosyayı O_RDWR modunda açtığımız halde mmap fonksiyonunda yalnızca PROT_READ 
+    EACCES değeri ile set edilecektir. Eğer biz dosyayı O_RDWR modunda açtığımız halde mmap fonksiyonunda yalnızca PROT_READ 
     kullanırsak bu durumda dosyaya yazma hakkımız olsa da sayfa özellikleri "read only" olduğu için o bellek bölgesine yazma 
     yapılırken program SIGSEGV sinyali ile çökecektir.
 
@@ -23997,10 +24031,10 @@ void exit_sys(const char *msg)
     fonksiyonunda PROT_WRITE olarak map edilmesi gerekir. Halbuki Intel gibi bazı işlemcilerde PROT_WRITE zaten aynı zamanda okuma
     izni anlamına da gelmektedir. Yani örneğin Intel'de PROT_READ diye bir sayfa özelliği yoktur. PROT_WRITE aslında PROT_READ|PROT_WRITE
     anlamına gelmektedir. Dolayısıyla biz dosyayı O_WRONLY modunda açıp mmap fonksiyonunda PROT_WRITE özelliğini belirtirsek 
-    bu PROT_WRITE aynı zamanda okuma izni anlamına da geldiği için mmap başarısız olacak ve errno EACCESS değeri ile set edilecektir. 
+    bu PROT_WRITE aynı zamanda okuma izni anlamına da geldiği için mmap başarısız olacak ve errno EACCES değeri ile set edilecektir. 
     POSIX standartlarında da bellek tabanlı dosyaların (aynı durum shm_open için de geçerli) açılırken "read" özelliğinin olması 
     gerektiği belirtilmiştir. Yani POSIX standartları da bellek tabanlı dosyaların O_WRONLY modda açılamayacağını açılırsa mmap 
-    fonksiyonun başarısız olacağını ve errno değerinin EACCESS olarak set edileceğini belirtmektedir.
+    fonksiyonun başarısız olacağını ve errno değerinin EACCES olarak set edileceğini belirtmektedir.
 
     - Bir dosyanın uzunluğu 0 ise biz mmap fonksiyonunda length parametresini 0 yapamayız. Fonksiyon doğrudan başarısızlıkla 
     sonlanıp errno değeri EINVAL olarak set edilmektedir.
