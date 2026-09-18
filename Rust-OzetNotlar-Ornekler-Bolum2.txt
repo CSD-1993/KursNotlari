@@ -17,7 +17,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 22/06/2026 - Salı
+                                            Son Güncelleme: 19/08/2026 - Çarşamba
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -21681,18 +21681,390 @@ edition = "2024"
 procmacro = { path = "../procmacro" }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+                                            126. Ders 10/08/2026 - Pazartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de öznitelik marolarını ele ele alacağız. Öznitelik nakroları (attribute macros) tıpkı görmüş olduğumuz diğer iki 
+    prosedürel makroda olduğu gibi ayrı bir kütüphane crate'inde ve onun kökünde oluşturulmak zorundadır. Bu makroların yine 
+    pub görünürlüğü ile dışarıya açılması gerekmektedir. Öznitelik makrolarının genel biçimi şöyledir:
 
+    #[proc_macro_attribute]
+    pub fn my_attr(attr: TokenStream, item: TokenStream) -> TokenStream {
+        //...
+    }
+
+    Burada makronun #[proc_macro_attribue] özniteliği ile başlatıldığına dikkat ediniz Daha önce görmüş olduğumuz iki 
+    prosedürel makrodan farklı olarak öznitelik makrolarının iki parametresi vardır. Genelleikle birinci parametre attr 
+    biçiminde, ikinci parametre de item biçiminde isimlendirilmektedir. Makro fonksiyonunun geri dönüş değeri yine TokenStream 
+    türündendir. 
+
+    Biz bir öznitelik makrosu oluşturduğumuzda aslında bir öznitelik oluşturmuş oluruz. Öznitelik makrosuna ilişkin fonksiyonun 
+    ismi öznitelik ismi olarak kullanılmaktadır. Anımsanacağı gibi öznitelikler "öğelere (items)" uygulanabilmektedir. 
+    Örneğin:
+
+    #[my_attr]
+    fn foo() {
+        println!("foo");
+    }
+
+    Görüldüğü gibi burada my_attr özniteliği bir fonksiyona uygulanmıştır. 
+
+    Türetme (derive) makrolarında makronun uygulandığı öğe koddan silinmemektedir. Zaten türetme makrolarının amacı olanı 
+    silmek değil olana bir şeyler eklemektir. Halbuki öznitelik makrolarında öğe silinip onun yerine makronun geri dönüş 
+    değerine ilişkin TokenStream getirilmektedir. Örneğin:
+
+    #[proc_macro_attribute]
+    pub fn noop(attr: TokenStream, item: TokenStream) -> TokenStream {
+        item
+    }
+    
+    Makro ikinci parametresi ile belirtilen öğenin (örneğimizde foo fonksiyonu) kendisiyle geri dönmektedir. Bu makroyu 
+    kullanmış olalım:
+
+    #[noop]
+    fn foo() {
+        println!("foo");
+    }
+        
+    Bu durumda öznitelik makrosu önce foo öğesini silecek sonra onun yerine yeniden aynı öğeyi yerleştirecektir. Yani aslında 
+    bu makro işlevsel bir etkiye yol açmayacaktır. Zaten onun için biz ismini noop (no operation) biçiminde verdik. Örneğin:
+
+    #[proc_macro_attribute]
+    pub fn delete(attr: TokenStream, item: TokenStream) -> TokenStream {
+        TokenStream::new()
+    }
+
+    Burada öznitelik makrosu boş bir TokenStream ile geri döndürülmüştür. Bu makroyu şöyle kullanalım:
+
+    #[delete]
+    fn foo() {
+        println!("foo");
+    }
+
+    Öznitelik makrosu öğye silip yerine boş bir atom yığını yerleştireceğine göre burada aslında foo fonksiyonu silinmiş 
+    olacaktır. Biz bu fonksiyonu çağırmak istersek Rust derleyicisi "fonksiyonun bulunmadığı belirten bir error mesajı" 
+    verecektir. 
+
+    Prosedürel makrolar arasındaki farklılıkları aşağdıaki tabloyla özetlemek istiyoruz:
+
+    ┌───────────────┬─────────────────────────┬──────────────────────────┬─────────────────────┬────────────────────┐
+    │     Biçim     │         Öznitelik       │     Çağrı sentaksı       │        Girdi        │  Çıktının etkisi   │
+    ├───────────────┼─────────────────────────┼──────────────────────────┼─────────────────────┼────────────────────┤
+    │ Function-like │ #[proc_macro]           │ makro!(...)              │ Tek TokenStream     │ Çağrı yerine geçer │
+    │               │                         │                          │ (çağrı gövdesi)     │                    │
+    ├───────────────┼─────────────────────────┼──────────────────────────┼─────────────────────┼────────────────────┤
+    │ Attribute     │ #[proc_macro_attribute] │ #[makro] / #[makro(...)] │ İki TokenStream     │ Öğenin  tamamının  │
+    │               │                         │ bir item üzerinde        │ (argümanlar + item) │ yerine geçer       │
+    ├───────────────┼─────────────────────────┼──────────────────────────┼─────────────────────┼────────────────────┤
+    │ Derive        │ #[proc_macro_derive]    │ #[derive(Makro)]         │ Tek TokenStream     │ Öğe korunur,       │
+    │               │                         │                          │ (item)              │ çıktı eklenir      │
+    └───────────────┴─────────────────────────┴──────────────────────────┴─────────────────────┴────────────────────┘
+
+    Peki öznitelik makrolarının parametreleri ne anlam ifade etmektedir? Öznitelik makrolarındaki birinci parametre özitelik
+    parantezinin içerisindeki argümanlara ilişkin atomları belirtmektedir. Ancak bu atomlara parantezler dahil değildir. 
+    Örneğin:
+
+    #[my_attr("first", "second")]
+    fn foo() {
+        //...
+    }
+
+    Tabii öznitelik argümanlarının herhangi bir kurala uyması zorunlu değildir. Çünkü buradaki atom yığınları parse edilmemekte 
+    öznitelik makrolarına TokenSTream olarak geçirilmektedir. Örneğin:
+
+    #[my_attr(red, green, blue=10)]
+    fn foo() {
+        //...
+    }
+
+    Bu argümanlar da geçerlidir. 
+
+    Öznitelik makrolarının ikinci parametresi özniteliğin uygulandığı öğeye ilişkin atom yığınını belirtmektedir. Testi 
+    şöyle yapabilirsiniz:
+
+    #[proc_macro_attribute]
+    pub fn my_attr(attr: TokenStream, item: TokenStream) -> TokenStream {
+        eprintln!("ATTR: {}", attr);
+        eprintln!("ITEM: {}", item);
+        
+        TokenStream::new()
+    }
+    
+    Şimdi bu makroyu binary crate içerisinde aşağıdaki gibi kullanmış olalım:
+
+    use procmacro::{my_attr};
+
+    #[my_attr(red = 200, green = 125, blue = 192)]
+    fn foo() {
+        println!("foo");
+    }
+
+    fn main() {
+        //...
+    }
+
+    Bu kod derlenirken derleme çıktısında şu iki satırı göreceksiniz:
+
+    ATTR: red = 200, green = 125, blue = 192
+    ATTR: fn foo() { println!("foo"); }
+
+    Öznitelik argümanlarının el alınması işlemi genellikle syn modülündeki parse fonksiyonlarıyla yardımıyla yapılmaktadır. 
+
+    Örneğin biz my_attr makromuzu iki argümanı kabul edecek biçimde yazmak isteyelim:
+
+    #[my_attr(delete)]
+    #[my_attr(noop)]
+
+    Bu makroyu yazarken makronun birinci parametresindeki TokenStream değerini kullanıp parantez içerisindeki yazının 
+    ne olduğunu anlamaya çalışmalıyız. Tabii bunun pek çok yolu vardır. Örnein attr parametresi to_string metoduna sokulup 
+    std::alloc::String nesnesii ondan da as_str ile String nesnesi elde edilip kontrol yapılabilir:
+
+    #[proc_macro_attribute]
+    pub fn my_attr(attr: TokenStream, item: TokenStream) -> TokenStream {
+        let attr_str = attr.to_string();
+        match attr_str.as_str() {
+            "delete" => TokenStream::new(),
+            "noop" => item,
+            _ => panic!("invalid macro argument!..")
+        }
+    }
+
+    Diğer alternatif yazım da şöyle olabilir:
+
+    #[proc_macro_attribute]
+    pub fn my_attr(args: TokenStream, item: TokenStream) -> TokenStream {
+        let mode = parse_macro_input!(args as Ident);
+
+        if mode == "delete" {
+            TokenStream::new()
+        } else if mode == "noop" {
+            item
+        } else {
+        panic!("Invalid macro argument!..");
+        }
+    }
+
+    Burada syn modülğndeki proc_macro_input makrosu ile TokenStream değeri Ident haline getirilmeye çalışılmıştır. Sonra da
+    elde edilen ident yazısı kontrol edilmiştir. Yine alternatif olarak biz attr parametresinden iterator elde edip ilk 
+    atomu TokenTree biçiminde elde ederek de makroyu yazabilirdik:
+
+    #[proc_macro_attribute]
+    pub fn my_attr(args: TokenStream, item: TokenStream) -> TokenStream {
+        let mut iter = args.into_iter();
+
+        let first = match iter.next() {
+            Some(token) => token,
+            None => panic!("Invalid makro argument!.."),
+        };
+
+        if iter.next().is_some() {
+            panic!("Invalid makro argument!..")
+        }
+
+        match first {
+            TokenTree::Ident(ident) => match ident.to_string().as_str() {
+                "delete" => TokenStream::new(),
+                "noop" => item,
+                other => panic!("Invalid makro argument!.."),
+            },
+            other => panic!("Invalid makro argument!.."),
+        }
+    }
 ---------------------------------------------------------------------------------------------------------------------------*/
-
-
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                            GEÇİCİ NOTLAR
+                                            127. Ders 12/08/2026 - Çarşamba
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Örneğin bir öznitelik makrosuyla bir fonksiyonun başına ve sonuna log mesajları eklemek isteyelim. Makromuzu şöyle 
+    kullanacağız:
+
+    #[log_call]
+    fn add(a: i32, b: i32) -> i32 { 
+        a + b 
+    }
+
+    Makro açıldığında aşağıdaki gibi bir etki oluşturulmak istensin:
+
+    fn add(a: i32, b: i32) -> i32 {
+        eprintln!("entering add");
+        let __result = { a + b };   
+        eprintln!(leaving `add");
+        __result
+    }
+
+    Burada görüldüğü gibi önce stderr dosyasına bir giriş mesajı bastırılmış, sonra fonksiyonun için enjekte edilmiş 
+    sonra da bir çıkış mesajı yazdırılmıştır. Bu öznitelik makrosunu şöyle yazabiliriz:
+
+    #[proc_macro_attribute]
+    pub fn log_call(attr: TokenStream, item: TokenStream) -> TokenStream {
+        if !attr.is_empty() {
+            panic!("invalid macro argument!..");
+        }
+
+        let mut func: ItemFn = parse(item).unwrap();
+
+        let fn_name = func.sig.ident.to_string();
+        let original_body = &func.block;
+
+        let new_body: Block = syn::parse_quote!({
+            eprintln!(concat!("entering ", #fn_name));
+            let __log_call_result = #original_body;
+            eprintln!(concat!("leaving ", #fn_name));
+            __log_call_result
+        });
+
+        func.block = Box::new(new_body);
+        quote!(#func).into()
+    }
+
+    Makroda önce log_call isminden sonra parantezler içerisinde argüman yazılıp yazılmadığına bakılmıştır. Eğer paramtezler
+    içerisine argüman yazılmışsa error verilmiştir:
+
+    if !attr.is_empty() {
+        panic!("invalid macro argument!..");
+    }
+
+    Daha sonra özniteliğin iliştirildiği fonksiyon parse edilmiştir:
+
+    let mut func: ItemFn = parse(item).unwrap();
+
+    Buradaki ItemFn yapısı syn modülü içerisindeki fonksiyonu temsil eden yapıdır. Fonksiyon paarse edildikten sora artık 
+    içeriğinde erişilebilir:
+
+    let fn_name = func.sig.ident.to_string();
+    let original_body = &func.block;
+
+    Burada fonksiyonun ismi ve onun gövdesi elde edilmiştir. Daha sonra fonksiyon için yeni bir blok oluşturulmuştur:
+
+    let new_body: Block = syn::parse_quote!({
+        eprintln!(concat!("entering ", #fn_name));
+        let __log_call_result = #original_body;
+        eprintln!(concat!("leaving ", #fn_name));
+        __log_call_result
+    });
+
+    Buradak Block yine syn modülündeki blok deyimini temsil eden yapıdır. Artık yapılacak şey eski bloğu atıp onun yerine 
+    yeni bloğu yerleştirmektir:
+
+    func.block = Box::new(new_body);
+
+    Buradaki func değişkeninin ItemFn türünden olduğuna dikkat ediniz. Önce bunu syn içerisindeki TokenStream türüne dönüştürüp
+    daha sonra into ile proc_macro içerisindeki TokenStream türüne dönüştürmemiz gerekir:
+
+    quote!(#func).into()
+
+    Yukarıdaki makronun kullanımını binary crate içerisinde şöyle test edebilirsiniz:
+
+    use procmacro::{log_call};
+
+    #[log_call]
+    fn foo() {
+        println!("function running...");
+    }
+
+    fn main() {
+        foo();
+    }
+--------------------------------------------------------------------------------------------------------------------------*/
+
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse, ItemFn, Result, Block};
+
+#[proc_macro_attribute]
+pub fn log_call(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        panic!("invalid macro argument!..");
+    }
+
+    let mut func: ItemFn = parse(item).unwrap();
+
+    let fn_name = func.sig.ident.to_string();
+    let original_body = &func.block;
+
+    let new_body: Block = syn::parse_quote!({
+        eprintln!(concat!("entering ", #fn_name));
+        let __log_call_result = #original_body;
+        eprintln!(concat!("leaving ", #fn_name));
+        __log_call_result
+    });
+
+    func.block = Box::new(new_body);
+    quote!(#func).into()
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de öznitelik makrolarıyla bir yapıya bir alan ekleyelim. Makronun kullanımı şöyle olacaktır:
+
+    #[with_id]
+    struct User { 
+        name: String 
+    }
+
+    Buradan elde edilen yapı şöyle olacakır:
+
+    struct User { 
+        id: u64, name: String 
+    }
+
+    Makro şöyle yazılabilir:
+
+    #[proc_macro_attribute]
+    pub fn with_id(attr: TokenStream, item: TokenStream) -> TokenStream {
+        if !attr.is_empty() {
+            panic!("invalid macro argument!..");
+        }
+
+        let mut st: ItemStruct = parse(item).unwrap();
+
+        match &mut st.fields {
+            Fields::Named(fields) => {
+                let id_field: syn::Field = syn::parse_quote! {
+                    pub id: u64
+                };
+                fields.named.insert(0, id_field);
+            }
+            _ => {
+                panic!("invalid macro!..");
+            }
+        }
+
+        quote!(#st).into()
+    }
+
+    Aslında burada yapılanlarla önceki örnekte yapılanlar birbirine çok benzemektedir. Önce yapı parse edilmiş sonra onun 
+    alanları elde edilmiş ve yeni alan oluşturulup insert edilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse, Fields, ItemStruct};
+
+#[proc_macro_attribute]
+pub fn with_id(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        panic!("invalid macro argument!..");
+    }
+
+    let mut st: ItemStruct = parse(item).unwrap();
+
+    match &mut st.fields {
+        Fields::Named(fields) => {
+            let id_field: syn::Field = syn::parse_quote! {
+                pub id: u64
+            };
+            fields.named.insert(0, id_field);
+        }
+        _ => {
+            panic!("invalid macro!..");
+        }
+    }
+
+    quote!(#st).into()
+}
 
 
 

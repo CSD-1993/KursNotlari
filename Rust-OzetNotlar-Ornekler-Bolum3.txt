@@ -1,0 +1,1895 @@
+/*---------------------------------------------------------------------------------------------------------------------------
+
+                                                C ve Sistem Programcıları Derneği
+
+                                    Rust Programlama Dili Kursunda Yapılan Örnekler ve Özet Notlar
+    
+                                                      Eğitmen: Kaan ASLAN
+
+                                                            3. Bölüm
+
+        Bu notlar Kaan ASLAN tarafından oluşturulmuştur. Kaynak belirtmek koşulu ile her türlü alıntı yapılabilir.
+        Kaynak belirtmek için aşağıdaki referansı kullanabilirsiniz:           
+
+                Aslan, K. (2025), "Rust Programlama Dili", Sınıfta Yapılan Örnekler ve Özet Notlar, 
+                    C ve Sistem Programcıları Derneği, İstanbul.
+
+                        (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
+                            (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
+
+                                            Son Güncelleme: 19/08/2026 - Çarşamba
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bu bölümde Rust'ta dosya işlemlerini ele alacağız. Rust'ta dosya işlemleri Rust standart kütüphanesindeki yapılarla 
+    gerçekleştirilmektedir. Dosya işlemleri için sık başvurulan başvurulan türler şunlardır:
+
+    ┌───────────┬─────────────────────────────────┬─────────────────────────────────────────┐
+    │   Modül   │           işlevi                │               Temel Türler              │
+    ├───────────┼─────────────────────────────────┼─────────────────────────────────────────┤
+    │ std::path │ Yol ifadesinin temsili ve       │ Path, PathBuf, Component, OsStr         │
+    │           │ manipülasyonu                   │ OsString                                │
+    ├───────────┼─────────────────────────────────┼─────────────────────────────────────────┤
+    │ std::fs   │ Dosya sistemi işlemleri (aç,    │ File, OpenOptions, Metadata,            │
+    │           │ sil, kopyala vs.)               │ DirEntry, ReadDir                       │
+    ├───────────┼─────────────────────────────────┼─────────────────────────────────────────┤
+    │ std::io   │ Bayt tabanlı soyutlamalar ve    │ Read, Write, BufRead, Seek,             │
+    │           │ hata ele alma modeli            │ BufReader, BufWriter, Error, ErrorKind  │
+    └───────────┴─────────────────────────────────┴─────────────────────────────────────────┘
+
+    Dosya işlemleri için dört ana tür vardır: File, Read, Write ve Seek. File bir yapıdır ve açık dosyayı temsil etmektedir. 
+    Read ve Write ise birer trait'tir. File yapısı bu trait'leri desteklemektedir. Yani açık dosya üzerinde işlem yapmak için 
+    Read ve Write trait'lerinden gelen metotlar kullanılmaktadır. Read ve Write trait'leri yalnızca File yapısı tarafından 
+    değil dosya gibi işlem gören diğer yapılar tarafından da desteklenmektedir. Read ve Write trait'lerini destekleyen "dosya 
+    gibi kullanılan" yapıların bazıları şunlardır:
+
+    ┌────────────────────────────┬──────┬───────┬──────┬──────────────────────────────────────┐
+    │            Tür             │ Read │ Write │ Seek │                 Açıklama             │
+    ├────────────────────────────┼──────┼───────┼──────┼──────────────────────────────────────┤
+    │ std::fs::File              │  +   │   +   │  +   │ Gerçek dosya (açılış moduna bağlı)   │
+    │ std::net::TcpStream        │  +   │   +   │  -   │ TCP soketi                           │
+    │ os::unix::net::UnixStream  │  +   │   +   │  -   │ Unix domain soketi                   │
+    │ std::io::Stdin             │  +   │   -   │  -   │ Standart giriş                       │
+    │ std::io::Stdout            │  -   │   +   │  -   │ Standart çıkış                       │
+    │ std::io::Stderr            │  -   │   +   │  -   │ Standart hata çıkışı                 │
+    │ Cursor<Vec<u8>>            │  +   │   +   │  +   │ Bellek içi tampon (test için ideal)  │
+    │ Cursor<&mut [u8]>          │  +   │   +   │  +   │ Sabit boyutlu bellek tamponu         │
+    │ &[u8]                      │  +   │   -   │  -   │ Byte dilimi (okudukça ilerler)       │
+    │ &mut [u8]                  │  -   │   +   │  -   │ Değişebilir byte dilimi              │
+    │ Vec<u8>                    │  -   │   +   │  -   │ Sona ekleyerek yazar                 │
+    │ VecDeque<u8>               │  +   │   +   │  -   │ Rust 1.63+ (FIFO davranışı)          │
+    │ BufReader<R>               │  +   │   -   │  +/- │ Tamponlu okuyucu                     │
+    │ BufWriter<W>               │  -   │   +   │  +/- │ Tamponlu yazıcı                      │
+    │ LineWriter<W>              │  -   │   +   │  -   │ Satır bazlı tamponlu yazıcı          │
+    │ process::ChildStdin        │  -   │   +   │  -   │ Alt sürecin stdin borusu             │
+    │ process::ChildStdout       │  +   │   -   │  -   │ Alt sürecin stdout borusu            │
+    │ process::ChildStderr       │  +   │   -   │  -   │ Alt sürecin stderr borusu            │
+    │ io::Empty (empty())        │  +   │   +   │  +   │ Boş akış (EOF döner, yazılanı yutar) │
+    │ io::Sink (sink())          │  -   │   +   │  -   │ Her yazılanı yutan hedef             │
+    │ io::Repeat (repeat(b))     │  +   │   -   │  -   │ Aynı byte'ı sonsuz döndürür          │
+    └────────────────────────────┴──────┴───────┴──────┴──────────────────────────────────────┘
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Disk dosyaları std::fs::File yapısıyla temsil edilmektedir.dosya açmak için bu yapıdaki aşağıdaki ilişkli fonksiyonlar 
+    kullanılmaktadır:
+
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<File>
+    pub fn create<P: AsRef<Path>>(path: P) -> Result<File>
+    pub fn create_new<P: AsRef<Path>>(path: P) -> Result<File>
+
+    Bu fonksiyonların generic olduklarına dikkat ediniz. Fonksiyonların generic olmasının nedeni Rust'ya yol ifadelerinin
+    (path names) değişik biçimlerde oluşturulabilmesindedir. Yol ifadeleri izleyen paragraflarda da ele alacağımız gibi 
+    AsRef<Path> trait'ini destekleyen herhangi bir yapı türünden olabilmektedir. str türü ve String türleri de AsRef<Path>
+    trait'ini desteklemektedir. 
+
+    open fonksiyonu parametre olarak yol ifadesini alır, zaten var olan dosyayı açar. Eğer dosya yoksa fonksiyon başarısız
+    olmaktadır. open fonksiyonu ile açılan dosyadan yalnızca okuma yapılabilir. create fonksiyonu "dosya varsa olanı sıfırlayarak 
+    açar, dosya yoksa onu yaratır ve açar. create fonksiyonu ile açılan dosyalara yalnızca yazma yapılabilir. create_new 
+    fonksiyonu var olmayan bir dosyayı yaratıp açar. eğer dosya varsa fonksiyon başarısız olmaktadır. Bu açım fonksiyonlarının
+    C mod ve POSIX bayrak karşılıkları şöyledir:
+
+    ┌─────────────────────────┬──────────────┬───────────────────────────────┐
+    │     Rust Çağrısı        │ C fopen Modu │     POSIX open() Bayrakları   │
+    ├─────────────────────────┼──────────────┼───────────────────────────────┤
+    │ File::open(path)        │     "r"      │ O_RDONLY                      │
+    │ File::create(path)      │     "w"      │ O_WRONLY | O_CREAT | O_TRUNC  │
+    │ File::create_new(path)  │     "wx"     │ O_WRONLY | O_CREAT | O_EXCL   │
+    └─────────────────────────┴──────────────┴───────────────────────────────┘
+
+    Klasik C'de "exclusive" açım için bir yol yoktu. Bunun için C11'de "wx" modu da C'ye eklendi. 
+    
+    Yukarıdaki açım fonksiyonlarının yetersiz olduğunu fark etmişsinizdir. Örneğin "olanı bir dosyayı hem ondan okuma 
+    yapmak hem de ona yazma yapmak için açmaya yönelik bir fonksiyon yoktur. Ancak bu işlemi yapmanın izleyen paragraflarda 
+    açıklayacağımız gibi yolları vardır. 
+
+    Yukarıdaki üç open fonksiyonun da geri dönüş değerine dikkat ediniz. Hepsi Result<Fle> türündendir. Rust'ta başarısız 
+    olabilen fonksiyonların Option ya da Result enum türleriyle geri döndüğünü biliyoruz. Ancak std::result::Result türünün 
+    iki generic parametresi vardır:
+
+    pub enum Result<T, E> {
+        Ok(T),
+        Err(E),
+    }
+
+    Oysa buradaki Result türünün bir tane generic parametresi olduğuna dikkat ediniz. Bu generic parametre Ok durumunda 
+    elde edilecek türü belirtmektedir. Buradaki Result türü Rust'ın temel std::result modülündeki Result türü değil 
+    std::io modülündeki başka bir Result türüdür. std::io::Result türü şöyle tanılanmıştır:
+
+    pub type Result<T> = Result<T, Error>;
+
+    Buradaki tür tanımı C'deki typedef bildirimi gibidir. Yani std::io::Result<T> türü aslında std::result::Result<T, std::io::Error>
+    ile eşdeğerdir. Yani bu Result türü Err varyantını std::io::Error türünden vermektedir. std::io::Error türü IO hataları 
+    için oluşturulmu bir yapı belitmektedir. Bu yapının metotlarından IO hatası ile ilgili bilgiler alınabilmektedir. 
+    Örneğin:
+
+    let f: File = File::open("test.txt").unwrap();
+
+    Bu örnekte eğer "test.txt" bulunamazsa open fonksiyonu Err varyantıyla geri dönecektir. unwrap metodu da Err varyantı 
+    için panic uygulayacaktır. Tabii genellikle biz dosya açılamadıysa programı abnormal biçimde sonlandırmayız. Hata 
+    kontrolü yaparak durumu ele alabiliriz. Örneğin:
+
+    let f: File;
+
+    f = match File::open("mest.txt") {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+    };
+
+    Burada match deyiminin geri dönüş değeri f değişkenine atandığı için Err varyantında biz programı sonlandırmak zorunda 
+    kaldık. Tabii kursumuzda "hataların ele alınması" kısmında da gördüğümüz gibi bu tür kontrollerin laternatif yoları da 
+    vardır. Örneğin:
+
+    let file: File;
+
+    let result = File::open("test.txt");
+    if result.is_err() {
+        eprintln!("cannot open file!..\n");
+        /* ... */
+    }
+    else {
+        unsafe {
+            file = result.unwrap_unchecked()
+        }
+    }
+
+    Ya da örneğin:
+
+    let f: File;
+
+    f = File::open("test.txt").unwrap_or_else(|e| {
+        eprintln!("cannot open file!...\n");
+        std::process::exit(1);
+    })
+
+    Dosya işlemlerinde "test.txt" gibi göreli yol ifadelerinde orijin noktasının prosesin çalışma dizini (current working 
+    directory) olduğunu anımsayınız. cargo programı ile "cargo run" yaparak programı çalıştırdığımızda prossin çalışma 
+    dizini "cargo run" komutunun uygulandığı dizin olmaktadır. RustRover IDE'si ise prosesin çalışma diznini ana proje dizini 
+    olarak set etmektedir. Maalesef "cargo run" komutunda prosesin çalışma dizinini ayarlamak için ek bir seçenek bulunmamaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        128. Ders 17/08/2026 - Pazartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz bir dosyanın File yapısının open, create ve create_new isimli ilişkili fonksiyonlarıyla açıldığını ve açım sonrasında 
+    bu fonksiyonların eğer başarılıysa Ok(File) değerini verdiğini söylemiştik. Ancak bu açım modlarının da yetersiz olduğundan 
+    söz etmiştik. İşte dosyayı tam istenilen biçimde açabilmek için std::fs modülünde OpenOptions isimli bir yapı kullanılmaktadır. 
+    Bu yapı kütüphanede demetsel biçimde tanımanmıştır. Ancak kullanıcının bu demetsel yapının alanlarını bilmesine gerek 
+    yoktur. (Yapının private elemanlarına crate dışından erişemeyeceğimize göre onları bilmemizin de bir anlamı yoktur.) 
+    Dokümantasyonda yapının alanları hakkında bilgi verilmemiştir:
+
+    pub struct OpenOptions(/* private fields */);
+
+    Bu yapı türünden bir değer yaratmak için yine yapının new ilişkili fonksiyonu bulunmaktadır. new ilişkili fonksiyonu 
+    parametresizdir. Örneğin:
+
+    let opop = OpenOptions::new();
+
+    Biz erişemesek de yapının açış moduna ilişkin bayrakları tutan bir alanı vardır. Değer yeni yaratıldığında bu bayrakların 
+    hiçbiri set edilmş değildir. 
+ 
+    Yapının açış modlarına ilişkin bayrakları set eden metotları vardır:
+
+    pub fn append(&mut self, append: bool) -> &mut Self;
+    pub fn create(&mut self, create: bool) -> &mut Self;
+    pub fn create_new(&mut self, create_new: bool) -> &mut Self;
+    pub fn read(&mut self, read: bool) -> &mut Self;
+    pub fn truncate(&mut self, truncate: bool) -> &mut Self;
+    pub fn write(&mut self, write: bool) -> &mut Self;
+
+    Bu metotlar bayrakların set m,i reset mi edileceğine ilişkin bool bir parametre alıp kendi nesnesinin referansına (adresine) 
+    geri dönmektedir. Yani böylece bu metotların geri dönüş değerleri ile diğer metotları çağırabiliriz. Örneğin:
+
+    let mut opop = OpenOptions::new();
+    opop.read(true).write(true);
+
+    Burada yeni bir OpenOptions değeri yaratılıp onun read ve write bayrakları set edilmiştir. Aşağıdaki kodu çalıştırıp 
+    sonucu gözlemleyebilirsiniz:
+
+    use std::fs::{OpenOptions, File};
+
+    fn main() {
+        let mut opop = OpenOptions::new();
+        opop.read(true).write(true);
+
+        println!("{:?}", opop);
+    }
+
+    Burada biz yalnızca bayrakları set edilmiş bir OpenOptions değeri elde ettik. İşte bu değeri kullanarak File değeri 
+    oluşturabilmek için OpenOptions yapısının open metodu kullanılmaktadır. open metodunun parametrik yapısı şöyledir:
+
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<File>
+
+    Bu parametrik yapı File yapısının open ilişkili fonksiyonuna benzemektedir. Bu metot bu bayraklara uygun bir biçimde 
+    File değeri oluşturmaktadır. Örneğin:
+
+    let f: File = OpenOptions::new().read(true).write(true).open("test.txt").unwrap();
+
+    Burada yaratılan OpenOptions değeri ifade sonunda drop edilecektir. Ancak artık open metodu bize başarı durumunda 
+    açılmış olan dosyanın File değerine verecektir. 
+
+    Yukarıdaki belirtmiş olduğumuz bazı bayraklar bazı bayraklarla birlikte kullanılamamaktadır. Hangi bayrakların hangi 
+    bayraklar olmadan kullanılamayacağını aşağıda bir tablo halinde veriyoruz:
+
+    ┌─────────────────────────────────┬──────────────────────┬─────────────────────────────────┐
+    │          Kombinasyon            │        Sonuç         │             Açıklama            │
+    ├─────────────────────────────────┼──────────────────────┼─────────────────────────────────┤
+    │ truncate + (write/append yok)   │ InvalidInput hatası  │ truncate yazma erişimi ister    │
+    │ create + (write/append yok)     │ InvalidInput hatası  │ create yazma erişimi ister      │
+    │ create_new + (write/append yok) │ InvalidInput hatası  │ create_new yazma erişimi ister  │
+    │ append + truncate               │ InvalidInput hatası  │ Semantik çelişki, her zaman     │
+    │                                 │                      │ hata                            │
+    │ create_new + create             │ Hata yok             │ create yok sayılır              │
+    │ create_new + truncate           │ Hata yok             │ truncate yok sayılır            │
+    │ Hiçbir erişim modu yok          │ InvalidInput hatası  │ read/write/append'ten en az     │
+    │                                 │                      │ biri gerekli                    │
+    └─────────────────────────────────┴──────────────────────┴─────────────────────────────────┘
+
+    Rust'ın 1.58.0 (Ozak 2022) sürümüyle birlikte File yapısına options ilişkili fonksiyonu da eklenmiştir. Bu options 
+    ilişkili fonksiyonu tamamen OpenOptions::new() işlemini yapmaktadır. Fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn options() -> OpenOptions
+       
+    Dolayısıyla artık ayrıntılı açış modları ile açım işlemi File yapısının sınırlarının dışına çıkmadan da gerçekleştirilebilmektedir. 
+    Örneğin:
+
+    let f: File = File::options().read(true).write(true).open("test.txt").unwrap();
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    File nesnesi yaratıldıktan sonra okuma ve yazma işlemleri File yapısının Read ve Write trait'lerinden gelen metotlar 
+    tarafından gerçekleştirilmektedir. Bu noktada Read ve Write trait'lerinin metotları üzerinde duracağız. Önce Read trait'ini 
+    ele alalım. 
+
+    Read trait'inin metotları şunlardır:
+
+    pub trait Read {
+        // Required method
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
+
+        // Provided methods
+        fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> { ... }
+        fn is_read_vectored(&self) -> bool { ... }
+        fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize> { ... }
+        fn read_to_string(&mut self, buf: &mut String) -> Result<usize> { ... }
+        fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> { ... }
+        fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> Result<()> { ... }
+        fn read_buf_exact(&mut self, cursor: BorrowedCursor<'_>) -> Result<()> { ... }
+        fn by_ref(&mut self) -> &mut Self
+        where Self: Sized { ... }
+        fn bytes(self) -> Bytes<Self> 
+        where Self: Sized { ... }
+        fn chain<R: Read>(self, next: R) -> Chain<Self, R> 
+        where Self: Sized { ... }
+        fn take(self, limit: u64) -> Take<Self> 
+        where Self: Sized { ... }
+        fn read_array<const N: usize>(&mut self) -> Result<[u8; N]>
+        where Self: Sized { ... }
+    }
+
+    Görüldüğü gibi trait'in tek bir zorunlu (required) metodu vardır:
+
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
+
+    Yani bu trait'i destekleyen türler yalnızca bu metodu yazmak zorundadır. Trait'in diğer metotları bu read metodu kullanılarak
+    yazılmıştır. 
+
+    read metodunun &mut self dışındaki parametresi (buf parametresi) u8 türünden bir dilim referansı almaktadır. Dilim referanslarının
+    kendi içerisinde gösterici ve uzunluktan oluşan iki parçaya sahip olduğunu anımsayınız. İşte read metodu bu dilim referansındaki
+    uzunluk kadar dosyadan okuma yapmaya çalışmaktadır. Metot dosya göstericisinin gösterdiği yerden itibaren dosya sonuna 
+    kadar talep edilen miktarda okuma yapamazsa okuyabildiği kadar okuma yapar ve okuyabildiği byte sayısına geri döner. 
+    Dosya göstericisi dosyanın sonundaysa metot hiç okuma yapamaz ve 0 ile geri döner. Metot IO hatası ya da erişim hakları 
+    nedeniyle başarısız olursa std::io::Error değeriyle geri dönmektedir. Örneğin:
+
+    use std::io::{Read};
+    use std::fs::{File};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+        let mut buf = [0u8; 10];
+        let size: usize;
+
+        size = f.read(&mut buf).expect("cannot read file!..");
+        println!("{} bytes read: {:?}", size, buf);
+    }
+    Burada dosyadan 10 byte okup ekrana yazdırılmıştır. Biz open fonksiyonunda dosya açılamadıysa neden açılamadığına 
+    yönelik bir hata mesajını stderr dosyasına yazdırdık, ancak read metodunda doğrudan expect uyguladık. Burada da benzer 
+    kontrolü yapabilirdik. Yukarıdaki kodda biz diziye ilkdeğer vermek zorunda kaldık. Çünkü Rust'ta bir değişkeni kullanmadan 
+    önce (adresini alma işlemi de dahil olmak üzere) ona ilkdeğerin verilmesi zorunludur. Bu durum C'den geçenlerde biraz 
+    tuhaf gelebilmektedir. (Yani "zaten ben o dizinin içeriğini bozacağım, neden ona ilkdeğer vermek zorunda kalıyorum" 
+    sorusu makuldur.) unsafe blok kullanmadan Rust'ta bundna kurtulmanın iyi bir yolu yoktur. Ancak unsafe blok içerisinde 
+    daha önce görmüş olduğumuz MaybeUninit türünü kullanabiliriz:
+
+    let mut buf: [u8; 10] = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+
+    Ancak bu onuyu ele alırken belrttiğimiz gibi Rust'ta unsafe özelliklerin mümkün olduğunca kullanılmaması önerilmektedir. 
+
+    read metodunun byte düzeyinde okuma yaptığına dikkat ediniz. Eğer okduğunuz byte'lar Unicode UTF-8 kodlamasına ilişkin 
+    yazılardan oluşuyorsa ondan String yapısının from_utf8_lossy ilişkili fonksiyonu ile String elde edebilirsiniz. Örneğin:
+
+    size = f.read(&mut buf).expect("cannot read file!..");
+    let s = String::from_utf8_lossy(&buf);
+    println!("{}", s);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Read};
+use std::fs::{File};
+
+fn main() {
+    let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut buf = [0u8; 10];
+    let size: usize;
+
+    size = f.read(&mut buf).expect("cannot read file!..");
+    println!("{} bytes read: {:?}", size, buf);
+    let s = String::from_utf8_lossy(&buf);
+    println!("{}", s);
+}
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            129. Ders 19/08/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda Read trait'indeki zorunlu metodu inceledik. Yukarıda da belirttiğimiz gibi Read trait'inde bu zorunlu metot 
+    kullanılarak gerçekleştirilmiş olan metotlar da hazır bulunmaktadır. Trait'in read_to_end metodu gerekiyorsa birden fazla 
+    read çağrısı yaparak dosya göstericisinin gösterdiği yerden itibaren dosya sonuna kadar tüm byte'ları dosyadan okuyarak 
+    parametresiyle aldığı vektöre yerleştirmektedir. Metodun parametrik yapısı şöyledir:
+
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize>
+
+    buf parametresi Vec<u8> türünden bir vektörün referansını almaktadır. Metot vektöre yerleştirdiği byte sayısıyla ya da 
+    hata değeri ile geri dönmektedir. Örneğin:
+
+     let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut v: Vec<u8> = Vec::new();
+    let n = f.read_to_end(&mut v).unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    println!("{} bytes read: {:?}", n, v);
+
+    let s = String::from_utf8_lossy(&v);
+    println!("{}", s);
+
+    Burada read_to_end metoduyla doyanın sonuna kadar tek hamlede okuma yapıp okunanları hem byte görüntüsüyle hem de String 
+    nesnesine dönüştürüp yazı biçiminde ekrana (stdout dosyasına) yazdırdık.
+
+    read_to_string metodu yine dosya göstericisinin gösterdiği yerden itibaren dosyadki byte'ları okuyarak onu bir String 
+    biçiminde vermektedir. Dosyada geçersiz UTF-8 karakterleri görülürse fonksiyon başarısızlıkla geri dönmektedir:
+
+    fn read_to_string(&mut self, buf: &mut String) -> Result<usize>
+
+    Örneğin:
+
+     let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut s = String::new();
+    let n = f.read_to_string(&mut s).unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+    println!("{}", s);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Read};
+use std::fs::{File};
+
+fn main() {
+    let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut s = String::new();
+    let n = f.read_to_string(&mut s).unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+    println!("{}", s);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Read trait'inin read_exact metodu tam oalrak parametresiyle belirtilen miktarda byte okumaya çalışmaktadır. Bu metodun 
+    read metodundan farkı eğer tam olarak istenilen kadar byte'ı okuyamazsa (çrneğin dosyada o byte yoktur) hatayla geri 
+    dönmesidir. Metot kendi içerisinde birden fazla read uygulayabilir. Ancak hata oluştuğunda dosya göstericisinin konumu 
+    hakkında dokümanlarda tam bir belirleme yapılmamıştır, "unspecified" bir durumun oluşacağı söylenmiştir. Metodun 
+    parametrik yapısı şöyledir:
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<()>
+
+    Örneğin:
+
+     let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut buf = [0u8; 100];
+    f.read_exact(&mut buf).unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let s = String::from_utf8_lossy(&buf);
+    println!("{}", s);
+
+    Read trait'inin diğer metotlarını "Rust Standard Library" dokğmanlarından inceleyebilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Read};
+use std::fs::{File};
+
+fn main() {
+    let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut buf = [0u8; 100];
+    f.read_exact(&mut buf).unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let s = String::from_utf8_lossy(&buf);
+    println!("{}", s);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Write trait'indeki metotları inceleyelim. Write trait'inin metotları şunlardır:
+
+    pub trait Write {
+        // Required methods
+        fn write(&mut self, buf: &[u8]) -> Result<usize>;
+        fn flush(&mut self) -> Result<()>;
+
+        // Provided methods
+        fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> { ... }
+        fn is_write_vectored(&self) -> bool { ... }
+        fn write_all(&mut self, buf: &[u8]) -> Result<()> { ... }
+        fn write_all_vectored(&mut self, bufs: &mut [IoSlice<'_>]) -> Result<()> { ... }
+        fn write_fmt(&mut self, args: Arguments<'_>) -> Result<()> { ... }
+        fn by_ref(&mut self) -> &mut Self
+        where Self: Sized { ... }
+    }
+
+    Görüldüğü gibi trait'te desteklenmesi zorunlu olan (required) iki metot vardır: write ve flush. Diğer metotlar bu 
+    zorunlu metotlar kullanılarak yazılmıştır. write metodunun parametrik yapısına dikkat ediniz:
+
+     fn write(&mut self, buf: &[u8]) -> Result<usize>;
+
+     Metodun buf parametresi yazılacak byte'ları gösteren dizi dilim referansını belirtmektedir. Metot başarı durumunda 
+     yazılan byte sayısına, başarısızlık durumunda hata değerine geri dönmektedir. Örneğin:
+
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let buf = "this is a test".as_bytes();
+    f.write(buf).expect("cannot write!..");
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Write};
+use std::fs::{File};
+
+fn main() {
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let buf = "this is a test".as_bytes();
+    f.write(buf).expect("cannot write!..");
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Write ttrait'inin zorunlu flush metodu bu trait'i tamponlu bir biçimde destekleyen türler için bulundurulmuştur:
+    
+    fn flush(&mut self) -> Result<()>;
+    
+    File yapısı kendi içerisinde bir tampon uygulamamaktadır. (İzleyen paragraflarda bu durum hakkında bilgi vereceğiz.) 
+    Dolayısıyla File yapısı içerisinde aslında bu zorunlu flush metodunun içi tamamne boştur. Yani File türünden bir 
+    değişkenle flush metodunun çağrılması içbir etki yaratmamaktadır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Write trait'inin write_fmt metodu formatlı yazım için kullanılmaktadır. Bu metodu adeta C'nin frintf fonksiyonuna 
+    benzetebilirsiniz. Metodun paraöetrik yapısına dikkat ediniz:
+
+    fn write_fmt(&mut self, args: Arguments<'_>) -> Result<()> { ... }
+
+    Burada formatlı yazım Arguments yapısıyla temsil edilmektedir. Formatlı yazımı alıp Arguments değeri ouşturan 
+    format_args isimli bir makro vardır. O halde bu metodun tipik kullanımı şöyledir:
+
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+    for i in 0..10 {
+        f.write_fmt(format_args!("{} => {}\n", i, i * i));
+    }
+
+    Buradaki formatlama mekanizmasının tamamen print fonksiyonlarındaki gibi olduğuna dikkat ediniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Write};
+use std::fs::{File};
+
+fn main() {
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+   for i in 0..10 {
+       f.write_fmt(format_args!("{} => {}\n", i, i * i));
+   }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aslında Rust'ta f.write_fmt çağrısını uygulayan write ve writeln makroları da vardır. Bu makrolar tamamen print ve println
+    makroları kullanılmaktadır Ancak bu makroların birinci parametresi hedefi belirten ve Write trait'ini destekleyen 
+    değeri almaktadır. Örneğin:
+
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+   for i in 0..10 {
+      writeln!(f, "{} => {}", i, i * i);
+   }
+
+   Burada write makrolarının aslında write_fmt metotlarını çağıran kod ürettiğine dikkat ediniz. 
+
+   write trait'inin diğer metotlarını dokümanlardan inceleyebilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Write};
+use std::fs::{File};
+
+fn main() {
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+   for i in 0..10 {
+      writeln!(f, "{} => {}", i, i * i);
+   }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Write trait'inin write_all metodu mantıksal olarak Read trait'inin read_exact metoduna benzemektedir. Bu metot kendi 
+    çeriisnde write çağrıları ile parametresiyle belirtilen dizi dilimindeki byte'ların hepsini yazmaya çalışır. Eğer 
+    yazım başarısı olursa hata değeri ile, başarı durumunda birim değeriyle geri dönmektedir:
+
+    fn write_all(&mut self, buf: &[u8]) -> Result<()> 
+
+    Başarısızlık durumunda dosya göstericisinin konumu belirsiz biçimdedir.  
+
+    Write trait'inin diğer metotlarını "Rust Standard Library" dokümanlarından inceleyebilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de dosya göstericisinin konumlandırılmasının nasıl yapıldığını görelim. Rust'ta dosya göstericisinin konumlandırılması
+    eylemi Seek isimli trait ile soyutlanmıştır. Seek trait'inin elemanları şunlardır:
+
+    pub trait Seek {
+        // Required method
+        fn seek(&mut self, pos: SeekFrom) -> Result<u64>;
+
+        // Provided methods
+        fn rewind(&mut self) -> Result<()> { ... }
+        fn stream_len(&mut self) -> Result<u64> { ... }
+        fn stream_position(&mut self) -> Result<u64> { ... }
+        fn seek_relative(&mut self, offset: i64) -> Result<()> { ... }
+    } 
+
+    Görüldüğü gibi trait'in yalnızca bir tane seek isimli zorunlu metodu vardır:
+
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64>;
+
+    Metodun pos parametresi SeekFrom isimli enum türündedir:
+
+    pub enum SeekFrom {
+        Start(u64),
+        End(i64),
+        Current(i64),
+    }
+
+    Bu enum tğrğnğn tek elemanlı demetsel varyantlarına sahip olduğuna dikkat ediniz. Yani biz bu enum türünden değeri 
+    örneğin SeekFrom::Start(1000) gibi oluştururuz. Tabii bidiğiniz gibi hedef tür zaten belliyse (seek metounda bellidir)
+    bu durumda Rust'ta enum varyantları için enum isminin kullanılmasına gerek yoktur. Metot başarı durumunda konumlandırılan 
+    offset değerine, başarısızlık durumunda hata değerine geri dönmektedir. Start, End ve Current varyantları diğer programlama
+    dillerinde olduğu gibi sırasıyla dosyanın başından itibareni EOF durumundan itibaren ve dosya göstericisinin gösterdiği 
+    yerden itibaren konumlandırma yapmaktadır. Start varyantının u64 türünden, End ve Current varyantlarının i64 türünden 
+    değere sahip olduğuna dikkat ediniz. Örneğin:
+
+    let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    f.seek(Start(8)).expect("seek failed!..");
+
+    let mut s = String::new();
+    f.read_to_string(&mut s).expect("read failed!..");
+    println!("{}", s);
+
+    Burada dosya göstericisi 8'inci offset'e konumlandırılıp geri kalan tüm byte'lar bir string biçiminde okunmuştur. 
+    Tabii text dosyaları üzerinde böylesi işlemlere aslında dikkat edilmelidir. Konumlandırma yapılan yer UTF-8 byte'larının 
+    başına denk gelmezse String dönüştürmesi yapılamayacaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Read, Seek};
+use std::fs::{File};
+use std::io::SeekFrom::{Start};
+
+fn main() {
+    let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    f.seek(Start(8)).expect("seek failed!..");
+
+    let mut s = String::new();
+    f.read_to_string(&mut s).expect("read failed!..");
+    println!("{}", s);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+   Şimdi de bir dosyanın sonuna ekleme yapalım. Bunun için dosyayı read/write modunda açmamız gerekir:
+
+    let mut f: File = File::options()
+        .read(true)
+        .write(true)
+        .open("test.txt")
+        .unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+    }); 
+
+    Dosya göstericisini EOF durumuna şöyle konumlanndırabiliriz:
+
+    f.seek(End(0)).expect("canno seek!..");
+
+    Artık yazacağımız her şey dosyanın sınuna yazılacak, dolayısıyla dosya büyütülecektir:
+
+    write!(f, "This is a test!");
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Write, Seek};
+use std::fs::{File};
+use std::io::SeekFrom::{End};
+
+fn main() {
+    let mut f: File = File::options()
+        .read(true)
+        .write(true)
+        .open("test.txt")
+        .unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+    });
+
+    f.seek(End(0)).expect("canno seek!..");
+    write!(f, "This is a test!");
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Seek trait'inin rerwind metodu dosya göstericisini 0'ıncı offset'e çekmektedir:
+
+    fn rewind(&mut self) -> Result<()> { ... }
+
+    Trait'in seek_relative metodu kendi içerisinde Current varyantını kullanarak dosya göstericisinin gösterdiği yerden itibaren 
+    konumlandırma yapmaktadır:
+
+    fn seek_relative(&mut self, offset: i64) -> Result<()> { ... }
+    
+    Trait'in stream_position metodu dosya göstericisinin konumunu vermektedir:
+
+    fn stream_position(&mut self) -> Result<u64> { ... }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de tamponlu okuma yazma işlemleri üzerinde duralım. File yapısı okuma yazma işlemini bir tampon kullnmadam doğrudan 
+    yapmaktadır. Örneğin biz Rust'ta bir döngü içerisinde File yapısının read metodu ile okumalar yaptığımızda bu metot her 
+    defasında arka planda işletim sisteminin düşük seviyeli read/write fonksiyonlarını çağırıp tekrar tekrar transfer yapmaktadır. 
+    Bir dosyadaki karakterleri tek tek sırasıyla okuyup parse etmek isteyelim. Her karakteri okurken yeniden read/write 
+    işleminin yapılması oldukça verimsizdir. İşte programlama dillerinin standart kütüphaneleri bu read/write çağrılarını
+    azaltmak için tamponlama (buffering) uygulamaktadır. C'nin stdio fonksiyonları, C++'ın iostream fonksiyonları Java ve 
+    C#'taki dosya sınıfları hep tamponlu bir biçimde çalışmaktadır. Tamponlu çalışmada okuma sırasında talep edilenden 
+    daha fazla okuma yapılarak tampon doldurulur. Sonraki okumalarda read işlemi yapmak yerine doğrudan bu tampondan 
+    istek karşılanır. Tamponun dışına çılıkdığında yeniden read işlemi yapılır. Yazma durumu da benzerdir. Yazma da doğrudan
+    tampona yapılmaktadır. Ancak tampon dolduğunda write fonksiyonları ile aygıta aktarım yapılmaltadır. Tabii bazen 
+    programcı tampondaklerin o anda disteki dosyaya yazılmasını isteyebilir. Bu işleme "flush" işlemi denilmektedir. 
+
+    Rust'ta File yapısının herhangibir tanpon kullanmadığını belirtmiştik. İşte Rust'ta tamponlu okuma ve yazmalar için 
+    BufReader ve BufWriter isimli yapılar kullanılmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        130. Ders 28/08/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta BufReader ve BufWriter yapıları yalnızca File yapısı için tasarlanmamaıştır. Bu trait'ler aslında Reda ve Write 
+    trait'lerini destekleyen herhangi bir tür için tamponlama yapanilmektedir. Biz önce BufReader yapısını sonra BufWriter 
+    yapısını ele alacağız. 
+
+    BufReader yapısı şöyle tanımlanmıştır:
+
+    pub struct BufReader<R: ?Sized> { /* private fields */ }
+
+    BufReader yapısının imp bloğu şöyle oluşturulmutur:
+
+    impl<R: Read> BufReader<R> {
+        //...
+    }
+
+    Görüldüğü gibi BufReader yapısının generic parametresi Read trait'ini destekleyen bir tür türündne olmak zorundadır. 
+    File yapısı Read trait'ini desteklediğine göre geberic parametre kullanılabilir. 
+    
+    Bir BufReader nesnesi yapının ilişkili new fonksiyonuyla yaratılmaktadır. new fonksiyonunun parametrik yapısı şöyledir:
+
+    pub fn new(inner: R) -> BufReader<R>
+
+    Görüldüğü gibi new fonksiyony Read trait'ini destekleyen bir değeri parametre olarak alıp BufReader değeri ile
+    geri dönmektedir. Örneğin:
+
+    let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+    let mut buf_reader = BufReader::new(f);
+    
+    BufReader yapısı BufRead isimli trait'i desteklemektedir. BufRead trait'i tamponlama işlemleri için arayüz oluşturmaktadır:
+
+    pub trait BufRead: Read {
+        // Required methods
+        fn fill_buf(&mut self) -> Result<&[u8]>;
+        fn consume(&mut self, amount: usize);
+
+        // Provided methods
+        fn has_data_left(&mut self) -> Result<bool> { ... }
+        fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> Result<usize> { ... }
+        fn skip_until(&mut self, byte: u8) -> Result<usize> { ... }
+        fn read_line(&mut self, buf: &mut String) -> Result<usize> { ... }
+        fn split(self, byte: u8) -> Split<Self> ⓘ
+        where Self: Sized { ... }
+        fn lines(self) -> Lines<Self> ⓘ
+        where Self: Sized { ... }
+    }
+
+    Trait'in Read trait'inden türetildiğine dikkat ediniz. Yani bu destelyecek tür Read trait'ini de desteklemek 
+    zorundadır. Görüldüğü gibi BufRead trait'inin iki zorunlu metodu vardır: fill_buf ve consume. fill_buf metodu  
+    read metodunu çağırarak doldurur ve başarı durumunda içsel tampona ilişkin dilim referansıyla geri döner. Bu metodun 
+    çağrıldığında tamponu ne kadar dolduracağı konsunda bir belirleme yapılmamıştır. EOF durumuna gelindiyse metot boş 
+    bir dilime ilişkin referansla geri dönmektedir. consume metodu içsel tampondaki belli miktarda byte okunmuş gibi 
+    işaretleme yapmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+    Trait'in isteğe bağlı (provided) metotları zorunlu metotlar kullanılarak yazılmıştır. read_line metodu dosyadan bir
+    satırlık bilgiyi okumak için kullanılmaktadır. Metoun parametrik yapısı şöyledir:
+
+    fn read_line(&mut self, buf: &mut String) -> Result<usize>
+
+    Metot okuduğu byte'ları String nesnesine yerleştirir, okuduğu byte sayısıyla geri döner. read_line metodu satır sonundaki 
+    '\n' karakterini de okur ve onu da String içerisinde yerleştirir. Satır okuması yapam metotların tampon kullanması 
+    gerektiğine dikkat ediniz. (Eğer satır okuyan metotlar tampon kullanmasaydı mecburen '\n' karakterini görene kadar 
+    dosyadan byte'ları döngü içerisinde okumak zorunda kalırdı. Bu da çok yavaş olurdu.) Metot dosyanın sonuna gelindeiğinde 
+    başarısız olmaz ancak 0 değeri ile geri döner. Örneğin:
+
+    use std::fs::{File};
+    use std::io::{BufReader, BufRead};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+        let mut buf_reader = BufReader::new(f);
+        let mut s = String::new();
+        let mut n: usize;
+
+        loop {
+            n = buf_reader.read_line(&mut s).unwrap_or_else(|err| {
+                eprintln!("ERROR: {}", err);
+                std::process::exit(1);
+            });
+            if n == 0 {
+                break;
+            }
+    ;       print!("{}", s);
+            s.clear();
+        }
+    }
+
+    Burada döngü içerisinde read_line metodu ile satırlar okunmuştur. read_line metodunun başrı durumunda geri dönüş değeri 
+    kontrol edilmiş ve eğer dosyadan 0 byte okunmuşsa artık döngüden çıkışmıştır. read_line metodu okunanları String'in 
+    sonuna push etmektedir. Bu nednele biz her okumadna sonra String değişkenini clear ettik. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BufRead trait'inin read_until metodu belli bir byte'ı görene kadar (o byte dahil olmak üzere) tamponlu okuma yapmaktadır. 
+    Okunanlar Vec<u8> içerisine yerleştirilmektedir. Metodun paramtrik yapısı şöyledir:
+
+    fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> Result<usize>
+
+    Metot yine başarı durumunda yerleştirilen byte sayısı ile geri dönmektedir. EOF durumu başarısızlık anlamına gelmez. Bu 
+    durumda yine metot 0 değeriyle geri döner. Örneğin:
+
+    n = buf_reader.read_until(0x61u8, &mut v).unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    0x61 numaralı karakter 'a' karakteridir. read_until bu karakteri görene kadar okuma yapmaktadır. 
+
+    use std::fs::{File};
+    use std::io::{BufReader, BufRead};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+        let mut buf_reader = BufReader::new(f);
+        let mut v = Vec::<u8>::new();
+        let mut n: usize;
+
+        n = buf_reader.read_until(0x61u8, &mut v).unwrap_or_else(|err| {
+                eprintln!("ERROR: {}", err);
+                std::process::exit(1);
+            });
+        let s = String::from_utf8(v).expect("invalid string!..");
+        println!("{}", s);
+    }
+
+    read_until metodunun ters işlemini yapan skip_until isimli metot da vardır. skip_until metodu belli bir byte görülene 
+    kadarki byte'ları geçmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BufRead trait'inin lines isimli metodu dosyayı satır satır okuyan bir iterator değeri geri döndürmektedir:
+
+    fn lines(self) -> Lines<Self>
+
+    Geri döndürülen Lines yapısı bir iteratör belirtmektedir. Dolayıısyla biz bu metodun geri dönüş değerini for döngüsü
+    ile kullanabiliriz. Örneğin:
+
+    for line in buf_reader.lines() {
+        //...
+    }
+
+    Burada line değişkeni Lines yapısının next metodunun geri döndürdüğü tür olan Result<String> türündendir. Örnek kullanım 
+    şöyle olabilir:
+
+    use std::fs::{File};
+    use std::io::{BufReader, BufRead};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+        let mut buf_reader = BufReader::new(f);
+
+        for line in buf_reader.lines() {
+            let s = line.unwrap_or_else(|err| {
+                eprintln!("ERROR: {}", err);
+                std::process::exit(1);
+            });
+            println!("{}", s);
+        }
+    }
+
+    Bu biçimde iteratör yoluyla dolaşım yapılırken elde edilen String içerisine '\n' karakteri yerleştirilmemektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BufRead trait'inin split metodu dosyayı belli bir ayıraç (delimiter) byte'tan ayrıştırarak onu kısım kısım veren bir 
+    iteratöre geri dönmektedir. Örneğin:
+
+     for name in buf_reader.split(b',') {
+        //...
+    }
+
+    Burada dosya ',' karakterlerinden ayrıştırılmak istenmiştir. döngünün her yinelenmesinde iki virgül karakterinin 
+    arasıdaki kısım elde edilmektedir. split metodunun geri döndürdüğü iteratörün next metodu elde edilen kısımları 
+    Result<Vec<u8>> olarak vermektedir. Aşağıdaki örnekte dosyanın içerisindekiler ',' karakterlerinden ayrıştıırlıp 
+    ekrana (stdout dosyasına) yazdırılmaktadır:
+
+    use std::fs::{File};
+    use std::io::{BufReader, BufRead};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+        let mut buf_reader = BufReader::new(f);
+
+        for name in buf_reader.split(b',') {
+            let v = name.unwrap_or_else(|err| {
+                eprintln!("ERROR: {}", err);
+                std::process::exit(1);
+            });
+            let s = String::from_utf8(v).expect("invalid caharcter");
+            println!("{}", s);
+        }
+    }
+
+    Dosyanın içeriğinin aşağıdaki gibi olduğunu varsayalım:
+
+    ali,veli,selami
+    ayşe,fatma
+
+    Metot döngü yinelendikçe önce "ali", "veli" yazılarını, sonra "selami\nayşe" yasızını sonra da "fatma" yazısını vercektir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BufRead trait'inin Read trait'inden türetildiğini belirtmiştik. İşte BufReader yapısı Read trait'indeki metotları da 
+    tampon kullanacak biçimde desteklemektedir. Read trait'inin zournlu read metodunu anımsayınız:
+
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize>
+
+    Bu metot BufReader tarafından tampon kullanacak biçimde tanımlanmıştır. Örneğin biz dosyayı tampnlu bir biçimde byte 
+    byte şöyle okuyabiliriz:
+
+    use std::fs::{File};
+    use std::io::{BufReader, Read};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+        let mut buf_reader = BufReader::new(f);
+        let mut buf = [0u8; 1];
+
+        let mut count = 0;
+        loop {
+            let n = buf_reader.read(&mut buf).unwrap_or_else(|err| {
+                eprintln!("ERROR: {}", err);
+                std::process::exit(1);
+            });
+            if n == 0 {
+                break;
+            }
+            print!("{:02X}{}", buf[0], if count % 16 == 15 {'\n'} else {' '});
+            count += 1;
+        }
+    }
+
+    Anımsayacağınız gibi Read trait'inde byte byte okumak için bytes isimli bir itertaör de vardı. Aynı işlemi onunla da yapabiliriz:
+
+    use std::fs::{File};
+    use std::io::{BufReader, Read};
+
+    fn main() {
+        let mut f: File = File::open("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+        let mut buf_reader = BufReader::new(f);
+        let mut buf = [0u8; 1];
+
+        let mut count = 0;
+        for rb in buf_reader.bytes() {
+            let b = rb.unwrap_or_else(|err| {
+                eprintln!("ERROR: {}", err);
+                std::process::exit(1);
+            });
+
+            print!("{:02X}{}", b, if count % 16 == 15 {'\n'} else {' '});
+            count += 1;
+        }
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de tamponlu yazım işlemlerini görelim. Tamponlu yazım işlemleri için BufWriter isimli yapı kullanılmaktadır:
+
+    pub struct BufWriter<W: ?Sized + Write> { /* private fields */ }    
+
+    BufWriter yapısı Write trait'ini destekleyen generic parametreye sahiptir. Burada BufRead trait'ini karşılığı olan 
+    BufWrite gibi bir trait bulunmamaktadır. 
+
+    Tamponlu yazımda byte'lar tampona yazılır. Tampon dolduğunda ya da açıkça flush işlemi yapıldığında tampondakiler 
+    tek bir çağrı ile hedefe aktarılmaktadır. BufWriter nesnesi yine yapının new ilişkili fonksiyonuyla yaraılmaktadır:
+
+    pub fn new(inner: W) -> BufWriter<W>
+
+    Burada W generic parametresi Write trait'ini destekleyen bir türden olmak zorundadır. Örneğin:
+
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let buf_writer = BufWriter::new(&f);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        130. Ders 31/08/2026 - Pazartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    BufWriter yapısının kendi metotlarından ziyade aslında Write trait'inden gelen metotlar kullanılmaktadır. Örneğin biz 
+    tamponlu bir biçimde bir dosyaya byte byte değer yazacak olalım. Bu durumda Write trait'indne gelen write metodunu 
+    kullanabiliriz. Write trait'inden gelen write metodunun parametrik yapısını anımsaınız:
+
+    fn write(&mut self, buf: &[u8]) -> Result<usize>
+
+    Metodun buf parametresi yazılacak byte'ların bulunduğu u8 türündne dizi dilim referansını belirtmektedir. Metot başarı 
+    durumunda yazılan byte sayısına gerş dönmektedir. Aşağıdaki örnekte write metodu ile byte byte dosyaya yazdırma yapılmıştır. 
+    Ancak bu write çağrıları aslında dpğrudan dosyaya yazmak yerine tampona yazmaktadır. Dosya tapon dolduğunda, flush işlemi 
+    yapıldığında ya da dosya kapatıldığında tampondaki bilgiler dosyaya aktarılmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::fs::{File};
+use std::io::{BufWriter, Write};
+
+fn main() {
+    let mut f: File = File::create("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    let mut buf_writer = BufWriter::new(&f);
+    let some_bytes: [u8; 5] = [0x10, 0x20, 0x30, 0x40, 0x50];
+    let mut b = [0u8; 1];
+
+    for i in 0..some_bytes.len() {
+        b[0] = some_bytes[i];
+        buf_writer.write(&b).unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz şimdiye kadar açık dosyalar üzerinde işlemler yapan yapıları inceledik. Rust'ta dosyalar üzerinde onları açmadan 
+    işlemler yapan yardımcı yapılar ve fonksiyonlar da bulunmaktadır. Bunlar std::fs modülü içerisinde tanımlanmışlardır. 
+    Şimdi bunların önemli olanlarını gözden geçirelim. Bu modüldeki fonksiyonların birçoğu aslında doğrudan Linux ve macOS 
+    sistemlerinde POSIX fonksiyonlarını Windows sistemlerinde ise Windows API fonksiyonlarını çağırmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    exists isimli fonksiyon bir dosyanın var olup olmadığı bilgisine vermektedir. Fonskiyonun parametrik yapısı şöyledir:
+
+    pub fn exists<P: AsRef<Path>>(path: P) -> Result<bool> 
+
+    Fonksiyon dosyanın başarı durumunda dosyanın var olup olmadığı bilgisine geri dönmektedir. 
+
+    Aşağıdaki örnekte klavyeden (stdin dosyasından) bir yol ifadesi okunmuştur. Bu yol ifadesine ilişkin dosyanın var olup olmadığı 
+    yazdırılmıştır. 
+  
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::io::{Write};
+use std::fs::{exists};
+
+
+fn main() {
+    let mut path: String = String::new();
+
+    print!("Path:");
+    std::io::stdout().flush().expect("cannot flush!..");
+    std::io::stdin().read_line(&mut path).expect("cannot read line!..");
+
+    let result = exists(path.trim()).expect("Invalid path!..");
+    if result {
+        println!("File exists...");
+    }
+    else {
+        println!("File doesn't exist");
+    }
+}
+   
+/*---------------------------------------------------------------------------------------------------------------------------
+    rename fonksiyonu bir dosyanın ismini değiştirmek için kullanılmaktadır. Tabii dosyanın ismini değiştirmekle taşımak 
+    aynı anlamdadır. Fonksiyonun parametirk yapısı şöyledir:
+
+    pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> Result<()>
+
+    Fonksiyon başarı durumunda birim değerine geri dönmektedir. (Yani fonksiyon başarı durumunda bir değer vermemektedir.)I 
+    Örneğin:
+
+    rename("test.txt", "mest.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    create_dir fonksiyonu dizin yaratmak için kullanıllmaktadır. Fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn create_dir<P: AsRef<Path>>(path: P) -> Result<()>
+
+    Fonksiyon başarı durumunda birim değerine geri dönmektedir. (Yani fonksiyon başarı durumunda bir değer vermemektedir.) 
+    Örneğin:
+
+    create_dir("mydir").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    crea_dir_all fonksiyonu iç içe dizinlerde olmayan dizinleri yaratarak hedef dizini yaratmaktadır. (Linux'taki "mkdir -p"
+    komutunun yaptığını yapmaktadır.) Fonksiyonun parametrik yaısı şöyledirİ:
+
+    pub fn create_dir_all<P: AsRef<Path>>(path: P) -> Result<()>
+
+    Fonksiyon başarı durumunda birim değerine geri dönmektedir. (Yani fonksiyon başarı durumunda bir değer vermemektedir.)I 
+    Örneğin:
+
+    create_dir_all("x/y/z/k").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    Dizin silmek için remove_dir ve remove_dir_all fonksiyonları bulunmaktadır. remove_dir fonksionu içi boi biri dizini 
+    silerken remove_dir_all fonksiyonu tüm dizin ağacını silebilmektedir. Bu fonksiyonların parametrik yapıları şöyledir:
+
+    pub fn remove_dir<P: AsRef<Path>>(path: P) -> Result<()>
+    pub fn remove_dir_all<P: AsRef<Path>>(path: P) -> Result<()>
+
+    Fonksiyonlar başarı durumunda birim değerine geri dönmektedir. (Yani fonksiyonlar başarı durumunda bir değer vermemektedir.)I 
+    Örneğin:
+
+    Örneğin:
+
+    remove_dir_all("mydir").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    remove_file fonksiyonu dosya silmek için kullanılmaktadır. Fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn remove_file<P: AsRef<Path>>(path: P) -> Result<()>
+
+    Fonksiyon başarı durumunda birim değerine geri dönmektedir. (Yani fonksiyon başarı durumunda bir değer vermemektedir.) 
+    Örneğin:
+
+    remove_file("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    read_to_string fonksiyonu tek hamlede bir text dosayı okuyarak içerğini bir String biçiminde bize verir. Fonksiyonun 
+    parametrik yapısı şöyledir:
+
+    pub fn read_to_string<P: AsRef<Path>>(path: P) -> Result<String>
+
+    Fonksiyon yol ifadesini parametre olarak alır ve başarı durumunda dosya içeriğini String olarak döndürür. Tabii String 
+    UTF-8 formatında karakterleri sakladığı için text dosyanın da UTF-8 formatında olması gerekir. Örneğin:
+
+    let text = read_to_string("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    read fonksiyonu tek hamlede bir dosyanın tüm byte'larını okuyup onu Vec<u8> biçiminde vermektedir. Fonksiyonun parametrik 
+    yapısı şöyledir:
+
+    pub fn read<P: AsRef<Path>>(path: P) -> Result<Vec<u8>>
+
+    Aşağıdaki örnekte dosyanın içeriği tek hamlede okunup hex sistemde ekrana (stdout dosyasına) yazdırılmıştır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::fs::{read};
+
+fn main() {
+    let v = read("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    for i in 0..v.len() {
+        if i % 16 == 0 {
+            print!("{0:08X} ", i);
+        }
+        print!("{:02X}{}", v[i], if i % 16 == 15 {'\n'} else {' '});
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    write fonksiyonu bir yol ifadesini ve &[u8] türüne AsRef ile dönüştürülebilen bir türden değeri parametre olarak alır, 
+    tüm byte dizgesini dosyaya yazar. Eğer dosya versa tamamen içini silip (truncate edip) byte'ları yazmaktadır. eğer dosya 
+    yoksa onu yaratıp byte'ları yazmaktadır. Fonskiyonun parametrik yapısı şöyledir:
+
+    pub fn write<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> Result<()>
+
+    Anımsanacağı aşağıdaki türler AsRef<[u8]> trait'ini desteklemektedir. Yani aşağıdaki türleri biz fonksiyonun ikinci parametresi 
+    için argüman olarak geçebiliriz:
+
+    &str
+    String
+    Vec<u8>
+    &u8[N]
+    
+    Fonksiyon başarı durumunda birim değerine geri dönmektedir. (Yani fonksiyon başarı durumunda bir değer vermemektedir.) 
+    Örneğin:
+
+    use std::fs::{read, write};
+
+    fn main() {
+        let v = read("test.txt").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+        write("mest.txt", v).unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+        print!("ok");
+    }
+
+    Burada bir dosyanın içeriği Vec<u8> olarak elde edilmiş ve bu içerik diğer dosyaya yazdırılmıştır. Biz örneğin bir 
+    yazıyı tek hamlede bir dosyanın içerisine de yazabiliriz:
+
+    write("test.txt", "ağrı dağı çok yüksek").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Tek hamlede dosya kopyalayan copy isimli bir fonksiyon bulunmaktadır. Fonksiyonun parametrik yapısı şöyledir:
+            
+    pub fn copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> Result<u64>
+
+    Fonksiyon başarı durumunda kopyalanan dosyanın byte uzunluğuyla geri dönmektedir. örneğin:
+
+    let size = copy("test.txt", "mest.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    println!("{} bytes copied...", size);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bir dosyanın "uzunluğu" gibi "son güncellleme zamanı" gibi metadata bilgileri metadata isimli fonksiyonla elde edilmektedir. 
+    Fonksyonun parametrik yapısı şöyledir:
+
+    pub fn metadata<P: AsRef<Path>>(path: P) -> Result<Metadata>
+
+    Fonksiyon dosya ya da dizinin yol ifadesini parametre olarak alır. Başarı durumunda metadata isimli bir yapı türünden 
+    değer verir. Metadata yapısının alanları private durumdadır. Metadata bilgileri bu yapının metotlarıyla elde edilmektedir. 
+    Metadata yapısının önemli metoları şunlardır:
+
+    ┌──────────────────────────────────────┬──────────────────────────────────────────────────────┐
+    │                Metot                 │                       Açıklama                       │
+    ├──────────────────────────────────────┼──────────────────────────────────────────────────────┤
+    │ file_type() -> FileType              │ Dosya türünü temsil eden FileType değerini verir.    │
+    │ is_dir() -> bool                     │ Girdinin bir dizin olup olmadığını bildirir.         │
+    │ is_file() -> bool                    │ Girdinin sıradan bir dosya olup olmadığını bildirir. │
+    │ is_symlink() -> bool                 │ Girdinin sembolik bağ olup olmadığını bildirir.      │
+    │ len() -> u64                         │ Dosyanın uzunluğunu bayt cinsinden döndürür.         │
+    │ permissions() -> Permissions         │ Dosyanın erişim izinlerini Permissions olarak verir. │
+    │ modified() -> io::Result<SystemTime> │ Son değiştirilme zamanını döndürür.                  │
+    │ accessed() -> io::Result<SystemTime> │ Son erişim zamanını döndürür.                        │
+    │ created() -> io::Result<SystemTime>  │ Oluşturulma zamanını döndürür.                       │
+    └──────────────────────────────────────┴──────────────────────────────────────────────────────┘
+
+    Aşağıdaki örnekte dosyanın uzunluğu elde edilip yazdırılmıştır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::fs::{metadata};
+
+fn main() {
+    let md = metadata("test.txt").unwrap_or_else(|err| {
+        eprintln!("ERROR: {}", err);
+        std::process::exit(1);
+    });
+
+    println!("File length: {}", md.len());
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            132. Ders 02/09/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    read_dir isimli fonksiyon bir dizindeki dosyaları elde etmekte kullanılmaktadır. Fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn read_dir<P: AsRef<Path>>(path: P) -> Result<ReadDir>
+
+    Fonksiyon dizinin yol ifadesini parametre olarak alır, başarı durumunda ReadDir isimli yapı türünden değer geri döndürür. 
+    ReadDir yapısı bir iteratör görevi yapmaktadır. Bu ReadDir yapısı for döngüsü ile dolaşıldığında Result<DirEntry> değerleri 
+    elde edilmektedir. DirEntry yapısının file_name metodu dosyanın ismini, metatdata metodu ise Metadata türünden metadata 
+    bilgilerini vermektedir. Örneğin:
+
+    use std::fs::{read_dir, DirEntry};
+
+    fn main() {
+        let dir_iter = read_dir("c:/windows").unwrap_or_else(|err| {
+            eprintln!("ERROR: {}", err);
+            std::process::exit(1);
+        });
+
+        for der in dir_iter {
+            let de = match der {
+                Ok(de) => de,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    continue;
+                }
+            };
+
+            print!(" {:<30} ", de.file_name().to_string_lossy());
+            match de.metadata() {
+                Ok(metadata) => {
+                    if metadata.is_dir() {
+                        print!("{:>10}", "<DIR>");
+                    }
+                    else {
+                        print!("{:>10}", metadata.len());
+                    }
+                },
+                Err(err) => println!("{}", err)
+            }
+            println!();
+        }
+    }
+
+    Burada biz "Windows" dizini içerisindeki dizinleri ve dosyaları yazdırdık. Programın çıktısı aşağıdaki gibi olacaktır:
+
+    addins                              <DIR>
+    appcompat                           <DIR>
+    apppatch                            <DIR>
+    AppReadiness                        <DIR>
+    assembly                            <DIR>
+    bcastdvr                            <DIR>
+    bfsvc.exe                          147456
+    Boot                                <DIR>
+    bootstat.dat                        67584
+    Branding                            <DIR>
+    BrowserCore                         <DIR>
+    CbsTemp                             <DIR>
+    comsetup.log                          762
+    Core.xml                            23885
+    CoreSingleLanguage.xml              23461
+    csup.txt                               12
+    Cursors                             <DIR>
+    debug                               <DIR>
+    diagnostics                         <DIR>
+    DiagTrack                           <DIR>
+    DigitalLocker                       <DIR>
+    Downloaded Program Files            <DIR>
+    DPINST.LOG                         103336
+    DtcInstall.log                       2516
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    İşletim sistemlerinin dosya sistemlerinde dizin girişlerinin isimsel formatları farklıdır. Dosya isimlerinin taşınabilir 
+    bir biçimde ifade edilebilmesi için Rust'taki dosya işlemlerinde std::fffi modülü içerisinde OsString ve bunun dilimsel 
+    biçimi olan OsStr isimli iki tür bulundurulmuştur. Bu iki tür o anda hangi işletim sisteminde çalışılıyorsa o sistemin 
+    kurallarına göre değişebilmektedir. Örneğin bazı işletim sistemlerinde dosya isimleri UTF-8 kodlamasıyla tutulurken 
+    bazılarında UTF-16 kodlamasıyla tutulabilmektedir. Biz yukarıdaki örneklerde read_dir ile dizini dolaştığımızda dizin 
+    girişinin ismini DirEntry yapısının file_name metodu ile elde ettik. Bu metotun parametrik yapısına dikkat ediniz:
+
+    pub fn file_name(&self) -> OsString
+
+    Görüldüğü gibi bu metot dizin girişinin ismini String olarak değil OsString olarak vermektedir. Çünkü dosya isimlerinin 
+    temsili işletim sistemindne işletim sistemine değişebilmektedir. OsString türü String türüne oldukça benzemektedir. OsString 
+    türünden bir değeri String türüne dönüştürmek için into_string metodu kullanılmaktadır. Metodun parametrik yapısı şöyledir:
+
+    pub fn into_string(self) -> Result<String, OsString>;
+
+    OsString içerisindeki yazı UTF-8 formatıyla ifade ediilemiyorsa metot başarısız olmakydır. 
+
+    Örneğin:
+
+    let mut os = OsString::new();
+
+    os.push("a.dat");
+
+    let s = os.into_string().expect("cannot convert String");
+    println!("{}", s);
+
+    to_string_lossy metodu Deref<Target=OsString> trait'inden galmektedir. Bu metot eğer OsString içerisindeki yazı 
+    UTF-8 formatında geçerli değilse dönüştürmeyi yapar ancak geçersin karakterlere ? yerleştirir. Örneğin:
+
+    let mut os = OsString::new();
+    os.push("a.dat");
+
+    let s = os.to_string_lossy();
+    println!("{}", s);
+
+    Elimizde OsString türünden bir değer varsa biz doğrudan to_str metodu ile onu string dilim referansına dönüştürebiliriz. 
+    Metodun paramtrik yapısı şöyledir:
+
+    pub fn to_str(&self) -> Option<&str>
+
+    Örneğin:
+
+    let mut os = OsString::new();
+    os.push("a.dat");
+
+    let s: &str = os.to_str().expect("imvalid conversion!..");
+    println!("{}", s);
+
+    OsStr türü OsString türünün statik biçimi için düşünülmüştür. Başka bir deyişle String ile str arasındaki ilişki 
+    OSString ile OsStr arasındaki ilişki gibidir. OsStr türünden bir değer yaratılamaz. Ancak bir referans oluşturulabilir. 
+    Örneğin:
+
+    let os_str: &OsStr = OsStr::new("foo");
+
+    Burada os_str değişkeni aslında bir adres ve bir uzunluk tutmaktadır. Elimizde bir OsStr varsa OsSting yapısının from 
+    ilişkili fonksiyonu ile onu OsString türüne dönüştürebiliriz. Örneğin:
+
+    let os_str = OsStr::new("foo");
+    let os = OsString::from(os_str);
+
+    Benzer biçimde elimizde OsStr türünden bir değer varsa to_os_string metodu ile onu OsString türüne dönüştürebiliriz:
+
+    let os_str = OsStr::new("foo");
+    let os: OsString = os_str.to_os_string();
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Rust'taki dosya işlemlerinde yol ifadeleri söz konusu olduğunda ilgili fonksiyonlar yol ifadelerini AsRef<Path> türüyle 
+    almaktadır. Örneğin File yapısının open ilişkili fonksiyonunu anımsayınız:
+
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<File>
+
+    Bu fonksiyon generic bir fonksiyondur. Generic parametresi AsRef<Path> trait'ini desteklemek zorundadır. Anımsanacağı 
+    gibi AsRef<T> trait'i şöyle tanımlanmıştır:
+
+    pub trait AsRef<T>
+    where
+        T: ?Sized,
+    {
+        // Required method
+        fn as_ref(&self) -> &T;
+    }
+
+    Görüldüğü gibi trait'in as_ref isminde zorunlu bir metodu vardır. Bu metot çağrıldığında T türündne bir referans vermektedir. 
+    open ilişki fonksiyonun tür sınırlamasına dikkat ediniz:
+
+    <P: AsRef<Path>
+
+    O halde bir türün yol ifadesi olarka kullanılabilmesi için AsRef<Path> trait'ini destekliyor olması gerekir. Başka bir 
+    deyişle o tür içerisinde aşağıdaki gibi bir metodun bulunuyor olması gerekir:
+
+    fn as_ref(&self) -> &Path
+
+    AsRef<Path> trait'ini destekleyen önemli türler şunlardır:
+
+    ┌────────────────┬──────────────────────────────────────────────┐
+    │      Tür       │                   Açıklama                   │
+    ├────────────────┼──────────────────────────────────────────────┤
+    │ Path           │ Kimlik impl'i; &Path -> &Path                │
+    │ PathBuf        │ Sahipli (owned) path türü                    │
+    │ &OsStr         │ Platforma özgü string dilimi                 │
+    │ OsString       │ Sahipli OsStr                                │
+    │ &str           │ UTF-8 dilim; "a/b" literalleri buradan gelir │
+    │ String         │ Sahipli UTF-8 string                         │
+    │ Cow<'_, OsStr> │ Ödünç ya da sahipli OsStr                    │
+    │ Component<'_>  │ components() öğesi (tek bileşen)             │
+    │ Components<'_> │ Henüz tüketilmemiş kalan path'i verir        │
+    │ Iter<'_>       │ path::Iter; kalan path'i verir               │
+    └────────────────┴──────────────────────────────────────────────┘
+
+    Burada bizim için en önemli olan türler şunlardır: &str, String, &OsStr, OsString, Path ve PathBuf. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            133. Ders 16/09/2026 - Pazarteai
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------------- 
+    Yol ifadelerinin Path isimli türle temsil edildiğini gördük. Path std::path modülünde bir yapı biçiminde tanımlanmıştır. 
+    Path yapısı içerisinde pek çok faydalı metodu da barındırmaktadır. Örneğin bu yapı ile biz yol ifadelerini bileşenlerine 
+    ayırabiliriz. Path türünden bir değer oluşturabilmek için yine yapının new ilişkili fonksiyonu kullanılır. new fonksiyonun 
+    parametrik yapısı şöyledir:
+
+    pub fn new<S: AsRef<OsStr> + ?Sized>(s: &S) -> &Path
+
+    Görüldüğü gibi new ilişkili fonksiyonu generic bir fonksiyondur. OsStr türüne AsRef ile dönüştürme yapabilen herhangi 
+    bir türden referansı parametre olarak alabilmektedir. str ve String türleri AsRef<OsStr> trait'ini desteklemektedir. 
+    Örneğin:
+
+    let path: &Path = Path::new(r"c:\temp\test.txt");
+
+    Path::new çağrısı ile Path türünden değer elde elde edilmemektedir, &Path türünden değer elde edilmektedir. Path türü 
+    tıpkı str ve OsStr türleri gibi unsized bir türdür. Yani aslında &Path referansı şişman bir göstericidir ve bir dilim 
+    referansı gibidir. Kendi içerisinde adres ve uzunluk tutmaktadır. 
+
+    Path yapısının yol bileşenlerini elde etmek için üç metodu vardır: file_name, file_stem, file_prefix ve extension. file_name 
+    uzantısıyla birlikte yol ifadesinin son bileşenini, file_stem yalnızca son bileşenein ismini, file_prefix önceki bileşenlerin 
+    hepsini, extension ise sonb bileşenin uzantısını vermektedir. Bu metotların parametrik yapıları şöyledir:
+    şöyledir:
+
+    pub fn file_name(&self) -> Option<&OsStr>
+    pub fn file_stem(&self) -> Option<&OsStr>
+    pub fn file_prefix(&self) -> Option<&OsStr>
+    pub fn extension(&self) -> Option<&OsStr>
+
+    Görüldüğü gibi bu metotların hepsi başarısız olma potansiyeline sahiptir. Bu nedenle geri dönüş değerleri Option<&OsStr> 
+    türündendir. Anımsayacağınız gibi OsStr türünü &str türüne dönüştürmek için to_str metodu kullanılıyordu. Bu metot da Option<&str>
+    veriyordu. Örneğin:
+
+    use std::path::Path;
+
+    fn main() {
+        let path = Path::new(r"c:\temp\test.txt");
+        let file_name = path.file_name().unwrap();
+        let file_stem = path.file_stem().unwrap();
+        let extension = path.extension().unwrap();
+
+
+        println!("{}", file_name.to_str().unwrap());        // test.txt
+        println!("{}", file_stem.to_str().unwrap());        // test
+        println!("{}", extension.to_str().unwrap());        // txt
+    }
+        
+    Bir Path değerinin belirttiği yol ifadesine ilişkin dizin girişinin var olup olmadığı Path yapısının exists metodu ile tespit 
+    edilebilir. Metodun parametrik yapısı şöyledir:
+
+    pub fn exists(&self) -> bool
+
+    Örneğin:
+
+    use std::path::Path;
+
+    fn main() {
+        let path = Path::new(r"test.txt");
+
+        println!("{}", if path.exists() {"exists"} else {"doesn't exist"});
+    }
+
+    Path yapısının starts_with metodu yol ifadesinin belli bir önekle başlayıp başlamadığını, ends_with metodu belli bir önekle bitip 
+    bitmediğini belirlemekte kullanılır. Bu metotların parametrik yapıları şöyledir:
+
+    pub fn starts_with<P: AsRef<Path>>(&self, base: P) -> bool
+    pub fn ends_with<P: AsRef<Path>>(&self, child: P) -> bool
+
+    Örneğin:
+
+    use std::path::Path;
+
+    fn main() {
+        let path = Path::new(r"c:\windows\test.txt");
+
+        println!("{}", if path.starts_with(r"c:\windows") {"Ok"} else {"Not Ok"});      // Ok
+    }
+
+    Yapının components metodu bir iteratör verir. Bu iteratör dolaşıldıkça Component isimli bir enum elde edilir. Bu enum 
+    şöyle tanımlanmıştır:
+
+    pub enum Component<'a> {
+        Prefix(PrefixComponent<'a>),
+        RootDir,
+        CurDir,
+        ParentDir,
+        Normal(&'a OsStr),
+    }
+
+    Örneğin:
+
+    use std::path::{Path, Component};
+
+    fn main() {
+        let path = Path::new(r"c:\windows\..\test.txt");
+
+        for c in path.components() {
+            match c {
+                Component::Prefix(pc) => println!("prefix: {}", pc.as_os_str().to_str().unwrap()),
+                Component::RootDir => println!("root dir"),
+                Component::CurDir => println!("current dir"),
+                Component::ParentDir => println!("parent dir"),
+                Component::Normal(s) => println!("normal: {}", s.to_str().unwrap())
+            }
+        }
+    }
+
+    iter metodu da iterator vermektedir. Ancak iter metodu ile dolaşım yapılırken yok bileşenleri &OsStr türündne elde 
+    edilmektedir. Örneğin:
+
+    use std::path::{Path, Component};
+
+    fn main() {
+        let path = Path::new(r"c:\windows\..\test.txt");
+
+        for c in path.iter() {
+        println!("{}", c.to_str().unwrap());
+        }
+    }
+
+    Burada ekranda sırasıyla şunlar görünecektir:
+
+    c:
+    \
+    windows
+    ..
+    test.txt
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Path türü str türüne benzetilebilir. Anımsanacağı gibi Path türünden bir değer yaratılamamktadır, ancak bir referans 
+    yaratılmaktadır. Biz &Path türü ile onun belirttiği yok ifadesinde bir değişilik yapamayız. İşte nasıl str türü için
+    String isimli bir yapı türü varsa, Path türü için de PathBuf isimli bir yapı türü vardır. Biz bir PathBuf değeri oluşturup 
+    onun belirtitği yol bileşenleri üzerinde değişiklikler yapabiliriz. 
+
+    Bir PathBuf değeri yine yapının new ilişkili fonksiyonu ile yaratılabilir:
+
+    pub const fn new() -> PathBuf
+
+    new ilişkili fonksiyonunun parametresiz olduğuna dikkat ediniz. Bu fonksiyon içi boş bir Path değeri yaratmaktadır. 
+    push metodu PathBuf yapısına yeni bir yol ifadesi eklemektedir:
+
+    pub fn push<P: AsRef<Path>>(&mut self, path: P)
+
+    Örneğin:
+
+    use std::path::{PathBuf};
+
+    fn main() {
+        let mut pb = PathBuf::new();
+
+        pb.push("/home/kaan/test.txt");
+        println!("{}", pb.as_path().to_str().unwrap());     // /home/kaan/test.txt
+    }
+
+    pop metodu da yol ifadesinin son bileşenini kırmaktadır:
+
+    pub fn pop(&mut self) -> bool
+
+    Örneğin:
+
+    let mut pb = PathBuf::new();
+
+    pb.push("/home/kaan/test.txt");
+    println!("{}", pb.as_path().to_str().unwrap());     // /home/kaan/test.txt
+    pb.pop();
+    println!("{}", pb.as_path().to_str().unwrap());     // /home/kaan
+
+    clear metodu PathBuf içerisindeki yol ifadesini silmektedir. add_extension metodu yol ifadesinin sonuna bir uzantgı 
+    eklemektedir. 
+
+    PathBuf yapısı Deref<Target=Path> trait'ini desteklediği için adresi alınarak bundan bir &Path değeri elde edilebilmektedir. 
+    Örneğin:
+
+    let mut pb = PathBuf::new();
+    pb.push("/home/kaan/test.txt");
+
+    let p: &Path = &pb;
+
+    PatBuf yapısının set_file_name metodu dosyanın ismini, set_extension metodu da uzantısını oluşturmaktadır. Örneğin:
+
+    let mut pb = PathBuf::new();
+
+    pb.set_file_name("test");
+    pb.set_extension("dat");
+    println!("{}", pb.as_path().to_str().unwrap());     // test.dat
+
+    PathBuf yapısının başka pek çok metodu da vardır. Bunlar için "The Rust Standard Library" dokğmanlarına başvurabilirsiniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bu bölümde Rust'ta "birlikler (union)" konusu üzerinde duracağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta birlikler tıpkı C'de olduğu gibi alanların çakışık yerleştirildiği veri yapılarıdır. Biz enum türünün de elemanlarının
+    çakışık yerleştirildiğini görmüştük. Doğal olarak "mademki enum türü de birlik gibi çakışık yerleştiriliyor, o zaman 
+    birliklere ne gerek var?" sorusu aklınıza gelebilir. Rust'ın enum türü kalıp uyuşumu ile çalışan daha karmaşık bir türdür. 
+    enum türünde kalıp uyuşumu için enum varyantının hangisinin set edildiğini belirten bir "ayırıcı değerin de (discriminant)"
+    değişken içerisinde yer kapladığını anımsayınız. Rust'ın birlikleri C'nin birliklerine benzemektedir. Dolayısıyla bir 
+    birlik türünden değerde bir ayırıcı değer bulundurulmaz. Rust'ın birlikleri özellikle C ile etkileşim amacıyla bulundurulmuştur. 
+    Aşağıdaki tabloda Rust'taki enum türüyle union türü arasındaki farklılıklar belirtilmektedir:
+
+    ┌────────────────┬──────────────────────────┬─────────────────────────────┐
+    │                │     Etiketli birlik      │       Etiketsiz birlik      │
+    │                │      (tagged union)      │       (untagged union)      │
+    ├────────────────┼──────────────────────────┼─────────────────────────────┤
+    │ Rust karşılığı │ enum                     │ union                       │
+    ├────────────────┼──────────────────────────┼─────────────────────────────┤
+    │ Aktif varyantı │ Evet — gizli bir ayırıcı │ Hayır — aktif alan bilgisi  │
+    │ saklar mı?     │ (discriminant) tutar     │ tutulmaz                    │
+    ├────────────────┼──────────────────────────┼─────────────────────────────┤
+    │ Güvenlik       │ Tamamen güvenli; match   │ Alan okuma unsafe;          │
+    │                │ derleyici tarafından     │ geçerlilik programcıda      │
+    │                │ denetlenir               │                             │
+    ├────────────────┼──────────────────────────┼─────────────────────────────┤
+    │ Boyut          │ En büyük varyant +       │ En büyük alan (+ hizalama); │
+    │                │ ayırıcı (+ hizalama)     │ ayırıcı değer yok           │
+    ├────────────────┼──────────────────────────┼─────────────────────────────┤
+    │ Ana kullanım   │ Sıradan Rust modellemesi │ FFI, düşük seviye, tip      │
+    │                │                          │ yeniden yorumlama           │
+    └────────────────┴──────────────────────────┴─────────────────────────────┘
+
+    Bir birlik union anahtar sözcüğüyle tanımlanır. Alan bildirimleri yapılarla aynıdır. Örneğin:
+
+    union U {
+        a: i32,
+        b: i64,
+        c: [u8; 12]
+    }
+
+    Burada birliğin üç alanı vardır. Bu alanlar tıpkı C'de olduğu gibi çakışık yerleştirilmektedir. Bir birlik türünden 
+    değer için C'de olduğu gibi birliği en büyük elemanı kadar yer ayrılmaktadır. Örneğin:
+
+    fn main() {
+        println!("{}", std::mem::size_of::<U>());       // 16
+    }
+
+    union U {
+        a: i32,
+        b: i64,
+        c: [u8; 12]
+    }
+
+    Birliün alanları herhangi bir türden olamaz. Birlik alanları Copy türünden olmak zorundadır. Ancak Copy türünden 
+    dizi ve demet de içerebilir. Birlik alanları gösterici ve referans da olabilir. Örneğin:
+
+    union U {
+        a: i32,
+        b: i64,
+        c: Sample       // error!
+    }
+
+    struct Sample {
+        name: &'static str,
+        no: i32
+    }
+
+    Ancak örneğin:
+
+    union U {
+        a: i32,
+        b: i64,
+        c: Sample       // geçerli
+    }
+
+    #[derive(Copy, Clone)]
+    struct Sample {
+        name: &'static str,
+        no: i32
+    }
+
+    Örneğin:
+
+    union U<'a> {
+        a: i32,
+        b: i64,
+        c: &'a Sample
+    }
+
+    struct Sample {
+        name: &'static str,
+        no: i32
+    }
+
+    Bu örnekte yapı Copy türünden değildir. Ancak birlik elemanı bir referanstır. 
+
+    Bir birlik türünden değişken bildirilirken birliğin yalnızca tek bir alanına değer verilebilir. Örneğin:
+
+    union U {
+        a: i32,
+        b: f64,
+        c: [i32; 3]
+    }
+    //...
+
+    let x = U {b: 10.2};
+    let y = U {c: [10, 20, 30]};
+
+    Birlik alanlarına erişim yine nokta operatöryle yapılmaktadır. Ancak değer verilmemiş elemana eişilirse derleyici 
+    tarafından bir kontrol yapılmadığından dolayı tanımsız davranış oluşur. Bu nedenle erişim her zaman unsafe blok 
+    içerisinden yapılmak zorundadır. Örneğin:
+
+    let x = U { a: 10 };
+
+    unsafe {
+        println!("{}", x.a);
+    }
+
+    Tabii birlikler de ilişkili fonksiyonlara ve metotlara sahip olabilir. Örneğin:
+
+    union U {
+        a: i32,
+        b: f64,
+        c: [i32; 3]
+    }
+
+    impl U {
+        fn foo(&self) {
+            println!("foo");
+        }
+    }
+
+    Burada foo U birliğinin bir metodudur. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Her ne kadar Rust'taki birlikler C'deki gibi çakışık yerleştiriliyorsa da bunların çakışıklığının biçimi C'deki ile 
+    aynı olmak zorunda değildir. Bu nedenle Rust ile C arasında bir etkileşim kurulacaksa #[repr(C)] özniteliğinin birliğe 
+    iliştirilmesi gerekir. Örneğin:
+
+    #[repr(C)]
+    union U {
+        a: i32,
+        b: f64,
+        c: [i32; 3]
+    }
+
+    Birlikler alanlarını drop etmez. Eğer böyle bir şeye gereksinim duyuluyorsa birlik için Drop trait'inin desteklenmesi 
+    ve drop metodunun yazılması gerekir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                          
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            GEÇİCİ NOTLAR
+---------------------------------------------------------------------------------------------------------------------------*/
+
