@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                        Son Güncelleme: 18/08/2026 - Salı
+                                        Son Güncelleme: 19/09/2026 - Pazar
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -20082,7 +20082,6 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
     (shrinkers) de işleme sokmaktadır.
     
     Biz birinci evreye "sayfa geri alımı (page reclaim)", ikinci evreye ise "dilim geri alımı (slab reclaim)" diyeceğiz. 
-
     Aşağıda birinci ve ikinci işlemi "evre 1" ve "evre 2" diye isimlendirerek ayrıntılı akışı veriyoruz:
 
     shrink_node()                                                mm/vmscan.c
@@ -20179,151 +20178,150 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
 
     Bu akışı şekilsel olarak da şöyle betimleyebiliriz:
 
-                                  Bellek baskısı
-                    ┌───────────────────┴───────────────────┐
-                    ▼                                       ▼
-            kswapd (arka plan)                    doğrudan geri alım
-            balance_pgdat()                       __alloc_pages_slowpath()
-                    │                               try_to_free_pages()
-                    └───────────────────┬───────────────────┘
-                                        ▼
-                              ┌───────────────────┐
-                              │   shrink_node()   │
-                              └───────────────────┘
-                                        │
-                                        ▼
-                              shrink_node_memcgs()
-                                        │
-                    ┌───────────────────┴────────────────────┐
-                    │ her memcg için sırayla EVRE 1 → EVRE 2 │
-                    └───────────────────┬────────────────────┘
-                                        │
- ══════════════════════════════ EVRE 1 ═╪══════════════════════════════════
-   SAYFA geri alımı                     │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │ shrink_lruvec(lruvec,sc)│
-                          └─────────────────────────┘
-                                        │
-                                        ▼
-                        get_scan_count(lruvec, sc, nr)
-                     (anon/file dengesi, swappiness, priority)
-                                        │
-                                        ▼
-                  while (nr[...]) → for_each_evictable_lru(lru)
-                                        │
-              ┌─────────────────────────┼─────────────────────────┐
-              ▼                         ▼                         ▼
-      shrink_list(              shrink_list(              shrink_list(
-       ACTIVE_FILE)              INACTIVE_FILE)            INACTIVE_ANON)
-              │                         │                         │
-              ▼                         │                         │
-      shrink_active_list()              │                         │
-      • PG_referenced / PTE young       │                         │
-      • sadece DEACTIVATE, return 0     │                         │
-              │                         │                         │
-              └──► INACTIVE_FILE ───────┤                         │
-                                        ▼                         ▼
-                      ┌───────────────────────────────────────────────┐
-                      │           shrink_inactive_list()              │
-                      └───────────────────────────────────────────────┘
-                                        │
-                                        ▼
-                        isolate_lru_folios()   ← LRU kuyruğundan koparma
-                                        │
-                                        ▼
-                             shrink_folio_list()
-                                        │
-                                        ▼
-                        folio_check_references(folio, sc)
-                                        │
-              ┌─────────────────────────┼─────────────────────────┐
-              ▼                         ▼                         ▼
-        FOLIOREF_ACTIVATE         FOLIOREF_KEEP           FOLIOREF_RECLAIM
-              │                         │                         │
-              ▼                         ▼                         ▼
-      ACTIVE listeye terfi     INACTIVE'e geri rotate     __remove_mapping()
-      (PG_referenced set)      (PG_referenced set)                │
-                                                                  ▼
-                            ┌─────────────────────────────────────────────┐
-                            │ __filemap_remove_folio(folio, shadow);      │
-                            │ if (mapping_shrinkable(mapping))            │
-                            │         inode_lru_list_add(mapping->host);  │
-                            └─────────────────────────────────────────────┘
-                                        │                    │
-                              sayfa serbest bırakıldı        │ ★ BESLEME
-                              (sc->nr_reclaimed++)           │ son folio gittiyse
-                                                             │ inode, s_inode_lru'ya
-                                                             │ girer ve artık
-                                                             │ mapping_empty() true
-                                        ┌────────────────────┘
- ══════════════════════════════ EVRE 2 ═╪══════════════════════════════════
-   SLAB geri alımı                      │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │ shrink_slab(gfp_mask,   │
-                          │   nid, memcg, priority) │
-                          └─────────────────────────┘
-                                        │
-                                        ▼
-                    do_shrink_slab()  →  kayıtlı her shrinker için
-                                        │
-                                        ▼
-                          ┌─────────────────────────┐
-                          │   super_cache_scan()    │
-                          └─────────────────────────┘
-                                        │
-                        !(gfp_mask & __GFP_FS) → SHRINK_STOP
-                                        │
-                        nr_to_scan'i üç önbelleğe orantıla
-                                        │
-              ┌─────────────────────────┼─────────────────────────┐
-              ▼                         ▼                         ▼
-      prune_dcache_sb()         prune_icache_sb()        free_cached_objects()
-      ① ÖNCE dcache                     │                  (FS'e özgü)
-        (dentry inode'u tutar)          ▼
-              │             list_lru_shrink_walk(&sb->s_inode_lru,
-              │                        sc, inode_lru_isolate, &freeable)
-              │                         │            ▲
-              └──► dput() → iput() ─────┤            └── ★ EVRE 1'den gelen
-                   (inode LRU'ya girer) │                   inode'lar
-                                        ▼
-                          ┌─────────────────────────┐
-                          │   inode_lru_isolate()   │
-                          └─────────────────────────┘
-                                        │
-        ┌───────────────┬───────────────┼───────────────┬───────────────┐
-        ▼               ▼               ▼               ▼               ▼
-    LRU_SKIP      LRU_REMOVED      LRU_ROTATE      LRU_RETRY      LRU_REMOVED
-   trylock         kullanımda/     I_REFERENCED    !mapping_       ★ UYGUN
-   başarısız       kirli → tembel  → biti temizle,  empty()        I_FREEING set
-                   çıkarma         kuyruğa taşı    (HIGHMEM)       + freeable'a taşı
-                                                   invalidate_            │
-                                                   mapping_pages()        │
-                                                                          ▼
-                                                          ┌───────────────────────┐
-                                                          │ dispose_list(&freeable)│
-                                                          └───────────────────────┘
-                                                                          │
-                                                                          ▼
-                                                                  evict(inode)
-                                                                          │
-                                                    ┌─────────────────────┴──────┐
-                                                    ▼                            ▼
-                                          op->evict_inode()        truncate_inode_pages_final()
-                                                    │                     clear_inode()
-                                                    └─────────────────────┬──────┘
-                                                                          ▼
-                                                                 destroy_inode()
-                                                             (slab'e geri verilir)
+                                    Bellek baskısı
+                        ┌───────────────────┴───────────────────┐
+                        ▼                                       ▼
+                kswapd (arka plan)                    doğrudan geri alım
+                balance_pgdat()                       __alloc_pages_slowpath()
+                        │                               try_to_free_pages()
+                        └───────────────────┬───────────────────┘
+                                            ▼
+                                ┌───────────────────┐
+                                │   shrink_node()   │
+                                └───────────────────┘
+                                            │
+                                            ▼
+                                shrink_node_memcgs()
+                                            │
+                        ┌───────────────────┴────────────────────┐
+                        │ her memcg için sırayla EVRE 1 → EVRE 2 │
+                        └───────────────────┬────────────────────┘
+                                            │
+    ══════════════════════════════  EVRE 1 ═╪══════════════════════════════════
+    SAYFA geri alımı                        │
+                                            ▼
+                            ┌─────────────────────────┐
+                            │ shrink_lruvec(lruvec,sc)│
+                            └─────────────────────────┘
+                                            │
+                                            ▼
+                            get_scan_count(lruvec, sc, nr)
+                        (anon/file dengesi, swappiness, priority)
+                                            │
+                                            ▼
+                    while (nr[...]) → for_each_evictable_lru(lru)
+                                            │
+                ┌─────────────────────────┼─────────────────────────┐
+                ▼                         ▼                         ▼
+        shrink_list(              shrink_list(              shrink_list(
+        ACTIVE_FILE)              INACTIVE_FILE)            INACTIVE_ANON)
+                │                         │                         │
+                ▼                         │                         │
+        shrink_active_list()              │                         │
+        • PG_referenced / PTE young       │                         │
+        • sadece DEACTIVATE, return 0     │                         │
+                │                         │                         │
+                └──► INACTIVE_FILE ───────┤                         │
+                                            ▼                         ▼
+                        ┌───────────────────────────────────────────────┐
+                        │           shrink_inactive_list()              │
+                        └───────────────────────────────────────────────┘
+                                            │
+                                            ▼
+                            isolate_lru_folios()   ← LRU kuyruğundan koparma
+                                            │
+                                            ▼
+                                shrink_folio_list()
+                                            │
+                                            ▼
+                            folio_check_references(folio, sc)
+                                            │
+                ┌─────────────────────────┼─────────────────────────┐
+                ▼                         ▼                         ▼
+            FOLIOREF_ACTIVATE         FOLIOREF_KEEP           FOLIOREF_RECLAIM
+                │                         │                         │
+                ▼                         ▼                         ▼
+        ACTIVE listeye terfi     INACTIVE'e geri rotate     __remove_mapping()
+        (PG_referenced set)      (PG_referenced set)                │
+                                                                    ▼
+                                ┌─────────────────────────────────────────────┐
+                                │ __filemap_remove_folio(folio, shadow);      │
+                                │ if (mapping_shrinkable(mapping))            │
+                                │         inode_lru_list_add(mapping->host);  │
+                                └─────────────────────────────────────────────┘
+                                            │                    │
+                                sayfa serbest bırakıldı        │ ★ BESLEME
+                                (sc->nr_reclaimed++)           │ son folio gittiyse
+                                                                │ inode, s_inode_lru'ya
+                                                                │ girer ve artık
+                                                                │ mapping_empty() true
+                                            ┌────────────────────┘
+    ══════════════════════════════ EVRE 2 ═╪══════════════════════════════════
+    DİLİM geri alımı                     │
+                                            ▼
+                            ┌─────────────────────────┐
+                            │ shrink_slab(gfp_mask,   │
+                            │   nid, memcg, priority) │
+                            └─────────────────────────┘
+                                            │
+                                            ▼
+                        do_shrink_slab()  →  kayıtlı her shrinker için
+                                            │
+                                            ▼
+                            ┌─────────────────────────┐
+                            │   super_cache_scan()    │
+                            └─────────────────────────┘
+                                            │
+                            !(gfp_mask & __GFP_FS) → SHRINK_STOP
+                                            │
+                            nr_to_scan'i üç önbelleğe orantıla
+                                            │
+                ┌─────────────────────────┼─────────────────────────┐
+                ▼                         ▼                         ▼
+        prune_dcache_sb()         prune_icache_sb()        free_cached_objects()
+        ① ÖNCE dcache                     │                  (FS'e özgü)
+            (dentry inode'u tutar)          ▼
+                │             list_lru_shrink_walk(&sb->s_inode_lru,
+                │                        sc, inode_lru_isolate, &freeable)
+                │                         │            ▲
+                └──► dput() → iput() ─────┤            └── ★ EVRE 1'den gelen
+                    (inode LRU'ya girer) │                   inode'lar
+                                            ▼
+                            ┌─────────────────────────┐
+                            │   inode_lru_isolate()   │
+                            └─────────────────────────┘
+                                            │
+            ┌───────────────┬───────────────┼───────────────┬───────────────┐
+            ▼               ▼               ▼               ▼               ▼
+        LRU_SKIP      LRU_REMOVED      LRU_ROTATE      LRU_RETRY      LRU_REMOVED
+    trylock         kullanımda/     I_REFERENCED    !mapping_       ★ UYGUN
+    başarısız       kirli → tembel  → biti temizle,  empty()        I_FREEING set
+                    çıkarma         kuyruğa taşı    (HIGHMEM)       + freeable'a taşı
+                                                    invalidate_            │
+                                                    mapping_pages()        │
+                                                                            ▼
+                                                            ┌───────────────────────┐
+                                                            │ dispose_list(&freeable)│
+                                                            └───────────────────────┘
+                                                                            │
+                                                                            ▼
+                                                                    evict(inode)
+                                                                            │
+                                                        ┌─────────────────────┴──────┐
+                                                        ▼                            ▼
+                                            op->evict_inode()        truncate_inode_pages_final()
+                                                        │                     clear_inode()
+                                                        └─────────────────────┬──────┘
+                                                                            ▼
+                                                                    destroy_inode()
+                                                                (dilime'e geri verilir)
 
 ----------------------------------------------------------------------------------------------------------------------*/
     
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi "Evre 1" üzerinde duralım. Sayfa önbelleğindeki sayfaların geri alım süreci zaman içerisinde iyileştirilmiş 
-    ve geliştirilmiştir. Güncel çekirdeklerde bu "Evre 1" işlemleri  shrink_lruvec fonksiyonu tarafından yapılmaktadır. 
-    Geri alınacak sayfalar ayrı LRU listelerinde tutulmaktadır. Çekirdeğin bu konudaki evrimini aşağıdaki tabloyla 
-    özetlemek istiyoruz:
+    Şimdi "Evre-1" üzerinde duralım. Sayfa önbelleğindeki sayfaların geri alım süreci zaman içerisinde iyileştirilmiş 
+    ve geliştirilmiştir. Güncel çekirdeklerde bu "Evre-1" işlemleri shrink_lruvec fonksiyonu tarafından yapılmaktadır. 
+    Çekirdeğin bu konudaki evrimini aşağıdaki tabloyla özetlemek istiyoruz:
 
     ┌────────┬─────────────────────────────────────────────────┐
     │ Sürüm  │                   Değişiklik                    │
@@ -20337,8 +20335,28 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
     │ 6.1    │ MGLRU (lruvec.lrugen)                           │
     └────────┴─────────────────────────────────────────────────┘
         
+    Geri alım için geri alımı yapılabilecek olan (her sayfanın geri alımının mümkün olmadığını anımsayınız) sayfalar 
+    LRU listelerinde tutulmaktadır. LRU listelerinde tutulan sayfalar şunlardır:
+
+    - Anonim sayfalar ("heap", "stack", "private mapping'ler", "copy on write (COW)" kopyaları).
+    - Sayfa önbelleğindeki sayfalar (dosya içeriği taşıyan sayfalar,`mmap edilmiş olsun ya da olmasın).
+    - "shmem/tmpfs" sayfaları (çekirdek bunları *anon* gibi takasa çıkarabilir ama*sayfa önbelleğinde tutar).
+    - Takas önbelleğindeki sayfalar (takas önbelleğini takas işlemlerini anlattığımız bölümde ele alacağız).
+
+    Aşağıdaki sayfalar bu LRU lsitelerinde tutulmamaktadır:
+
+    - Dilim önbelleğine ilişkin sayfalar. (Yani kmem_cache_alloc ve dolayısıyla kmalloc ile tahsis edilmiş olan sayfalar.)
+    - Sayfa tablolarına ilişkin sayfalar.
+    - Çekirdek "stack" alanları.
+    - vmalloc ve türevileri ile tahsis edilen (yani vmalloc alanında tahsis edilen) sayfalar).
+    - İkiz blok tahsisat sisteminde boşta duran sayfalar.
+    - "Reserved" olarak işaretlenmiş sayfalar.
+
+    Bunların bir kısmı hiç geri alınamaz; dilim önbelleğindeki olanlar ise LRU üzerinden değil Evre-2'de açıklayacağımız 
+    "büzücüler (shrinkers)" yoluyla küçültülmektedir.
+    
     Güncel çekirdeklerde sayfalara ilişkin LRU listeleri eğer CONFIG_MEMCG konfigürsyon seçeneği aktif değilse pglist_data 
-    nesnesinde aktifse mem_cgroup nesnesinin içerisinde tutulmaktadır:
+    nesnesinde, aktifse mem_cgroup nesnesinin içerisinde tutulmaktadır:
 
     pg_data_t (node N)
     └─ __lruvec ........................... yalnızca !CONFIG_MEMCG
@@ -20346,15 +20364,15 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
     mem_cgroup
     └─ nodeinfo[nid] → mem_cgroup_per_node
         ├─ lruvec
-        │   ├─ lists[NR_LRU_LISTS] ....... asıl LRU listeleri
+        │   ├─ lists[NR_LRU_LISTS] ...... asıl LRU listeleri
         │   ├─ lru_lock ................. listeleri koruyan kilit
         │   └─ lrugen ................... CONFIG_LRU_GEN ise
         └─ lru_zone_size[MAX_NR_ZONES][NR_LRU_LISTS]
 
-    Biz daga önce de "memory cgroup" kavramından bellek yönetiminde üstünkörü bahsetmiştik. Bu mekanizma "docker" gibi 
-    container teknolojilerinin geçrçekleştirilmesi için bir grup cgroup mekanizmasıyla birlikte kullanılmaktadır. 
-    Biz kurusumuzda container oluşturabilmek için gereken çekirdke altyapısını ayrı bir bölümde ele alacağız. LRU 
-    listelerinin nerede tutulduğu yeri aşağıda bir tablo halinde de veriyoruz:
+    Biz daha önce de "memory cgroup" kavramından bellek yönetiminde üstünkörü bahsetmiştik. Bu mekanizma "docker" gibi 
+    "container" teknolojilerinin geçekleştirilmesi için diğer cgroup mekanizmalarıyla birlikte kullanılmaktadır. 
+    Biz kursumuzda "container" oluşturabilmek için gereken çekirdek altyapısını ayrı bir bölümde ele alacağız. LRU 
+    listelerinin tutulduğu yeri ve bunlara erişim fonksiyonlarını aşağıda bir tablo halinde de veriyoruz:
     
     ┌──────────────┬─────────────────────────────────┬────────────────────────────┐
     │    Bağlam    │              Alan               │           Dosya            │
@@ -20431,13 +20449,13 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
     ├───────────────────┼───────┼────────────────────────────┤
     │ LRU_INACTIVE_ANON │   0   │ Anonim, inactive           │
     │ LRU_ACTIVE_ANON   │   1   │ Anonim, active             │
-    │ LRU_INACTIVE_FILE │   2   │ Dosya/page cache, inactive │
-    │ LRU_ACTIVE_FILE   │   3   │ Dosya/page cache, active   │
+    │ LRU_INACTIVE_FILE │   2   │ Sayfa önbelleği, inactive  │
+    │ LRU_ACTIVE_FILE   │   3   │ Sayfa önbelleği, active    │
     │ LRU_UNEVICTABLE   │   4   │ mlock'lu / geri alınamaz   │
     └───────────────────┴───────┴────────────────────────────┘
 
     Bir folio nesnesi bu LRU bağlı listelerinin yalnızca birinde bulunmaktadır. folio yapısının lru elemanı bu bağlı 
-    listelerin düğümlerini belirtmektedir. 
+    listelerin düğümlerini oluşturmaktadır:
 
     struct folio {
         /* ... */
@@ -20450,28 +20468,26 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
         /* ... */
     };
 
-    Peki bir NUMA düğümünde ya da memcg'de neden tek bir LRU listesi yoktur da farklı beş tane LRU listesi bulunmaktadır. 
-    İşte sayfa önbelleğindeki bir sayfanın geri alınma maliyeti aynı değildir. Örneğin bir sayfa (genel olarak folio)
-    eğer mmap fonksiyonuyla "anonin (anonymous)" biçimde tahsis edilmişse bu sayfa geri alınırken eğer kirli değilse 
+    Peki bir NUMA düğümünde ya da memcg'de neden tek bir LRU listesi yoktur da farklı beş tane LRU listesi bulunmaktadır? 
+    İşte sayfa önbelleğindeki her sayfanın geri alınma maliyeti aynı değildir. Örneğin bir sayfa (genel olarak folio)
+    eğer mmap fonksiyonuyla "anonim (anonymous)" biçimde tahsis edilmişse bu sayfa geri alınırken eğer kirli değilse 
     "takas dosyasına (swap file)" geri yazılmak zorundadır. Ancak eğer sayfa bir dosyaya ilişkinse (yani anonim değilse) 
     ve kirli değilse bu durumda geri alınan sayfanın takas dosyasına yazılması gerekmez. Çünkü zaten o bilgiler ilgili 
-    dosyanın içerisinde bulunmaktadır. İşte yukarıdaki LRU liste türlerinde _ANON sonekiyle biten iki tür anonim sayfaalr 
-    için LRU listesii _FILE sonekiyle biten iki tür ise dosyaya ilişkin sayfalar için LRU listesi oluşturmaktadır. 
-    Bu iki tür LRU listesi aynı zamanda "aktif" ve "aktif olmayan" biçiminde ikiye ayrılmaktadır. 
+    dosyanın içerisinde bulunmaktadır. İşte yukarıdaki LRU liste türlerinde _ANON sonekiyle biten iki tür anonim sayfalar 
+    için LRU listesi, _FILE sonekiyle biten iki tür ise dosyalara ilişkin sayfalar için LRU listesi belirtmektedir. 
+    Bu iki tür LRU listesi aynı zamanda "aktif olan" ve "aktif olmayan" biçiminde ikiye ayrılmaktadır. 
 
     Yukarıda anonim ve dosya tabanlı biçimde tahsis edilmiş sayfaların (genel olarak folio'ların) aktif ve aktif olmayan 
-    biçiminde ik ayrı listede tutulduğu belirttik. Aktif olmayan liste "ikinci şans (second chance)" denilen durum 
-    için oluşturulmuştur. Aktif olmayan listede bulunan bir sayfaya (genel olarak folio) dokunulduğunda bu sayfa aktif 
-    listeye alınmaktadır. (Normal LRU bağlı listelerinde). Bir folio nesnesinin bellek baskısı altında geri alınmaması 
-    için en az iki kez referans edilmiş olması gerekir. Aktif olmayan liste bellek baskısı altında ilk geri alınacak 
-    listedir. Aktif liste ise geri alımı geciktirilen ancak yoğun bellek baskısı söz konusu olduğunda geri alım yapılan
-    listedir:
+    biçiminde iki ayrı listede tutulduğunu belirttik. Aktif olmayan liste "ikinci şans (second chance)" denilen durum 
+    için oluşturulmuştur. Aktif olmayan listede bulunan bir sayfaya (genel olarak folio'ya) dokunulduğunda bu sayfa aktif 
+    listeye alınmaktadır. Aktif olmayan liste bellek baskısı altında ilk geri alınacak listedir. Aktif liste ise geri alımı 
+    geciktirilen ancak yoğun bellek baskısı söz konusu olduğunda geri alım yapılan listedir:
 
     Aktif olmayan liste = aday havuzu (kuyruk sonu = ilk kurban)
-    Active liste  = working set  (yaşlanmaz, sadece basınç altında budanır)
+    Actif liste  = working set  (yaşlanmaz, sadece basınç altında budanır)
     
-    LRU_UNEVICTABLE listesi geri alınamaz bir listedir. Bir floio üzerinde işlem yapılırken folio kilitlendiğinde 
-    geri bu listeye alınmaktadır. Kilitli folio'ların geri alınması bozucu etkilere yol açmaktadır. 
+    LRU_UNEVICTABLE listesi geri alınamaz bir listedir. Bir folio üzerinde işlem yapılırken folio kilitlendiğinde 
+    bu listeye alınmaktadır. Kilitli folio'ların geri alınması bozucu etkilere yol açmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
