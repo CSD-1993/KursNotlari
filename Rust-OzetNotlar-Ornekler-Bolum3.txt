@@ -17,7 +17,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 19/08/2026 - Çarşamba
+                                            Son Güncelleme: 23/09/2026 - Salı
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -1783,7 +1783,7 @@ fn main() {
         c: [u8; 12]
     }
 
-    Birliün alanları herhangi bir türden olamaz. Birlik alanları Copy türünden olmak zorundadır. Ancak Copy türünden 
+    Birliğin alanları herhangi bir türden olamaz. Birlik alanları Copy türünden olmak zorundadır. Ancak Copy türünden 
     dizi ve demet de içerebilir. Birlik alanları gösterici ve referans da olabilir. Örneğin:
 
     union U {
@@ -1876,9 +1876,374 @@ fn main() {
         b: f64,
         c: [i32; 3]
     }
+---------------------------------------------------------------------------------------------------------------------------*/
 
-    Birlikler alanlarını drop etmez. Eğer böyle bir şeye gereksinim duyuluyorsa birlik için Drop trait'inin desteklenmesi 
-    ve drop metodunun yazılması gerekir. 
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        134. Ders 21/09/2026 - Pazartesi                                             
+---------------------------------------------------------------------------------------------------------------------------*/
+                               
+/*---------------------------------------------------------------------------------------------------------------------------
+    Birliğin alanlarının Copy türünden olması gerektiğini belirtmiştik. Ancak birliğin kendisi varsaylan durumda Copy türünden 
+    değildir. Örneğin:
+
+    fn main() {
+        let x = U {a: 10};
+        let y: U;
+
+        y = x;
+
+        unsafe {
+            println!("{}", x.a);            // error!
+        }
+    }
+
+    union U {
+        a: i32,
+        b: f64,
+        c: [i32; 3]
+    }
+
+    Her ne kadar birliğin alanaları Copy türlerine ilişkin olsa da birliğin kendisi Copy türüne ilişkin olmadığı için Drop 
+    trait'ini destekleyebilir. Bu özellik Rust'ın 1.49 sürümüyle dile eklenmiştir. Örneğin:
+
+    impl Drop for U {
+        fn drop(&mut self) {
+            println!("drop");
+        }
+    }                     
+
+    Alanları Copy türünden olan bir türün drop edilmesinin ne anlamı olabilir? İşte Rust'ın 1.49 versiyonuyla birlikta artık 
+    birlik türleri ManuallyDrop<T> türünden alanlara sahip olabilmektedir. Biz kursumuzda bu türü ele almadık. Ancak ManuallyDrop<T>
+    türü Copy türündne olmayan değerleri bünyesine alarak onu eğer açıkça drop ilişkili fonksiyonu çağrılmışsa drop etmektedir. 
+    Örneğin:
+
+    let mut s = std::mem::ManuallyDrop::<Sample>::new(Sample(10));
+
+    unsafe {
+        std::mem::ManuallyDrop::drop(&mut s);
+    }
+
+    Burada Sample türünden bir demetsel yapı ManuallyDrop<T> ile kullanılmaktadır. ManuallyDrop<T> türünden değişken faaliyet 
+    alanını bitirdiğinde otomatik olarak onun tuttuğu değer için drop çağrılmamaktadır. Ancak programcı açıkça std::mem::ManuallyDrop::drop
+    çağrısı yaparsa çağrılmaktadır. Örneğin:
+
+    fn main() {
+        let u = U {s: std::mem::ManuallyDrop::<Sample>::new(Sample(10))};
+        
+        //...
+    }
+
+    struct Sample(i32);
+
+    impl Drop for Sample {
+        fn drop(&mut self) {
+            println!("drop...");
+        }
+    }
+
+    union U {
+        a: i32,
+        b: f64,
+        c: [i32; 3],
+        s: std::mem::ManuallyDrop<Sample>,
+    }
+
+    impl Drop for U {
+        fn drop(&mut self) {
+            unsafe {
+                std::mem::ManuallyDrop::drop(&mut self.s)
+            }
+        }
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Birliğin alanı başka bir birlik türünden de olabilir. Ancak bu durumda alana ilişkin birliğin Copy türünden olması gerekir. 
+    Örneğin:
+
+    #[derive(Copy, Clone)]
+    union K {
+        a: i32, b: f64
+    }
+
+    union U {
+        a: i32,
+        b: f64,
+        c: [i32; 3],
+        k: K                // geçerli
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de kursumuzda daha önce sıklıkla sözünü ettiğimiz "prelude" konusu üzerinde duracağız. Rust'a "prelude" bazı use 
+    işlemlerininin otomatik yapılmasını sağlayan mekanizmalardır. Örneğin biz Vec yapısını hiç niteliklendirmeden ve use 
+    işlemi yapmanna doğurdan kullanabilmekteyiz:
+
+    let v = Vec::<i32>::new();
+
+    Biz kursumuzda daha önce bunu yapabilmemizin gerekçesi olarak Vec yapısının standart prelude içeriisnde use edilmiş 
+    olduğunu söylemiştik. 
+
+    Standart prelude sayesinde Rust her crate'in kök modülüne extern crate std; bildirimini, her modülüne de use 
+    std::prelude::rust_2024::*; (versiyona göre değişebilir) bildirimini otomatik olarak eklemektedir:
+
+    extern crate std;                   // crate'in kök modülüne yerleştirildiği varsayımaktadır
+    use std::prelude::rust_2024::*      // her modüle yerleştirildiği varsayılmaktadır.
+
+    std::prelude modülünün alt modeülleri şöyledir:
+
+    std::prelude
+    ├── v1          // the original prelude; frozen for trait additions
+    ├── rust_2015   // re-exports v1
+    ├── rust_2018   // re-exports v1
+    ├── rust_2021   // v1 + TryFrom, TryInto, FromIterator
+    ├── rust_2024   // rust_2021 + Future, IntoFuture
+    └── rust_future // unstable: the prelude of the *next* edition (nightly only)
+
+    Standart prelude içerisinde hangi isimlerin use edildiği Rust Standard Kütüphansinde std::prelude modülü içerisinde 
+    açıklanmıştır. Biz şu anda std::prelude::rust_2024 sürümüne tabi durumdayız. Dokümantasyonda std::prelude::rust_2024 
+    modülünde aşağıdaki öğelerin export edildiği (yani işleme sokulduğu) belirtilmiştir:
+
+    pub use super::v1::panic;
+    pub use super::v1::*;
+    pub use core::prelude::rust_2024::*;
+
+    Bu use bildirimleri ne anlam ifade etmektedir? İşte biz panic ismini doğrudan kullanabiliriz. std::v1 modülündeki 
+    tüm isimleri de doğrudan kullanabiliriz. core::prelude::rust_2024 modülü içerisindeki isimleri de doğrudan kullanabiliriz. 
+    std::v1 modülündeki use bildirimleri şunlardır:
+
+    pub use crate::marker::Send;
+    pub use crate::marker::Sized;
+    pub use crate::marker::Sync;
+    pub use crate::marker::Unpin;
+    pub use crate::ops::Drop;
+    pub use crate::ops::Fn;
+    pub use crate::ops::FnMut;
+    pub use crate::ops::FnOnce;
+    pub use crate::ops::AsyncFn;
+    pub use crate::ops::AsyncFnMut;
+    pub use crate::ops::AsyncFnOnce;
+    pub use crate::mem::drop;
+    pub use crate::mem::align_of;
+    pub use crate::mem::align_of_val;
+    pub use crate::mem::size_of;
+    pub use crate::mem::size_of_val;
+    pub use crate::convert::AsMut;
+    pub use crate::convert::AsRef;
+    pub use crate::convert::From;
+    pub use crate::convert::Into;
+    pub use crate::iter::DoubleEndedIterator;
+    pub use crate::iter::ExactSizeIterator;
+    pub use crate::iter::Extend;
+    pub use crate::iter::IntoIterator;
+    pub use crate::iter::Iterator;
+    pub use crate::option::Option;
+    pub use crate::option::Option::None;
+    pub use crate::option::Option::Some;
+    pub use crate::result::Result;
+    pub use crate::result::Result::Err;
+    pub use crate::result::Result::Ok;
+    pub use core::prelude::v1::assert;
+    pub use core::prelude::v1::assert_eq;
+    pub use core::prelude::v1::assert_ne;
+    pub use core::prelude::v1::cfg;
+    pub use core::prelude::v1::column;
+    pub use core::prelude::v1::compile_error;
+    pub use core::prelude::v1::concat;
+    pub use core::prelude::v1::debug_assert;
+    pub use core::prelude::v1::debug_assert_eq;
+    pub use core::prelude::v1::debug_assert_ne;
+    pub use core::prelude::v1::env;
+    pub use core::prelude::v1::file;
+    pub use core::prelude::v1::format_args;
+    pub use core::prelude::v1::include;
+    pub use core::prelude::v1::include_bytes;
+    pub use core::prelude::v1::include_str;
+    pub use core::prelude::v1::line;
+    pub use core::prelude::v1::matches;
+    pub use core::prelude::v1::module_path;
+    pub use core::prelude::v1::option_env;
+    pub use core::prelude::v1::stringify;
+    pub use core::prelude::v1::todo;
+    pub use core::prelude::v1::try;Deprecated
+    pub use core::prelude::v1::unimplemented;
+    pub use core::prelude::v1::unreachable;
+    pub use core::prelude::v1::write;
+    pub use core::prelude::v1::writeln;
+    pub use core::prelude::v1::Clone;
+    pub use core::prelude::v1::Copy;
+    pub use core::prelude::v1::Debug;
+    pub use core::prelude::v1::Default;
+    pub use core::prelude::v1::Eq;
+    pub use core::prelude::v1::Hash;
+    pub use core::prelude::v1::Ord;
+    pub use core::prelude::v1::PartialEq;
+    pub use core::prelude::v1::PartialOrd;
+    pub use crate::dbg;
+    pub use crate::eprint;
+    pub use crate::eprintln;
+    pub use crate::format;
+    pub use crate::is_x86_feature_detected;
+    pub use crate::print;
+    pub use crate::println;
+    pub use crate::thread_local;
+    pub use self::ambiguous_macros_only::vec;
+    pub use self::ambiguous_macros_only::panic;
+    pub use core::prelude::v1::cfg_select;
+    pub use core::prelude::v1::derive;
+    pub use crate::borrow::ToOwned;
+    pub use crate::boxed::Box;
+    pub use crate::string::String;
+    pub use crate::string::ToString;
+    pub use crate::vec::Vec;
+    pub use core::prelude::v1::concat_bytes;Experimental
+    pub use core::prelude::v1::const_format_args;Experimental
+    pub use core::prelude::v1::log_syntax;Experimental
+    pub use core::prelude::v1::trace_macros;Experimental
+
+    Bu isimleri aşağıda daha düzenli bir biçimde bir tablo halinde de veriyoruz:
+
+    ┌───────────────────────────────────────┬────────────────────────────────────────┐
+    │               Kategori                │                 Öğeler                 │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ İşaretleyici (marker) trait'ler       │ Copy, Send, Sized, Sync, Unpin         │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Operatör ve yaşam döngüsü trait'leri  │ Drop, Fn, FnMut, FnOnce                │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Bellek yardımcı fonksiyonları         │ drop, size_of, size_of_val,            │
+    │                                       │ align_of, align_of_val                 │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Tahsis (allocation) ile ilgili türler │ Box, Vec, String, ToOwned, ToString    │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Karşılaştırma trait'leri              │ PartialEq, PartialOrd, Eq, Ord         │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Dönüşüm trait'leri                    │ AsRef, AsMut, Into, From               │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Diğer temel trait'ler                 │ Clone, Default                         │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Yineleyici (iterator) trait'leri      │ Iterator, Extend, IntoIterator,        │
+    │                                       │ DoubleEndedIterator, ExactSizeIterator │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ Cebirsel veri tipleri ve varyantları  │ Option, Some, None, Result, Ok, Err    │
+    ├───────────────────────────────────────┼────────────────────────────────────────┤
+    │ derive makroları                      │ Clone, Copy, Debug, Default, Eq, Hash, │
+    │                                       │ Ord, PartialEq, PartialOrd             │
+    └───────────────────────────────────────┴────────────────────────────────────────┘
+
+    Biz bu isimlerin hepsini standard prelude't eolduğu için her modülde doğrudan kullanabiliriz. Bu lsitede print isminin 
+    prinln ismiin, Vec isminin de bulunduğuna dikkat ediniz. core::prelude::rust_2024 modülündeki use bildirimleri de 
+    şunlardır:
+
+    pub use crate::iter::FromIterator;
+    pub use crate::convert::TryFrom;
+    pub use crate::convert::TryInto;
+    pub use crate::future::Future;
+    pub use crate::future::IntoFuture;
+    pub use super::v1::*;
+
+    Bu isimleri de doğrudan kullanabilmekteyiz. 
+
+    Eğer programcı modülün en yukarısına #![no_std] özniteliğini yerleştirirse bu durumda Rust derleyicisi std::prelude::rust_2024
+    modülü yerine core::prelude::rust_2024 modülünü işleme sokmaktadır. core::prelude::rust_2024 modülü core::prelude::rust_2024 
+    modülünden daha az use içermektedir. Aşağıdaki tabloda her iki modülünde use edilmiş isimlerini karşılaştırmalı bir 
+    biçimde veriyoruz:
+
+    ┌───────────────────────────────┬───────────────────┬──────────────────┐
+    │             İsim              │ core::prelude::v1 │ std::prelude::v1 │
+    ├───────────────────────────────┼───────────────────┼──────────────────┤
+    │ Option, Result ve varyantları │        Var        │       Var        │
+    │        Iterator ailesi        │        Var        │       Var        │
+    │  Clone, Copy, Default, Drop   │        Var        │       Var        │
+    │  PartialEq/Eq/PartialOrd/Ord  │        Var        │       Var        │
+    │     From/Into/AsRef/AsMut     │        Var        │       Var        │
+    │     Send/Sync/Sized/Unpin     │        Var        │       Var        │
+    │     drop, size_of ailesi      │        Var        │       Var        │
+    │       Derive makroları        │        Var        │       Var        │
+    │              Box              │        Yok        │       Var        │
+    │              Vec              │        Yok        │       Var        │
+    │       String, ToString        │        Yok        │       Var        │
+    │            ToOwned            │        Yok        │       Var        │
+    └───────────────────────────────┴───────────────────┴──────────────────┘
+
+    Rust programcıları bazı isimlerin standart prelude içerisinde olduğu hissine kapılabilmektedir. Aşağıdaki tabloda 
+    standard prelue içerisinde olması gerekdiği hissini uyandıran ancak aslında olmayan isimlerin listesini veriyoruz:
+
+    ┌────────────────────────────────┬──────────────────────────────────┬────────────────────────────────┐
+    │              İsim              │        Neden use gerekir?        │           Doğru use            │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ HashMap, HashSet, BTreeMap     │ Nesne tutan yapılar kasıtlı      │ use std::collections::HashMap; │
+    │                                │ olarak dışarıda bırakılmıştır    │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Display, Debug (trait)         │ fmt modülü prelude'da değil      │ use std::fmt::{self, Display}; │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Read, Write, BufRead, Seek     │ I/O trait'leri isim çakışması    │ use std::io::prelude::*;       │
+    │                                │ riski taşır                      │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Ordering                       │ Sadece cmp() sonucunu            │ use std::cmp::Ordering;        │
+    │                                │ eşleştirirken gerekir            │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Rc, Arc, RefCell, Cell         │ Akıllı göstericiler yaygın ama   │ use std::rc::Rc;               │
+    │                                │ evrensel değil                   │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Hash (trait)                   │ Derive makrosu prelude'da, trait │ use std::hash::Hash;           │
+    │                                │ değil                            │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Error (trait)                  │ Hata tasarımı crate'e özgü       │ use std::error::Error;         │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Deref, Add, Index ...          │ Operatör trait'leri sadece       │ use std::ops::Deref;           │
+    │                                │ implement ederken gerekir        │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ TryFrom, TryInto, FromIterator │ Sadece 2015/2018 edition'da      │ 2021+ için gerekmez            │
+    │                                │ eksik                            │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ Future, IntoFuture             │ Sadece 2015/2018/2021 edition'da │ 2024 için gerekmez             │
+    │                                │ eksik                            │                                │
+    ├────────────────────────────────┼──────────────────────────────────┼────────────────────────────────┤
+    │ PhantomData                    │ Sadece ileri düzey tür           │ use std::marker::PhantomData;  │
+    │                                │ tasarımında kullanılır           │                                │
+    └────────────────────────────────┴──────────────────────────────────┴────────────────────────────────┘  
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda standard prelude sayesinde hiç use işlemi yapmadan doğrudan kullanabileceğimiz isimleri listeledik. Rust'ta 
+    standard prelude'e programcı yeni bir öğe ekleyememektedir. Eğer programcı yukarıdaki standard prelude içerisinde olmayan 
+    pek çok farklı ismi kullanmak isterse en pratikj yöntem bir crate oluşturup onun kökünde use bildirimlerini yapıp, 
+    modülü "Cargo.toml" dosyasında belirtip onu use etmektir. Örneğin:
+
+    use myprelude::*;
+
+    Bu örnekten de anlaşılacağı gibi içeirisnd pub use bildirimleri olan crate'ler derlenip başka bir modülden use edilebilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Standard prelude'teki isimler ezilebilir mi? Bunlara isim araması sırasında hangi aşamada başvurulmaktadır? İşte her ne 
+    kadar biz standart prelude'ün içerisindeki use deyimlerinin sank modülün başına yerleştirilmiş gibi etki gösterdiğini 
+    belirtsek de aslında isim araması bakımından bazı farklılıklar da söz konusudur:
+
+    - Modülde tanımlı bir öğe (item) prelude'teki isimleri gölgeler.
+    - Açık bir use bildirimi prelude içerisindeki isimleri gölgeler.
+    - Bir glob import (yabi use m::* işlemş) prelude içerisindeki isimleri gölgeler. 
+    
+
+    Standard prelude bağlamında isim araması da şöyle yapılmaktadır (else-if biçiminde):
+
+    1) İsim önce yerel bloklarda aranır.
+    2) İsim kullanılan modülün kökünde aranır.
+    3) Glob import'lar (yani use m::* gibi)
+    4) Standart prelude
+    
+    use bildirimi ismi ilgili faaliyet alanına soktuğunu anımsayınız. Bu sıra üzerinde bazı örnekler verelim:
+
+    
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                          
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                          
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
