@@ -4876,8 +4876,9 @@ void exit_sys(const char *msg)
     yazma yapma amacıyla" dosyanın açılmak istendiği anlamına gelmektedir. İşletim sistemi prosesin etkin kullanıcı ID'sine 
     ve etkin grup ID'sine ve dosyanın kullanıcı ve grup ID'sine bakarak prosesin dosyaya "r", "w" hakkının olup olmadığını 
     kontrol eder. Eğer proses bu hakka sahip değilse open fonksiyonu başarısız olur. (Erişim erişim kontrollerinin dosyadan 
-    okuma yapılırken ya da dosyaya yazma yapılırken değil open fonksiyonu ile dosya açılırken yapıldığına dikkat ediniz.)  
-    Örneğin biz dosyayı şöyle açmak isteyelim:
+    okuma yapılırken ya da dosyaya yazma yapılırken değil open fonksiyonu ile dosya açılırken yapıldığına dikkat ediniz.
+    Dosya açıldıktan sonra erişim hakları değiştirilse bile bundan açılmış dosya etkilenmemektedir.) Örneğin biz dosyayı 
+    şöyle açmak isteyelim:
 
     fd = open("test.txt", O_RDONLY);
 
@@ -5078,8 +5079,11 @@ void exit_sys(const char *msg)
     │ O_NOCTTY    │ Dosya bir terminal aygıtıysa prosesin kontrol terminali                │    POSIX     │
     │             │ (controlling terminal) olarak atanmasını engeller.                     │              │
     ├─────────────┼────────────────────────────────────────────────────────────────────────┼──────────────┤
-    │ O_CLOEXEC   │ Dosya betimleyicisine FD_CLOEXEC bayrağı atar; exec() sonrası          │    POSIX     │
-    │             │ betimleyici otomatik kapanır. fork() + exec() yarış koşulunu önler.    │              │
+    │ O_CLOEXEC   │ Dosya betimleyicisine FD_CLOEXEC bayrağı atar; exec sonrası            │    POSIX     │
+    │             │ betimleyici otomatik kapanır. fork + exec yarış koşulunu önler.        │              │
+    ├─────────────┼────────────────────────────────────────────────────────────────────────┼──────────────┤
+    │ O_CLOFORK   │ Dosya betimleyicisine FD_CLOFORK bayrağı atar; fork sonrası            │    POSIX     │
+    │             │ betimleyici otomatik kapanır. POSIX 2024 ile eklenmiştir.              │              │
     ├─────────────┼────────────────────────────────────────────────────────────────────────┼──────────────┤
     │ O_DSYNC     │ Her write(), yalnızca veriyi diske flush edene kadar bloke et;         │    POSIX     │
     │             │ meta veri (erişim zamanı vs) beklenmez.                                │  (2008'den)  │
@@ -5111,7 +5115,7 @@ void exit_sys(const char *msg)
     │             │ 64-bit sistemlerde örtük olarak etkindir.                              │              │
     ├─────────────┼────────────────────────────────────────────────────────────────────────┼──────────────┤
     │ O_ASYNC     │ Dosya üzerinde IO hazır olduğunda SIGIO sinyali gönder.                │ Linux'a Özgü │
-    │             │ (sinyal güdümlü G/Ç). fcntl() ile de ayarlanabilir.                    │              │
+    │             │ (sinyal güdümlü G/Ç). fcntl.  ile de ayarlanabilir.                    │              │
     └─────────────┴────────────────────────────────────────────────────────────────────────┴──────────────┘
 
     Yukarıda da belirttiğimiz gibi erişim hakları open fonksiyonu tarafından (yani open fonksiyonunun çağırdığı sistem fonksiyonu 
@@ -14726,6 +14730,26 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    POSIX'in 2024 versiyonunda (henüz çok yeni) dosya açış bayraklarına O_CLOFORK isimli bir bayrak da eklenmiştir. Bu bayrak 
+    kullanıldığında fork işlemi sırasında alt proseste betimleyici otomatik olarak kapatılmaktadır. Örneğin:
+
+    if ((fd = open("test.c", O_RDONLY|O_CLOFORK)) == -1)
+        exit_sys("open");
+
+    Bu bayrak ileride göreceğimiz gibi daha sonra fcntl fonksiyonu ile de set edilebilmektedir:
+
+    if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD)|FD_CLOFORK) == -1)
+        exit_sys("fcntl");
+
+    Benzer biçimde bu bayrak şöyle de reset edilebilir:
+
+    if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) & ~FD_CLOFORK) == -1)
+        exit_sys("fcntl");
+
+    Bu bayrak Linux çekirdeği tarafından desteklenmemektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
     C'nin standart dosya fonksiyonlarının tamponlama mekanizmasıyla çalıştığını görmüştük. Bu durumda fopen fonksiyonu ile 
     açtığımız bir dosyaya bir şeyler yazıp henüz tampon flush edilmeden fork yaparsak üst prosesin tüm bellek alanının kopyası 
     çıkartılacağı için bu tamponun da flush edilmemiş bir kopyası oluşacaktır. Örneğin fopen fonksiyonuyla bir dosyayı
@@ -15145,12 +15169,12 @@ void exit_sys(const char *msg)
 
     Fonksiyonun birinci parametresi beklenecek alt prosesin proses ID değerini belirtir. Bu sayede programcı belli bir alt 
     prosesi bekleyebilmektedir. Bu birinci parametre aslında birkaç biçimde geçilebilmektedir. Eğer bu  parametreye programcı 
-    pozitif değerde bir proses ID geçerse fonksiyon proses id'si geçirilen değer olan o alt prosesi bekleyecektir. (Tabii bu 
-    parametreye geçirilen proses ID, o prosesin bir alt prosesi değilse fonksiyon hemen başarısız olmaktadır.) Eğer bu parametre 
-    negatif bir proses ID değeri geçilirse bu durumda fonksiyon proses grup ID'si bu değerin pozitifi olan herhangi bir alt 
-    prosesi beklemektedir. Eğer bu parametre -1 olarak geçilirse bu durumda fonksiyon tamamen wait fonksiyonundaki gibi davranmaktadır. 
+    pozitif değerde bir proses ID geçerse fonksiyon proses id'si geçirilen değer olan o alt prosesi bekler. (Tabii bu parametreye 
+    geçirilen proses ID, o prosesin bir alt prosesi değilse fonksiyon hemen başarısız olacaktır.) Eğer bu parametreye negatif 
+    bir proses ID değeri geçilirse bu durumda fonksiyon proses grup ID'si bu değerin pozitifi olan herhangi bir alt prosesi 
+    beklemektedir. Eğer bu parametre -1 olarak geçilirse bu durumda fonksiyon tamamen wait fonksiyonundaki gibi davranmaktadır. 
     Yani herhangi bir alt prosesi beklemektedir. Eğer bu parametreye 0 değeri geçilirse fonksiyon, proses grup ID'si kendsisini 
-    çağıran prosesin ID'si ile aynı olan herhangi bir alt prosesi beklemektedir. Bu parametrenin alabielceği değerleri aşağıda
+    çağıran prosesin ID'si ile aynı olan herhangi bir alt prosesi beklemektedir. Bu parametrenin alabileceği değerleri aşağıda
     bir tablo biçiminde de veriyoruz:
     
     ┌────────────┬───────────────────────────────────────────────────────────────┐
@@ -15170,7 +15194,7 @@ void exit_sys(const char *msg)
 
     WNOHANG: Bu durumda waitpid eğer alt proses henüz sonlanmamışsa bekleme yapmaz, fonksiyon 0 ile geri döner.  
     WUNTRACED, WCONTINUED: Prosesin durdurulması ve devam ettirilmesi ile ilgili bilginin elde edilmesinde kullanılmaktadır.
-    Aşağıdaki tabloda son parametre için kullanılabielcek bayrakların listesini veriyoruz:
+    Aşağıdaki tabloda son parametre için kullanılabilecek bayrakların listesini veriyoruz:
 
     ┌─────────────┬─────────────────────────────────────────────────────────────────────────────┬──────────┐
     │   Seçenek   │                                    Anlamı                                   │ Standart │
@@ -15192,7 +15216,7 @@ void exit_sys(const char *msg)
 
     Tabii bu üçüncü parametre genellikle 0 geçilmektedir. 0 geçilmesi bu bayraklardan hiçbirinin kullanılmadığı anlamına 
     gelmektedir. O halde aslında wait(&status) çağrısı ile waitpid(-1, &status, 0) çağrısı eşdeğerdir. Gördüğünüz gibi waitpid 
-    fonsiyonu tamamen wait fonksiyonunu işlevsel olarak kapsamaktadır. 
+    fonksiyonu tamamen wait fonksiyonunu işlevsel olarak kapsamaktadır. 
 
     waitpid fonksiyonunda da ikinci parametre için NULL adres geçilebilir. Bu durumda proses beklenir ama çıkış bilgileri 
     elde edilmez.
@@ -15200,7 +15224,7 @@ void exit_sys(const char *msg)
     waitpid fonksiyonu da tıpkı wait fonksiyonunda olduğu gibi başarı durumunda beklenen proses ID değeri ile, başarısızlık 
     durumunda -1 değeriyle geri dönmektedir. 
 
-    Örenğin:
+    Örneğin:
 
     
     if ((pid = fork()) == -1)
@@ -15211,7 +15235,7 @@ void exit_sys(const char *msg)
     if (waitpid(pid, &status, 0) == -1) 
         exit_sys("waitpid");
 
-    Burada waitpid fonksiyonu ile alt prosesin PID değeri belirtilerek bekleme yaılmıştır. Örneğin:
+    Burada waitpid fonksiyonu ile alt prosesin PID değeri belirtilerek bekleme yapılmıştır. Örneğin:
 
     if ((child_pid = waitpid(pid, &status, WNOHANG)) == -1) 
         exit_sys("waitpid");
@@ -15219,8 +15243,8 @@ void exit_sys(const char *msg)
     if (child_pid == 0) 
         printf("no child exited...\n");
     
-    Burada WNOHANG bayrağının kullanıdığına dikkat ediniz. Bu bayrak waitpid fonksiyonu ile beklenen alt proses henüz 
-    fonksiyonun 0 ile geri dönmesine yol açmaktadır. 
+    Burada WNOHANG bayrağının kullanıldığına dikkat ediniz. Bu bayrak waitpid fonksiyonu ile beklenen alt proses henüz 
+    sonlanmamışsa fonksiyonun 0 ile geri dönmesine yol açmaktadır. 
 
     Aşağıdaki örnekte 5 tane alt proses yaratılmış ancak bunlar herhangi bir sırada değil yaratım sırasına göre waitpid 
     fonksiyonu ile beklenmiştir. Bu örneği waitpid yerine wait fonksiyonunu kullanarak da çalıştırıp iki çıktı arasındaki
@@ -15279,7 +15303,70 @@ void exit_sys(const char *msg)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     Programcının fork fonksiyonu ile her yarattığı alt prosesi wait fonksiyonları ile beklemesi iyi bir tekniktir. Aksi halde
-    sonraki paragrafta ele alacağımız gibi "hortlak (zombie)" proses problemi oluşabilmektedir. 
+    sonraki paragrafta ele alacağımız gibi "zombie" proses problemi oluşabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    POSIX standartlarında olmayan ancak "glibc" kütüphanesi tarafından desteklenen wait3 ve wait4 isimli iki fonksiyon daha 
+    vardır. Bu fonksiyonlar Linux sistemlerinde sys_wait4 isimli sistem fonksiyonu çağrılarak 
+    gerçekleştirilmiştir:
+
+    #include <sys/wait.h>
+
+    pid_t wait3(int *status, int options, struct rusage *rusage);
+    pid_t wait4(pid_t pid, int *status, int options, struct rusage *rusage);
+
+    wait3 ve wait4 fonksiyonlarının waitpid fonksiyonundan tek farkı rusage isimli bir yapı türünden nesnenin adresini 
+    almasıdır. Bu fonksiyonlar ek olarak prosesin kullanmış olduğu kaynaklara ilişkin bilgileri de vermektedir. Aslında 
+    çağrı sırasında bu rusage parametreleri NULL da geçilebilir. Bu durumda:
+
+    wait3(status, options, rusage);
+
+    çağrısı ile:
+
+    waitpid(-1, status, options);
+
+    çağrısı eşdeğerdir. Benzer biçimde:
+
+    wait4(pid, status, options, rusage);
+
+    çağrısı ile de:
+
+    waitpid(pid, status, options);
+
+    çağrısı eşdeğerdir. wait3 fonksiyonunun herhangi bir alt prosesi, wait4 fonksiyonunun ise belli bir alt prosesi beklediğine 
+    dikkat ediniz. Fonksiyonlara geçirilen rusage yapısı "<sys/resource.h>" dosyasında tanımlanmıştır:
+
+    struct rusage {
+        struct timeval ru_utime; /* user CPU time used */
+        struct timeval ru_stime; /* system CPU time used */
+    };
+
+    Yapının ru_utime elemanı prosesin kullanıcı modunda geçirdiği zamanı, ru_stime elemanı ise çekirdek modunda geçirdiği 
+    zamanı vermektedir.
+
+    Linux gerçekleştiriminde bu yapı çok daha fazla elemana sahiptir:
+
+    struct rusage {
+        struct timeval ru_utime; /* user CPU time used */
+        struct timeval ru_stime; /* system CPU time used */
+        long   ru_maxrss;        /* maximum resident set size */
+        long   ru_ixrss;         /* integral shared memory size */
+        long   ru_idrss;         /* integral unshared data size */
+        long   ru_isrss;         /* integral unshared stack size */
+        long   ru_minflt;        /* page reclaims (soft page faults) */
+        long   ru_majflt;        /* page faults (hard page faults) */
+        long   ru_nswap;         /* swaps */
+        long   ru_inblock;       /* block input operations */
+        long   ru_oublock;       /* block output operations */
+        long   ru_msgsnd;        /* IPC messages sent */
+        long   ru_msgrcv;        /* IPC messages received */
+        long   ru_nsignals;      /* signals received */
+        long   ru_nvcsw;         /* voluntary context switches */
+        long   ru_nivcsw;        /* involuntary context switches */
+    };
+
+    Biz proseslerin kullandığı kaynak bilgilerinin elde edilmesini ayrı bir bölümde ele alacağız.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -15293,38 +15380,41 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    UNIX/Linux sistemlerinde prosesler konusunda çokça karşılaşılan "zombie (hortlak)" proses biçiminde bir kavram vardır. 
-    Zombie sözcük anlamı olarak "tam ölememiş ya da öldükten sonra dirilmiş olan canlılar" için kullanılmaktadır. (Tabii
-    gerçek dünyada böyle bir durumla karşılaşılmamıştır.) Bir alt proses sonlandığında işletim sistemi onun kaynaklarını 
-    boşaltmaktadır. Örneğin prosesin bellek alanı tamamen sisteme iade edilmektedir. Prosesin açmış olduğu dosyalar kapatılmaktadır. 
-    Ancak işletim sistemi, alt prosesin çıkış kodunu üst prosese iletebilmek için proses kontrol bloğunu proses bittiğinde 
-    hemen serbest bırakmamaktadır. Prosesin çıkış kodu proses kontrol bloğunda saklanmaktadır. İşletim sistemi "üst proses bu çıkış 
-    kodunu herhangi bir zaman isteyebilir" diye sonlanmış olan prosesin proses kontrol bloğunu (Linux'taki task_struct yapısı) 
-    sisteme iade etmez. Böylece bir alt proses bittiğinde eğer üst proses wait fonksiyonlarıyla alt prosesin exit kodunu henüz 
-    almamışsa "kendisi bitmiş ama proses kontrol bloğu sisteme iade edilmemiş" durumu oluşmaktadır. İşte bu duruma UNIX/Linux 
-    dünyasında "zombie process" denilmektedir. Zombie proseslerde prosesin ID değeri de "üst proses wait ya da waitpid fonksiyonunu 
-    kullanabilir" diye sisteme iade edilmemektedir. Yani zombie proses oluşması bitmiş olan prosesin proses kontrol bloğunun 
-    yer kaplamasına hem de bitmiş olan prosesin ID değerinin yeniden kullanılamamasına yol açmaktadır. 
+    UNIX/Linux sistemlerinde prosesler konusunda çokça karşılaşılan "zombie proses" denilen bir kavram vardır. (İngilizce 
+    "zombie" sözcüğü "hortlak" gelmektedir. Hortlak sözcük anlamı olarak "tam ölememiş ya da öldükten sonra dirilmiş olan 
+    canlılar" için kullanılmaktadır. Tabii gerçek dünyada böyle bir durumla karşılaşılmamıştır. Ancak öldü sanılarak defnedilmeye 
+    çalışılırken tabuttan çıkan kişiler bulunmaktadır.) 
+    
+    Bir alt proses sonlandığında işletim sistemi onun kaynaklarını boşaltmaktadır. Örneğin prosesin bellek alanı tamamen sisteme 
+    iade edilmektedir. Prosesin açmış olduğu dosyalar kapatılmaktadır. Ancak işletim sistemi, alt prosesin çıkış kodunu üst 
+    prosese iletebilmek için proses kontrol bloğunu proses bittiğinde hemen serbest bırakmamaktadır. (Prosesin çıkış kodu proses 
+    kontrol bloğunda saklanmaktadır.) İşletim sistemi "üst proses bu çıkış kodunu herhangi bir zaman isteyebilir" diye sonlanmış 
+    olan prosesin proses kontrol bloğunu (Linux'taki task_struct yapısı) sisteme iade etmez. Böylece bir alt proses bittiğinde 
+    eğer üst proses wait fonksiyonlarıyla alt prosesin çıkış kodunu henüz almamışsa "kendisi bitmiş ama proses kontrol bloğu 
+    sisteme iade edilmemiş" durumu oluşmaktadır. İşte bu duruma UNIX/Linux dünyasında "zombie proses" denilmektedir. Zombie 
+    proseslerde prosesin ID değeri de "üst proses wait ya da waitpid fonksiyonunu kullanabilir" diye sisteme iade edilmemektedir. 
+    Yani zombie proses oluşması bitmiş olan prosesin proses kontrol bloğunun yer kaplamasına hem de bitmiş olan prosesin ID 
+    değerinin yeniden kullanılamamasına yol açmaktadır. 
 
     Alt ve üst proseslerin sonlanması şu biçimlerde olabilmektedir:
 
     1) Üst proses alt prosesten önce sonlanmış olabilir. Bu durumda alt proses "öksüz (orphan)" duruma düşer. Sistem de 1 numaralı 
     ID'ye sahip olan "init" prosesini öksüz prosesin üst prosesi olarak atar. Daha sonra alt proses sonlandığında "init" prosesi 
-    alt prosesin exit kodunu alarak onun zombie duruma düşmesini engeller.
+    alt prosesin çıkış kodunu alarak onun zombie duruma düşmesini engeller.
 
     2) Alt proses üst prosesten daha önce sonlanmıştır. İşte bu durumda eğer üst proses wait fonksiyonlarını henüz uygulamamışsa
     alt proses zombie durumda kalır. Tabii üst proses wait fonksiyonlarını uyguladığı anda alt proses zombie olmaktan kurtulur.
 
     3) Alt proses üst prosesten önce sonlanmıştır. Ancak üst proses de wait fonksiyonlarını uygulamadan sonlanmıştır. Bu durumda
     yine işletim sistemi artık çıkış kodunu alacak bir üst proses kalmadığı için alt prosesi zombie olmaktan çıkartır. Yani 
-    onun proses kontrol bloğunu ve ID değerini serbest boşaltır.
+    onun proses kontrol bloğunu ve ID değerini serbest bırakır.
 
     O halde zombie proses yalnızca şu süreçte ortaya çıkmaktadır: "Alt proses sonlanmıştır ancak üst proses wait fonksiyonlarını 
     uygulamadan çalışmasına devam etmektedir."
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Şimdi bir "zombie" proses durumu oluşturalım. Yapacağımız şey alt prosesi sonlandırıp üst prosesin wait fonksiyonlarını 
+    Şimdi bir zombie proses durumu oluşturalım. Yapacağımız şey alt prosesi sonlandırıp üst prosesin wait fonksiyonlarını 
     uygulamadan yoluna devam etmesini sağlamaktır. Zombie prosesler "ps -l" komutunda "defunct" olarak gösterilmektedir. 
     Bunların "proses durumları da (process state)" "Z" harfi ile belirtilmektedir. Örneğin:
 
@@ -15376,11 +15466,11 @@ void exit_sys(const char *msg)
     proses uzun süre çalışıyorsa (günlerce, aylarca) zombie prosesler sistem kaynağının boşa harcanmasına yol açabilmektedir.
 
     2) Zombie proseslere ilişkin proses ID değerleri o proses zombie'likten kurtulana kadar sistem tarafından kullanılamamaktadır. 
-    Sürekli zombie proses üreten bir program proses ID'lerin tükenmesine bile yol açabilmektedir. 
+    Sürekli zombie proses üreten bir program proses ID'lerinin tükenmesine bile yol açabilmektedir. 
 
     3) Daha önce bir kullanıcının yaratabileceği maksimum proses sayısının sınırlandırıldığını belirtmiştik. İşletim sistemi 
-    bunun için proses yaratıldıka bir sayacı artırır, proses sonlandığında bu sayacı eksiltir. İşte zombie prosesler henüz 
-    tam sonlanmadığı için bu sayacı artıramamaktadır. 
+    bunun için proses yaratıldıkça bir sayacı artırır, proses sonlandığında bu sayacı eksiltir. İşte zombie prosesler henüz 
+    tam sonlanmadığı için bu sayacı eksiltememektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -15388,7 +15478,7 @@ void exit_sys(const char *msg)
     uygulandığında üst proses alt proses bitene kadar blokede bekleyecektir. Halbuki bazı uygulamalarda üst prosesin yoluna 
     devam etmesi ve bloke olmaması istenir. İşte zombie oluşmasının otomatik engellenmesi için iki yöntem kullanılmaktadır:
 
-    1) Alt proses bittiğinde SIGCHLD sinyalinde üst proses wait fonksiyonlarını uygularsa üst proses blokede kalmadan zombie 
+    1) Alt proses bittiğinde SIGCHLD sinyaline üst proses wait fonksiyonlarını uygularsa üst proses blokede kalmadan zombie 
     durumunu engelleyebilir.
 
     2) Biz alt prosesin çıkış kodunu almak istemediğimizi işletim sistemine söylersek işletim sistemi alt proses bittiğinde 
@@ -15416,13 +15506,13 @@ void exit_sys(const char *msg)
     Ancak Windows sistemlerinde çevre değişkenlerinin büyük harf-küçük harf duyarlılığı yoktur. Genel olarak çevre değişkenleri 
     (yani anahtarlar) boşluk karakterleri içermemektedir. 
 
-    Çevre değişkenleri yukarıda da belirttiğimiz gibi prosese özgüdür. fork işlemi sırasında alt prose aktarılmaktadır. 
-    Örneğin biz kabk üzerinden bir program çaıştırdığımızda kabuk prosesinin çevre değişkenleri bizim çalıştırdığımız 
+    Çevre değişkenleri yukarıda da belirttiğimiz gibi prosese özgüdür. fork işlemi sırasında alt prosese aktarılmaktadır. 
+    Örneğin biz kabuk üzerinden bir program çaıştırdığımızda kabuk prosesinin çevre değişkenleri bizim çalıştırdığımız 
     programa ilişkin prosese aktarılmaktadır. Bir proses başka bir prosesin çevre değişkenlerine herhangi bir biçimde 
     müdahale edememektedir. 
 
     Peki çevre değişkenlerine neden gereksinim duyulmaktadır? İşte bazı POSIX fonksiyonları ve sistem fonksiyonları 
-    prosesin belli çevre değişkenlerine başvurabilmektedir. Çevre dğeişkenleri programcılar tarafından da çeşitli amaçlarla
+    prosesin belli çevre değişkenlerine başvurabilmektedir. Çevre değişkenleri programcılar tarafından da çeşitli amaçlarla
     kullanılabilmektedir. 
 
     Çevre değişkenleri ile ilgili programcının şu işlemleri yapabilmesi gerekmektedir:
@@ -15487,7 +15577,7 @@ int main(int argc, char *argv[])
 /*---------------------------------------------------------------------------------------------------------------------------
     Yukarıda da belirttiğimiz gibi prosesin çevre değişkenleri, fork işlemi sırasında üst prosesten alt prosese aktarılmaktadır. 
     Zaten çevre değişkenleri prosesin bellek alanında saklandığından ve fork işlemi de prosesin bellek alanının kopyasını 
-    oluşturduğundan bu aktarınm fork işleminde doğal olarak yapılmaktadır. Örneğin biz kabuk üzerinden bir program çalıştırdığımızda 
+    oluşturduğundan bu aktarım fork işleminde doğal olarak yapılmaktadır. Örneğin biz kabuk üzerinden bir program çalıştırdığımızda 
     kabuğun çevre değişkenleri bizim programımıza aktarılacaktır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -15497,9 +15587,9 @@ int main(int argc, char *argv[])
     gelene kadar bazı prosesler çevre değişkenlerine eklemeler yapmaktadır. Örneğin kabuk programını çalıştıran login programı 
     "HOME", "USER" "SHELL" gibi çevre değişkenlerini prosesin çevre değişken listesine eklemektedir. Benzer biçimde kabuk 
     da pek çok çevre değişkenini çevre değişken listesine eklemiş durumdadır. Yani biz programımızı kabuk üzerinden çalıştırırken 
-    kümülatif olarak çeşitli prosesler çevre değişken listesine çeşitli çevre değişkenlerini zaten eklemiş durumdaıdr. Örneğin 
+    kümülatif olarak çeşitli prosesler çevre değişken listesine çeşitli çevre değişkenlerini zaten eklemiş durumdadır. Örneğin 
     biz kabuk üzerinde "cd" komutunu kullandığımızda kabuk PWD isimli çevre değişkeninin değerini o anda geçilen dizinin 
-    yol ifadesini belirtecek biçimde değiştirmektedir. (Bunu chdir POSIX fonksiyonu bunu yapmaz, zaten yapamaz. Kabuktaki "cd" 
+    yol ifadesini belirtecek biçimde değiştirmektedir. (chdir POSIX fonksiyonu bunu yapmaz, zaten yapamaz. Kabuktaki "cd" 
     komutu bunu yapmaktadır.)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -15514,31 +15604,35 @@ int main(int argc, char *argv[])
     $ echo "merhaba nasılsın?"
     merhaba nasılsın?
 
-    Tabii "echo" komutu aslında "/bin" dizininde bir program dosyası biçiminde bulnmaktadır. Dolayısıyla bu program argv ile 
+    Tabii "echo" komutu aslında "/bin" dizininde bir program dosyası biçiminde bulunmaktadır. Dolayısıyla bu program argv ile 
     komut satırı argümanlarını alıp birleştirerek aralara SPACE karakteri ekleyip yazdırmaktadır. Örneğin:
 
     $ echo merhaba    nasılsın?
     merhaba nasılsın?
 
-    Burada "merahaba" ile "nasılsın?" arasındaki birden fazla boşluk karakterinin kaybolduğuna dikkat ediniz. Kabuk üzerinden 
+    Burada "merhaba" ile "nasılsın?" arasındaki birden fazla boşluk karakterinin kaybolduğuna dikkat ediniz. Kabuk üzerinden 
     çift tırnak ve tek tırnak (aralarında küçük farklılıklar vardır) tek bir komut satırı argümanı oluşturmaktadır. Örneğin:
 
     $ echo "merhaba    nasılsın?"
     merhaba    nasılsın?
    
-    Kabuk üzerinde bir çevre değişkenini başına $ getirerekyazarsak kabuk sanki o yazı yerine onun değerine ilişkin yazıyı 
+    Kabuk üzerinde bir çevre değişkenini başına $ getirerek yazarsak kabuk sanki o yazı yerine onun değerine ilişkin yazıyı 
     oraya yazmışız gibi davranmaktadır. Örneğin biz kabuk üzerinde $PATH yazarsak kabuk bu $PATH yazısını kaldırıp onun 
     yerine onun değerini  oraya yerleştirecektir. (Aynı işlem Windows sistemlerinde %NAME% ile yapılmaktadır.) O halde biz
-    biz kabuğun bir çevre değişkeninin değerini şöyle yazdırabliriz:
+    kabuğun bir çevre değişkeninin değerini şöyle yazdırabiliriz:
 
     $ echo $PATH
     /home/kaan/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
 
-    Eüer $ karakterinin yanındaki çevre dğeişkeni mevcut değilse bu durumda kabuk onun yerine boş bir yazı (boş string) 
+    Eğer $ karakterinin yanındaki çevre dğeişkeni mevcut değilse bu durumda kabuk onun yerine boş bir yazı (boş string) 
     yerleştirmektedir. Örneğin:
 
     $ echo -$XXX-
     --
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            35. Ders 17/09/2026 - Perşembe
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -15732,7 +15826,7 @@ void exit_sys(const char *msg)
 
     Aslında putenv fonksiyonu bizim "anahtar=değer" biçiminde verdiğimiz yazının adresini eğer anahtar yoksa doğrudan
     bu gösterici dizisine eklemektedir. Bu gösterici dizisinin hemen aşağısında boş yer olmak zorunda değildir. Genellikle
-    gerçekleştirimleri yapanlar yeni bir environ dizisini tahsis edip eklemeyi oaraya yapmaktadır. Örneğin:
+    gerçekleştirimleri yapanlar yeni bir environ dizisini tahsis edip eklemeyi oraya yapmaktadır. Örneğin:
 
     char s[] = "ayse=500";
 
@@ -15786,7 +15880,7 @@ int main(void)
     QT_IM_MODULES=wayland;ibus
     ...
 
-    İstedğimiz bir ismin bulunduğu satırları elde etmek için "grep" komutu ile boru işlemi yapabiliriz. Örneğin:
+    İstediğimiz bir ismin bulunduğu satırları elde etmek için "grep" komutu ile boru işlemi yapabiliriz. Örneğin:
 
     $ env | grep PWD
     PWD=/home/kaan/Study/UnixLinux-SysProg/09-EnvironmentVariables
@@ -15815,7 +15909,7 @@ char *mygetenv(const char *env)
     len1 = strlen(env);
     for (int i = 0; environ[i] != NULL; ++i) {
         if ((str = strchr(environ[i], '=')) != NULL) {
-            len2 = (size_t)(str - environ[i]);               /* size-t dönüştürmesi gerekmior */
+            len2 = (size_t)(str - environ[i]);               /* size_t dönüştürmesi gerekmiyor */
             if (len1 == len2 && strncmp(environ[i], env, len1) == 0) 
                 return str + 1;
         }
@@ -15847,7 +15941,7 @@ int main(int argc, char *argv[])
     fork işlemi sırasında üst prosesin tüm bellek alanının bir kopyası oluşturulduğuna göre alt prosesin çevre değişken listesi 
     üst prosesinkinin aynısı olacaktır. Ancak fork işleminden sonra üst proses kendi çevre değişken listesinde bir değişiklik 
     yaparsa artık yalnızca o değişiklik o prosese özgü hale gelecektir. Çünkü fork işlemi sırasında bellek alanları kopyalandıktan 
-    sonra artık üst prosesle alt prosesin bellek alanları birbirinden tamamen biribirinden ayrılmış olur. 
+    sonra artık üst prosesle alt prosesin bellek alanları birbirinden tamamen ayrılmış olur. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -15858,7 +15952,7 @@ int main(int argc, char *argv[])
 
     int unsetenv(const char *name);
 
-    Fonksiyon çevre değişkenin ismini almaktadır. Başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri önder ve 
+    Fonksiyon çevre değişkenin ismini almaktadır. Başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri döner ve 
     errno uygun biçimde set edilir. Eğer ilgili çevre değişkeni zaten yoksa fonksiyon bir şey yapmaz ancak başarılı bir biçimde 
     geri dönmektedir. Örneğin:
 
@@ -15915,7 +16009,7 @@ void exit_sys(const char *msg)
 /*---------------------------------------------------------------------------------------------------------------------------
     Peki biz programımızı çalıştırdığımızda belli bir çevre değişkeninin zaten var olmasını nasıl sağlayabiliriz? Çevre 
     değişkenleri fork işlemi sırasında alt prosese aktarıldığına göre biz eğer kabuk programının (bash) çevre değişken listesine 
-    bir ekleme yaparsak kabuk bizim programınızı çalıştırırken fork yapacak ve onun çevre değişkenleri bizim programımıza 
+    bir ekleme yaparsak kabuk bizim programımızı çalıştırırken fork yapacak ve onun çevre değişkenleri bizim programımıza 
     aktarılacaktır. Peki kabuk programının çevre değişken listesine nasıl ekleme yapabiliriz? İşte bu işlem şöyle yapılabilmektedir:
 
     $ city=eskisehir
@@ -15940,7 +16034,7 @@ void exit_sys(const char *msg)
     $ city=izmir
     $ env | grep city
 
-    Anımsanacağı gib bir çevre değişkeninin (aslında genel olarak kabul değişkeninin) değerini elde etmek için kabuk üzerinde 
+    Anımsanacağı gibi bir çevre değişkeninin (aslında genel olarak kabuk değişkeninin) değerini elde etmek için kabuk üzerinde 
     ismin önüne $ karakteri getirilmektedir. Örneğin: 
 
     $ echo $city
@@ -15985,12 +16079,12 @@ void exit_sys(const char *msg)
     "Interactive shell" demek "komut satırına düşen kullanıcının komut vererek çalıştırdığı shell" demektir. "login shell" demek 
     bize "user name" ve "password" soran shell demektir. "Non-interactive shell" demek ise tek bir komutu çalıştırıp işlemini 
     sonlandıran shell demektir. Değişik kabuk programlarının startup dosyaları farklıdır. Biz burada "bash" kabuğu üzerinde 
-    duracağız. ash kabuğunun "user manual" dokümanındaki ilgili bölüm aşağıdaki bağlantıdan incelenebilir:
+    duracağız. bash kabuğunun "user manual" dokümanındaki ilgili bölüm aşağıdaki bağlantıdan incelenebilir:
 
     https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html
 
     Eğer bash "interactive login shell" biçiminde çalıştırılmışsa shell önce "/etc/profile" dosyasını çalıştırır, sonra sırasıyla
-    aşağıdaki dosyalardan hangisini ilk bulursa yalnız onun içerisindeki komutlar çalıştırırır:
+    aşağıdaki dosyalardan hangisini ilk bulursa yalnız onun içerisindeki komutları çalıştırır:
 
     $ ~/.bash_profile
     $ ~/.bash_login
@@ -17027,7 +17121,10 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-<BURADA KALDIK>
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            37. Ders 24/09/2026 - Perşembe
+---------------------------------------------------------------------------------------------------------------------------*/
+
 /*---------------------------------------------------------------------------------------------------------------------------
     Aşağıdaki örnekte de execl fonksiyonunun execve kullanılarak nasıl yazıldığı hakkında bir fikir verilmiştir. 
     Burada komut satırı argümanlarının sayısı MAX_ARGS ile sınırlandırılmıştır.
@@ -17035,7 +17132,7 @@ int main(int argc, char *argv[])
     Değişken sayıda argüman alan fonksiyonların yazımını inceleyiniz.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-/* sample.c */
+/* execl.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17068,21 +17165,16 @@ int myexecl(const char *path, const char *arg0, ...)
     return execve(path, args, environ);
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
     pid_t pid;
 
-    if (argc == 1) {
-        fprintf(stderr, "wrong number of arguments!...\n");
-        exit(EXIT_FAILURE);
-    }
-
-    printf("sample running...\n");
+    printf("execl running...\n");
 
     if ((pid = fork()) == -1)
         exit_sys("fork");
 
-    if (pid == 0 && myexecl("mample", "mample", "ali", "veli", "selami", (char *)0) == -1)
+    if (pid == 0 && myexecl("/bin/ls", "/bin/ls", "-l", "-i", (char *)0) == -1)
         exit_sys("myexecl");
 
     printf("ok, parent continues...\n");
@@ -17099,49 +17191,36 @@ void exit_sys(const char *msg)
     exit(EXIT_FAILURE);
 }
 
-/* mample.c */
-
-#include <stdio.h>
-
-extern char **environ;
-
-int main(int argc, char *argv[])
-{
-    printf("mample running...\n\n");
-
-    printf("command line arguments:\n\n");
-    for (int i = 0; i < argc; ++i)
-        puts(argv[i]);
-
-    printf("\nEnvirionment variables:\n\n");
-
-    for (int i = 0; environ[i] != NULL; ++i)
-        puts(environ[i]);
-
-    return 0;
-}
-
 /*---------------------------------------------------------------------------------------------------------------------------
-    fexecve isimli POSIX fonksiyonu execve fonksiyonu gibidir. Ancak bunun tek farkı dosyayı yol ifadesini alarak değil dosya 
-    betimleyicisini alarak çalıştırmasıdır. Yani biz çalıştırmak istediğimiz dosyayı zaten open fonksiyonu ile açmışsak bu 
-    durumda doğrudan fexecve fonksiyonunu kullanabiliriz. Fonksiyonun prototipi şöyledir:
+    fexecve isimli POSIX fonksiyonu execve fonksiyonu gibidir. Ancak bunun tek farkı yol ifadesi yerine dosya betimleyicisini 
+    alarak çalışmasıdır. Yani biz çalıştırmak istediğimiz program dosyasını dosyayı zaten open fonksiyonu ile açmışsak bu durumda 
+    doğrudan fexecve fonksiyonunu kullanabiliriz. Fonksiyonun prototipi şöyledir:
 
     #include <unistd.h>
 
     int fexecve(int fd, char *const argv[], char *const envp[]);
 
-    Fonksiyonun birinci parametresi çalıştırılacak dosyanın dosya betimleyicisini almaktadır. Diğer parametreler execve fonksiyonu 
+    Fonksiyonun birinci parametresi çalıştırılacak dosyanın dosya betimleyicisini belirtmektedir. Diğer parametreler execve fonksiyonu 
     ile tamamen aynıdır. Bu fonksiyonun birinci parametresinde belirtilen betimleyiciye ilişkin dosya hangi modda açılmış olmalıdır?
-    POSIX standartlarında olan ancak Linux tarafından desteklenmeyen O_EXEC bayrağı bunun için kullanılabilir. (O_EXEC bayrağında
-    dosyanın "x" hakkına sahip olup olmadığına bakılmaktadır.) Ancak POSIX standartlarında da dosyanın O_RDONLY modunda
-    açılabileceği belirtilmiştir. Yani dosya bu modlarda da açılmış olabilir. Linux sistemlerinde O_EXEC bayrağı olmasa da benzer 
-    amaçlarla kullanılan standart olmayan O_PATH bayrağı bulunmaktadır. Linux sistemlerinde bu dosya O_PATH bayrağı ile de 
-    açılmış olabilir. O halde Linux sistemleri de göz önüne alındığında buradaki dosyanın taşınabilirlik bakımından O_RDONLY modda
-    açılması uygun olmaktadır. Programcı bu dosyayı fork işleminden sonra alt proseste exec işleminden önce açabilir. Bu durumda 
-    dosyanın alt proseste kapatılması işlemi exec sırasında otomatik yapılmaktadır. Yani exec edilen kodda artık bu dosya açık 
-    görülmeyecektir.
+    POSIX standartlarında dosyanın O_EXEC bayrağı ile ya da O_RDONLY bayrağı ile açılması gerektiği belirtilmiştir. O_EXEC bayrağında 
+    zaten açış sırasında dosyanın "x" hakkına sahip olup olmadığına bakılmaktadır. O_RDONLY bayrağında açış sırasında "x" hakkına 
+    bakılmaz ancak fexecve çağrısı sırasında prosesin dosyaya "x" hakkına sahip olup olmadığı kontrol edilmektedir. Linux çekirdeği
+    O_EXEC bayrağını desteklemediği için Linux sistemlerinde dosya O_RDONLY bayrağı ile ya da O_PATH bayrağı ile açılmalıdır. 
+    Anımsanacağı gibi O_PATH bayrağı da POSIX tarafından desteklenmemektedir. 
 
-    Aşağıda fexecve fonksiyonun kullanımına bir örnek verilmiştir. Burada dosya alt proseste açılmıştır. 
+    Aşağıda fexecve fonksiyonun kullanımına bir örnek verilmiştir. Burada dosya alt proseste açılmıştır:
+
+    if (pid == 0) {
+        if ((fd = open(argv[1], O_RDONLY)) == -1)
+            exit_sys("open");
+        if (fexecve(fd, &argv[1], environ) == -1)
+            exit_sys("fexecve");
+        /* unreachable code */
+    }
+    /* ... */
+
+    Açım işleminin Linux'ta O_RDONLY bayrağı ile yapıldığına dikkat ediniz. (Linux O_EXEC bayrağını desteklememektedir.) 
+    Örneğimizde fexecve fonksiyonuna üst prosesin çevre dğeişken listesi geçirilmiştir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -17174,6 +17253,7 @@ int main(int argc, char *argv[])
             exit_sys("open");
         if (fexecve(fd, &argv[1], environ) == -1)
             exit_sys("fexecve");
+        /* unreachable code */
     }
 
     printf("ok, parent continues...\n");
@@ -17192,34 +17272,36 @@ void exit_sys(const char *msg)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     exec işlemi yapıldığında o ana kadar açık olan dosyaların akıbeti ne olacaktır? Anımsanacağı gibi açık dosyaların dosya 
-    nesnelerinin adresleri "dosya betimleyici tablosu" denilen bir tabloda tutuluyordu. Örneğin bir program 100 tane dosya açıp 
-    sonra exec işlemi uygulasa yeni çalıştırılacak kod bu 100 dosyanın farkında olmayacaktır. Ancak dosya betimleyici tablosunda
-    bu 100 betimleyici çoğu kez gereksiz bir biçimde bulunmaya devam edecektir. İşte UNIX/Linux sistemlerinde her açık dosya için
-    "close on exec" isminde bir bayrak da tutulmaktadır. Eğer bu bayrak "set" edilmişse bu durumda exec işlemi sırasında bu dosya
-    işletim sistemi tarafından otomatik olarak kapatılır. Eğer bu bayrak "reset" durumdaysa bu durumda exec işlemi sırasında dosya 
-    kapatılmaz, exec yapılan program kodu dosyanın betimleyicisini bilirse onu kullanmaya devam edebilir. Bu bayrak default olarak 
-    "reset" durumdadır. open fonksiyonuyla dosya açılırken açış modunda O_CLOEXEC bayrağı belirtilirse bu bayrak set edilmiş olur. 
-    Örneğin:
+    nesnelerinin adresleri "dosya betimleyici tablosu" denilen bir tabloda tutuluyordu. exec işlemi sırasında prosesin 
+    betimleyici tablosu korunmaktadır. Bu durumda örneğin bir program 100 tane dosya açıp sonra exec işlemi uygulasa yeni 
+    çalıştırılacak program bu 100 dosyanın farkında olmayacaktır. Ancak dosya betimleyici tablosunda bu 100 betimleyici çoğu 
+    kez gereksiz bir biçimde (seyrek olarak böylesi bir durum kasten istenebilir) bulunmaya devam edecektir. İşte UNIX/Linux 
+    sistemlerinde her açık dosya için "close-on-exec" isminde bir bayrak da tutulmaktadır. Eğer bu bayrak "set" edilmişse bu 
+    durumda exec işlemi sırasında bu dosya işletim sistemi tarafından otomatik olarak kapatılır. Eğer bu bayrak "reset" durumdaysa 
+    bu durumda exec işlemi sırasında dosya kapatılmaz, exec yapılan program kodu dosyanın betimleyicisini bilirse onu kullanmaya 
+    devam edebilir. Bu bayrak default olarak "reset" durumdadır. Yani exec sonrasında önceki programın açmış olduğu dosyalar 
+    açık kalmaya devam etmektedir. İşte open fonksiyonuyla dosya açılırken açış modunda O_CLOEXEC bayrağı belirtilirse bu 
+    bayrak set edilmiş olur. Böylece exec işlemi sırasında dosya otomatik biçimde kapatılır. Örneğin:
 
     fd = open("test.txt", O_RDONLY|O_CLOEXEC);
 
     Programcı isterse herhangi bir zaman fcntl fonksiyonu ile de bu bayrağı set ya da reset edebilir. Biz bu fcntl fonksiyonunu 
     henüz görmedik. Ancak bu bayrağın set edilmesi işlem şöyle yapılabilmektedir:
 
-    if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD)|FD_CLOEXEC)) == -1)
+    if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD)|FD_CLOEXEC) == -1)
         exit_sys("fcntl");
 
     Benzer biçimde bu bayrak şöyle de reset edilebilir:
 
-    if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) & ~FD_CLOEXEC)) == -1)
+    if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) & ~FD_CLOEXEC) == -1)
         exit_sys("fcntl");
 
-    Close on exec bayrağı dosya nesnesinin içerisinde tutulmamaktadır. Aynı dosya nesnesini gösteren farklı betimleyiciler olabilir. 
-    Bu betimleyicilerden birinin close on exec bayrağı set edilmişken diğerinin set edilmemiş olabilir. Yani close on exec bayrağı 
-    dosya nesnesinin içerisinde değil proses kontrol blok içerisinde başka bir yerdedir.
+    Close-on-exec bayrağı dosya nesnesinin içerisinde tutulmamaktadır. Çünkü aynı dosya nesnesini gösteren farklı betimleyiciler 
+    olabilir. Bu betimleyicilerden birinin close-on-exec bayrağı set edilmişken diğerinin set edilmemiş olabilir. Yani close-on-exec 
+    bayrağı dosya nesnesinin içerisinde değil proses kontrol blok içerisinde başka bir yerdedir.
 
-    Aşağıdaki örnekte "sample" programı execl ile "mample" programını çalıştırmıştır. Ancak "mample" programı "sample" programının
-    açmış olduğu dosyanın betimleyici numarasını bilmediği için "sample" programı komut satırı argümanıyla bu bilgiyi "mample"
+    Aşağıdaki örnekte "sample" programı execl ile "other" programını çalıştırmıştır. Ancak "other" programı "sample" programının
+    açmış olduğu dosyanın betimleyici numarasını bilmediği için "sample" programı komut satırı argümanıyla bu bilgiyi "other"
     programına iletmiştir.
 
     Aşağıdaki programı daha sonra dosyanın close-on-exec bayrağı set set ederek yeniden deneyiniz:
@@ -17235,9 +17317,17 @@ void exit_sys(const char *msg)
     if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD)|FD_CLOEXEC) == -1)
         exit_sys("fcntl");
 
-    close on exec bayrağı bazı işlemler sırasında işletim sistemi tarafından set ya da reset edilebilmektedir. Örneğin dup ve 
-    dup2 fonksiyonları ile dosya betimleyicisinin kopyası çıkartılırken her zaman yeni betimleyicinin close on exec bayrağı 
+    Bu durumda alt proseste dosya betimleycisi kapalı olduğu için read fonksiyonu -1 ile geri dönecek ve errno değişkeni
+    EBADF ("Bad file descriptor") ile set edilecektir. 
+
+    close-on-exec bayrağı bazı işlemler sırasında işletim sistemi tarafından set ya da reset edilebilmektedir. Örneğin dup 
+    ve dup2 fonksiyonları ile dosya betimleyicisinin kopyası çıkartılırken her zaman yeni betimleyicinin close on exec bayrağı 
     reset durumda olur.
+
+    Anımsanacağı gibi POSIX'e 2024 versiyonu ile fork yaparken de dosyanın otomatik kapatılmasını sağlayan O_CLOFORK bayrağı
+    eklenmiştir. Ancak Linux'un bu bayrağı desteklemediğini belirtmiştik. Linux'un bu bayrağı desteklememesinin nedeni 
+    exec işlemi olmadan tek başına fork işleminin artık pek kullanılmaması ve bu desteğin mevcut çekirdek tasarımına bir yük 
+    getirmesidir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /* sample.c */
@@ -17263,7 +17353,7 @@ int main(int argc, char *argv[])
         exit_sys("fork");
 
     sprintf(fd_str, "%d", fd);
-    if (pid == 0 && execl("mample", "mample", fd_str, (char *)0) == -1)
+    if (pid == 0 && execl("other", "other", fd_str, (char *)0) == -1)
         exit_sys("execve");
 
     printf("parent process continues...\n");
@@ -17282,7 +17372,7 @@ void exit_sys(const char *msg)
     exit(EXIT_FAILURE);
 }
 
-/* mample.c */
+/* other.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17324,85 +17414,137 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                                30. Ders 18/02/2023 - Cumartesi
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-    exec fonksiyonları ile script dosyaları da (yani text dosyalar da) çalıştırılabilmektedir. Bu özellik tamamen çekirdekte
-    bulunan sistem fonksiyonları (Linux'ta execve) tarafından sağlanmaktadır. exec fonksiyonları (aslında Linux'ta execve 
-    sistem fonksiyonu) eğer çalıştırılmak istenen dosya "çalıştırılabilir bir dosya değilse (örneğin Linux'ta ELF formatı ya 
-    da a.out formatı değilse)" bu dosyanın birinci satırını okuyarak onunla özel bir işlem yapmaktadır. Çalıştırılabilir 
-    formata sahip olmayan bir dosyanın (tipik olarak bir text dosya) birinci satırı aşağıdaki gibi ise exec fonksiyonları burada 
-    özel bir işlem uygulamaktadır:
+    exec fonksiyonları ile brtik (script) dosyaları da (yani text dosyalar da) çalıştırılabilmektedir. Bu özellik tamamen 
+    çekirdekte bulunan sistem fonksiyonları (Linux'ta execve) tarafından sağlanmaktadır. exec fonksiyonları (aslında Linux'ta 
+    execve sistem fonksiyonu) eğer çalıştırılmak istenen dosya "çalıştırılabilir bir dosya değilse (örneğin Linux'ta ELF 
+    formatı ya da a.out formatı değilse)" bu dosyanın birinci satırını okuyarak onunla özel bir işlem yapmaktadır. Çalıştırılabilir 
+    formata sahip olmayan bir dosyanın (tipik olarak bir text dosya) birinci satırı aşağıdaki gibi ise exec fonksiyonları 
+    burada özel bir işlem uygulamaktadır:
 
     #! [optional SPACE'ler] <executable file mutlak yol ifadesi> [isteğe bağlı argüman(lar)]
 
-    Burada #! karakterlerine genellikle "shebang" denilmektedir. Bu karakterler hemen satırın başında olmak zorundadır. 
+    Burada #! karakterlerine genellikle "shebang" denilmektedir. Bu karakterler hemen dosyanın başında bulunmak zorundadır. 
     Shebang karakterlerinden sonra isteğe bağlı bir ya da birden fazla SPACE karakteri bulundurulabilmektedir. Bundan sonra 
     gerçekten çalıştırılacak olan "çalıştırılabilir bir dosyanın" mutlak yol ifadesi olmalıdır. Bunu isteğe bağlı argümanlar 
-    izleyebilir. Örneğin:
+    izleyebilir. Örneğin aşağıdaki satırlar geçerlidir:
 
     #! /bin/bash
     #!/bin/bash
     #!/usr/bin/python
-    #!make -f
+    #!/usr/bin/make -f
 
-    exec işlemini yapan sistem fonksiyonları eğer exec yapılmak istenen dosya çalıştırılabilir bir dosya değilse (muhtemelen bir 
-    text dosya) onun birinci satırını okuyarak orada belirtilen çalıştırılabilir dosyayı çalıştırmaktadır. Ancak exec fonksiyonlarının 
-    bu işlemi yapabilmesi için exec yapılan dosyanın yine de (text dosyası olmasına karşın) "x" hakkına sahip olması gerekmektedir. 
-    Aksi takdirde exec fonksiyonları başarısız olur ve yine errno değeri EACCES biçiminde set edilir.
+    exec işlemini yapan sistem fonksiyonları eğer exec yapılmak istenen dosya çalıştırılabilir bir dosya değilse (burada "x" hakkını 
+    kastetmiyoruz, dosyanın ELF gibi bir formata sahip olmadığını kastediyoruz onun birinci satırını okuyarak orada belirtilen 
+    çalıştırılabilir dosyayı çalıştırmaktadır. Ancak exec fonksiyonlarının bu işlemi yapabilmesi için exec yapılan dosyanın yine 
+    de (text dosyası olmasına karşın) "x" hakkına sahip olması gerekmektedir. Aksi takdirde exec fonksiyonları başarısız olur ve 
+    yine errno değeri EACCES biçiminde set edilir.
 
-    Yukarıdaki biçimde biz bir script dosyasını çalıştırmaya çalıştığımızda aslında asıl çalıştırılan dosya shebang'te belirtilen 
-    dosya olmaktadır. Peki shebang'te belirtilen dosya çalıştırılırken ona komut satırı argümanları olarak ne geçirilecektir? 
-    Shebang'te belirtilen programın çalıştırılması sırasında bu programa geçirilen komut satır argümanları şöyledir:
+    Yukarıdaki gibi shebang satırı içeren bir betik dosyası exec fonksiyonlarıyla çalıştırılmak istendiğinde exec fonksiyonları 
+    betik dosyasını değil "shebang" satırında belirtilen  çalıştırılan dosyayı çalıştırmaktadır. Ancak o dosyayı çalıştırırken 
+    betik dosyasının yol ifadesini de o programa komut satırı argümanı olarak geçirmektedir. Örneğin "myscript" ismindeki 
+    aşağıdaki dosyayı exec fonksiyonlarıyla çalıştırmak isteyelim:
+
+    #!/bin/bash
+
+    for i in {1..10}; do
+        echo "$i"
+    done
+
+    Burada dosyanın shebang satırında "/bin/bash" dosyası belirtilmektedir. İşte exec fonksiyonları aslında bu "/bib/bash" 
+    dosyasını çalıştırıp "myscript" dosyasını da bu programa komut satırı argümanı olarak geçirmektedir. Yani aslında aşağıdaki 
+    çalıştırmayla eşdeğer bir durum ortaya çıkmaktadır:
+
+    $ /bin/bash myscript
+
+    Görüldüğü gibi bu örnekte aslında betik dosyasını exec fonksiyonları değil "/bin/bash" programı çalıştırmaktadır. exec 
+    fonksiyonları bu sürece yalnızca aracılık etmektedir. 
+
+    Shebang staırında belirtilen programın çalıştırılması sırasında bu programa geçirilen komut satır argümanları şöyledir:
 
     argv[0] ---> shebang'te belirtilen program dosyasına ilişkin yol ifadesi
     argv[1] ---> Eğer shebang'te çalıştırılabilen programın yanında isteğe bağlı argüman varsa o argüman 
-    argv[2] ---> exec fonksiyonunda belirtilen çalıştırılabilir olmayan dosyanın (yani script dosyasının) yol ifadesi 
+    argv[2] ---> exec fonksiyonunda belirtilen çalıştırılabilir olmayan dosyanın (yani betik dosyasının) yol ifadesi 
     argv[3] ve sonrası ---> exec fonksiyonunda belirtilen komut satırı argümanları ancak ilk argüman dahil değil
 
-    Eğer shebang'in yanındaki programın yanında isteğe bağlı argüman verilmemişse bu durumda shebang'te belirtilen programın
+    Eğer shebang'in yanındaki programın yol ifadesinin yanında isteğe bağlı argüman verilmemişse bu durumda shebang'te belirtilen programın
     komut satırı argümanları şöyle olacaktır:
 
     argv[0] ---> shebang'te belirtilen program dosyasına ilişkin yol ifadesi
-    argv[1] ---> exec fonksiyonunda belirtilen çalıştırılabilir olmayan dosyanın (yani script dosyasının) yol ifadesi 
+    argv[1] ---> exec fonksiyonunda belirtilen çalıştırılabilir olmayan dosyanın (yani betik dosyasının) yol ifadesi 
     argv[2] ve sonrası ---> exec fonksiyonunda belirtilen komut satırı argümanları ancak ilk argüman dahil değil
 
-    Burada dikkat edilmesi gereken bir nokta şudur: exec fonksiyonunda belirtilen argv[0] için girilen argüman shebang'te 
+    Burada dikkat edilmesi gereken bir nokta şudur: exec fonksiyonunda belirtilen argv[0] için girilen argüman shebang satırında
     belirtilen programa aktarılmamaktadır.
 
-    Şimdi çeşitli denemelerle argüman aktarımını anlamaya çalışalım. "test.txt" şöyle olsun:
+    Şimdi çeşitli denemelerle argüman aktarımını anlamaya çalışalım. 
+    
+    - "sample.py" isimli Python programını biz normalde şöyşe çalıştırırız.
 
-    #! /home/kaan/Study/Unix-Linux-SysProg/mample ankara
+    $ python3 sample.py
 
-    Burada görüldüğü gibi shebang'te belirtilen programın yanında bir isteğe bağlı argüman vardır. Şimdi "mample" programının 
-    da şöyle yazılmış olduğunu kabul edelim:
+    "python3" isimli yorumlayıcı (ismi "python" da olabilir) çalıştıracağı programı komut satırı argümanı olarak almaktadır. 
+    Şimdi biz çalıştırma işlemini kolaylaştırmak isteyelim.Bunun için "sample.py" dosysının başına shebang satırı yerleştirmeliyiz:
 
-    #include <stdio.h>
+    #!/usr/bin/python3
+
+    for i in range(10):
+        print(i)
+        
+
+    "sample.py" dosyasına chmod komutu ile "x" hakkı verelim:
+
+    $ chmod +x sample.py
+
+    Artık Python programını sanki bir C programıymış gibi çalıitırabiliriz:
+
+    $ ./sample.py
+    0
+    1
+    2
+    3
+    4
+    5
+    6
+    7
+    8
+    9
+
+    Burada exec fonksiyonları aslında aşağıdaki gibi bir çalıştırma yapılmış gibi işlem exec uygulayacaktır:
+
+    $ python3 sample.py 
+
+    - "test.txt" dosyasının shebang satırı şöyle olsun:
+
+    #!/home/kaan/Study/Unix-Linux-SysProg/sample ankara
+
+    Burada görüldüğü gibi shebang'te belirtilen programın yanında isteğe bağlı bir argüman ("ankara" argümanı) bulunmaktadır. 
+    Şimdi "sample" programının da C'de şöyle yazıldığını varsayalım:
+
+    /* sample.c */
 
     int main(int argc, char *argv[])
     {
-        printf("mample running...\n");
+        printf("sample running...\n");
 
         for (int i = 0; i < argc; ++i)
-            puts(argv[i]);
+            printf("argv[%d]: %s\n", i, argv[i]);
 
         return 0;
     }
 
-    Şimdi aşağıdaki gibi exec yapılmış olsun:
+    Şimdi aşağıdaki gibi exec yapmış olalım:
 
     execl("test.txt", "test.txt", "ali", "veli", "selami", (char *)0);
 
     Ekranda şunları görmeliyiz:
 
-    mample running...
-    /home/kaan/Study/Unix-Linux-SysProg/mample
-    ankara
-    test.txt
-    ali
-    veli
-    selami
+    sample running...
+    argv[0]: /home/kaan/Study/UnixLinux-SysProg/10-Exec/sample
+    argv[1]: ankara
+    argv[2]: test.txt
+    argv[3]: ali
+    argv[4]: veli
+    argv[5]: selami
 
     exec işlemi şöyle yapılmış olsun:
 
@@ -17410,42 +17552,44 @@ void exit_sys(const char *msg)
 
     Ekrana şunlar çıkacaktır:
 
-    mample running...
-    /home/kaan/Study/Unix-Linux-SysProg/mample
-    ankara
-    test.txt
-    veli
-    selam
+    sample running...
+    argv[0]: /home/kaan/Study/UnixLinux-SysProg/10-Exec/sample
+    argv[1]: ankara
+    argv[2]: test.txt
+    argv[3]: veli
+    argv[4]: selami
 
     Şimdi de shebang satırı şöyle olsun:
 
-    #!/home/kaan/Study/Unix-Linux-SysProg/mample
+    #!/home/kaan/Study/Unix-Linux-SysProg/sample
 
     Görüldüğü gibi burada arık shebang'te belirtilen programın yanında isteğe bağlı argüman yoktur. Şimdi exec işlemini şöyle
     yapmış olalım:
 
     execl("test.txt", "test.txt", "ali", "veli", "selami", (char *)0);
 
-    mample running...
-    /home/kaan/Study/Unix-Linux-SysProg/mample
-    test.txt
-    ali
-    veli
-    selami
+    sample running...
+    argv[0]: /home/kaan/Study/UnixLinux-SysProg/10-Exec/sample
+    argv[1]: test.txt
+    argv[2]: ali
+    argv[3]: veli
+    argv[4]: selami
 
     Sistemlerde genellikle shebang satırları için maksimum bir uzunluk belirlenmiş olmaktadır. Örneğin eski Linux sistemlerinde 
-    eğer shebang satırı uzunsa çekirdek bunun ilk 127 karakterini dikkate almaktadır. Ancak Linux'ta 5.1 çekirdek'ı ile birlikte
+    eğer shebang satırı uzunsa çekirdek bunun ilk 127 karakterini dikkate almaktadır. Ancak Linux'ta 5.1 çekirdeği ile birlikte
     bu uzunluk 255'e yükseltilmiştir.
 
     Shebang'te belirtilen çalıştırılabilir program genellikle "mutlak yol ifadesi" ile belirtilmektedir. Ancak Linux'ta buradaki 
     program "göreli yol ifadesi" ile de belirtilebilmektedir. Örneğin:
 
-    #!mample
+    #!sample
+
+    <BURADA KALDIK>
 
     Bu durumda burada belirtilen program exec işlemini yapan prosesin çalışma dizini temel alınarak aranmaktadır.
 
     Shebang'te belirtilen programın yanına birden fazla argüman yazabilir miyiz? Örneğin:
-
+s
     #! /home/kaan/Study/Unix-Linux-SysProg/mample ankara izmir istanbul
 
     Maalesef bu durumda UNIX türevi sistemler arasında bazı farklılıklar söz konusu olmaktadır. Bu durum POSIX standartlarında
@@ -24062,23 +24206,24 @@ void exit_sys(const char *msg)
 
     void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
 
-    Fonksiyonun birinci parametresi, "mapping için" önerilen (preferred) sanal adresi belirtmektedir. Programcı, belli bir sanal 
-    adresin mapping için kullanılmasını isteyebilir. Ancak fonksiyon, flags parametresinde MAP_FIXED geçilmemişse bu adresi 
-    tam (exact) olarak yani verildiği gibi kullanmayabilir. Fonksiyon bu önerilen adresin yakınındaki bir sayfayı tahsis edebilir. 
-    Bu tahsisatın burada belirtilen adresin neresinde yapılacağı garanti edilmemiştir. Yani buradaki adres eğer fonksiyonun flags 
-    parametresinde MAP_FIXED kullanılmamışsa bir öneri niteliğindedir. Eğer bu adres NULL olarak geçilirse bu durumda mapping işlemi 
-    işletim sisteminin kendi belirlediği bir adresten itibaren yapılır. Tabii en normal durum bu parametrenin NULL adres olarak 
-    geçilmesidir.
+    Fonksiyonun birinci parametresi, "haritalama (mapping) için" önerilen (preferred) sanal adresi belirtmektedir. Programcı, 
+    belli bir sanal adresin haritalama için kullanılmasını isteyebilir. Ancak POSIX standartlarına göre fonksiyon, flags 
+    parametresinde MAP_FIXED geçilmemişse bu adresi tam (exact) olarak yani verildiği gibi kullanmayabilir. Fonksiyon 
+    bu önerilen adresin yakınındaki bir sayfayı da tahsis edebilir. Bu tahsisatın burada belirtilen adresin neresinde 
+    yapılacağı POSIX standartlarında garanti edilmemiştir. Yani buradaki adres eğer fonksiyonun flags parametresinde 
+    MAP_FIXED kullanılmamışsa bir öneri niteliğindedir. Eğer bu adres NULL olarak geçilirse bu durumda haritalama işlemi 
+    işletim sisteminin kendi belirlediği bir adresten itibaren yapılı. Kullanıcı modundaki programlarda genellikle bu 
+    NULL adres olarak geçilmektedir.  
 
-    Fonksiyonun ikinci parametresi, paylaşılan bellek alanının ne kadarının map edileceğini belirtir. Örneğin paylaşılan bellek 
-    alanı nesnesi 1 MB olabilir. Ancak biz onun 100K'lık bir kısmını map etmek isteyebiliriz. Ya da tüm paylaşılan bellek alanını 
-    da map etmek isteyebiliriz. Bu uzunluk sayfa katlarında olmak zorunda değildir. Ancak pek çok sistem, bu uzunluğu sayfa katlarına 
-    doğru yukarı yuvarlamaktadır. Yani biz uzunluğu örneğin 100 byte verebiliriz. Ancak sistem 100 byte yerine sayfa uzunluğu olan 
-    4096 byte'ı map edecektir.
+    Fonksiyonun ikinci parametresi, haritalanacak bellek alanının büyüklüğünü belirtmektedir. Örneğin paylaşılan bellek 
+    alanı nesnesi 1 MB olabilir. Ancak biz onun 100K'lık bir kısmını haritalamak etmek isteyebiliriz. Ya da tüm paylaşılan 
+    bellek alanının da haritalanmasını isteyebiliriz. Bu uzunluk POSIX standartlarına göre sayfa katlarında olmak zorunda 
+    değildir. Ancak pek çok sistem, bu uzunluğu sayfa katlarına doğru yukarı yuvarlamaktadır. Yani biz uzunluğu örneğin 
+    100 byte verebiliriz. Ancak sistem 100 byte yerine sayfa uzunluğu olan 4096 byte'ı haritalaacaktır.
 
-    Fonksiyonun üçüncü parametresi, mapping işleminin koruma özelliklerini belirtmektedir. Başka bir deyişle bu parametre paylaşılan 
-    bellek alanı için ayrılacak fiziksel sayfaların işlemci düzeyinde koruma özelliklerini belirtir. Bu özellikler şu sembolik 
-    sabitlerden oluşturulabilir:
+    Fonksiyonun üçüncü parametresi (prot parametresi), haritalama işleminin koruma özelliklerini belirtmektedir. Başka 
+    bir deyişle bu parametre paylaşılan bellek alanı için ayrılacak fiziksel sayfaların işlemci düzeyinde koruma özelliklerini 
+    belirtir. Bu özellikler şu sembolik sabitlerden oluşturulabilir:
 
     PROT_READ
     PROT_WRITE
