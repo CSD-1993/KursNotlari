@@ -1,0 +1,1500 @@
+/*----------------------------------------------------------------------------------------------------------------------
+                                        C ve Sistem Programcıları Derneği
+
+                "Linux Kernel - İşletim Sistemlerinin Tasarımı ve Gerçekleştirilmesi" Kursu - Özet Notlar
+                                                   3. Bölüm
+
+                                              Eğitmen: Kaan ASLAN
+
+        Bu notlar Kaan ASLAN tarafından oluşturulmuştur. Kaynak belirtmek koşulu ile her türlü alıntı yapılabilir.
+        Kaynak belirtmek için aşağıdaki referansı kullanabilirsiniz:
+
+    Aslan, K. (2025), "Linux Kernel - İşletim Sistemlerinin Tasarımı ve Gerçekleştirilmesi Kursu, Özet Notları
+        C ve Sistem Programcıları Derneği, İstanbul.
+
+                     (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
+                         (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
+
+                        Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
+
+                                        Son Güncelleme: 26/09/2026 - Cumartesi
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                            101. Ders 05/09/2026 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
+
+*----------------------------------------------------------------------------------------------------------------------
+    Bu bölümde proseslerin sanal bellek alanlarının nasıl oluşturulduğu ve nasıl yönetildiği üzerinde duracağız. Anımsanacağı 
+    gibi UNIX/Linux sistemlerinde yeni bir proses fork isimli POSIX fonksiyonuyla yeni bir thread de pthread_create 
+    isimli POSIX fonksiyonuyla yaratılmaktadır. Bu fonksiyonlar nihayetinde Linux çekirdeğindek sys_fork ve sys_clone 
+    fonksiyonlarını çağırmaktadır. fork fonksiyonun bir prosesin ödeş kopyasını oluşturduğunu anımsayınız. fork fonksiyonu
+    çağrıldığında yeni bir task_struct (proses kontrol bloğu) yaratılmakta ve kabaca üst prosesin task_struct nesnesinin 
+    içeriği alt prosesin task_struct nesnesine kopyalanmaktadır. task_struct içerisindeki elemanların birçoğunun göstericiler 
+    yoluyla nesneleri gösterdiğini anımsayınız. Dolayısıyla fork işlemi büyük ölçüde "derin (deep)" kopyalama biçiminde 
+    değil "sığ (shallow)" kopyalama biçiminde yürütülmektedir. Biz proselerin ve thread'leri yaratılması sürecini ayrı 
+    bir bölümde ele alacağız. exec fonksiyonlarının bir prosesin yaşamına başka bir kodla devam etmesini sağladığını
+    anımsayınız. exec işlemi uygulandığında prosesin bellek alanı boşaltılıp başka bir program dosyasından hareketle
+    yeni bir bellek alanı oluşturulmakta ve proses yaşamına başka bir kodu çalıştırarak devam etmektedir. Anımsanacağı 
+    gibi UNIX/Linux sistemlerinde "hem mevcut program çalışmaya devam etsim hem de başka bir program da çalışsın" 
+    isteniyorsa yalnızca fork ve yalnızca exec yetersiz kalmaktadır. Bu işlem tipik olarak önce fork uygulanıp alt proseste
+    exec uygulanarak gerçekleştirilmektedir. Örneğin:
+
+    pid_t pid;
+    /* ...*/
+
+    if ((pid = fork()) == -1)
+        exit_sys("fork");
+
+    if (pid == 0 && execl("/bin/ls", "/bin/ls", "-l", (char *)NULL) == -1) 
+        exit_sys("exexcl");
+    
+    /* ... */
+
+    Yeni prosesin fork içerisinden çalışmaya başladığını, fork fonksiyonundan alt prosesin 0 ile, üst prosesin alt prosesin
+    exit koduyla çıktığını anımsayınız.
+    
+    Biz bu süreci zaten ayrı bir bölümde ele alacağız. Bu bölümde biz prosesin bellek alanının nasıl kayıt altında 
+    tutulduğunu ele alacağız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Prosesin bellek alanına ilişkin tüm bilgiler task_struct yapısındaki mm ve/veya active_mm elemanlarının gösterdiği 
+    mm_struct nesnelerinde tutulmaktadır:
+
+    struct task_struct {
+        /*... */
+
+        struct mm_struct		*mm;
+	    struct mm_struct		*active_mm;
+
+        /* ... */
+    };
+
+    mm_struct yapısı üzerinde çekirdeğin çeşitli versiyonlarında iyileştirmeler yapılmıştır. Güncel çekirdeklerde bu 
+    yapı oldukça büyük bir durumdadır:
+
+    struct mm_struct {
+        struct {
+            /*
+            * Fields which are often written to are placed in a separate
+            * cache line.
+            */
+            struct {
+                /**
+                * @mm_count: The number of references to &struct
+                * mm_struct (@mm_users count as 1).
+                *
+                * Use mmgrab()/mmdrop() to modify. When this drops to
+                * 0, the &struct mm_struct is freed.
+                */
+                atomic_t mm_count;
+            } ____cacheline_aligned_in_smp;
+
+            struct maple_tree mm_mt;
+
+            unsigned long mmap_base;	/* base of mmap area */
+            unsigned long mmap_legacy_base;	/* base of mmap area in bottom-up allocations */
+    #ifdef CONFIG_HAVE_ARCH_COMPAT_MMAP_BASES
+            /* Base addresses for compatible mmap() */
+            unsigned long mmap_compat_base;
+            unsigned long mmap_compat_legacy_base;
+    #endif
+            unsigned long task_size;	/* size of task vm space */
+            pgd_t * pgd;
+
+    #ifdef CONFIG_MEMBARRIER
+            /**
+            * @membarrier_state: Flags controlling membarrier behavior.
+            *
+            * This field is close to @pgd to hopefully fit in the same
+            * cache-line, which needs to be touched by switch_mm().
+            */
+            atomic_t membarrier_state;
+    #endif
+
+            /**
+            * @mm_users: The number of users including userspace.
+            *
+            * Use mmget()/mmget_not_zero()/mmput() to modify. When this
+            * drops to 0 (i.e. when the task exits and there are no other
+            * temporary reference holders), we also release a reference on
+            * @mm_count (which may then free the &struct mm_struct if
+            * @mm_count also drops to 0).
+            */
+            atomic_t mm_users;
+
+            /* MM CID related storage */
+            struct mm_mm_cid mm_cid;
+
+            /* sched_cache related statistics */
+            struct sched_cache_stat sc_stat;
+    #ifdef CONFIG_MMU
+            atomic_long_t pgtables_bytes;	/* size of all page tables */
+    #endif
+            int map_count;			/* number of VMAs */
+
+            spinlock_t page_table_lock; /* Protects page tables and some
+                            * counters
+                            */
+            /*
+            * Typically the current mmap_lock's offset is 56 bytes from
+            * the last cacheline boundary, which is very optimal, as
+            * its two hot fields 'count' and 'owner' sit in 2 different
+            * cachelines, and when mmap_lock is highly contended, both
+            * of the 2 fields will be accessed frequently, current layout
+            * will help to reduce cache bouncing.
+            *
+            * So please be careful with adding new fields before
+            * mmap_lock, which can easily push the 2 fields into one
+            * cacheline.
+            */
+            struct rw_semaphore mmap_lock;
+
+            struct list_head mmlist; /* List of maybe swapped mm's.	These
+                        * are globally strung together off
+                        * init_mm.mmlist, and are protected
+                        * by mmlist_lock
+                        */
+    #ifdef CONFIG_PER_VMA_LOCK
+            struct rcuwait vma_writer_wait;
+            /*
+            * This field has lock-like semantics, meaning it is sometimes
+            * accessed with ACQUIRE/RELEASE semantics.
+            * Roughly speaking, incrementing the sequence number is
+            * equivalent to releasing locks on VMAs; reading the sequence
+            * number can be part of taking a read lock on a VMA.
+            * Incremented every time mmap_lock is write-locked/unlocked.
+            * Initialized to 0, therefore odd values indicate mmap_lock
+            * is write-locked and even values that it's released.
+            *
+            * Can be modified under write mmap_lock using RELEASE
+            * semantics.
+            * Can be read with no other protection when holding write
+            * mmap_lock.
+            * Can be read with ACQUIRE semantics if not holding write
+            * mmap_lock.
+            */
+            seqcount_t mm_lock_seq;
+    #endif
+            struct futex_mm_data	futex;
+
+            unsigned long hiwater_rss; /* High-watermark of RSS usage */
+            unsigned long hiwater_vm;  /* High-water virtual memory usage */
+
+            unsigned long total_vm;	   /* Total pages mapped */
+            unsigned long locked_vm;   /* Pages that have PG_mlocked set */
+            atomic64_t    pinned_vm;   /* Refcount permanently increased */
+            unsigned long data_vm;	   /* VM_WRITE & ~VM_SHARED & ~VM_STACK */
+            unsigned long exec_vm;	   /* VM_EXEC & ~VM_WRITE & ~VM_STACK */
+            unsigned long stack_vm;	   /* VM_STACK */
+            union {
+                /* Temporary while VMA flags are being converted. */
+                vm_flags_t def_flags;
+                vma_flags_t def_vma_flags;
+            };
+
+            /**
+            * @write_protect_seq: Locked when any thread is write
+            * protecting pages mapped by this mm to enforce a later COW,
+            * for instance during page table copying for fork().
+            */
+            seqcount_t write_protect_seq;
+
+            spinlock_t arg_lock; /* protect the below fields */
+
+            unsigned long start_code, end_code, start_data, end_data;
+            unsigned long start_brk, brk, start_stack;
+            unsigned long arg_start, arg_end, env_start, env_end;
+
+            unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
+
+    #ifdef CONFIG_ARCH_HAS_ELF_CORE_EFLAGS
+            /* the ABI-related flags from the ELF header. Used for core dump */
+            unsigned long saved_e_flags;
+    #endif
+
+            struct percpu_counter rss_stat[NR_MM_COUNTERS];
+
+            struct linux_binfmt *binfmt;
+
+            /* Architecture-specific MM context */
+            mm_context_t context;
+
+            mm_flags_t flags; /* Must use mm_flags_* hlpers to access */
+
+    #ifdef CONFIG_AIO
+            spinlock_t			ioctx_lock;
+            struct kioctx_table __rcu	*ioctx_table;
+    #endif
+    #ifdef CONFIG_MEMCG
+            /*
+            * "owner" points to a task that is regarded as the canonical
+            * user/owner of this mm. All of the following must be true in
+            * order for it to be changed:
+            *
+            * current == mm->owner
+            * current->mm != mm
+            * new_owner->mm == mm
+            * new_owner->alloc_lock is held
+            */
+            struct task_struct __rcu *owner;
+    #endif
+
+            /* store ref to file /proc/<pid>/exe symlink points to */
+            struct file __rcu *exe_file;
+    #ifdef CONFIG_MMU_NOTIFIER
+            struct mmu_notifier_subscriptions *notifier_subscriptions;
+    #endif
+    #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !defined(CONFIG_SPLIT_PMD_PTLOCKS)
+            pgtable_t pmd_huge_pte; /* protected by page_table_lock */
+    #endif
+    #ifdef CONFIG_NUMA_BALANCING
+            /*
+            * numa_next_scan is the next time that PTEs will be remapped
+            * PROT_NONE to trigger NUMA hinting faults; such faults gather
+            * statistics and migrate pages to new nodes if necessary.
+            */
+            unsigned long numa_next_scan;
+
+            /* Restart point for scanning and remapping PTEs. */
+            unsigned long numa_scan_offset;
+
+            /* numa_scan_seq prevents two threads remapping PTEs. */
+            int numa_scan_seq;
+    #endif
+            /*
+            * An operation with batched TLB flushing is going on. Anything
+            * that can move process memory needs to flush the TLB when
+            * moving a PROT_NONE mapped page.
+            */
+            atomic_t tlb_flush_pending;
+    #ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
+            /* See flush_tlb_batched_pending() */
+            atomic_t tlb_flush_batched;
+    #endif
+            struct uprobes_state uprobes_state;
+    #ifdef CONFIG_PREEMPT_RT
+            struct rcu_head delayed_drop;
+    #endif
+    #ifdef CONFIG_HUGETLB_PAGE
+            atomic_long_t hugetlb_usage;
+    #endif
+            struct work_struct async_put_work;
+
+    #ifdef CONFIG_IOMMU_MM_DATA
+            struct iommu_mm_data *iommu_mm;
+    #endif
+    #ifdef CONFIG_KSM
+            /*
+            * Represent how many pages of this process are involved in KSM
+            * merging (not including ksm_zero_pages).
+            */
+            unsigned long ksm_merging_pages;
+            /*
+            * Represent how many pages are checked for ksm merging
+            * including merged and not merged.
+            */
+            unsigned long ksm_rmap_items;
+            /*
+            * Represent how many empty pages are merged with kernel zero
+            * pages when enabling KSM use_zero_pages.
+            */
+            atomic_long_t ksm_zero_pages;
+    #endif /* CONFIG_KSM */
+    #ifdef CONFIG_LRU_GEN_WALKS_MMU
+            struct {
+                /* this mm_struct is on lru_gen_mm_list */
+                struct list_head list;
+                /*
+                * Set when switching to this mm_struct, as a hint of
+                * whether it has been used since the last time per-node
+                * page table walkers cleared the corresponding bits.
+                */
+                unsigned long bitmap;
+    #ifdef CONFIG_MEMCG
+                /* points to the memcg of "owner" above */
+                struct mem_cgroup *memcg;
+    #endif
+            } lru_gen;
+    #endif /* CONFIG_LRU_GEN_WALKS_MMU */
+    #ifdef CONFIG_MM_ID
+            mm_id_t mm_id;
+    #endif /* CONFIG_MM_ID */
+        } __randomize_layout;
+
+        /*
+        * The mm_cpumask needs to be at the end of mm_struct, because it
+        * is dynamically sized based on nr_cpu_ids.
+        */
+        char flexible_array[] __aligned(__alignof__(unsigned long));
+    };
+
+    mm_struct yapısı prosesin sanal bellek alanına ilişkin tüm bilgileri tutmaktadır. Ancak yukarıda da gördüğünüz gibi 
+    yapı oldukça karmaşıktır, yapının çok sayıda elemanı vardır. 
+
+    Prosesin sanal bellek alanınına ilişkin bilgileri tutan mm_struct nesnesine "Understanding the Linux Kernel" kitabında 
+    "bellek betimleyicisi (memory descriptor)" da denilmektedir. "Bellek betimleyicisi" terimi çekirdek geliştirme  
+    terminolojisinde kullanılan bir terim değildir. Ancak biz de kursumuzda bu nesneye bazen "bellek betimleyicisi" diyeceğiz.
+
+    Prosesin sanal adres alanı içeisindeki aynı özelliklere sahip sayfalardan oluşan alanlar vm_area_struct isimli bir yapıyla
+    temsil edilmektedir. Güncel çekirdeklerde bu yapı şöyle tanımlanmıştır:
+
+    struct vm_area_struct {
+        /* The first cache line has the info for VMA tree walking. */
+
+        union {
+            struct {
+                /* VMA covers [vm_start; vm_end) addresses within mm */
+                unsigned long vm_start;
+                unsigned long vm_end;
+            };
+            freeptr_t vm_freeptr; /* Pointer used by SLAB_TYPESAFE_BY_RCU */
+        };
+
+        /*
+        * The address space we belong to.
+        * Unstable RCU readers are allowed to read this.
+        */
+        struct mm_struct *vm_mm;
+        pgprot_t vm_page_prot;          /* Access permissions of this VMA. */
+
+        /*
+        * Flags, see mm.h.
+        * To modify use vm_flags_{init|reset|set|clear|mod} functions.
+        * Preferably, use vma_flags_xxx() functions.
+        */
+        union {
+            /* Temporary while VMA flags are being converted. */
+            const vm_flags_t vm_flags;
+            vma_flags_t flags;
+        };
+
+    #ifdef CONFIG_PER_VMA_LOCK
+        /*
+        * Can only be written (using WRITE_ONCE()) while holding both:
+        *  - mmap_lock (in write mode)
+        *  - vm_refcnt bit at VM_REFCNT_EXCLUDE_READERS_FLAG is set
+        * Can be read reliably while holding one of:
+        *  - mmap_lock (in read or write mode)
+        *  - vm_refcnt bit at VM_REFCNT_EXCLUDE_READERS_BIT is set or vm_refcnt > 1
+        * Can be read unreliably (using READ_ONCE()) for pessimistic bailout
+        * while holding nothing (except RCU to keep the VMA struct allocated).
+        *
+        * This sequence counter is explicitly allowed to overflow; sequence
+        * counter reuse can only lead to occasional unnecessary use of the
+        * slowpath.
+        */
+        unsigned int vm_lock_seq;
+    #endif
+        /*
+        * A file's MAP_PRIVATE vma can be in both i_mmap tree and anon_vma
+        * list, after a COW of one of the file pages.	A MAP_SHARED vma
+        * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
+        * or brk vma (with NULL file) can only be in an anon_vma list.
+        */
+        struct list_head anon_vma_chain; /* Serialized by mmap_lock &
+                        * page_table_lock */
+        struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
+
+        /* Function pointers to deal with this struct. */
+        const struct vm_operations_struct *vm_ops;
+
+        /* Information about our backing store: */
+        unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
+                        units */
+        struct file * vm_file;		/* File we map to (can be NULL). */
+        void * vm_private_data;		/* was vm_pte (shared mem) */
+
+    #ifdef CONFIG_SWAP
+        atomic_long_t swap_readahead_info;
+    #endif
+    #ifndef CONFIG_MMU
+        struct vm_region *vm_region;	/* NOMMU mapping region */
+    #endif
+    #ifdef CONFIG_NUMA
+        struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
+    #endif
+    #ifdef CONFIG_NUMA_BALANCING
+        struct vma_numab_state *numab_state;	/* NUMA Balancing state */
+    #endif
+    #ifdef CONFIG_PER_VMA_LOCK
+        /*
+        * Used to keep track of firstly, whether the VMA is attached, secondly,
+        * if attached, how many read locks are taken, and thirdly, if the
+        * VM_REFCNT_EXCLUDE_READERS_FLAG is set, whether any read locks held
+        * are currently in the process of being excluded.
+        *
+        * This value can be equal to:
+        *
+        * 0 - Detached. IMPORTANT: when the refcnt is zero, readers cannot
+        * increment it.
+        *
+        * 1 - Attached and either unlocked or write-locked. Write locks are
+        * identified via __is_vma_write_locked() which checks for equality of
+        * vma->vm_lock_seq and mm->mm_lock_seq.
+        *
+        * >1, < VM_REFCNT_EXCLUDE_READERS_FLAG - Read-locked or (unlikely)
+        * write-locked with other threads having temporarily incremented the
+        * reference count prior to determining it is write-locked and
+        * decrementing it again.
+        *
+        * VM_REFCNT_EXCLUDE_READERS_FLAG - Detached, pending
+        * __vma_end_exclude_readers() completion which will decrement the
+        * reference count to zero. IMPORTANT - at this stage no further readers
+        * can increment the reference count. It can only be reduced.
+        *
+        * VM_REFCNT_EXCLUDE_READERS_FLAG + 1 - A thread is either write-locking
+        * an attached VMA and has yet to invoke __vma_end_exclude_readers(),
+        * OR a thread is detaching a VMA and is waiting on a single spurious
+        * reader in order to decrement the reference count. IMPORTANT - as
+        * above, no further readers can increment the reference count.
+        *
+        * > VM_REFCNT_EXCLUDE_READERS_FLAG + 1 - A thread is either
+        * write-locking or detaching a VMA is waiting on readers to
+        * exit. IMPORTANT - as above, no further readers can increment the
+        * reference count.
+        *
+        * NOTE: Unstable RCU readers are allowed to read this.
+        */
+        refcount_t vm_refcnt ____cacheline_aligned_in_smp;
+    #ifdef CONFIG_DEBUG_LOCK_ALLOC
+        struct lockdep_map vmlock_dep_map;
+    #endif
+    #endif
+        /*
+        * For areas with an address space and backing store,
+        * linkage into the address_space->i_mmap interval tree.
+        *
+        */
+        struct {
+            struct rb_node rb;
+            unsigned long rb_subtree_last;
+        } shared;
+    #ifdef CONFIG_ANON_VMA_NAME
+        /*
+        * For private and shared anonymous mappings, a pointer to a null
+        * terminated string containing the name given to the vma, or NULL if
+        * unnamed. Serialized by mmap_lock. Use anon_vma_name to access.
+        */
+        struct anon_vma_name *anon_name;
+    #endif
+        struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
+    #ifdef __HAVE_PFNMAP_TRACKING
+        struct pfnmap_track_ctx *pfnmap_track_ctx;
+    #endif
+    } __randomize_layout;
+
+    Karmaşık bu iki veri yapısını basite indirgersek şöyleşunları söyleyebiliriz: Prosesin tüm sanal bellek alanına ilişkin 
+    bilgiler task_struct nesnesinin mm ve/veya acive_mm elemanlarının gösterdiği mm_struct nesnesi içerisindedir. mm_struct 
+    nesnesi de sanal bellek alanlarını (area) belirten (bunu fiziksel düğümlerdeki bölgelerle (zones) karıştırmayınız) 
+    mm_area_struct nesnelerini tutmaktadır. Alanları (area) belirten nesnelere Linux çekirdek terminolojisindde kısaca 
+    "VMA (Virtual Memory Area)" denilmektedir. Biz kursumuzda da bu alanlara kısaca VMA diyeceğiz. 
+
+    VMA'lar tamamen prosesin sanala bellek lanaı ile ilgilidir. VMA'lar içerisinde fiziksel belleğe ilişkin hiçbir
+    bilgi tutulmamaktadır. Fiziksel bellek eşleştirmeleri dorudan sayfa tablosu yoluyla yapılmaktadır.
+
+    mm_struct yapısı içerisinde alanlar eskiden "kırmızı-siyah ağacı" ile tutuluyordu. Çekirdeğin 6.1 versiyonuyla b
+    irlikte "maple ağacı (maple tree)" denilen bütünleşik bir veri yapısı kullanılmaya başlanmıştır. Bu ağacın kök düğümü 
+    mm_struct içerisindeki mm_mt elemanında tutulmaktadır:
+
+    struct mm_struct {
+        /* ... */
+
+        struct {
+            struct maple_tree mm_mt;        /* tek yapı: tüm VMA'lar */
+            /* ... */
+        };
+
+        /* ... */
+    };
+
+    mm_struct ile belirtilen sanal bellek alanaları için "Understanding the Linux Kernel" kitabında "memory area" terimi 
+    yerine "memory region" terimi kullanılmıştır. "Memory region" terimi çekirdek geliştirme terminolojisinde kullanılan 
+    bir terim değildir. İngilizce "area", "region", "zone" sözcükleri arasında anlamsal farklılıklar bulunmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        102. Ders 06/09/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    task_struct içerisinde prosesin sanal bellek alanını bilgilerinin iki gösterici tarafından gösterildiğini belirtmiştik:
+
+     struct task_struct {
+        /*... */
+
+        struct mm_struct		*mm;
+	    struct mm_struct		*active_mm;
+
+        /* ... */
+    };
+
+    Peki neden iki ayrı gösterici bulundurulmuştur? Çekirdek thread'lerine bağlamsal geçiş daha az maliyetli olsun diye 
+    mm elemanının yeniden düzenlenmesi yerine active_mm elemanı kullanılmaktadır. Proses thread'lerinde bu iki eleman 
+    aslında aynı bellek betimleycisini göstermektedir. 
+
+    ┌──────────────────────────────┬────────┬─────────────────────┐
+    │          Durum               │   mm   │   active_mm         │
+    ├──────────────────────────────┼────────┼─────────────────────┤
+    │ Proses thread'i              |  mm_X  │     mm_X            │
+    │ Çekirdek thread'i (lazy TLB) │  NULL  │ ödünç alınan (mm_X) │
+    └──────────────────────────────┴────────┴─────────────────────┘
+
+    Yani mm göstericisi "bu thread'in sahip olduğu adres alanını", active_mm gösterici ise "o anda CPU'nun sayfa 
+    tablosunda yüklü olan thread'in adres alanını belirtmektedir. Yukarıda da belirttiğimiz gibi normal proses thread'lerinde
+    bu iki gösterici aslında aynı bellek betimleyicisini göstermektedir. Farklılaşma çekirdek thread'lerinde söz konusu 
+    olmaktadır. Örneğin "kswapd" gibi "ksoftirqd" gibi "kworker" gibi çekirdek thread'lerinin kullanıcı alanı yoktur. 
+    Bunların mm göstericileri NULL durumdadır. Bunların bellek alanları active_mm göstericisi tarafından gösterilmektedir. 
+    active_mm elemanı hiçbir zaman NULL olmamaktadır. Bu eleman kullanıcı proseslerine ilişkin thread'lerde zaten mm 
+    elemanı ile aynı nesnesyi göstermektedir. Çekirdek thread'lerinde geçişin yapıldığı thread'e ilişkin mm_struct 
+    nesnesini göstermektedir. 
+
+    Bir proses thread'inden çekirdek thread'ine geçiş yapıldığında sayfa tablosu çekirdek thread'i için değiştirilmez. 
+    Çünkü zaten çekirdek alanı tüm proses thread'lerinin sayfa tablolarında aynı yerde ve aynı biçimde bulunmaktadır. 
+    Yani geçilen çekirdek thread'i aslında geçişin yapıldığı önceki proses thread'inin sayfa tablosunu ödünç almaktadır. 
+    Buna Linux çekirdek terminolojisinde "Lazy TLB" denilmektedir. İşte active_mm elemanı böylesi bir durumda ödünç 
+    alınan proses thread'inin bellek alanı bilgilerini göstermektedir. Örneğin "bash" prosesine ilişkin bir thread'ten 
+    "kswapd" thread'ine geçiliyor olsun. Oradan da "firefox" prosesin thread'ine geçilsin. Bu senaryodaki mm ve active_mm 
+    elemanları aşağıdaki gibi değişecektir:
+
+    Zaman ──────────────────────────────────────────────────────────────▶
+
+    bash (PID 100)               kswapd (kthread)            firefox (PID 200)
+    ┌────────────────┐          ┌────────────────┐          ┌────────────────┐
+    │ mm        = A  │          │ mm = NULL      │          │ mm        = B  │
+    │ active_mm = A  │   ───>   │ active_mm = A  │   ───>   │ active_mm = B  │
+    └────────────────┘          └────────────────┘          └────────────────┘
+                                ▲                            ▲
+                                │ A'nın sayfa tablosu        │ Burada gerçek
+                                │ hâlâ CR3'te — ödünç        │ adres alanı
+                                │ alındı, mm_count arttı     │ değişimi olur
+
+
+    Çekirdek thread'leri zaten kullanıcı alanına hiç erişmemektedir bu nedenle CPU'nun da hangi sayfa tablosunu 
+    gösterdiğinin bir önemi yoktur. 
+
+    Peki neden mm ve active_mm biçiminde iki gösterici vardır. Yalnızca mm ya da acive_mm olsaydı ne olurdu? İşte 
+    çekirdek içerisinde bazı yerlerde "şu anda çalışan çekirdek thread'i mi, adres alanı aslında giçişin yapıldığı 
+    thread'ten ödünç alınmış bir adres alanı mı" kontrolü yapılmaktadır. Çekirdek bu kontrolü pek çok yerde mm == NULL
+    ile yapmaktadır. Çekirdek mm == NULL gördüğü zaman bellek betimleyicisi ödünç alınmış bir çekirdek thread'in söz 
+    konusu olduğunu anlamakta ve bellek alanına artık active_mm göstericisiyle erişmektedir. Örneğin aygıt sürücülerde
+    kullandığımız copy_from_user fonksiyonunu biz çekirdekler thread'lerinde kullanamayız. Çünkü çekirdek thread'leri 
+    belli bir proses bağlamında çalışmamaktadır. İşte bu copy_from_user gibi bir fonksiyonu biz çekirdek thread'i 
+    içerisinde kullandığımızda bu fonksiyonkendi içerisinde if (current->mm == NULL) kontrolü yaptığı için hemen 
+    başarısızlıkla geri dönmektedir. Özetle çekirdek kodlarında if (current->mm == NULL) kontrolü "bu bir çekirdek 
+    thread'i mi sorusunu yanıtlamaktadır. 
+
+    Sistemdeki tüm proseslerin sayfa tablolarının yüksek anlamlı kısımlarının aslında hep aynı olduğunu ve bu alanların 
+    çekirdeğe ilişkin olduğunu anımsayınız. Kullanıcı prosesine ilişkin bir thread'ten çekirdek thread'ine geçildiğinde 
+    sayfa tablosunun değiştirilmesine gerek kalmamaktadır. :ekirdek thread'i geçilen proses thread'inin sayfa tablosunu 
+    kullanmaya devam etmektedir. 
+
+    Çekirdek kodlarında prosesin sanal bellek alanına erişmek için her zaman mm göstericisi kullnılmaktadır. active_mm
+    göstericisi çekirdekte yalnızca bazı yerlerde kullanılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+    
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux'ta thread'lerin de sanki prosesler gibi task_struct nesnesine sahip olduğunu ancak prosesin thread'lerinin 
+    aynı bellek alanını kullandığını anımsayınız. İşte prosesin tüm thread'leri aslında aynı bellek betimleyicisini 
+    (yani mm_struct nsnesini) göstermektedir. Bunu bir şekille şöyle gösterebiliriz:
+
+                        ┌─────────────────────────┐
+    Thread 1  ────────> │      task_struct        │
+                        │  pid  = 1234            │──┐
+                        │  tgid = 1234            │  │
+                        │  mm   ──────────────────┼──┼───┐
+                        └─────────────────────────┘  │   │
+                                                     │   │
+                        ┌─────────────────────────┐  │   │   ┌──────────────────┐
+    Thread 2  ────────> │      task_struct        │  │   └──>│    mm_struct     │
+                        │  pid  = 1235            │  │       │  (adres alanı)   │
+                        │  tgid = 1234            │  │   ┌──>│  mm_users = 3    │
+                        │  mm   ──────────────────┼──┼───┘   │  pgd ──────┐     │
+                        └─────────────────────────┘  │       └────────────┼─────┘
+                                                     │                    │
+                        ┌─────────────────────────┐  │                    ▼
+    Thread 3  ────────> │      task_struct        │  │            ┌───────────────┐
+                        │  pid  = 1236            │  │            │ Sayfa tablosu │
+                        │  tgid = 1234            │  │            └───────────────┘
+                        │  mm   ──────────────────┼──┘
+                        └─────────────────────────┘
+
+    Burada aynı prosesin üç thread'i temsili olarak belirtilmiştir. Anımsanacağı gibi bunların hepsinin farklı pid 
+    değerleri vardır. tgid değeri prosesin ana thread'ine ilişkin pid değerini tutmaktadır. Zaten bu değer prosesin 
+    pid değeri olarka kullanılmaktadır. Şekilde bu üç thread'in de aynı mm_struct nesnesini gösterdiğini görüyorsunuz. 
+    mm_struct yapısı içerisindeki pgd elemanı sayfa tablosunun sanal bellek adresin tutmaktadır. 
+
+    Bellek betimleyicisi (yani mm_struct nesnesi) içerisindeki mm_users isimli eleman bir referans sayacı görevini 
+    görmektedir. Bu eleman kendisine kaç farklı task_struct nesnesindne referans edildiği bilgisini tutmaktadır. 
+    Yukarıdaki şekilde bellek betimleyicisine üç farklı task_struct içerisinden referans edildiğinden dolayı mm_users 
+    sayıcı da 3 değerindedir. 
+
+    Bellek betimleyicisi içerisinde mm_users sayacının dışında bir de mm_count isimli bir sayaç bulunmaktadır. mm_count 
+    mm_struct nesnesi her kullanılmaya başlandığında bir artırılmaktadır. Ancak kullanıcı alanındaki birdne fazla 
+    threda tarafından mm_struct nesnesinin gösterilmesi durumunda (yukarıdaki şekildeki gibi) bu mm_count sayacı yalnızca
+    1 artırılmaktadır. mm_count ile mm_users arasındaki ilişki şöyledir: "mm_users > 0 olduğu sürece mm_count'a yalnızca 
+    1 katkı sağlar."  mm_count sayacının değerini sembolik olarak aşağıdaki gibi de belirtiebiliriz:
+
+    mm_count = (mm_users > 0 ? 1 : 0) + (ödünç alan çekirdek thread'i sayısı) + (geçici referanslar)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de sanal bellek alanlarının (VMA'ların) bellek betimleyicisi (mm_struct nesnesi) içerisindeki tutuluş biçimini
+    gözden geçirelim. Eskiden VMA'lar bellek betimleyicileri içerisinde "kırmızı-siyah ağacı" ile tutuluyordu. Anımsanacağı
+    gibi kırmızı-siyah ağacı belli bir aralık bilgisini de tutabilecek bir yapıdaydı. Ancak çekirdeğin 6.1 versiyonu 
+    ile birlikte kırmızı-siyah ağacı yerine "maple ağacı" kullanılmaya başlanmıştır. Güncel çekirdeklerde "mapl ağacı" 
+    kullanılmaktadır. ("Mapl" sözcüğü "akçağaç" anlamına gelmektedir. Kanada bayrağında akçağaç yaprağı bulunmaktadır.)
+    
+    Maple ağacı bir çeşit B-Tree varyantıdır. Bilindiği gibi B-Tree özellikle "dışsal aramalarda (externel search)" 
+    yoğun kullanılan "çok yönlü (multiway)" yani çok düğümlü bir arama ağacıdır. MySql, Oracle, SQL Server gibi veri 
+    tabanaı yönetim sistemleri motor kısmında hep B-Tree ve türevlerini kullanmaktadır. B-Tree'de düğümlerde tek bir 
+    anahtar yoktur. N tane anahtar vardır. Aranacak değer hangi anahtar aralığına düşüyorsa o alt düğüme gidilmektedir. 
+    Böylece ağacın yükseklği ikili arama ağacına göre düşürülmektedir. Tabii ağacın yüksekliğinin düşürülmesi ek birtakım 
+    maliyetler de doğurmaktadır. Bu nedenle içsel aramalarda (internal search) B-Tree sok seyrek kullanılmaktadır. 
+    Disk tabanlı aramalarda (external search) her düğüm geçişi bir disk okuması gerektirdiği için ağacın yüksekliğinin
+    düşürülmesi ikili arama ağacına göre ciddi bir hız kazancı sağlamaktadır. Üç anahtarlı bir B-Tree düğümününün 
+    yapısı aşağıdakine benzemektedir:
+           
+           p0                 p1                 p2                 p3
+         ┌───┬──────────────┬───┬──────────────┬───┬──────────────┬───┐
+         │ • │      30      │ • │      60      │ • │      90      │ • │
+         └─┬─┴──────────────┴─┬─┴──────────────┴─┬─┴──────────────┴─┬─┘
+           │                  │                  │                  │
+    ┌────┬─┴──┬────┐   ┌────┬─┴──┬────┐   ┌────┬─┴──┬────┐   ┌────┬─┴──┬────┐
+    │ 10 │ 20 │ 25 │   │ 35 │ 42 │ 55 │   │ 70 │ 75 │ 80 │   │ 93 │ 96 │ 98 │
+    └────┴────┴────┘   └────┴────┴────┘   └────┴────┴────┘   └────┴────┴────┘
+
+    Burada üç anahtar için 4 alt düğümün buulundurulduğuna dikkat ediniz. Arama yapılırken aranacak değer hangi anahtarlar
+    arasında kalıyorsa o alt düğüme gidilmektedir. Örneğin burada 75'değerinin arandığını varsyalım. Bu değer 60 anahtarı 
+    ile 90 anahtarı arasındadır. Bu durumda p2 göstericinin gösterdiği alt düğüme gidilecektir. 
+
+    ┌──────────────┬───────────────────┐
+    │   Gösterici  │  Anahtar aralığı  │
+    ├──────────────┼───────────────────┤
+    │      p0      │      key <  30    │
+    │      p1      │  30 < key <  60   │
+    │      p2      │  60 < key <  90   │
+    │      p3      │      key >  90    │
+    └──────────────┴───────────────────┘
+
+    Gerçekleştirimde tipik olarak anahtarlar ve düğümler birer dizi içerisinde tutulmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdeğin prosesin VMA'ları üzerindeki şu iki işlemi etkin biçimde yapabilmesi gerekir:
+
+    1) Belli bir adresin tahsis edilmiş bir VMA içerisnde olup olmadığının tespiti. Örneğin bir gösterici ile bir 
+    adrese erişilmiş olsun. Bu sanal adrese ilişkin sayfa tablosunda bir yönlendirme yapımadıysa "page fault" oluşacaktır. 
+    Bu page fault kesme kodunda işletim sisteminin erişilen yerin programın sanal adres alanı içerisinde geçerli bir 
+    yer olup olmadığını tespit etmesi gerekir. 
+    
+    2) İşletim sisteminin tahsis edilmiş tüm VMA'ları dolaşılabilmesi gerekir. Burada bir arama değil dolaşma söz konusudur. 
+    
+    Eskiden daha önce de belirttiğimiz arama amacıyla "kırmızı-siyah ağacı" ve dolaşma amacıylda de bir bağlı liste kullanılıyordu. 
+    Örneğin çekirdeğin eski versiyonlarında mm_struct nesnesinn ilgili elemanları şöyleydi:
+
+    struct mm_struct {
+        /* ... */
+
+	    struct vm_area_struct *mmap;		/* list of VMAs */
+	    struct rb_root mm_rb;
+        
+        */ ... */
+    };
+
+    Burada mm_rb elemanı VMA'ların tutulduğu kırmızı-siyah arama ağacının kökünü, mmap elemanı ise VMA'ları dolaşmakta 
+    kullanılan bağlı listenin kökünü belirtmektedir. Bu bağlı listenin düğümleri doğrudan vm_are_struct nesnelerinden 
+    oluşmaktadır. vm_area_struct yapısındaki next göstericisi de sonraki elemanı göstermektedir. Ancak bu tasarm yukarıda 
+    da belirttiğimiz gibi çekirdeğin 6.1 versiyonunda (2022) değiştirilmiş ve "maple ağacı" kullanılmaya başlanmıştır. Maple 
+    ağacının kendisi dolaşıma da izin verdiği için artık ayrı bir listeye gerek de kalmamıştır. 
+  
+    Maple ağacı bu bakımdan B-Tree organizasyonun benzerini kullanmaktadır. Ancak anahtarlar yerine sanal bellek adresleri
+    bulunmaktadır. Çünkü VMA'lar için kullanılan bu ağacın amacı tek bir anahtar tutmak değil bir adres aralığı tutmaktır.
+    Mapl ağacında her zaman adres alanları ardışıl bir biçimde tutulmaktadır. Güncel çekirdeklerde mm_struct içerisindeki 
+    maple ağacının kökü mapl_tree isimli bir yapıyla temsil edilmiştir:
+
+    struct mm_struct {
+        /* ... */
+
+	    struct maple_tree mm_mt;	    /* Mapl ağacı */
+	    int map_count;			        /* VMA sayısı */
+
+        /* ... */
+    };
+
+    mm_struct yapısının mm_mt elemanı maple ağacını temsil etmektedir. ap_count elemanı prosesin sanal bellek alanında 
+    toplam kaç VMA (vm_area_struct) olduğunu belirtmektedir. mapltree yapısı güncel çekirdeklerde "include/linux/maple_tree.h"
+    başlık dosyası içerisinde şöyle tanımlanmıştır:
+
+    struct maple_tree {
+        union {
+            spinlock_t		ma_lock;
+    #ifdef CONFIG_LOCKDEP
+            struct lockdep_map	*ma_external_lock;
+    #endif
+        };
+        unsigned int	ma_flags;
+        void __rcu      *ma_root;
+    };
+
+    Burada ma_lock elemanı erişimler için kullanılan spinlock nesnesini ma_root elemanı ise kök düğümün yerini belirtmektedir. 
+    Maple  ağacının düğümlerini temsil eden yapı da "include/linux/maple_tree.h" başlık dosyası içerisinde şöyle tanımlanmıştır:
+
+    struct maple_node {
+        union {
+            struct {
+                struct maple_pnode *parent;
+                void __rcu *slot[MAPLE_NODE_SLOTS];
+            };
+            struct {
+                void *pad;
+                struct rcu_head rcu;
+                struct maple_enode *piv_parent;
+                unsigned char parent_slot;
+                enum maple_type type;
+                unsigned char slot_len;
+                unsigned int ma_flags;
+            };
+            struct maple_range_64 mr64;
+            struct maple_arange_64 ma64;
+            struct maple_copy cp;
+        };
+    };
+
+    Görüldüğü gibi mapl_node yapısı aslında çakışık yapılardan oluşan bir birlik görünümündedir. Yukarıdaki yapının 
+    içerisinde bulunan birliğin içerisindeki yapılar (anonymous struct) ve yapı nesneleri çakışıktır. Örneğin aşağıdaki 
+    üç eleman aynı anda bulunmamaktadır:
+
+    struct maple_range_64 mr64;
+    struct maple_arange_64 ma64;
+    struct maple_copy cp;
+
+    Peki bu kadar çakışıklığın nedeni nedir? İşte burada tek bir düğüm veri yapısının çeşitli konfigürasyonlara göre 
+    değiştirilebilirliği sağlanmaktadır. 
+
+    Güncel çekirdeklerdeki maple ağacının düğümlerindeki gösterici sayısı (yani alt düğüm sayısı, slot da denilmektedir) 
+    konfigürasyon parametresine göre değişebilmektedir. 64 bit sistemlerde şöyledir:
+
+    ┌─────────────────┬───────┬──────────────────┬─────┐
+    │   Düğüm Türü    │ pivot │ gösterici (slot) │ gap │
+    ├─────────────────┼───────┼──────────────────┼─────┤
+    │ maple_dense     │   0   │        31        │  -  │
+    │ maple_leaf_64   │  15   │        16        │  -  │
+    │ maple_range_64  │  15   │        16        │  -  │
+    │ maple_arange_64 │   9   │        10        │ 10  │
+    └─────────────────┴───────┴──────────────────┴─────┘
+
+    32 bit sistemlerde ise şöyledir:
+
+    ┌─────────────────┬───────┬──────────────────┬─────┐
+    │   Düğüm Türü    │ pivot │ gösterici (slot) │ gap │
+    ├─────────────────┼───────┼──────────────────┼─────┤
+    │ maple_dense     │   0   │        63        │  -  │
+    │ maple_leaf_64   │  31   │        32        │  -  │
+    │ maple_range_64  │  31   │        32        │  -  │
+    │ maple_arange_64 │  20   │        21        │ 21  │
+    └─────────────────┴───────┴──────────────────┴─────┘
+
+    Burada pivot sözcüğü anahtar anlamında kullanılmaktadır. pivot sayısının gösterici sayısından (slot sayısından)
+    bir eksik olduğuna dikkat ediniz. Çünkü maple ağacı aralıkları tuttuğu için son aralığın bir gösteri tarafından 
+    gösterilmesine gerek kalmamaktadır. Çekirdek kodlarında kullanılan slot sayısına ilgili makrolar şunlardır:
+
+    #if defined(CONFIG_64BIT) || defined(BUILD_VDSO32_64)
+    #define MAPLE_NODE_SLOTS	    31	/* 256 bytes including ->parent */
+    #define MAPLE_RANGE64_SLOTS	    16	/* 256 bytes */
+    #define MAPLE_ARANGE64_SLOTS	10	/* 240 bytes */
+    #else
+    #define MAPLE_NODE_SLOTS	    63	/* 256 bytes including ->parent */
+    #define MAPLE_RANGE64_SLOTS	    32	/* 256 bytes */
+    #define MAPLE_ARANGE64_SLOTS	21	/* 240 bytes */
+    #endif
+
+    maple ağacındaki düüm türleri de aşağıdaki enum yapısıyla belirtilmiştir:
+
+    enum maple_type {
+        maple_dense,
+        maple_leaf_64,
+        maple_range_64,
+        maple_arange_64,
+        maple_copy,
+    };
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                                103. Ders 20/09/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Maple  ağacı gerçekleştiriminde ara düğümlerle yaprak düğümler farklı bilgileri tutmaktadır. Ara düğümlerde pivot'lar 
+    ve alt düğümlerin yerleri saklanırken yaprak düğümler için bir yer ayrılmamakta doğrudan yaprak düğümler vm_area_struct 
+    nesnelerini göstermektedir. 
+
+    Ara düğümlerin çakışık iki ayrı yapı ile temsil edildiğine dikkat ediniz: maple_range_64 ve maple_arange_64. Buradaki 
+    maple_range_64 yspısı VMA'nın olup olmadığını tespit etmek amacıyla bulundurulukren maple_arange_64 yapısı sanal bellek 
+    alanında yeni bir VMA tahsis ederken kullanılmaktadır. Görüldüğü gibi mapl_node yapısı sanki tek bir yapıymış gibi 
+    tanımlanmış olsa da onun içeriği değişebilmektedir. Bir düğüm içerisindeki bilginin türü ayrı bir alanda tutulmamaktadır. 
+    Slot içerisindeki göstericilerin içerisinde tutulmaktadır. Tahsisat amaçlı gezinmede düğüm içerisinde boşlukların tutulduğu 
+    ayrı bir gap elemanı da bulunmaktadır: maple_range_64 yapısıyla maple_arange_64 yaısının tanımlamalarını aşağıda veriyoruz:
+
+    struct maple_range_64 {
+        struct maple_pnode *parent;
+        unsigned long pivot[MAPLE_RANGE64_SLOTS - 1];
+        union {
+            void __rcu *slot[MAPLE_RANGE64_SLOTS];
+            struct {
+                void __rcu *pad[MAPLE_RANGE64_SLOTS - 1];
+                struct maple_metadata meta;
+            };
+        };
+    };
+
+    struct maple_arange_64 {
+        struct maple_pnode *parent;
+        unsigned long pivot[MAPLE_ARANGE64_SLOTS - 1];
+        void __rcu *slot[MAPLE_ARANGE64_SLOTS];
+        unsigned long gap[MAPLE_ARANGE64_SLOTS];
+        struct maple_metadata meta;
+    };
+
+    maple_arange_64 yapısında bir gap alanı olduğuna dikkat ediniz. Bu gap alanı alt düğümlerdeki yani her slotun
+    gösterdiği alt ağaçtaki en büyük boş (NULL) aralığın uzunluğunu tutan bir dizdir. Böylece tahsisat için arama 
+    yapılırken boşuna eğer alt ağaçta yer yoksa boşuna aşağıya doğru gidilmemektedir. Peki neden bazı düğümlerde 
+    gap olurken (maple_arange_64) bazılarında gap yoktur (struct maple_range_64)? İşte bu tasarım daha etkinliği
+    artırmak için dşünülmüştür. Örneğin bazı proseslerde zaten çok az VMA bulunduğu için ağaç tek kademe olabilir. 
+    Bu durumda bu ilk düğümde örneğin gap alanına hiç gerek yoktur. 
+
+    Yukarıda düğümlerin türlerinin slot içerisindeki göstericilerde saklandığını belirtmiştik. Bu göstericilerin 
+    gösterdiği yerdeki düğüm nesneleri belli uzunluklara hizalanmıştır. Buradaki slot göstericilerinin formatı şöyledir:
+   
+    ┌────────────────────────────────────────────┬──────────────────┐
+    │         maple_node adresi   [63:8]         │ bayraklar  [7:0] │
+    │           (256 byte' hizalı, 56 bit)       │     (8 bit)      │
+    └────────────────────────────────────────────┴──────────────────┘
+                                                         │
+                                                         ▼
+    ┌─────────┬───────────────────────┬─────────┬─────────┬─────────┐
+    │    -    │      maple_type       │  NULL   │   kök   │    -    │
+    │         │      (enum 0..3)      │olabilir │ bayrağı │         │
+    │   [7]   │         [6:3]         │   [2]   │   [1]   │   [0]   │
+    └─────────┴───────────────────────┴─────────┴─────────┴─────────┘
+                        │                 │         │
+                        │                 │         └── MAPLE_ROOT_NODE (0x02)
+                        │                 └──────────── MAPLE_ENODE_NULL (0x04)
+                        └───────────────────────────── MAPLE_NODE_TYPE_MASK << 3
+
+
+    Görüldüğü gibi alt düğümlerin yerlerini belirten göstericilerin düşük anlamlı 8 biti bayraklar için ayrılmıştır. 
+    maple ağacının düğümleri de 256 byte'a hizalanmış durumdadır. Düşün anlamlı 8 bitin [6:3] bitleri (toplam 4 bit)
+    alt düğümün türünü tutmaktadır. Yani bu değer sağa 3 kez ötelenirse yukarıda verdiğimiz enum değerleri elde 
+    edilmektedir:
+
+    enum maple_type {
+        maple_dense,
+        maple_leaf_64,
+        maple_range_64,
+        maple_arange_64,
+        maple_copy,
+    };
+
+    Bir byte alan içerisindeki değerleri de aşağıdaki tabloda belirtiyoruz:
+
+    ┌─────────────────┬────────────┬───────────────────────┐
+    │   maple_type    │  Alt düğüm │      Üst düğüm        │
+    ├─────────────────┼────────────┼───────────────────────┤
+    │ maple_dense     │ 0x04       │ geçersiz (MAS_BUG_ON) │
+    │ maple_leaf_64   │ 0x0C       │ geçersiz (MAS_BUG_ON) │
+    │ maple_range_64  │ 0x14       │ 0x06                  │
+    │ maple_arange_64 │ 0x1C       │ 0x06                  │
+    └─────────────────┴────────────┴───────────────────────┘
+
+    Burada üçüncü sütuna dikkat ediniz. BTree gerçekleştirimlerinde üst düğümün yeri tutulmak zorundadır. İşte üst 
+    düğümün yeri de aynı zamanda düğümlerdeki parent göstericisinde tür bilgisiyla tutulmaktadır. Üçüncü sütun bu 
+    parent göstericisine ilişkindir. Üst düğüm göstericisinin bayraklarını şöyle de gösterebiliriz:
+
+    ┌────────────────────────────────────────────┬──────────────────┐
+    │        üst düğümün adresi   [63:8]         │ bayraklar  [7:0] │
+    │           (256B hizalı, 56 bit)            │     (8 bit)      │
+    └────────────────────────────────────────────┴──────────────────┘
+                                                        │
+                                                        ▼
+    ┌─────────────────────────┬─────────────────────┬───────────────┐
+    │      slot indeksi       │     parent type     │      kök      │
+    │        (0 - 31)         │   0b11 = RANGE64    │    bayrağı    │
+    │          [7:3]          │        [2:1]        │      [0]      │
+    └─────────────────────────┴─────────────────────┴───────────────┘
+                │                       │                   │
+                │                       │                   └── MA_ROOT_PARENT (0x01)
+                │                       └────────────────────── MAPLE_PARENT_RANGE64 (0x06)
+                └────────────────────────────────────────────── MAPLE_PARENT_SLOT_MASK (0xF8)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki arama sonucunda elde edilen VMA'nın yeri (yani vm_area_struct nesnesinin yeri) ağaçta nasıl tutulmaktadır? İşte 
+    düğümlerdeki yaprağa ilişkin bir slot'taki adresin düşük anlamı 8 biti 00 ise (yaprak düğümlerde NULL yoksa böyledir) 
+    bu slottaki adres artık doğrudan vma_area_struct nesnesini göstermektedir. Burada temsili bir adesle durumu şekilsel 
+    olarak gösterelim:
+
+      +7   +6   +5   +4   +3   +2   +1   +0     ← slot içi bayt offset'i
+    ┌────┬────┬────┬────┬────┬────┬────┬────┐
+    │ ff │ ff │ 88 │ 81 │ 0b │ 2c │ 40 │ 00 │   = 0xffff88810b2c4000
+    └────┴────┴────┴────┴────┴────┴────┴────┘
+     ◀── yüksek adres          düşük adres ──▶   ▲
+                                                  │
+           etiket yok, ham gösterici  ────────────┘
+
+    Bu slotun içinde bulundurğu yaprak düğümü gösteren üst düğümün slot adresi de aşağıdakine benzemektedir:
+
+      +7   +6   +5   +4   +3   +2   +1   +0
+    ┌────┬────┬────┬────┬────┬────┬────┬────┐
+    │ ff │ ff │ 88 │ 81 │ 04 │ a3 │ f0 │ 0c │   = 0xffff888104a3f00C
+    └────┴────┴────┴────┴────┴────┴────┴────┘
+     ◀── yüksek adres          düşük adres ──▶   ▲
+                                                 │
+                        etiket baytı = 0x0C  ────────┘
+                                = 0b0000_1100
+                                        │  │└── bit 0 : -
+                                        │  └─── bit 1 : ROOT       = 0
+                                        │       bit 2 : ENODE_NULL = 1
+                                        └────── bit[6:3] = 1 → maple_leaf_64
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimd, maple ağacının görünümünü kafnızda canlandırabilmeniz için bazı örnekler verelim. Aşağıda en alt düzeydeki 
+    bir düğümü görüyorsunuz:
+    
+              ┌───────────────────────────────────────────────────────────┐
+              │  min = 0x405000   (üst düğümden geldi, düğümde YAZMIYOR)  │
+              ├───────────────────────────────────────────────────────────┤
+     0x405000 │  slot[0] = NULL          pivot[0] = 0x5FFFFF              │
+              ├───────────────────────────────────────────────────────────┤
+     0x600000 │  slot[1] = vma_data      pivot[1] = 0x600FFF              │
+              ├───────────────────────────────────────────────────────────┤
+     0x601000 │  slot[2] = NULL          pivot[2] = 0x601FFF              │
+              ├───────────────────────────────────────────────────────────┤
+     0x602000 │  slot[3] = vma_heap      pivot[3] = 0x624FFF              │
+              ├───────────────────────────────────────────────────────────┤
+     0x625000 │  slot[4] = NULL          (pivot YOK!)                     │
+              ├───────────────────────────────────────────────────────────┤
+              │  max = 0x627FFF   (üst düğümden geldi, düğümde YAZMIYOR)  │
+              └───────────────────────────────────────────────────────────┘
+    
+    Bu düğümden ne anlaşılmaktadır? Bu düğüm  0x405000 ile 0x627FFF arasındaki bölgeyi tutmaktadır.  pivot[0] değerinin  
+    0x5FFFFF olduğuna ve slot[0]'ın NULL adres içerdiğine dikkat ediniz. Bu durumda 0x405000 ile  0x5FFFFF arasındaki 
+    bölge sanal adres alanında tahsis edilmemiştir. pivot[1] değerinin 0x600FFF olduğuna dikkat ediniz. İşte  0x600FFF 
+    ile 0x601FFF arasındaki bölge tahsis edilmiştir ve o bölgeyi belirten VMA slot[1] tarafından gösterilmektedir. 
+    pivot[2] değerinin 0x601FFF  olduğuna ve buna karşı gelen slot[2]'nin NULL adres içerdiğine dikkat ediniz. Bu 
+    durumda 0x601FFF ile 0x624FFF arasındaki bölge boştur.İşte bu düğüm belli bir sanal adres aralığının durumunu 
+    yansıtmaktdır. 
+
+    Şimdi de boş bir sanal adres alanına VMA'lar eklendiğinde maple ağacının bu alanları nasıl gösterdiğine ilişkin bir 
+    örnek verelim. Çekirdekte kullanılan maple ağacının düğümlerinde 16 slot bulunmaktadır. Ancak biz örneğimizde ağacın 
+    kolay anlaşılabilmesi için düğümlerdeki slot sayısının 3 olduğunu varsayacağız. 
+    
+    Örneğin başlangıçta çekirdeğin mt_store_range fonksiyonu le aşağıdaki aralığın tahsis edildiğini düşünelim:
+
+    mt_store_range(&mm_mt, 0x400000, 0x400FFF, vma_text);
+
+    Prosesin sanal adres alanının sembolik görüntüsü şöyledir:
+
+    0x000000 ┌──────────────────────────────────┐
+             │  NULL                            │   slot[0]
+    0x400000 ├──────────────────────────────────┤
+             │  vma_text                        │   slot[1]
+    0x401000 ├──────────────────────────────────┤
+             │  NULL                            │   slot[2]
+   ULONG_MAX └──────────────────────────────────┘
+
+    Burada kök düümdeki üç slot şöyledir:
+
+    node_A   type = MT_LEAF   end = 2      [ 0x000000 .. ULONG_MAX ]
+        ├ slot[0] = NULL       pivot[0] = 0x3FFFFF
+        ├ slot[1] = vma_text   pivot[1] = 0x400FFF
+        └ slot[2] = NULL       (pivot yok; düğümün max'ı = ULONG_MAX)
+
+    Şimdi prosesin adres alanına vma_data ile isimlendirdiğimiz yeni bir VMA eekleyelim:
+
+    mt_store_range(&mm_mt, 0x600000, 0x600FFF, vma_data);
+
+    Şimdi prosesin snaal adres alanının görünümü şöyle olacaktır:
+
+    0x000000 ┌──────────────────────────────────┐
+             │  NULL                            │   
+    0x400000 ├──────────────────────────────────┤
+             │  vma_text                        │   
+    0x401000 ├──────────────────────────────────┤
+             │  NULL                            │   
+    0x600000 ├──────────────────────────────────┤
+             │  vma_data                        │   
+    0x601000 ├──────────────────────────────────┤
+             │  NULL                            │   
+   ULONG_MAX └──────────────────────────────────┘
+
+   
+    Bizim örneğimizde slot sayısı üç olduğu için artık buradaki 5 bölge 3 slota sığmayacağı için alt düğüm 
+    oluşturulacaktır:
+
+                    ┌──────────────────────────────────────┐
+                    │  node_R   type = MT_INTERNAL         │
+                    │  end = 1                             │
+                    │  [ 0x000000 .. ULONG_MAX ]           │
+                    ├──────────────────────────────────────┤
+                    │  slot[0] → node_L0  pivot[0]=0x5FFFFF│
+                    │  slot[1] → node_L1  (max=ULONG_MAX)  │
+                    │  slot[2] = --- kullanılmıyor ---     │
+                    └──────────────────────────────────────┘
+                          │                     │
+              ┌───────────┘                     └───────────┐
+              ▼                                             ▼
+    node_L0  MT_LEAF  end = 2                    node_L1  MT_LEAF  end = 1
+    [ 0x000000 .. 0x5FFFFF ]                     [ 0x600000 .. ULONG_MAX ]
+    ├ slot[0]=NULL      piv[0]=0x3FFFFF          ├ slot[0]=vma_data  piv[0]=0x600FFF
+    ├ slot[1]=vma_text  piv[1]=0x400FFF          ├ slot[1]=NULL      (max=ULONG_MAX)
+    └ slot[2]=NULL      (max=0x5FFFFF)           └ slot[2]= --- boş ---
+
+    Şimdi prosesin adres alanına vma_heap ile temsil ettiğimiz bir VMA daha ekleyelim:
+
+    mt_store_range(&mm_mt, 0x602000, 0x624FFF, vma_heap);
+
+     0x000000 ┌──────────────────────────────────┐  ┐
+              │  NULL                            │  │
+     0x400000 ├──────────────────────────────────┤  │ node_L0
+              │  vma_text                        │  │
+     0x401000 ├──────────────────────────────────┤  │
+              │  NULL                            │  │
+     0x600000 ├──────────────────────────────────┤  ┘ ┐
+              │  vma_data                        │    │ node_L1
+     0x601000 ├──────────────────────────────────┤    │
+              │  NULL                            │    │
+     0x602000 ├──────────────────────────────────┤    ┘ ┐
+              │  vma_heap                        │      │ node_L2
+     0x625000 ├──────────────────────────────────┤      │
+              │  NULL                            │      │
+    ULONG_MAX └──────────────────────────────────┘      ┘
+
+    Bu eklemedne sonra maple ağacının görünümü şöyle olacaktır:
+
+                  ┌────────────────────────────────────────┐
+                  │  node_R   type = MT_INTERNAL   end = 2 │
+                  │        [ 0x000000 .. ULONG_MAX ]       │
+                  └────────────────────────────────────────┘
+                    │                │                │
+       ┌────────────┘                │                └────────────┐
+       ▼                             ▼                             ▼
+   node_L0                       node_L1                       node_L2
+
+   node_R   MT_INTERNAL   end = 2        [ 0x000000 .. ULONG_MAX ]
+    ├ slot[0] → node_L0   pivot[0] = 0x5FFFFF   gap[0] = 0x400000
+    ├ slot[1] → node_L1   pivot[1] = 0x601FFF   gap[1] = 0x001000
+    └ slot[2] → node_L2   (max = ULONG_MAX)     gap[2] = ULONG_MAX - 0x624FFF
+
+    node_L0   MT_LEAF   end = 2           [ 0x000000 .. 0x5FFFFF ]
+    ├ slot[0] = NULL       pivot[0] = 0x3FFFFF
+    ├ slot[1] = vma_text   pivot[1] = 0x400FFF
+    └ slot[2] = NULL       (max = 0x5FFFFF)
+
+    node_L1   MT_LEAF   end = 1           [ 0x600000 .. 0x601FFF ]
+    ├ slot[0] = vma_data   pivot[0] = 0x600FFF
+    ├ slot[1] = NULL       (max = 0x601FFF)
+    └ slot[2] = --- boş ---
+
+    node_L2   MT_LEAF   end = 1           [ 0x602000 .. ULONG_MAX ]
+    ├ slot[0] = vma_heap   pivot[0] = 0x624FFF
+    ├ slot[1] = NULL       (max = ULONG_MAX)
+    └ slot[2] = --- boş ---
+
+    Biz örneğimizde düğümlerdkei slot sayısını (yani MT_SLOTS değerini) 3 yaptığımız için üç VMA eklemekle iki bölünme 
+    yaşadık. Gerçekte MAPLE_RANGE64_SLOTS = 16'dır ve bir yaprak, aralarındaki NULL aralıklarla birlikte yaklaşık 8 VMA 
+    taşımaktadır. Tipik bir prosesin yaklaşık 100 VMA'sı için ağaç yüksekliği 2'de kalır; bölünme yalnızca yüzlerce 
+    VMA'lı süreçlerde ara sıra olur.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarda biz maple ağacının bazı ayrıntılarına değindik. Ancak ayrıntılar büyük resmi bulanıklaştırmasın istiyoruz. 
+    Maple  ağacının ne işe yaradığını ve hangi işlevler için bulundurulduğunu yeniden özetleme istiyoruz:
+
+    - Maple ağacı prosesin bellek alanı içerisindeki VMA'ların (memory_area_struct) yerlerini tutmektedir. 
+    - Maple ağacı sayesinde belli bir adresn prosesin bellek alanı içerisinde tahsis edilmiş bir VMA içerisinde olup olmadığı
+    hızlı bir biçimde sorgulanabilmektedir.
+    - Maple ağacı prosesin sanal bellek alanında yeni bir VMA tahsisatı yapılırken boş alanların hızlı bir biçimde tespit 
+    edilmesini de sağlamaktadır. 
+    - Maple ağacı sayesinde artık prosesin bütün VMA'larının ayrı bir listede saklanmasına da gerek kalmamaktadır. 
+
+    Prosesin sanal bellek alanı ile işlemcinin o proses için kullandığı sayfa tablosunu biribirine karıştırmayınız. 
+    Bir program dosyası exec fonksiyonlarıyla yüklendiğinde prosesin sanal bellek alanı ELF formatındaki bölümlerden
+    (section/segment) hareketle prosesin sanala bellek alanında VMA'lar (yani vm_area_struct nesneleri) oluşturulmaktadır. 
+    Ancak prosesin sayfa tablosu hemen hemen boş durumdadır. Prosesin sayfa tablosunda sanak sayfalara karşı fiziksel 
+    sayfaların oluşturulması işlemi "page fault" ile yapılmaktadır. Bir page fault oluştuğunda işletim sistemi 
+    faıult'a yol açan adresi inceler. Bu adresin prosesin sanal bellek alanında bir VMA tarafından gösterilip gösterilmediğini 
+    maple ağacıyla tespit eder. Eğer erişilmek istenen adres sanal bellek alanı içriindeyse bu durumda erişilen bölgeyi 
+    diskten  belleğe yükler Yani görüldüğü gibi takas mekanizmaıyla maple ağacıyla prosesin sanal bellek alanının 
+    tutulmasının önemli bir ilişkisi yoktur. Maple ağacının işlevi VMA'nın bulunmasından ibarettir. Bu sayfanın fiziksel 
+    RAM'e yüklenmesi VMA (yani struct_vm_area) nesnesinden ya da doğrudan sayfa tablosu girişinden hareketle yapılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de maple ağacı üzerinde işlem yapan çekirdek fonksiyonlarına kısaca değinelim. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        104. Ders 26/09/2026 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de proseslerin heap alanlarının nasıl organize edildiği üzerinde duralım. Anımsanacağı gibi "heap alanı" 
+    dinamik tahsisarın yapıldığı deposal bir alandır. Pek çok modern işletim sisteminde heap alanı prosese özgü bir 
+    biçimde prosesin sanal bellek alanı içerisinde yaratılmaktadır. Bu nedenle proses sonlandığında prosesin heap 
+    alanı da yok edilmektedir. (Ancak C standartlarında malloc gibi bellek tahsisat fonksiyonlaırının prosese özgü 
+    bir heap alanında tahsisat yaptığı gibi bir açıklama bulunmamaktadır. Yani C standartlarında malloc gibi tahsisat 
+    fonksiyonlarının prosese özgü tahsisat yaptığı yönünde bir garanti verilmemiştir.)
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeğinde prosesin heap alanı başlangıçta sabit uzunluklu biçimde belirlenmiş bir alan değildir. Heap alanı
+    belli bir yerden başlatılarak gerektikçe aşağıya doğru (düşük adresten yüksek adrese doğru) büyütülmektedir. Heap 
+    alanı için de bir ya da birden fazla VMA (vm_area struct) nesnesi oluşturulmaktadır. Nedne eap alanının başlangıçta 
+    belli büyüklükte yaratılmadığını merak edebilirsiniz. Eğer böyle olsaydı o alanın tamamı içn bir VMA oluşturulurdu 
+    ve henüz tahsis edilmiş heap alanlarına yapılan erişimler page fault sırasında tespit edilemezdi. Ayrıca heap 
+    için baştan yer ayrılması izleyen bölümde açıklayacağımız mmap alanı üzerinde de gereksiz bir baskı oluşturuabilirdi. 
+    Aşağıdaki şekilde heap alanının 32 bit bir sistemde prosesin bellek alanındaki konumumu betimlenmektedir:
+
+    0x00000000  ┌────────────────────────────────┐
+                │ NULL koruma bölgesi            │
+    0x00010000  ├────────────────────────────────┤
+                │ BOŞ                            │
+    0x08048000  ├────────────────────────────────┤
+                │ program: text                  │
+                │ program: rodata                │
+                │ program: data                  │
+                │ program: bss                   │
+                ├────────────────────────────────┤
+                │ rastgele boşluk (≤ 32 MB)      │
+    start_brk   ├────────────────────────────────┤
+                │ [heap] ↓                       │
+    brk         ├────────────────────────────────┤
+                │                                │
+                │ büyük boş alan (~2.7 GB)       │
+                │                                │
+                ├────────────────────────────────┤
+                │ mmap bölgesi ↑                 │
+                │ (kütüphaneler, büyük malloc)   │
+    0xb7...     ├────────────────────────────────┤
+                │ rastgele boşluk (stack gap)    │
+                ├────────────────────────────────┤
+                │ [stack] ↑                      │
+    0xC0000000  ├────────────────────────────────┤  ← TASK_SIZE = PAGE_OFFSET
+                │ çekirdek alanı (1 GB)          │
+                │ (user modda erişilemez)        │
+    0xFFFFFFFF  └────────────────────────────────┘
+
+    64 bit sistemlerde de benzer organizasyon söz konusudur:
+
+    0x0000000000000000 ┌────────────────────────────────┐
+                       │ NULL koruma bölgesi            │
+    0x10000            ├────────────────────────────────┤
+                       │ BOŞ                            │
+    0x55...            ├────────────────────────────────┤
+                       │ program: text                  │
+                       │ program: rodata                │
+                       │ program: data                  │
+                       │ program: bss                   │
+                       ├────────────────────────────────┤
+                       │ rastgele boşluk                │
+    start_brk          ├────────────────────────────────┤
+                       │ [heap] ↓                       │
+    brk                ├────────────────────────────────┤
+                       │                                │
+                       │ büyük boş alan (onlarca TB)    │
+                       │                                │
+                       ├────────────────────────────────┤
+                       │ mmap bölgesi ↑                 │
+                       │ (kütüphaneler, büyük malloc)   │
+    0x7f...            ├────────────────────────────────┤
+                       │ [stack] ↑                      │
+    0x7ffffffff000     └────────────────────────────────┘
+
+    Burada prosesin sanal bellek alanının ilk 64K'lık kısmının NULL adres atamalarının tespiti içinkullanıldığını 
+    görüyorsunuz. Belli bir boşluktan sonra ELF formatının bölümlerinin yüklendiği alanlar gelmektedir. ELF formatının 
+    yerleşik alanlarından sonra heap alanının başlangıcını kötü niyetli yazılımların bulmasını zorlaştırmak için 
+    rastgele bir boşluk bulundurulmaktadır. Bu rastgele boşluktan sonra heap alanı başlamaktadır. Heap alanının 
+    büyütülmesi aşağıya doğru yapılmaktadır. Büyütme malloc, calloc, realloc çağrılarda heap alanı yetmediği zaman 
+    yapılmaktadır. Heap'in büütülmesi Linux ve diğer UNIX türevi sistemlerin çoğunda brk ve sbrk isimli fonksiyonlarla 
+    yapılmaktadır. Bu fonksiyonlar doğrudan Linux sistemlerinde sys_brk isimli sistem fonksiyonunu çağrımaktadır. 
+    Ancak brk ve sbrk fonksiyonları POSIX standartlarında bulunmamaktadır. Tabii heap büyüdükçe ya da küçüldükçe heap 
+    alanına ilişkin VMA'lar da (yani vm_area_struct) nesneleri de güncellenmektedir. UNIX dünyasında hali hazırda 
+    tahsis edilmiş heap alanın bittiği noktaya "program break address" de denilmektedir. Başlangıç durumunda heap 
+    alanı 0 uzunluktadır. Yani "program break address" rastgele boşluktan hemen sonrayı göstermektedir. Başka bir 
+    deyişle start_brk ile brk adresleri aynıdır. malloc gibi tahsisatlar yapıldıkça heap alanı büyümektedir. 
+
+    Yukarıdaki çizimlerde heap bölgesinin başlangıç sanal bellek adresi start_brk ile bitik sanal bellek adresi de 
+    brk ile gösterilmiştir. İşte malloc gibi bir tahsisat fonksiyonu yeterli alanı bulamayınca bu brk adresini brk ya da 
+    sbrk fonksiyonlarıyla aşağıya kaydırarak heap alanını büyütmekte ve büyüen alanı da heap organizasyonuna dahil 
+    etmektedir. brk ve sbrk fonksiyonları kullanıcı modundan kullanılabilmektedir. Fonksiyonların prototipleri şöyledir:
+
+    #include <unistd.h>
+
+    int brk(void *addr);
+    void *sbrk(intptr_t increment);
+
+    brk fonksiyonu heap alanının yeni bitiş noktasını adres olarak almaktadır. sbrk fonksiyonu ise bu break adresi 
+    belirlenen miktarda artırmakta ya d azaltmaktadır. sbrk fonksiyonu 0 argümanı ile çağrılırsa o andaki break 
+    adres elde edilebilir. brk fonksiyonu başarı durumunda 0 değerine, başsrızılık durumunda -1 değerine geri dönmektedir. 
+    sbrk fonksiyonu ise başarı durumunda yeni break adrese, balarısızlık durumunda (void *)-1 (başka bir deyişle 
+    en yüksek adres değerine) değerine geri dönmektedir. 
+
+    brk ve sbrk fonksiyonlaır her ne kadar Linux sistemlerinde kullanıcı modundan çağrılabilir durumdaysa da programcının 
+    bu fonksiyonları çağırması tavsiye edilmemektedir. Bu fonksiyonlar yukarıda da belirttiğimiz gibi malloc gibi 
+    tahsisat fonksiyonları tarafından çağrılmaktadır. Biz örneğin sbrk fonksiyonu ile heap alanını küçültürsek bu 
+    sbrk fonksiyonu (sys_brk sistem fonksiyonu) malloc ile yapılan tahsisatları bilmediği için C'nin tüm tahsisat
+    sisteminin bozulmasına yol açabilir. 
+
+    Peki heap alanı en fazla ne kadar büyüyebilir? İşte break adresi büyütülmektedir. Ancak izleyen paragraflarda 
+    göreceğimiz mmap alanı da yukarı doğru büyümektedir. Bunların arasına da en az 1 sayfa boşluk bırakılmaktadır. 
+    Bunlar kesiştiği noktada artık heap ve mmap alanları daha fazla büyütülemeyecektir: 
+
+
+    start_brk          ┌────────────────────────────────┐
+                       │ [heap]                         │
+    brk (en fazla)     ├────────────────────────────────┤
+                       │ en az 1 sayfa boşluk           │
+                       ├────────────────────────────────┤ ← düşük adresteki ilk VMA
+                       │ mmap alanı                     │
+                       └────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    UNIX türevi sistemlerde malloc ve realloc fonksiyonları taban bir fonksiyon durumundadır. calloc fonksiyonu zaten 
+    malloc fonksiyonunu çağırmaktadır. Bu fonksiyonlar break adresini gerektiğinde artırmaktadır. Burada bir noktaya 
+    dikkat ediniz. C'nin bu temel tahasisat fonksiyonları kendi içerisinde daha önce de sözünü ettiğimiz gibi tahsisat
+    algoritmalarını uygulamaktadır. Heap alanın büyütülmesi blok blok yapılmaktadır. Örneğin gcc kütüphanesindeki 
+    malloc fonksiyonu büyütmeyi 128K'lık bloklarla yapmaktadır. 
+
+    Linux sistemlerinde malloc ve realloc fonksiyonları 128K'dan daha büyük tahsisat yapılmak istendiğinde artık bu 
+    tahsisatları heap alanını büyüterek değil izleyen paragraflarda göreceğimiz mmap fonksiyonu  yoluyla yapmaktadır. 
+    mmap fonksiyonu da yeni bir VMA oluşturmaktadır.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Proseslerin heap bölgesinin başlangıç ve bitiş adresleri prosesin sanal bellek bilgilerinin bulunduğu mm_struct 
+    yapısının içinde tutulmaktadır:
+
+    struct mm_struct {
+        /*  ... */
+
+		unsigned long start_code, end_code, start_data, end_data;
+		unsigned long start_brk, brk, start_stack;
+		unsigned long arg_start, arg_end, env_start, env_end;
+
+        /* ... */
+    };
+
+    Görüldüğü gibi yalnızca heap alanına ilişkin değil programın kod, data ve stack alanlarına ilişkin bilgiler de 
+    mm_struct yapısının içerisinde tutulmaktaır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki C++ ve diğer doğal kodlu çalışma sistemlerindeki bellek tahsisatları nasıl yapılmaktadır? Yukarıda da belirttiğimiz
+    gibi aslında malloc ve realloc taban fonksiyonlardır. Çünkü bunlar heap alanını büyütebilmektedir. Bu nedenle Linux'taki
+    C++ derleyicileri (g++ ve clang++) ve kullanılan standart C++ kütüphanesi aslında tahsisatları arka planda malloc 
+    fonksiyonu ile yapmaktadır. Örneğin C++'ta new operatöryle aşağıdaki gibi tahsisat yapılmış olsun:
+
+    char *str = new char[1024];
+
+    Bu durumda bilindiği gibi new operatörü aslında global operator new isimli fonksiyonu çağırmaktadır. İşte bu 
+    fonksiyon da aslında malloc fonksiyonu çağrılarak yazılmıştır. Aşağıda "glibc++" kütüphanesindeki operator new
+    fonksiyonunun gerçekleştirimini veriyoruz:
+
+    _GLIBCXX_WEAK_DEFINITION void *
+    operator new (std::size_t sz) _GLIBCXX_THROW (std::bad_alloc)
+    {
+    void *p;
+
+    /* malloc (0) is unpredictable; avoid it.  */
+    if (__builtin_expect (sz == 0, false))
+        sz = 1;
+
+    while ((p = malloc (sz)) == nullptr)
+        {
+        new_handler handler = std::get_new_handler ();
+        if (! handler)
+            _GLIBCXX_THROW_OR_ABORT(bad_alloc());
+        handler ();
+        }
+
+        return p;
+    }
+
+    Görülrüğü gibi aslına taban fonksşyon malloc fonksiyonudur. Diğer programlama dillerindeki durum da beznerdir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de kullanıcı modunda da çağrılan çekirdek tarafından tarafından da mmap fonksiyonunu ele alacağız. mmap 
+    fonksiyonu yüksek seviyeli VMA (yani vm_area_struct) oluşturan ve bunu bir dosyayla da ilişkilendiren önemli bir 
+    sistem fonksiyonudur. Tabii Linux çekirdeğinde mmap fonksiyonunun gerçekleştirimi zaman içerisinde çekirdek veri 
+    yapılarının değiştirilmesiyle birlikte evrim geçirmiştir. Biz burada güncel çekirdeklerdeki durumu temel alacağız.   
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz öncelikle kullanıcı modundan kullanılabilen mmap POSIX fonksiyonunu yeniden anımsatmak istiyoruz. Bu anımsatmayı
+    yapmazsak izleyen paragraflardaki açıklamalar yeterince anlaşılmayacaktır. mmap POSIX fonksiyonunun prototipi şöyledir:
+
+    #include <sys/mman.h>
+
+    void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+
+    Fonksiyonun birinci parametresi, "haritalama (mapping) için" önerilen (preferred) sanal adresi belirtmektedir. Programcı, 
+    belli bir sanal adresin haritalama için kullanılmasını isteyebilir. Ancak POSIX standartlarına göre fonksiyon, flags 
+    parametresinde MAP_FIXED geçilmemişse bu adresi tam (exact) olarak yani verildiği gibi kullanmayabilir. Fonksiyon 
+    bu önerilen adresin yakınındaki bir sayfayı da tahsis edebilir. Bu tahsisatın burada belirtilen adresin neresinde 
+    yapılacağı POSIX standartlarında garanti edilmemiştir. Yani buradaki adres eğer fonksiyonun flags parametresinde 
+    MAP_FIXED kullanılmamışsa bir öneri niteliğindedir. Eğer bu adres NULL olarak geçilirse bu durumda haritalama işlemi 
+    işletim sisteminin kendi belirlediği bir adresten itibaren yapılı. Kullanıcı modundaki programlarda genellikle bu 
+    NULL adres olarak geçilmektedir. Linux sistemlerinde çekirdek tarafından bu birinci adres ya olduğu gibi kullanılmakta 
+    ya da hiç kullanılmamaktadır. 
+
+    Fonksiyonun ikinci parametresi, ne kadarlık alanın haritalanacağını belirtmektedir. Bu uzunluk POSIX standartlarına göre 
+    sayfa katlarında olmak zorunda değildir. Ancak pek çok sistem bu uzunluğu sayfa katlarına doğru yukarı yuvarlamaktadır. 
+    Yani biz uzunluğu örneğin 100 byte verebiliriz. Ancak sistem 100 byte yerine sayfa uzunluğu olan PAGE_ALIGN (tipik 
+    olarak 4096) değerine yuvarlayarak  haritalandıracaktır. VMA alanlarının sayfa katlarında olması gerektiğini anımsayınız. 
+
+    Fonksiyonun üçüncü parametresi (prot parametresi), haritalama işleminin koruma özelliklerini belirtmektedir. Yani 
+    burada belirtien koruma özelliği VMA nesnesine (vm_area_struct) nesnesine aktarılmakta ve ilgili sanal bellek alanı 
+    sayfa tablosuna yazıldığında onun işlemci düzeyinde koruma özelliğini belirlemektedir. Bu özellikler aşağıdaki sembolik
+    sabitlerin bit düzeyinde OR işlemine sokulmasıyla oluşturulabilir:
+
+    ┌────────────────┬───────┬─────────────────────────────────────┐
+    │     Sabit      │ POSIX │               Anlam                 │
+    ├────────────────┼───────┼─────────────────────────────────────┤
+    │ PROT_NONE      │ Evet  │ Erişim yok (guard, rezervasyon)     │
+    │ PROT_READ      │ Evet  │ Okuma                               │
+    │ PROT_WRITE     │ Evet  │ Yazma                               │
+    │ PROT_EXEC      │ Evet  │ Çalıştırma                          │
+    │ PROT_SEM       │ Hayır │ Atomik op uyumlu; Linux'ta etkisiz  │
+    │ PROT_GROWSDOWN │ Hayır │ Yalnız mprotect: aşağı büyüyen VMA  │
+    │ PROT_GROWSUP   │ Hayır │ Yalnız mprotect: yukarı büyüyen VMA │
+    └────────────────┴───────┴─────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+    Kullanıcı modundaki mmap POSIX fonksiyonu bazı işlemlerdne sonra Linux sistemlerinde sys_mmap isimli sistem 
+    fonksiyonunu çağırmaktadır. Tabii çekirdek bu sistem fonksiyonunu doğrudan kullanmaz ancak bu sistem fonksiyonunun 
+    çağırdığı birkaç fonksiyonu kullanmaktadır. Kullanıcı modundaki mmap POSIX fonksiyonunun güncel Linux sistemlerinde 
+    çağrılmasıyla oluşan çekirdekteki çağrı zincirini aşağıda veriyoruz:
+
+        KULLANICI ALANI
+    ┌──────────────────────────┐
+    │ mmap()  [glibc __mmap64] │
+    └────────────┬─────────────┘
+                 │ syscall (rax = 9)
+    ═════════════╪═══════════════════════════════════════════════════════════
+    ÇEKİRDEK     ▼
+    ┌──────────────────────────┐
+    │ entry_SYSCALL_64         │  arch/x86/entry/entry_64.S
+    │   └─ do_syscall_64       │  arch/x86/entry/common.c
+    └────────────┬─────────────┘
+                 ▼
+    ┌──────────────────────────┐
+    │ SYSCALL_DEFINE6(mmap)    │  arch/x86/kernel/sys_x86_64.c
+    │   off → pgoff            │
+    └────────────┬─────────────┘
+                 ▼
+    ┌──────────────────────────┐
+    │ ksys_mmap_pgoff()        │  mm/mmap.c
+    │   fget(fd) / hugetlb     │
+    └────────────┬─────────────┘
+                ▼
+    ┌──────────────────────────┐
+    │ vm_mmap_pgoff()          │  mm/util.c
+    │   security_mmap_file     │
+    │   mmap_write_lock ─────┐ │
+    └────────────┬───────────┼─┘
+                 ▼           │    (kilit altında)
+    ┌──────────────────────────
+    │ do_mmap()                   mm/mmap.c
+    │   doğrulama              
+    │   prot/flags → vm_flags  
+    │        │                 
+    │        ├──► get_unmapped_area() ──► arch_get_unmapped_area_topdown()
+    │        │                                   └─► vm_unmapped_area()  [Maple Tree gap]
+    │        ▼                 
+    │   mmap_region()          
+    │     ├─ do_vmi_munmap()             (MAP_FIXED: çakışanları kaldır)
+    │     ├─ security_vm_enough_memory_mm()   (taahhüt / overcommit)
+    │     ├─ can_vma_merge_* / vma_expand()   (komşuyla birleş → bitti)
+    │     ├─ vm_area_alloc()                  (yeni VMA)
+    │     ├─ ┌─ dosya:          call_mmap() → f_op->mmap → vm_ops
+    │     │  ├─ SHARED|ANON:    shmem_zero_setup()
+    │     │  └─ PRIVATE|ANON:   vma_set_anonymous()
+    │     ├─ vma_iter_store()                 (mm_mt Maple Tree'ye ekle)
+    │     ├─ vma_interval_tree_insert()       (i_mmap, dosya ise)
+    │     └─ vm_stat_account()
+    └────────────┬─────────────
+                 │  mmap_write_unlock ◄───┘
+                 ▼
+    ┌──────────────────────────┐
+    │ mm_populate()            │  mm/gup.c   (yalnızca MAP_POPULATE / MAP_LOCKED)
+    └────────────┬─────────────┘
+                 ▼
+        dönüş: adres ya da -errno  →  rax  →  glibc  →  kullanıcı
+
+
+    Bu akış içerisindeki en önemli işlemler do_mmap fonksiyonu içerisinde yapılmaktadır. 
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                                GEÇİCİ NOTLAR
+----------------------------------------------------------------------------------------------------------------------*/
+
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
