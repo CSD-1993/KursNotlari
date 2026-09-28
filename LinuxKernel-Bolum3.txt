@@ -1337,6 +1337,10 @@
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+                                        105. Ders 27/09/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
     Biz öncelikle kullanıcı modundan kullanılabilen mmap POSIX fonksiyonunu yeniden anımsatmak istiyoruz. Bu anımsatmayı
     yapmazsak izleyen paragraflardaki açıklamalar yeterince anlaşılmayacaktır. mmap POSIX fonksiyonunun prototipi şöyledir:
 
@@ -1371,18 +1375,518 @@
     │ PROT_READ      │ Evet  │ Okuma                               │
     │ PROT_WRITE     │ Evet  │ Yazma                               │
     │ PROT_EXEC      │ Evet  │ Çalıştırma                          │
-    │ PROT_SEM       │ Hayır │ Atomik op uyumlu; Linux'ta etkisiz  │
-    │ PROT_GROWSDOWN │ Hayır │ Yalnız mprotect: aşağı büyüyen VMA  │
-    │ PROT_GROWSUP   │ Hayır │ Yalnız mprotect: yukarı büyüyen VMA │
     └────────────────┴───────┴─────────────────────────────────────┘
+
+    PROT_READ sayfaların "read only" olduğunu belirtir. Anımsabanacağı gibi böyle sayfalara yazma yapılırsa, işlemci 
+    exception oluşturur ve program SIGSEGV sinyali ile sonlandırılır. PROT_WRITE sayfalara yazma yapılabileceğini 
+    belirtmektedir. Örneğin PROT_READ|PROT_WRITE hem okuma hem de yazma anlamına gelmektedir. PROT_EXEC ilgili sayfada 
+    bir kod varsa (örneğin oraya bir fonksiyon yerleştirilmişse) o kodun çalıştırılabilirliği üzerinde etkili olmaktadır. 
+    Örneğin Intel ve ARM işlemcilerinde, fiziksel sayfa PROT_EXEC ile özelliklendirilmemişse o sayfadaki bir kod 
+    çalıştırılamamaktadır. PROT_NONE o sayfaya herhangi bir erişimin mümkün olamayacağını belirtmektedir. Yani 
+    PROT_NONE olan bir sayfa ne okunabilir ne de yazılabilir. Bu tür sayfa özellikleri "guard page" oluşturmak için 
+    kullanılabilmektedir. Tabii bir sayfanın koruma özelliği daha sonra da değiştirilebilir. Aslında bütün işlemciler 
+    buradaki koruma özelliklerinin hepsini desteklemeyebilirler. Örneğin Intel işlemcilerinde PROT_WRITE zaten okuma 
+    özelliğini de kapsamaktadır. Bazı işlemciler sayfalarda PROT_EXEC özelliğini hiç bulundurmamaktadır. Ancak ne 
+    olursa olsun programcı sanki bu özelliklerin hepsi kodun çalıştırıldığı işlemcide varmış gibi bu parametreyi 
+    oluşturmalıdır. Böylece kodun başka bir işlemcinin bulunduğu sistemde de düzgün çalışması sağlanacaktır. 
+
+    Fonksiyonun dördüncü parametresi olan flags Linux sistemlerinde aşağıdaki sembolik sabitlerdne oluşturulmmaktadır:
+    
+    ┌─────────────────────┬──────────────────────────────────────────────────────┬─────────────────────┐
+    │        Bayrak       │                        İşlevi                        │        POSIX        │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_SHARED          │ Eşleme diğer prosesler ile paylaşılır; yapılan       │ Evet                │
+    │                     │ değişiklikler alttaki dosyaya yansıtılır (msync ile  │                     │
+    │                     │ senkronize edilir).                                  │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_PRIVATE         │ Copy-on-write özel eşleme; değişiklikler dosyaya ve  │ Evet                │
+    │                     │ diğer proseslere yansımaz.                           │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_SHARED_VALIDATE │ MAP_SHARED gibidir, ancak çekirdek bilinmeyen        │ Hayır               │
+    │                     │ bayrakları EOPNOTSUPP ile reddeder (Linux 4.15).     │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_FIXED           │ addr argümanı ipucu değil zorunludur; o bölgedeki    │ Evet                │
+    │                     │ mevcut eşlemeler sessizce kaldırılır.                │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_FIXED_NOREPLACE │ MAP_FIXED gibidir, ancak bölge doluysa EEXIST ile    │ Hayır               │
+    │                     │ başarısız olur (Linux 4.17).                         │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_ANONYMOUS       │ Dosyaya dayanmayan, sıfırlanmış bellek eşlemesi; fd  │ Evet (POSIX.1-2024) │
+    │                     │ yok sayılır (-1 verilmeli), offset 0 olmalı.         │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_ANON            │ MAP_ANONYMOUS ile eş anlamlıdır (BSD uyumluluğu      │ Evet (POSIX.1-2024) │
+    │                     │ için).                                               │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_FILE            │ Uyumluluk amaçlıdır; Linux'ta yok sayılır.           │ Hayır               │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_32BIT           │ Eşlemeyi Adres Alanı'nın ilk 2 GB'ına yerleştirir    │ Hayır               │
+    │                     │ (yalnızca x86-64).                                   │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_GROWSDOWN       │ Aşağı doğru büyüyen stack benzeri eşleme; guard      │ Hayır               │
+    │                     │ page'e erişimde bölge genişletilir.                  │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_STACK           │ Eşlemenin stack olarak kullanılacağını belirtir;     │ Hayır               │
+    │                     │ Linux'ta THP'yi devre dışı bırakır.                  │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_HUGETLB         │ Huge page kullanarak eşleme yapar; boyut             │ Hayır               │
+    │                     │ MAP_HUGE_2MB, MAP_HUGE_1GB vs ile seçilir.           │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_LOCKED          │ Eşlenen sayfaları mlock(2) gibi RAM'de kilitler;     │ Hayır               │
+    │                     │ mlock(2)'tan farklı olarak sayfalar kilitlenemezse   │                     │
+    │                     │ mmap başarısız olmaz.                                │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_POPULATE        │ Page table'ları önceden doldurur (prefault); dosya   │ Hayır               │
+    │                     │ eşlemelerinde read-ahead tetikler.                   │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_NONBLOCK        │ MAP_POPULATE ile anlamlıdır; Linux 2.6.23'ten beri   │ Hayır               │
+    │                     │ no-op'tur.                                           │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_NORESERVE       │ Swap alanı rezerve edilmez; overcommit politikasına  │ Hayır               │
+    │                     │ bağlı olarak SIGSEGV riski doğar.                    │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_SYNC            │ DAX dosyalarında senkron page fault semantiği        │ Hayır               │
+    │                     │ sağlar; MAP_SHARED_VALIDATE ile kullanılır (Linux    │                     │
+    │                     │ 4.15).                                               │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_UNINITIALIZED   │ Anonim sayfalar sıfırlanmaz; yalnızca                │ Hayır               │
+    │                     │ CONFIG_MMAP_ALLOW_UNINITIALIZED ile (genellikle      │                     │
+    │                     │ NOMMU) etkindir.                                     │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_DROPPABLE       │ Bellek baskısı altında çekirdeğin içeriği            │ Hayır               │
+    │                     │ atabileceği özel anonim eşleme (Linux 6.11).         │                     │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_DENYWRITE       │ Tarihsel; yok sayılır.                               │ Hayır               │
+    ├─────────────────────┼──────────────────────────────────────────────────────┼─────────────────────┤
+    │ MAP_EXECUTABLE      │ Tarihsel; yok sayılır.                               │ Hayır               │
+    └─────────────────────┴──────────────────────────────────────────────────────┴─────────────────────┘
+    
+    Aşağıdaki iki bayraktan yalnızca biri kullanılabilir. Bu iki bayrak birikte kullanılamaz:
+
+    MAP_PRIVATE
+    MAP_SHARED
+
+    MAP_PRIVATE ile oluşturulan haritalamaya "özel haritalama (private mapping)", MAP_SHARED ile oluşturulan haritalamaya 
+    ise "paylaşımlı haritalama (shared mapping)" denilmektedir. MAP_PRIVATE "copy-on-write" denilen semantik için kullanılmaktadır. 
+    "Copy-on-write" işlemi "yazma yapılana kadar sanal sayfaların aynı fiziksel sayfalara yönlendirilmesi ancak yazmayla 
+    birlikte o sayfaların bir kopyalarının çıkartılıp yazmanın o prosese özel olarak yapılması anlamına gelmektedir. 
+    MAP_PRIVATE bayrağı birden fazla proses tarafından paylaşılan VMA'ların söz konusu olduğu durumda yazma yapıldığında 
+    bunların ayrıştırlması amacıyla kullanılmaktadır. Başka bir deyişle MAP_PRIVATE bayrağı şunlara yol açmaktadır:
+
+    - VMA'dan okuma yapıldığında paylaşılan bellek alanından okuma yapılır.
+    - VMA'ya yazma yapıldığında bu yazma paylaşılan bellek alanına yansıtılmaz. O anda yazılan sayfanın bir kopyası 
+    çıkartılarak yazma o kopya üzerine yapılır. Dolayısıyla başka bir proses bu yazma işlemini göremez.
+
+    Bir proses ilgili paylaşılan bellek alanı nesnesini MAP_PRIVATE ile map ettiğinde ve diğer proses o alana yazma yaptığında 
+    onun yazdığını MAP_PRIVATE yapan prosesin görüp görmeyeceği POSIX standartlarında belirsiz (unspecified) bırakılmıştır. 
+    Linux sistemlerinin man sayfasında da bu durum "unspecified" olarak belirtilmiş olsa da mevcut Linux çekirdeklerinde 
+    başka bir proses özel haritlanmış bir VMA'ya yazma yaptığında bu yazma özel haritlanmış proseste görülmektedir. Ancak 
+    özel haritalama yapan proses sayfaya yazma yaptığında artık o sayfanın kopyasından çıkartılacağı için bu yazma işleminden 
+    sonraki diğer prosesin yaptığı yazma işlemleri görülmemektedir.
+
+    MAP_SHARED ise paylaşılan bellek alanı söz konusu olduğunda yazma işleminin paylaşılan bellek alanına yapılacağını yani 
+    "copy-on-write" yapılmayacağını belirtmektedir. Dolayısıyla MAP_SHARED bir haritalamada paylaşılan alana yazılanlar diğer 
+    prosesler tarafından görülür. Normal olarak programcılar prosesler arası haberleşme için paylaşımlı haritalama kullanırlar. 
+    Özel haritalama (yani "copy-on-write") bazı özel durumlarda tercih edilmektedir. Örneğin çekirdek (exec fonksiyonları) 
+    çalıştırılabilir dosyanın ".data" bölümünü özel haritalama yaparak belleğe yüklemektedirler.
+
+    Yukarıda da belirtitğimiz gibi fonksiyonun flags parametresinde MAP_PRIVATE ve MAP_SHARED değerlerinin yalnızca biri 
+    kullanılabilir. Ancak bu değerlerden biri ile MAP_FIXED değeri bit düzeyinde OR işlemine sokulabilmektedir. MAP_FIXED 
+    bayrağı fonksiyonun birinci parametresindeki adres NULL geçilmemişse bu adresin kendisinin aynen (hiç değiştirilmeden) 
+    kullanılacağını belirtmektedir. Yani bu adresin yakınındaki herhangi bir sayfa değil tam olarak bu adresten itibaren 
+    tahsisat yapılacak ve fonksiyon bu adresin aynısıyla geri dönecektir. (Tabii bu durumda programcının verdiği adres uygun 
+    olmayabilir. Bu durumda fonksiyon da başarısız olur.) Eğer MAP_FIXED bayrağı belirtilmişse Linux sistemlerinde birinci 
+    parametredeki adresin sayfa katlarında olma zorunluluğu vardır. Ancak POSIX standartlarının son versiyonları "may require" 
+    ifadesiyle işletim sisteminin bunu zorunlu tutulmayabileceğini belirtmektedir.
+
+    MAP_ANONYMOUS bayrağı "anonim haritalama (anonymous mapping) yapmak için kullanılmaktadır. Anonim haritalama dosya üzerinde 
+    yapılmayan (yani bellek tabanlı dosya biçiminde olmayan) VMA tahsisatları için kullanılmaktadır. Dolayısıyla anonim 
+    haritalama yapılırken mmap fonksiyonunun fd ve offset parametreleri dikkate alınmamaktadır.
+
+    mmap fonksiyonunda MAP_ANONYMOUS kullanıldığında fonksiyonun fd parametresi ve offset parametresi dikkate alınmamaktadır. 
+    Ancak POSIX standartlarına MAP_ANONYMOUS bayrağı kullanıldığında fd parametresi -1, offset parametresi ise 0 olarak
+    geçilmelidir. 
+
+    mmap fonksiyonunun son iki paramtresi (yani fd ve offset parametreleri) oluşturulan VMA için kullanılacak dosyayı 
+    (backing store) belirtmektedir. Bir VMA bir dosyanın belli bir kısmını tutuyor olabilir. Bu duruma işletim 
+    sistemleri dünyasında "bellek tabanlı dosyalar (memory-mapped file) denilmektedir. Biz bu son iki parametreye 
+    bir dosyanın betimleyicisini ve dosyada bir offset'i verirsek artık sanki dosyanın o parçası bellekte o VMA içerine 
+    çekilmiş gibi bir etki oluşmaktadır. Tabii aslında izleyen paragraflarda da göreceğimiz gibi tahsis edilen VMA 
+    sayfa dosyanın önbelleği ile ilişkilendirilmektedir. 
+
+    mmap fonksiyonu başarı durumunda tahsis edilen VMA'nın sanal bellek adresiyle, başarısızlık durumunda MAP_FAILED
+    (genellikle (void *)-1 değeri) özel değeriyle geri dönmektedir. 
+
+    Şimdi kullanıcı modunda anonim haritalama ile VMA oluşturma örneğini verelim. Burada mmap fonksiyonunda biz 
+    flags parametresine MAP_PRIVATE|MAP_ANONYMOUS geçeceğiz. fd parametresi ve offset parametresi MAP_ANONYMOUS 
+    nedeniyle artık fonksiyon tarafından kullanılmayacaktır:
+
+    char *vma;
+
+    if ((vma = (char *)mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    strcpy(vma, "this is a test");
+    puts(vma);
+
+    Burada biz prosesin sanal bellek alanında 8192 byte uzunluğunda (tipik olarak 2 sayfa) bir VMA oluşturduk. 
+    Bu VMA'daki sayfaların PROT_READ|PROT_WRITE özelleğine sahip olduğuna dikkat ediniz. Bu sayfalardan hem okuma
+    yapılabilece hem de yazma yapılabilecektir. Biz örneğimizde tahsis edilen VMA'yı serbest bırakmadık. Ancak proses
+    sonlandığında zaten serbest bırakma işlemi yapılacaktır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    mmap POSIX fonksiyonuyla tahsis edilen VMA vunmap fonksiyonuyla serbest bırakılabilir. munmap fonksiyonunun prototipi 
+    şöyledir:
 
-    Kullanıcı modundaki mmap POSIX fonksiyonu bazı işlemlerdne sonra Linux sistemlerinde sys_mmap isimli sistem 
-    fonksiyonunu çağırmaktadır. Tabii çekirdek bu sistem fonksiyonunu doğrudan kullanmaz ancak bu sistem fonksiyonunun 
-    çağırdığı birkaç fonksiyonu kullanmaktadır. Kullanıcı modundaki mmap POSIX fonksiyonunun güncel Linux sistemlerinde 
-    çağrılmasıyla oluşan çekirdekteki çağrı zincirini aşağıda veriyoruz:
+    #include <sys/mman.h>
+
+    int munmap(void *addr, size_t len);
+
+    Fonksiyonun birinci parametresi, daha önce tahsis edilen VMA'da bulunan kısmın adresini almaktadır, ikinci parametresi 
+    ise unmap edilecek alanın uzunluğunu belirtmektedir. Fonksiyon birinci parametresinde belirtilen adresten itibaren 
+    ikinci parametresinde belirtilen miktardaki byte'ı içeren kısmı serbest bırakmaktadır. POSIX standartları işletim 
+    sistemlerinin birinci parametrede belirtilen adresin sayfa katlarında olmasını zorlayabileceğini (may require) 
+    belirtmektedir. Linux'ta birinci parametrede belirtilen adres sayfa katlarında olmak zorundadır. Uzunluğun sayfa 
+    katlarında olması zorunlu değildir. Bu durumda uzunluk sayfa katlarına yukarıya doğru yuvarlanmaktadır. Fonksiyon 
+    başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri döner ve errno değişkeni uygun biçimde set edilir. 
+    munmap ile zaten tahsis edilmemiş olan bir alan serbest bırakılmaya çalışılırsa fonksiyon bir şey yapmaz. Bu durumda 
+    fonksiyon başarısızlıkla geri dönmemektedir.
+
+    Serbest bırakma işlemi tahsis edilen VMA'nın bir kısmına yapılabilmektedir. Bu durumda işletim sistemi VMA'yı 
+    ardışıl olmayan parçalara kendisi ayırmaktadır. Örneğin:
+
+    xxxxmmmmmmmmmxxxx
+
+    Burada "m" sanal bellekteki VMA'yı, "x" ise diğer alanları göstrmektedir. Şimdi biz bu VMA'nın arasında bir bölgeyi 
+    serbest bırakalım. Çekirdek bu durumda o VMA'yı o alan boş olacak biçimde iki parçaya bölmektedir:
+
+    xxxxmmmmxxmmmxxxx
+
+    Görüldüğü gibi artık sanki iki ayrı VMA varmış gibi işlem uygulanmaktadır. 
+
+    Proses bittiğinde tüm VMA'lar zaten işletim sistemi tarafından serbest bırakılmaktadır. 
+
+    Örneğin:
+
+    char *vma;
+
+    if ((vma = (char *)mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    strcpy(vma, "this is a test");
+    puts(vma);
+
+    if (munmap(vma, 8192) == -1)
+        exit_sys("munmap");
+    
+    Aşağıda örneği bütünsel olarak veriyoruz.
+----------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    char *vma;
+
+    if ((vma = (char *)mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    strcpy(vma, "this is a test");
+    puts(vma);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de mmap fonksiyonu ile tahsis ettğimiz VMA'yı bir dosya ile ilişkilendirelim. Yukarıda da belirttiğimiz gibi
+    bu işleme işletim sistemleri terminolojisinde "bellek tabanlı dosyalar (memory-mapped file)" denilmektedir. Bir 
+    dosyanın belli bir kısmını bellek tabanlı hale getirdiğimizde artık o bellek alanından okuma yaptığımızda dosyadan 
+    okuma yapmış oluruz, o bellek alanına yazma yazma yaptığımızda dosyaya yazmı oluruz. Bellek tabanlı dosya oluşturmak 
+    için mmap fonksiyonun son iki parametersine dosyanın betimleyicisini ve neredne itibaren haritalama yapılacağına ilişkin
+    offset değerini vermemiz gerekir. Tabii dosyanın mmap fonksinuna girilen prot parametresine uygun olacak biçimde 
+    açılmış olması gerekir. Örneğin:
+
+    char *vma;
+    int fd;
+    struct stat finfo;
+
+    if ((fd = open("test.txt", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (fstat(fd, &finfo) == -1)
+        exit_sys("fstat");
+    
+    if ((vma = (char *)mmap(NULL, finfo.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+    
+    printf("%.10s", vma);
+    memcpy(vma, "xxxxx", 5);
+
+    if (munmap(vma, finfo.st_size) == -1)
+        exit_sys("munmap");
+
+    close(fd);
+
+    Burada "test.txt" dosyası O_RDWR bayrağıla read/write biçimde açılmıştır. mmap fonksiyonuna bu betimleyici
+    geçirilmiştir. Bu örnekte dosyanın tamamının haritlanması için önce dosya uzunluğu fstat fonksiyonuyla elde 
+    edilmiştir. Artık ilgili bellek alanına yazma yapıldığında dosyaya yazma yapılmış gibi işlem uygulanacaktır. 
+    Bunun çekirdek tarafındna nasıl sağlandığını izleyen paragraflarda ele alacağız. 
+
+    Aşağıda bellek tabanlı dosya örneğini bütünsel olarka veriyoruz.
+----------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/mman.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    char *vma;
+    int fd;
+    struct stat finfo;
+
+    if ((fd = open("test.txt", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (fstat(fd, &finfo) == -1)
+        exit_sys("fstat");
+    
+    if ((vma = (char *)mmap(NULL, finfo.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+    
+    printf("%.10s", vma);
+    memcpy(vma, "xxxxx", 5);
+
+    if (munmap(vma, finfo.st_size) == -1)
+        exit_sys("munmap");
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Linux çekirdeği pek çok UNIX türevi sistemin çekirdeğinde olduğu gibi bellek tabanlı dosya işlemlerinde arka planda
+    aslında tahsis edilen VMA'nın sanal sayfa numaralarını sayfa tablosunda dosyaya ilişkin sayfa önbelleğindeki fiziksel 
+    sayfalarla eşlemektedir. Yani Linux'ta biz bellek tabanlı dosyaysı mmap ile oluşturdultan sonra o alana yazma 
+    yaptığımızda aslında dosyanın sayfa önbelleğine yazma yapmış oluruz. Sayfa önbellekleri de anımsayacağınız gibi 
+    arka plnada periyodik biçimde flush edilmektedir. Ancak POSIX standartlarında tahsis edilen sanal bellek alanının 
+    doğrudan sayfa önbelleğibne yönlendirilmesi zorunlu tutulmamıştır. Bu nednele POSIX standartlarında bellek tabanlı 
+    dosya açılıp o bellek alanına yazma yapıldıktan sonra yazılanların dosyaya aktarılması için msync fonksiyonunun 
+    kullanılması gerektiği belirtilmiştir. Linux sistemlerinde bu fonksiyonu kullanmaya hiç gerek yoktur. 
+
+    msync fonksiyonun prototipi şöyledir:
+
+     #include <sys/mman.h>
+
+    int msync(void *addr, size_t len, int flags);
+
+    Fonksiyonun birinci parametresi flush edilecek bellek tabanlı dosyanın bellek adresini, ikinci parametresi bunun 
+    uzunluğunu belirtmektedir. POSIX standartlarına göre birinci parametrede belirtilen adresin "sayfa katlarında olması 
+    zorunlu değildir, ancak işletim sistemi bunu zorunlu yapabilir (may require)". Linux sistemlerinde bu adresin sayfa 
+    katlarında olması zorunlu tutulmuştur. Fonksiyonun ikinci parametresi flush edilecek byte miktarını belirtmektedir. 
+    Burada belirtilen byte miktarı ve girilen adresi kapsayan tüm sayfalar işleme sokulmaktadır. (Örneğin birinci parametrede 
+    belirtilen adres sayfa katlarında olsun. Biz ikinci parametre için 7000 değerini girersek sayfa uzunluğu 4K ise sanki 
+    8192 girmiş gibi etki oluşacaktır.) Fonksiyonun son parametresi flush işleminin yönünü belirtmektedir. Bu parametre 
+    aşağıdaki bayraklardan yalnızca birini alabilir:
+
+    MS_SYNC: Burada yön bellekten diske doğrudur. Yani biz bellek tabanlı dosyanın bellek alanında değişiklik yaptığımızda 
+    bunun diskteki dosyaya yansıtılabilmesi için MS_SYNC kullanabiliriz. Bu bayrak aynı zamanda msync fonksiyonu geri döndüğünde 
+    flush işleminin bittiğinin garanti edilmesini sağlamaktadır. Yani bu bayrağı kullandığımızda msync flush 
+    işlemi bitince geri dönmektedir.
+
+    MS_ASYNC: MS_SYNC bayrağı gibidir. Ancak bu bayrakta flush işlemi başlatılıp msync fonksiyonu hemen geri döner. 
+    Yani bu bayrakta msync geri döndüğünde flush işlemi başlatılmıştır ancak bitmiş olmak zorunda değildir.
+
+    MS_INVALIDATE: Buradaki yön diskten belleğe doğrudur. Yani başka bir proses diskteki dosyayı güncellendiğinde 
+    bu güncellemenin bellek tabanlı dosyanın bellek alanına yansıtılması sağlanmaktadır.
+
+    munmap işlemi ile bellek tabanlı dosyanın bellek alanı serbest bırakılırken zaten msync işlemi yapılmaktadır. 
+    Benzer biçimde proses munmap yapmadan sonlanmış olsa bile sonlanma sırasında munmap işlemi işletim sistemi
+     tarafından  yapılmakta ve bu flush işlemi de gerçekleştirilmektedir.
+
+    Fonksiyon başarı durumunda 0 değerine, başarısızlık durumunda -1 değerine geri dönmektedir.
+
+    Bu durumda biz POSIX standartlarına uygunluk bakımından örneğin bir bellek tabanlı dosyanın bellek alanına 
+    bir şeyler yazdığımızda o alanın flush edilmesi için MS_SYNC ya da MS_ASYNC bayraklarıyla msync çağrısını 
+    yapmamız gerekir:
+
+    if ((maddr = (char *)mmap(NULL, finfo.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED)
+        exit_sys("mmap");
+
+    memcpy(maddr, "ankara", 6);
+
+    if (msync(maddr, finfo.st_size, MS_SYNC) == -1)        /* bellekteki değişiklikler diske yansıtılıyor */
+        exit_sys("msync");
+
+    Yine POSIX standartlarına uygunluk bakımından dışarıdan bir prosesin bellek tabanlı dosyada değişiklik yapması 
+    durumunda  onun bellek tabanlı dosyanın bellek alanına yansıtılabilmesi için MS_INVALIDATE bayrağı ile msync 
+    fonksiyonunun çağrılması gerekmektedir. Örneğin:
+
+    if ((maddr = (char *)mmap(NULL, finfo.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+
+    /* başka bir proses dosya üzerinde değişiklik yapmış olsun */
+
+    if (msync(maddr, finfo.st_size, MS_INVALIDATE) == -1)        /* diskteki değişiklikler belleğe yansıtılıyor */
+        exit_sys("msync");
+
+    msync fonksiyonunda yalnızca tek bir bayrak kullanılabilmektedir. Bu nedenle iki işlemi MS_SYNC|MS_INVALIDATE biçiminde
+    birlikte yapmaya çalışmayınız. 
+
+    Linux sistemlerinde msync kullanmaya hiç herek yoktur. Ancak taşınabilir uygulamalarda msync kullanılması önerilmektedir. 
+    
+    Aşağıda msync fonksiyonunun kullanımına ilişkin bir örnek verilmiştir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/mman.h>
+
+void exit_sys(const char *msg);
+
+int main(void)
+{
+    char *vma;
+    int fd;
+    struct stat finfo;
+
+    if ((fd = open("test.txt", O_RDWR)) == -1)
+        exit_sys("open");
+
+    if (fstat(fd, &finfo) == -1)
+        exit_sys("fstat");
+    
+    if ((vma = (char *)mmap(NULL, finfo.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) 
+        exit_sys("mmap");
+    
+    printf("%.10s", vma);
+    memcpy(vma, "xxxxx", 5);
+
+    if (msync(vma, finfo.st_size, MS_SYNC) == -1)
+        exit_sys("msync");
+
+    if (munmap(vma, finfo.st_size) == -1)
+        exit_sys("munmap");
+
+    close(fd);
+
+    return 0;
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Son oalrak mprotect isimli POSIX fonksiyonuna da değinmek istiyoruz. mmap ile oluşturulan VMA'nın koruma bayrakları 
+    daha sonra mprotect isimli POSIX fonksiyonuyla değiştirilebilmektedir. mprotect fonksiyonunun parametrik yapısı 
+    şöyledir:
+
+    #include <sys/mman.h>
+
+    int mprotect(void *addr, size_t len, int prot);
+
+    Fonksiyonun birinci parametresi koruma özelliği değiştirilecek alanın başlangıç adresini belirtmektedir. POSIX
+    standartlarında bu adresin sayfa katlarınd aolması zorunlu tutulmamıştır. Ancak işletim sisteminin bunu zorunlu 
+    tutabileceği (may requre) belirtilmiştir. İkinci parametre uzunluğu belirtmektedir. Verilen adres ve uzunluğu 
+    etkileyen VMA'nın koruma özellikleri değiştirilmektedir. Tabii bu değiştirme Linux sistemlerinde önceki VMA'nın
+    parçalanması sonucunu da doğurabilmektedir. Sonra parametre değiştirilecek yeni korumu bayraklarını belirtmektedir. 
+
+    Ayrıca POISX standarlarında da bulunan VMA'nın fiziksel bellekte kalıcılığını sağlayan (yani takas dosyasına 
+    aktarılamsını engelleyen) mlcok fonksiyonu da bulunmaktadır:
+
+    #include <sys/mman.h>
+
+    int mlock(const void *addr, size_t len);
+
+    lock edilen kısım unlock fonksiyonuyla eski haline getirilebilir:
+
+    #include <sys/mman.h>
+
+    int munlock(const void *addr, size_t len); 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Biz yukarıda mmap fonksiyonun kullanıcı modundaki kullanımını ele aldık. Şimdi de bu fonksiyonun çekirdek tasarımında 
+    nasıl işlev gördüğünü inceleyeceğiz. Şu sorulara yanıtlar vermeye çalışacağız:
+
+    - Anonim haritlama (yani bir dosyaya referans etmeyen haritalama) çekirdek tarafından nasıl gerçekleştirilmeltedir?
+    - "Özel haritalama (private mapping)", "paylaşımlı haritlama" çekirdke tarafından nasıl gerçekleştirilmektedir?
+    - Bellek tabanlı dosyaların çekirdek gerçekleştirimi nasıldır?
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Kullanıcı modundaki mmap POSIX fonksiyonu bazı işlemlerden sonra Linux sistemlerinde sys_mmap isimli sistem 
+    fonksiyonunu çağırmaktadır. 32 bit sistemlerde eskiden sys_mmap fonksiyonu 32 bir offset temelinde çalışıyordu. 
+    Sonra o fonksiyon muhafaze edilip 64 bit offset temelinde çalışabilen (offset yerine sayfa indeksi kullanılarak 
+    yapılmaktadır.) sys_mmap2 fonksiyonu da sisteme dahil edildi. Sonraki 32 it sistemlerde sys_mmap yerine artık 
+    yalnızca sys_mmap2 sistem fonksiyonu bulunduruldu. Ancak 64 bit Linux sistemlerinde yalnızca sys_mmap fonksiyonu 
+    bulunmaktadır. Biz anlatımda bu sistem fonksiyonunu sys_mmap ismiyle belirteceğiz. Aşağıda hangi sistemlerde hangi 
+    mmap sistem fonksiyonun bulunduğunu bir tablo biçiminde veriyoruz. Tablodaki numaralar sistem fonksiyonlarının 
+    numaralarını belirtmektedir:
+
+    ┌────────────────┬────────────────────────────────┬──────────────────┬─────────────────────┐
+    │      Grup      │          Mimari / ABI          │ mmap (No, Giriş) │  mmap2 (No, Giriş)  │
+    ├────────────────┼────────────────────────────────┼──────────────────┼─────────────────────┤
+    │ Yalnızca mmap  │ x86_64 (64-bit ABI), x32       │ 9 sys_mmap       │ -                   │
+    │                │ arm64 (native)                 │ 222 sys_mmap     │ -                   │
+    │                │ riscv64, loongarch64           │ 222 sys_mmap     │ -                   │
+    │                │ powerpc64 (native)             │ 90 sys_mmap      │ - (yalnızca compat) │
+    │                │ sparc64 (native)               │ 71 sys_mmap      │ - (yalnızca compat) │
+    │                │ mips n64, mips n32             │ 9 sys_mips_mmap  │ -                   │
+    │                │ alpha                          │ 71 sys_osf_mmap  │ -                   │
+    │                │ s390x                          │ 90 sys_old_mmap  │ -                   │
+    ├────────────────┼────────────────────────────────┼──────────────────┼─────────────────────┤
+    │ mmap + mmap2   │ i386 (+ x86_64 ia32 compat)    │ 90 sys_old_mmap  │ 192 sys_mmap_pgoff  │
+    │                │ arm OABI                       │ 90 sys_old_mmap  │ 192 sys_mmap2       │
+    │                │ m68k                           │ 90 sys_old_mmap  │ 192 sys_mmap2       │
+    │                │ sh                             │ 90 old_mmap      │ 192 sys_mmap2       │
+    │                │ microblaze                     │ 90 sys_mmap      │ 192 sys_mmap2       │
+    │                │ powerpc32 (+ ppc64 compat)     │ 90 sys_mmap      │ 192 sys_mmap2       │
+    │                │ sparc32 (+ sparc64 compat)     │ 71 sys_mmap      │ 56 sys_mmap2        │
+    │                │ mips o32                       │ 90 sys_mips_mmap │ 210 sys_mips_mmap2  │
+    │                │ parisc (32 ve 64 bit)          │ 90 sys_mmap      │ 89 sys_mmap2        │
+    ├────────────────┼────────────────────────────────┼──────────────────┼─────────────────────┤
+    │ Yalnızca mmap2 │ arm EABI (+ arm64 compat)      │ -                │ 192 sys_mmap2       │
+    │                │ xtensa                         │ -                │ 80 sys_mmap_pgoff   │
+    │                │ arc, csky, hexagon, nios2,     │ -                │ 222 sys_mmap2       │
+    │                │ openrisc, riscv32, loongarch32 │                  │                     │
+    └────────────────┴────────────────────────────────┴──────────────────┴─────────────────────┘
+    
+    Tabii çekirdek bu sys_mmap sistem fonksiyonunu doğrudan kullanmaz ancak bu sistem fonksiyonunun çağırdığı birkaç 
+    fonksiyonu kullanmaktadır. Kullanıcı modundaki mmap POSIX fonksiyonunun güncel Linux sistemlerinde  çağrılmasıyla 
+    oluşan çekirdekteki çağrı zincirini aşağıda veriyoruz:
 
         KULLANICI ALANI
     ┌──────────────────────────┐
@@ -1442,7 +1946,6 @@
 
 
     Bu akış içerisindeki en önemli işlemler do_mmap fonksiyonu içerisinde yapılmaktadır. 
-
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
