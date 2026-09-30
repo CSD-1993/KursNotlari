@@ -17,7 +17,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 23/09/2026 - Salı
+                                            Son Güncelleme: 30/09/2026 - Çarşamba
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -2224,18 +2224,692 @@ fn main() {
     - Açık bir use bildirimi prelude içerisindeki isimleri gölgeler.
     - Bir glob import (yabi use m::* işlemş) prelude içerisindeki isimleri gölgeler. 
     
-
     Standard prelude bağlamında isim araması da şöyle yapılmaktadır (else-if biçiminde):
 
     1) İsim önce yerel bloklarda aranır.
-    2) İsim kullanılan modülün kökünde aranır.
-    3) Glob import'lar (yani use m::* gibi)
-    4) Standart prelude
+    2) İsim kullanılan modülde aranır. 
+    3) İsim glob import'larda (yani use m::* gibi) aranır.
+    4) İsim standart Standart prelude içerisinde aranır. 
     
-    use bildirimi ismi ilgili faaliyet alanına soktuğunu anımsayınız. Bu sıra üzerinde bazı örnekler verelim:
+    use bildiriminin ismi ilgili faaliyet alanına soktuğunu anımsayınız. Bu sıra üzerinde bazı örnekler verelim. 
+    Örneğin:
 
+    fn main() {
+        let v = Vec{};      // Bizim tanımladığımız Vec
+
+        v.disp();           // geçerli
+    }
+
+    struct Vec {
+        //...
+    }
+
+    impl Vec {
+        fn disp(&self) {
+            println!("My Vec");
+        }
+    }
+
+    Vec ismi standart prelude içerisinde bulunmaktadır. Ancak yukarıdaki isim arama sırasına bakıldığında isim önce main 
+    fonksiyonun yerel bloğunda, sonra modülün kökünde aranacaktır. Standard prelude arama sırasının sonundadır. Bu nedenle 
+    buradal Vec bizim tanımladığımız Vec yapısıdır. Örneğin:
+
+    fn main() {
+        //...
+    }
+
+    mod module_a {
+        pub struct Vec {
+            //...
+        }
+
+        impl Vec {
+            fn disp(&self) {
+                println!("My Vec");
+            }
+        }
+
+        mod module_b {
+            fn foo() {
+                let v = Vec {};      // error! prelude içerisindeki standart Vec
+
+                v.disp();           // error!
+            }
+        }
+    }
+
+    Burada C++, C# gibi dillerden geçenler modeule_b içerisindeki foo fonksiyonunda kullanılan Vec isminin üst modüldeki
+    Vec olması gerektiğini düşünebilmektedir. Oysa anımsnacağı gibi Rıst'ta isim araması ırasında üst modüle hiç bakılmamaktadır. 
+    Dolayısıyla buradaki Vec artık bizim tanımladığımız Vec değil standrat prelude içerisinde bulunan standart kütüphanedeki 
+    Vec yapısıdır. 
+
+    Örneğin:
     
+    fn main() {
+        //...
+    }
 
+    pub struct Vec {
+        //...
+    }
+
+    impl Vec {
+        fn disp(&self) {
+            println!("My Vec");
+        }
+    }
+
+    mod a_module {
+        mod b_module {
+            use crate::Vec; 
+
+            fn foo() {
+                let v = Vec {};      // geçerli, bizim tanımladığımız Vec
+                v.disp();           // geçerli
+            }
+        }
+    }
+    
+    use bildiriminin faaliyet alanına değişken soktuğuna dikkat ediniz. Bu nedenle artık Vec ismi b_module içerisinde 
+    bildirilmiş bir isim gibidir. Dolayısıyla isim araması sırasında bulunacaktır. 
+
+    use bildiriminin glob biçiminde ilgili modüldeki isimlerin hepsi faaaliyet alanına sokulmaktadır. Ancak isim arama 
+    sırasına dikkat edildiğinde ismin kullanıldığı modüle önce bakılmaktadır. Örneğin:
+
+    fn main() {
+        //...
+    }
+
+    mod a_module {
+        struct Sample(i32);
+
+        mod b_module {
+            use super::*;
+
+            struct Sample(i32, i32);
+
+            fn foo() {
+                let s = Sample(10, 20);     // geçerli, glob daha düşük öncelikli
+                //...
+            }
+        }
+    }
+    
+    Burada hem module_a içerisinde hem de module_b içerisinde Sample isimli iki tanımlanmıştır. Buradaki glob use işlemi 
+    bir isim çakışmasına yol açmayacaktır. Çünkü yukarıdaki sıraya göre Sample ismi modülde bulunduğu için glob ile 
+    sokulan Sample dikkate alınmayacaktır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi C'de ve C++'ta main fonksiyonun geri dönüş değeri int olmak zorundadır. Ancak o dillerin standartları 
+    main fonksiyonun geri dönüş değerinin eğer derleyici izin veriyorsa (implementaion dependent) başka bir tür de olabileceğini 
+    belirtmektedir. Peki Rust'ta durum nasıldır?
+
+    Rust'ta main fonksiyonun parametresi yoktur. Ancak geri dönüş değeri std::process::Termination isimli bir trait'i 
+    destekleyen bir türdne olmak zorundadır. Termination trait'i şöyle tanımlanmıştır:
+
+    pub trait Termination {
+       // Required method
+        fn report(self) -> ExitCode;
+    }
+
+    Görüldüğü gibi bu trait'i destekleyen türün report isimli bir metodu olmak zorundadır. Bu metot da ExitCode türünden 
+    bir değerler geri dönmektedir. ExitCode std::proscess modülünde bir yapı biçiminde tanımlanmıştır. Bu yapının içerisinde 
+    ExitCode türünden iki const değişken vardır: FAILURE ve SUCCESS. Yani bir ExitCode değeri örneğin ExitCode::FAILURE 
+    ya da ExitCode::SUCCESS biçiminde oluşturulabilir. 
+    
+    ExitCode yapısı From<u8> trait'in de desteklemektedir. Yani yapıda u8 türünden parametreye sahip bir from metodu da 
+    vardır. Bu duurmda biz ExitCode yapısı türünden değeri ExitCode::from(değer) biçiminde de oluşturabiliriz. ExitCode 
+    yapısının ifade ettiği çıkış kodunun u8 türünden (yani 0 ile 255 arasında) olmak zorunda olduğuna dikkar ediniz. 
+    
+    ExitCode yapısının aşağıdaki biçimde tanımlanmış olduğunu varsyabilirsiniz:
+
+    struct ExitCode(u8);
+
+    impl ExitCode {
+        const FAILURE: ExitCode = ExitCode(1);
+        const SUCCESS: ExitCode = ExitCode(0);
+    }
+
+    impl std::convert::From<u8> for ExitCode {
+        fn from(value: u8) -> Self {
+            ExitCode(value)
+        }
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi biz main fonksiyonunu kendi yapımız türünden bir değerle geri döndürmek isteyelim. Yapımızın std::process::Terination 
+    destekliyor olması gerekir. Örneğin:
+
+    fn main() -> MyExitStruct {
+        println!("main...");
+        MyExitStruct
+    }
+
+    struct MyExitStruct;
+
+    impl std::process::Termination for MyExitStruct {
+        fn report(self) -> std::process::ExitCode {
+            println!("my report method");
+            std::process::ExitCode::SUCCESS
+        }
+    }
+
+    main programı sonlanırken report metodu çağrılmaktadır. Dolayısıyla bu programı çalıştırdığımızda ekranda şunları 
+    göreceğiz:
+
+    main...
+    my report method
+
+    Tabii uygulamada programcılar nadiren main fonksiyonunu kendi türlerine ilişkin bir değerle geri döndürmektedir. Rust'ta
+    aşağıdaki türler zaten Termination trait'ini desteklemektedir:
+
+    ()
+    !
+    Infallible
+    ExitCode
+    Result<T, E> where T: Termination, E: Debug
+
+    Örneğin birim türü Termination trait'ini desteklemektedir. Zaten biz şimdiye kadar main fonksiyonuna bir geri döüş 
+    değeri türü yazmadık. main fonksiyonunu hep şöyle kullandık:
+
+    fn main() {
+        //...
+    }
+
+    Anımsanacağı gibi Rust'ta bir fonksiyonda -> atomu ile geri dönüş değerinin türü belirtilmezse fonksiyonun geri dönüş 
+    değeri () türünden ("birim (unit)" türünden) kabul edilmektedir. Yani aşağıdaki iki tanımlama tamamen eşdeğerdir:
+
+    fn main() {
+        //...
+    }
+
+    fn main() -> () {
+        //...
+    }
+
+    Maalesef Rust dokğmantasyonlarında birim türünün report metodunun hangi ExitCode değeriyle geri döndüğü açık bir 
+    biçimde belirtilmemiştir. Muhtemelen bu durum dokümantasyonda bir hatadır. Ancak standart kütüphane dokümanlarında 
+    birim türünün report metodunun aşağıdaki gibi yazıldığı görülmektedir:
+
+    impl Termination for () {
+        #[inline]
+        fn report(self) -> ExitCode {
+            ExitCode::SUCCESS
+        }
+    }
+
+    ! türü (yani "never" türü) "geri dönmemeyi" belirttiğinden dolayı Termination trait'ini de şeklen desteklemektedir. 
+
+    ExitCode yapısının kendisi de Termination trait'ini desteklemektedir. O halde örneğin biz main fonksiyonunu şöyle 
+    geri döndürebiliriz:
+
+    fn main() -> std::process::ExitCode {
+        println!("main...");
+        
+        std::process::ExitCode::SUCCESS
+    }
+
+    Standart kütüphane kaynak kodlarında ExitCode yapısında report metodu şöyle yazılmıtır:
+
+    impl Termination for ExitCode {
+        #[inline]
+        fn report(self) -> ExitCode {
+            self
+        }
+    }
+
+    Bu durumda örneğin biz yukarıdai main fonksiyonunu std::process::ExitCode::SUCCESS değeriyle geri döndürdüğümzde 
+    main biterken bu değer ile report metodu metodu çağrılacak, report metodu da self ile geri döndüğü için std::process::ExitCode::SUCCESS
+    değeri elde edilecektir. 
+
+    Aşağıdaki generic parametre koşulunu sağlayan Result türü de Termination trait'ini desteklemektedir:
+
+    Result<T, E> where T: Termination, E: Debug
+
+    Görüldüğü gibi eğer Result enum türünün Ok varyantının türü Termination trait'ini destekliyorsa ve Err varyantının türü 
+    de std::fmt::Debug trait'ini destekliyorsa Result türü main fonksiyonunun geri dönüş değeri türü olarak kullanılabilmektedir. 
+    Türlerin çoğu zaten std::fmt::Debug trait'ini desteklemektedir. Bu türün report metodu da standart kütüphane kaynak 
+    kodlarında şöyle yazılmıştır:
+
+    impl<T: Termination, E: fmt::Debug> Termination for Result<T, E> {
+        fn report(self) -> ExitCode {
+            match self {
+                Ok(val) => val.report(),
+                Err(err) => {
+                    io::attempt_print_to_stderr(format_args_nl!("Error: {err:?}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
+    }
+
+    Buradan şu sonuş çıkmaktadır: Eğer biz main fonksiyonunu Ok(ok_val) değeri ile geri döndürürsek geri döndürdüğümüz 
+    ok_val değeri ile report metodu çağrılıp report metodunun geri dönüş değeriyşe main fonksiyonu geri döndürülmektedir. eğer 
+    biz main fonksiyonunu Err(err_val) değeri ile geri döndürürsek bu durumda da err_val değeri debug mesajı olarak standarr
+    error dosyasına yazdırılıp main fonksiyonu std::process::ExitCode::FAILURE değeir ile geri döndürülmektedir. Örneğin:
+
+    fn main() -> Result<MyExitStruct, &'static str> {
+        println!("main...");
+
+        Ok(MyExitStruct)
+    }
+
+    struct MyExitStruct;
+
+    impl std::process::Termination for MyExitStruct {
+        fn report(self) -> std::process::ExitCode {
+            println!("my report method");
+            std::process::ExitCode::SUCCESS
+        }
+    }
+
+    Burada biz main fonksiyonunu Ok(MyExitStruct) ile geri döndürdük. MyExitStruct türü Termination trait'i desteklediği 
+    için aslında bu türün report metodu çağrılacaktır. main fonksiyonunu şöyle yazmış olalım:
+
+    fn main() -> Result<MyExitStruct, &'static str> {
+        println!("main...");
+
+        Err("terimantion error!..")
+    }
+
+    Burada önce "termination error!.." mesajı standart error dosyasına debug mesajı olarak basılacak ve main fonksiyonu 
+    std::process::ExitCode::FAILURE değeriyle geri dönecektir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Gördüğünüz gibi Rust'ta main fonksiyonunun geri dönüş değeri konusu biraz karışıktır. Tabii programcı bu karışıklığa 
+    hiç girmeden main fonksiyonunu birim değeriyle geri döndürebilir. Ancak bu tasarım çok daha gelişmiş geri dönüş durumlarını 
+    desteklemektedir. Aşağıda main fonksiyonun geri dönüş değeri olarak bir enum türünün kullanıldığı bir örnek görüyorsunuz
+---------------------------------------------------------------------------------------------------------------------------*/
+
+fn main() -> Outcome {
+    Outcome::Warnings(4)
+}
+
+use std::process::{ExitCode, Termination};
+
+enum Outcome {
+    Clean,
+    Warnings(u8),
+    Fatal(String),
+}
+
+impl Termination for Outcome {
+    fn report(self) -> ExitCode {
+        match self {
+            Outcome::Clean => ExitCode::SUCCESS,
+            Outcome::Warnings(n) => {
+                eprintln!("{n} warning(s)");
+                ExitCode::from(2)
+            }
+            Outcome::Fatal(msg) => {
+                eprintln!("fatal: {msg}");
+                ExitCode::from(3)
+            }
+        }
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Artık biz Rust Programlama Dİlindeki kuralların neredeyse hepsini gözden geçirdik. Şimdi kurusmuzn sonlaırna doğru 
+    uygulama programlarında sıkça karşımıza çıkan çeşitli konular üzerinde duracağız. Önce Rust'ta thread kullanımını ele 
+    alacağız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    İşletim sistemlerinde çalışmakta olan programlara "proses (process)" denilmektedir. Proses canlı bir varlıktır. İşletim 
+    sistemi bir program çalıştırıldığında çekirdeği içerisinde çalışırılan program için pek çok veri yapısı oluşturmaktadır. 
+    Proses yalnızca bir akış değildir. Çalışmakta olan programın bütün bilgilerini temsil etmektedir. 
+    
+    Thread'ler bir proseslerin ayrı bir biçimde çizelgelenen farklı akışlarıdır. Bir proses çalışmaya tek bir thread'le başlar. 
+    Buna prosesin ana thread'i (main thread) denilmektedir. Diğer thread'ler daha sonra programcı tarafından yaratılmaktadır. 
+    Thread'ler aynı program üzerinde ilerleyen farklı akışlardır. Thread'ler işletim sistemlerine 90'lı yıllarda sokulmuştur. 
+    Thread kullanımının mümkün olduğu işletim sistemlerine "çok thread'li (multi-threaded)" işletim sistemleri denilmektedir. 
+    Windows, Linux, macOS thread kullanımının mümkün olduğu "çok thread'li (multi-threaded)" işletim sistemleridir.                                   
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Modern çok prosesli ve çok thread'li işletim sistemlerinde thread'ler "zaman paylaşımlı (time sharing)" bir biçimde 
+    çalıştırılmaktadır. İşletim sistemi thread'leri bir kuyrukta tutar. Bu kuyruğua genellikle "çalışma kuyruğu (run queue)"
+    denilmektedir. Sonra kuyruktan bir thread'i alır. Onu CPU'ya atar. O thread'in belli bir süre çalışmasını sağlar. Sonra 
+    o süre dolduğunda thread'in çalışmasına ara verir. Sıraki thread'i CPU'ya atar ve çalışma "biraz onu biraz bundan" biçiminde 
+    devam ettirilir. Kullanıcılar programların aynı anda çalıştığını sanırlar. Ancak aslında programlar bu biçimde kesikli 
+    kesikli çalışmaktadır. Bir thread'in CPU'ya atanıp çalıştırıldığı parçalı zaman süresine "quantum süresi (time quantum)" 
+    denilmektedir. Quantum süresini bitiren (ya da bloke olan) bir thread'in CPU'dan koparılarak sıradaki thread'in CPU'ya 
+    atanması sürecine ise "bağlamsal geçiş (context switch)" ya da "görev geçişi (task switch)" denilmektedir. Quantum süreleri 
+    işletim sistemi tarafından uygun biçimde belirlenmektedir. 
+
+    Birden fazla CPU'nun ya da çekirdeğin bulunduğu durumda zaman paylaşımlı çalışma benzer biçimde yürütülmektedir. Genellikle 
+    işletim sistemleri her CPU ya da çekirdek için ayrı bir çalışma kuyruğu oluştururlar. Böylece toplamda birim zamanda yapılan 
+    iş miktarı da artırılmış olur. Bu durumu süpermarketlerdeki birden fazla kasanın bulunmasına benzetebiliriz. Bazı işletim 
+    sistemleri tek bir çalışma kuyruğu oluşturup bir CPU ya da çekirdekte thread'ler arası geçiş olacağı zaman o tek kuyruktan 
+    çizelgeleme yapmaktadır. Bu tarzda kuyruklar yine gündelik hayatta karşımıza çıkabilmektedir. Yani çok CPU ya da çekirdek 
+    olması zaman paylaşımlı çalışmayı ortadan kaldırmamaktadır. 
+
+    İşletim sistemlerinde thread'leri CPU kuyruklarına yerleştirilmesi, CPU'ya atanması, bağlamsal geçiş (context switch) 
+    işlemlerini yapan alt sisteme "çizelgeleyici (scheduler)" denilmektedir.                                          
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            136. Ders 30/09/2026 - Çarşamba                           
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Peki thread'lere neden gereksinim duyulmaktadır? Bunları birkaç madde halinde özetleyebiliriz:
+
+    1) Thread'ler arka plan periyodik işlemlerin yapılabilmesi için iyi bir araç oluşturmaktadır. Örneğin bir program çalışırken 
+    aynı zamanda saati ekranın bir yerine basacak olsun. Tek bir akışla bu işlemi yapmak çok zordur. Çünkü ana akış input gibi 
+    bir fonksiyona girdiğinde artık saati basma imkanı kalmaz. Ana akışın input gibi bir fonksiyona girmese bile hem bir işi 
+    yaparken periyodik başka bir işlemi yapması çok zordur. Halbuki çok thread'li programlamada bir thread yaratılır ve arka 
+    plan periyodik işlemler bu thread'e havale edilir. Böylece programın ana akışı ilerlemeye devam eder. Ondan bağımsız bir 
+    biçimde yaratılan thread periyodik işlemleri yapar. Thread'ler biribinden bağımız olarak sanki ayrı programlarmış gibi 
+    çalışmaktadır. Bir thread'in bir noktada beklemesi (teknik olarak "bloke olması") diğer thread'lerin çalışmasını engellememektedir.
+
+    2) Thread'ler bir işi hızlandırmak için de kullanılmaktadır. Bir işi tek bir akışa yaptırmak yerine biren fazla akışa 
+    yaptırabilirsek o işin daha hızlı bitirilmesini saplayabiliriz. 
+
+    3) Thread'ler "paralel programlama (parallel programming)" ortamı oluşturmak için de kullanılmaktadır. 
+
+    4) GUI programlama modelinde bir mesaj oluştuğunda bir işlem yapmak istediğimizde o işlemi uzatmamalıyız. Aksi takdirde
+    mesaj döngüsü işletilmemiş olur ve program donmuş gibi bir etki oluşur. Bu tür durumlarda bir mesaj oluştuğunda uzun 
+    süren bir işlem yapılacaksa bir thread yaratılır, uzun sürecek işlem thread'e havale edilir. Eğer işlem iptal edilecekse 
+    o thread öldürülür. Yani GUI programlama modelinde therad'ler bazen mecburen kullanılmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Rust'ta temel thread işlemleri üzerinde duralım. Rust'ta thread işlemleri için std::thread modülündeki fonksiyonlar 
+    ve yapılar kullanılnaktadır. Genellikle Rust programcıları bu modülü programın başında use ederler:
+
+    use std::thread;
+
+    Yeni bir thread yaratmak için spawn fonksiyonu kullanılmaktadır. Fonksiyonun parametrik yapısı şöyledir:
+
+    pub fn spawn<F, T>(f: F) -> JoinHandle<T>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+
+    Bu parametrik yapı biraz karmaşık görünümdedir. Ancak burada ilk göze çarpan şey spawn fonksiyonunun generib bir 
+    fonksiyon olmasıdır. Fonksiyonun iki generic parametresi vardır. Bu generi parametreler zaten girilen argümandan 
+    otomatik çıkarsanmaktadır. spawn fonksiyonu "çağrılabilen (callable)" bir değeri parametre olarak alır. spwan 
+    fonksiyonuna geri dönüş değeri T türünden olan (T burada generic herhangi bir türü temsil ediyor) parametresi olmayan 
+    bir fonksiyon, kapanım (clusure) ya da çağrılabilen bir yapı türünden değişken olabilir. Söz konusu çağrılabilen nesne 
+    ancak 'static ömre sahip olan dış bloklardaki değerleri kullanabilmektedir Çağrılabilen nesnenin geri dönüş değeri 
+    de thread'ler arası taşınabilirliği olan (yani Send trait'ini destekleyen) bir tür türünden olmalıdır. spawn fonksiyonu 
+    JoinHandle<T> türünden bir değerle geri dönmektedir. JoinHandle std::thread modülündeki bir yapıdır. JoinHandle yapısı 
+    da generic bir yapıdır. Geneirc parametresi çağrılabilen nesnenin geri dönüş değeri türündendir. Örneğin biz spawn 
+    fonksiyonuna geri dönüş değeri i32 türünden olan bir fonksiyonu argüman olarak geçirirsek spawn fonksiyonu da JoinHandle<i32> 
+    türüyle geri dönmektedir. Örneğin biz spawn fonksiyonuna geri dönüş değeri birim olan (yani () türündne olan) bir 
+    fonksiyonu parametre olarak geçirirsek spawn fonksiyonu bu durumda JoinHandle<()> türüyle geri dönecektir. Örneğin:
+
+    let jh = thread::spawn(thread_proc);
+    
+    Burada örneğin thread_proc şöyle bir fonksiyon olabilir:
+
+    fn thread_proc() {
+        //...
+    }
+
+    spawn fonksiyonu yeni bir thread'in yaratılarak o thread'in belirtilen fonksiyonla (örneğimizdeki thread_proc) çalışmasını
+    sağlamaktadır. Artık yukarıdaki işlemle birlikte programda iki thread söz konusu olmaktadır. Birincisi programın ana threadi, 
+    ikincisi bizim spawn ile yarattıpımız thread. Programın ana thread'i yukarıda da belirttiğimiz gibi işletim sistemi tarafından 
+    yaratılmaktadır. Ana thread'in başlangıç fonksiyonunun main olduğunu düşünebilirsiniz. Artuık yukarıdaki örnekte birbirinden 
+    bağımısz olarak çizelgelenen (yani biri dursa da diğeri çalışmaya devam edebilecek olan) iki ayrı thread vardır. 
+
+    Rust'ta tıpkı C'de olduğu gibi main fonksiyonu bittiğinde yalnızca ana thread değil tüm proses sonlanmaktadır. Thread'ler 
+    proseslerin içerisinde akış belirtmektedir. Eğer akış main fonksiyonun ana bloğunu bitrirse programla birlikte tüm 
+    thread'ler de sonlandırılmış olacaktır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aşağıdaki örnekte main fonksiyonu içerisinde bir thread yaratılmış sonra da hem ana thread hem de yaratılan thread 0'dan 
+    5'e kadar sayıları 1 saniye bekleyerek ekrana (stdout dosyasına) yazdırmıştır:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let jh = thread::spawn(thread_proc);
+
+        for i in 0..5 {
+            println!("main running: {}", i);
+            thread::sleep(Duration::from_millis(1000));
+        }
+    }
+
+    fn thread_proc() {
+        for i in 0..5 {
+            println!("thread running: {}", i);
+            thread::sleep(Duration::from_millis(1000));
+        }
+    }
+
+    Bu örnekte thread akışını belli süre bekletmek için thread modülündeki sleep fonksiyonu kullanılmıştır. sleep fonksiyonu
+    time modülündeki Duration türünden bir değeri parametre olarak almaktadır. Duration değerini oluşturmanın çeşitli yolları 
+    vardır. Duration yapısının from_millis ilişkili fonksiyonu belli bir milisaniyeye ilişkin Duration değeri oluşturmaktadır. 
+    Yukarıdaki programı çalıştırdığımızda muhtemelen ekrana (stdout dosyasına) şunlar basılacaktır:
+
+    main running: 0
+    thread running: 0
+    main running: 1
+    thread running: 1
+    main running: 2
+    thread running: 2
+    main running: 3
+    thread running: 3
+    main running: 4
+    thread running: 4
+
+    Yukarıda bşiz kasten "muhtemelen" sözcüğünü kullandık. Çünkü main fonks,yonu hizlı bir biçimde işlemini bitirirse 
+    (bu durum çok da mümkün değildir) thread 4 değerini henüz ekrana (stdout dosyasına) basamayabilir. 
+
+    Aşağıdaki programda maim akışı hemen biteceği için yaratılan thread de sonlandırılacaktır:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let jh = thread::spawn(thread_proc);
+
+        // dikkat! main akışı bitiyor, proses sonlanacak
+    }
+
+    fn thread_proc() {
+        for i in 0..5 {
+            println!("thread running: {}", i);
+            thread::sleep(Duration::from_millis(1000));
+        }
+    }
+
+    Peki ana thread'in main fonksiyonunu bitirmesini nasıl engelleyebiliriz? İlk akla gelen ana thread'i main fonksiyonunda 
+    bekletmektir. Örneğin:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let jh = thread::spawn(thread_proc);
+
+        std::io::stdin().read_line(&mut String::new()).unwrap();
+    }
+
+    fn thread_proc() {
+        for i in 0..5 {
+            println!("thread running: {}", i);
+            thread::sleep(Duration::from_millis(1000));
+        }
+    }
+
+    Burada artık ana thread'te ENTER tuşuna basılana kadar akış bekletilmiştir. 
+
+    İşte aslında yaratılmış olan bir thread'in sonlanmasının beklenmesi JoinHandle yapısının join isimli metoduyla yapılmaktadır. 
+    join metodu ilgili thread sonlanana kadar kendisini thread akışını bloke ederek bekletir. join metodunun parametrik yapısı 
+    şöyledir:
+
+    pub fn join(self) -> Result<T>
+
+    Görüldüğü gibi metot Result<T> türüne geri dönmektedir. Buradaki Result türü std::Result değildir. Buradaki Result 
+    türü thread modülünde tanımlanmış olan Result türüdür:
+
+    pub type Result<T> = Result<T, Box<dyn Any + Send + 'static>>;
+
+    Buradan anlamamız gereken şey şudur: join metodu başarı durumunda Ok(T) değerine geri dönmektedir. Başarısızlık 
+    durumunda ise Box<dyn Any + Send + 'static> türüne geri dönmektedir. join metodu UNIX/Linux sistemlerinde sinyal 
+    dolayısıyla başarısız olabilir. Metot başarı durumunda thread fonksiyonunun (callable nesnesyi kastediyoruz) geri dönüş 
+    değerini vermektedir. Örneğin:
+
+    use std::thread;
+
+    fn main() {
+        let jh = thread::spawn(thread_proc);
+        let result = jh.join().unwrap();
+
+        println!("Result: {}", result);
+    }
+
+    fn thread_proc() -> i32 {
+        let mut total = 0;
+
+        for i in 1..=100 {
+            total += i;
+        }
+        total
+    }
+
+    Burada thread fonksiyonun geri dönüş değeri i32 türündendir. join metodu da başarı durumunda Ok(i32) ile geri 
+    dönmektedir. 
+
+    Thread için işletim sistemleri çekirdek alanı içerisinde bazı nesneler oluşturmaktadır. Bu nesnelerin bazıları thread 
+    join edilene kadar çekirdekte tahsis edilmiş bir biçimde tutulabilmektedir. Dolayısıyla eğer thread join edilemzse 
+    işletim sistemi "her an join işlem yapılabilir diye bazı veri yapılarını çekirdek alanından boşaltmamaktadır. Bu duruma 
+    UNIX türevi sistemlerde "zombie thread" durumu da danilmektedir. İşte thread'in join edilmesi aynı zamanda işletim 
+    sisteminin tuttuğu kaynakların boşaltılmasını da sağlamaktadır. 
+
+    Çok sayıda kısa ömürlü thread'lerin yaratıldığı uygulamalar seyrek değildir. Bu tür uygulamalarda her yaratılan thread'in
+    join ile beklenmesi çoğu kez mümkün olmaz. İşte bu tür durumalrda thread'ler "detached" duruma sokulmalıdır. Bir thread 
+    "detached" duruma sokulduğu zaman programcı işletim sistemine adeta şunları söylemektedir: "İşletim sistemi ben bu thread'in
+    çıkıl kodunu (yani thrad fonksiyonunun geri dönüş değerini) almayacağım. Bu nedenle thread sonlandığında sen onun kaynaklarını 
+    hemen boşalt". Rust'te thread'in detached duruma sokulması için JoinHandle değerinin drop edilmesi gerekmektedir. Drop
+    işlemi sırasında drop fonksiyonu thread'i ilgili alt seviye fonksiyonu çağırarak detached duruma sokmaktadır. Örneğin:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        for _ in 0..100 {
+            let jh = thread::spawn(thread_proc);
+            drop(jh);
+        }
+        std::io::stdin().read_line(&mut String::new()).unwrap();
+    }
+
+    fn thread_proc() {
+        for i in 0..10 {
+            println!("{}", i);
+            thread::sleep(Duration::from_millis(1000));
+        }
+    }
+
+    Burada her yaratılan thread hemen "detached" duruma sokulmuştur. Dolayısıyla join gereksinimi de ortadan kaldırılmıştır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Birden fazla thread aynı fonksiyon üzerinde ilerleyebilir. Bu durumda fonksiyonun yerel değişkenleri bozulmaz. Çünkü 
+    thread'lerin stack'leri birbirinden ayrılmıştır. Yerel değişkenlerin stack'te yaratıldığını anımsayınız. Her thread 
+    akışı yerel değişkenlerin kendine özgü kopyasını kendi stack'inde oluşturmaktadır. Böylece iki thread akışı aynı 
+    fonksiyon üzerinde ilerlerken aslında bu iki threda yerel değişkenlerin farklı kopyalarını kullanıyor durumda olur. 
+    Örneğin:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let jh1;
+        let jh2;
+
+
+        jh1 = thread::spawn(thread_proc);
+        jh2 = thread::spawn(thread_proc);
+
+        jh1.join().unwrap();
+        jh2.join().unwrap();
+    }
+
+    fn thread_proc() {
+        let mut total = 0;
+
+        for i in 1..=10 {
+            println!("{}", i);
+            thread::sleep(Duration::from_millis(1000));
+            total += i;
+        }
+        println!("Total: {}", total);
+    }
+
+    Burada iki thread de thread_proc içerisindeki yerel değişkenlerin farklı kopyalarını kullanmaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Çok sayıda threda oluşturup onların hepsini nasıl join edebiliriz? Her spawn işlemindne elde edilen thread'e ilişkin 
+    JoinHandle nesnesini ayrı bir dizide ya da Vec içerisinde tutmak gerekir. Örneğin:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let mut jhs: Vec<_> = Vec::new();
+
+        for i in 0..100 {
+            jhs.push(thread::spawn(thread_proc));
+        }
+
+        for jh in jhs {
+            jh.join().unwrap();
+        }
+    }
+
+    fn thread_proc() {
+        println!("thread_proc running");
+        thread::sleep(Duration::from_millis(1000));
+    }
+
+    Bunu biraz daha pratik bir biçimde şöyle de yapabilirdik:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let jhs: Vec<_> = (0..10).map(|_| {
+        thread::spawn(thread_proc)
+        }).collect();
+
+        for jh in jhs {
+            jh.join().unwrap();
+        }
+    }
+
+    fn thread_proc() {
+        println!("thread_proc running");
+        thread::sleep(Duration::from_millis(1000));
+    }
+
+    Burada vektör oluşturmanın fonksiyonel programlama tekniği ile nasıl yapıldığına dikkat edimiz. Range yapısının
+    map metodu aldığı fonksiyonun (callable nesnenin) geri dönüş değerlerini veren bir dolaşılabilir bir değer üretmektedir. 
+    Bu değerler collect metodu ile toplanıp bir vektöre dönüştürülmüştüri  
+
+
+
+
+
+
+
+
+
+
+
+                                        
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -2249,6 +2923,12 @@ fn main() {
 /*---------------------------------------------------------------------------------------------------------------------------
                                           
 ---------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            136. Ders 30/09/2026 - Çarşamba                           
+---------------------------------------------------------------------------------------------------------------------------*/
+
 
 
 
