@@ -18220,6 +18220,10 @@ int main(void)
     UGS rwx rwx rwx rwx
 
     Dolayısıyla POSIX 2008 ve sonrasında bu bayrakları yüksek anlamlı dördüncü octal digit'le de belirtebiliriz. 
+
+    Burada bir anımsatmada bulunmak istiyoruz. Daha önce de belirttiğimiz gibi POSIX standartlarında dosyanın sahip olduğu 
+    "UGS rwx rwx rwx rwx" bilgilerine dosyanın "mod (mode)" bilgileri denilmektedir. Biz kursumuzda kalsik terminolojiyi
+    kullanarak bunlara "erişim hakkı (access rights)" diyoruz.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -18323,12 +18327,12 @@ void exit_sys(const char *msg)
     değiştirilmektedir.
 
     Set-user-id bayrağının kullanım gerekçesini basit bir örnekle açıklayabiliriz. Bilindiği gibi kullanıcı parolaları komut 
-    satırında "passwd" komutuyla değiştirilmektedir. Default durumda passwd komutu kullanıcının kendi parolasını değiştirmektedir. 
+    satırında "passwd" komutuyla değiştirilmektedir. Default durumda passwd programı kullanıcının kendi parolasını değiştirmektedir. 
     Örneğin:
 
     $ passwd
 
-    Burada passwd önce mevut parolayı sonra da yeni parolayı bize sormaktadır. passwd programı parolayı "/etc/shadow" dosyasına 
+    Burada passwd önce mevut parolayı sonra da yeni parolayı bize soracaktır. passwd programı parolayı "/etc/shadow" dosyasına 
     yazmaktadır. Bu dosyaya yapnızca "root" prosesler erişebilmektdir:
 
     $ ls -l /etc/passwd
@@ -18353,18 +18357,18 @@ void exit_sys(const char *msg)
     girdiğini belirtmiştik. İşte set-user-ID ve set-group-ID bayrakları set edilmiş bir program dosyası exec yapıldığında 
     artık gerçek kullanıcı ve group ID'leriyle etkin kullanıcı ID'leri farklılaşabilmektedir. 
 
-    Aşağıdaki örnekte "sample" programı "other" programını exec yaparak çalıştırmıştır. Bu other programı prosesin gerçek 
+    Aşağıdaki örnekte "sample" programı "other" programını exec yaparak çalıştırmıştır. other programı prosesin gerçek 
     ve etkin kullanıcı ve grup ID'lerini ekrana isim olarak yazdırmaktadır. Biz bu örnekte other programını derledikten 
-    sonra chown komutuyla sudo ile birlikte kullanıcı ID'sini ve group ID'sini root olarak değiştirdik. Bu deneyi önce other 
-    programının set-user-ID bayrağı set edilmeden ve set edildikten sonra yineleyiniz. Aşağıda yapılanlar özetlenmiştir:
+    sonra chown komutuyla sudo ile birlikte kullanıcı ID'sini ve group ID'sini root olarak değiştirdik. Bu deneyi önce 
+    "other" programının set-user-ID bayrağını set etmeden sonra da set ederek yapınız. Aşağıda yapılanlar özetlenmiştir:
 
     $ gcc -Wall -o sample sample.c
     $ gcc -Wall -o other other.c
     $ ls -l other
     -rwxr-xr-x 1 kaan study 17088 Şub 19 13:42 other
-    $ sudo chown root:root mample
+    $ sudo chown root other
     $ ls -l other
-    -rwxr-xr-x 1 root root 17088 Şub 19 13:42 mample
+    -rwxr-xr-x 1 root study 17088 Şub 19 13:42 other
     $ ./sample
     Real user ID: kaan
     Effective user ID: kaan
@@ -18398,12 +18402,13 @@ void exit_sys(const char *msg)
     $ sudo chmod u+s other
     $ ls -l other
     -rwsr-xr-x 1 ali study 16344 Eki  1 11:48 other
-    $ sudo other
     $ sudo ./other
     Real user ID: root
     Effective user ID: ali
     Real group ID: root
     Effective group ID: root
+
+    Burada tek farklılık dosyanın grup ID'sinin de root haline gelmiş olmasıdır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /* sample.c */
@@ -18422,7 +18427,7 @@ int main(void)
     if ((pid = fork()) == -1)
         exit_sys("fork");
 
-    if (pid == 0 && execl("mample", "mample", (char *)0) == -1)
+    if (pid == 0 && execl("other", "other", (char *)0) == -1)
         exit_sys("execl");
 
     if (wait(NULL) == -1)
@@ -18503,17 +18508,17 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Normal olarak set-user-ID ve set-group-ID bayrakları çalıştırılabilen dosyalar için söz konusudur. Ancak dizinler için de 
+    Normal olarak set-user-ID ve set-group-ID bayrakları çalıştırılabilir dosyalar için söz konusudur. Ancak dizinler için de 
     set-group-ID bayrağının bir anlamı vardır. Pek çok UNIX türevi sistemde (Linux da buna dahil) bir dizin'in set-group-ID 
     bayrağı set edilirse Linux o dizin içerisinde open fonksiyonuyla (zaten başka yolu yoktur) ya da mkdir fonksiyonuyla bir 
     dosya ya da dizin yaratıldığında dosyanın ya da dizinin grup ID'sini prosesin etkin grup ID'si olarak değil, o dizin'in 
-    grup ID'si olarak set etmektedir. BSD sistemlerinde zaten default olarak bir dosya ya da dizin yaratıldığında dosyanın 
+    grup ID'si olarak set etmektedir. BSD sistemlerinde zaten varsayılan durumda bir dosya ya da dizin yaratıldığında dosyanın 
     ya da dizin'in grup ID'si o dosyanın ya da dizinin içinde bulunduğu dizin'in grup ID'si olarak set edilmektedir. O halde 
     Linux'ta open fonksiyonu ile bir dosya ya da dizin yaratılırken dosya ya da dizin'in grup ID'si eğer o dosya ya da 
     dizinin içinde bulunduğu dizin'in set-group-ID bayrağı set edilmemişse prosesin etkin group ID'si olarak eğer set edilmişse 
     dizin'in grup ID'si olarak set edilmektedir. Bu durumu basit bir biçimde şöyle test edebilirsiniz:
 
-    - Önce "xxx" gibi bir isimle bir dizin yaratınız:
+    - Önce "xxx" gibi bir isimle bir dizin yaratalım:
 
     $ mkdir xxx
     $ ls -ld xxx
@@ -18528,7 +18533,7 @@ void exit_sys(const char *msg)
     -rw-r--r-- 1 kaan study 0 Eki  1 12:38 x.txt
 
     Görüldüğü gibi "x.txt" dosyasının kullanıcı ve grup ID'leri prosesin etkin kullanıcı ve group ID'si biçimindedir. 
-    Şimdi biz "xxx" dizinin group ID'sini "root" olarak değiştirelim ve dizinin set-group-ID bayrağını set edelim:
+    Şimdi biz "xxx" dizinin group ID'sini "root" olarak değiştirelim ve dizinin set-group-ID erişim hakkını set edelim:
 
     $ cd ..
     $ sudo chown :root xxx
@@ -18555,16 +18560,16 @@ void exit_sys(const char *msg)
     Peki betik dosyaları (shebang içeren text dosyalar) için set-user-ID ve set-group-ID bayrakları set edilebilir mi?
     Bu işlem ilk zamanlar uygulanmıştır. Ancak güvenlik açığı nedeniyle sonra uygulamadan kaldırılmıştır. Bugünkü modern 
     UNIX/Linux sistemleri betik dosyalarının set-user-ID ve set-group-ID bayrakları set edilmiş olsa bile onları dikkate 
-    almamaktadır. Buradaki güvenlik açığı ilginç bir biçimde aşağıdaki gibi oluşmaktadır:
+    almamaktadır. Buradaki güvenlik açığı ilginç bir biçimde şöyle oluşmaktadır:
 
-    Betik dosyasının ismi "x.txt" olsun. Eğer bu dosyanın set-user-ID ve set-group-ID bayrakları dikkate alınsaydı bu durumda
-    exec fonksiyonları bu dosyayı açıp shebang satırında bulunan programı çalıştırırken prosesin etkin kullanıcı ve/veya grup 
-    ID'sini "x.txt" dosyasının kullanıcı ve/veya grup ID'si olarak set ederdi. Bu durumda da eğer birisi örneğin "y.txt" sembolik 
-    bağlantı dosyası oluşturup bu dosyanın "x.txt" dosyasını göstermesini sağlarsa ve bu "y.txt" ile exec yaparsa bu durumda 
-    aslında exec fonksiyonu sembolik bağlantıyı izleyecek ve "x.txt" dosyasını çalıştıracaktır. Ancak exec fonksiyonları bu 
-    "x.txt" dosyasının shebang satırındaki programı çalıştırırken yine komut satırı argümanı olarak "y.txt" dosyasını kullanacaktır. 
-    İşte tam bu sırada birisi bu "y.txt" dosyasının sembolik bağlantısını değiştirirse maalesef prosesin etkin kullanıcı 
-    ID'si "x.txt"nin kullanıcı ID'si olacak biçimde aslında başka dosyayı çalıştırır. 
+    Betik dosyasının ismi "x.txt" olsun. Bu dosyanın set-user-ID ve set-group-ID haklarının dikkate alınmış olduğunu varsayalım. 
+    Bu durumda exec fonksiyonları bu dosyayı açıp shebang satırında bulunan programı çalıştırırken prosesin etkin kullanıcı 
+    ve/veya grup ID'sini "x.txt" dosyasının kullanıcı ve/veya grup ID'si olarak set edecektir. Bu durumda da eğer birisi örneğin 
+    "y.txt" gibi bir sembolik bağlantı dosyası oluşturup bu dosyanın "x.txt" dosyasını göstermesini sağlarsa ve bu "y.txt" ile 
+    exec yaparsa bu durumda aslında exec fonksiyonu sembolik bağlantıyı izleyecek ve "x.txt" dosyasını çalıştıracaktır. Ancak 
+    exec fonksiyonu bu "x.txt" dosyasının shebang satırındaki programı çalıştırırken komut satırı argümanı olarak "y.txt" 
+    dosyasını kullanacaktır. İşte tam bu sırada birisi bu "y.txt" dosyasının sembolik bağlantısını değiştirirse maalesef 
+    prosesin etkin kullanıcı ID'si "x.txt"nin kullanıcı ID'si olacak biçimde başka dosyayı çalıştıracaktır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -19210,7 +19215,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Ş,mdi proseslerin "ek grup ID'leri (supplementary group IDs" konusu üzerinde duralım.
+    Şimdi proseslerin "ek grup ID'leri (supplementary group IDs" konusu üzerinde duralım.
 
     İlk zamanlar UNIX sistemlerinde prosesler tek bir grup ile ilişkilendirilmişti. Sonra bir prosesin birden fazla grup ile 
     ilişkili olması gerektiği anlaşıldı ve bu durum "ek gruplar (supplementary groups)" kavramı ile sisteme dahil edilerek 
@@ -19613,10 +19618,6 @@ void exit_sys(const char *msg)
     thread çalıştığında kendi rızası ile CPU'yu bırakır. Eğer CPU bırakmazsa diğer thread'ler çalışma fırsatı bulamazlar. 
     Bu patolojik duruma "diğer thread'lerin açlıktan ölmesi (starvation)" denilmektedir. Tabii bu sistemler artık çok kısıtı 
     kullanılmaktadır. PalmOS, eski Windows 3.X sistemleri böyleydi. 
----------------------------------------------------------------------------------------------------------------------------*/
-
-/*---------------------------------------------------------------------------------------------------------------------------
-                                                34. Ders 04/03/2023 Cumartesi
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
