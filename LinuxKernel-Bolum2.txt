@@ -21028,10 +21028,11 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Eskiden inode önbelleğinin geri alımı için tüm inode nesnelerine ilişkin toplamda bir tane LRU listesi bulunuyordu. 
-    Güncel çekirdeklerde uzunca bir süredir her süper blok nesnesi için ayrı bir inode LRU listesi tutulmaktadır. Mount 
-    edilmiş her dosya sistemi için bir super_block nesnesi oluşturulduğunu anımsayınız. Bu super_block nesnelerinin 
-    içerisinde hem o süper blokta bulunan bütün inode nesnelerini hem de kullanılmayan inode nesnelerini tutan elemanlar 
+    Şimdi de inode nesnelerinin geri alımı üzerinde duralım. Eskiden inode önbelleğinin geri alımı için tüm inode 
+    nesnelerine ilişkin toplamda bir tane LRU listesi bulunuyordu. Güncel çekirdeklerde uzunca bir süredir her süper blok 
+    nesnesi için ayrı bir inode LRU listesi tutulmaktadır. Mount edilmiş her dosya sistemi için bir super_block nesnesi 
+    oluşturulduğunu anımsayınız. Bu super_block nesnelerinin içerisinde hem o süper blokta bulunan bütün inode nesnelerini 
+    hem de kullanılmayan inode nesnelerini tutan elemanlar 
     bulunmaktadır:
 
     struct super_block {
@@ -21044,14 +21045,15 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
         /* ... */
     };
 
-    Burada s_inode_lru elemanı bu süper blok içerisindeki kullanılmayan inode nesnelerinin LRU listesini belirtmektedir. 
-    Bu listenin başındaki (list_head LRU listelerine göre ters sıra) inode nesneleri en eski nesnelerdir. Dolayısıyla 
-    inode geri alımı baştan sona doğru yapılmaktadır. s_inode_lru elemanının güncel çekirdeklerde list_head türünden 
-    değil list_lru türünden olduğuna dikkat ediniz. Bu geçiş de dentry LRU listelerinde olduğu gibi çekirdeğin 3.12 
-    versiyonunda yapılmıştır. Bu yapı memcg temelinde bağlı LRU listelerini soyutlamaktadır. Bu sayede büzücüler (shrinkers) 
-    belirli bir düğüm ya da cgroup için çağrıldığında yalnızca ilgili liste taranır. Her süper bloğun kendi büzücüsü 
-    bulunmaktadır. list_lru yapısının tanımlaması "include/linux/list_lru.h" dosyasında, gerçekleştirimi ise "mm/list_lru.c" 
-    dosyasında yapılmıştır. list_head ile list_lru yapıları arasındaki farklılıkları aşağıda bir tablo halinde veriyoruz:
+    Burada s_inode_lru elemanı bu süper blok içerisindeki kullanılmayan yani referans sayacı (i_count) 0'a düşen inode 
+    nesnelerinin LRU listesini belirtmektedir. Bu listenin başındaki (list_head LRU listelerine göre ters sıra) inode 
+    nesneleri en eski nesnelerdir. Dolayısıyla inode geri alımı baştan sona doğru yapılmaktadır. s_inode_lru elemanının 
+    güncel çekirdeklerde list_head türünden değil list_lru türünden olduğuna dikkat ediniz. Bu geçiş de dentry LRU 
+    listelerinde olduğu gibi çekirdeğin 3.12 versiyonunda yapılmıştır. Bu yapı memcg temelinde bağlı LRU listelerini 
+    soyutlamaktadır. Bu sayede büzücüler (shrinkers) belirli bir düğüm ya da cgroup için çağrıldığında yalnızca ilgili 
+    liste taranır. Her süper bloğun kendi büzücüsü bulunmaktadır. list_lru yapısının tanımlaması "include/linux/list_lru.h" 
+    dosyasında, gerçekleştirimi ise "mm/list_lru.c" dosyasında yapılmıştır. list_head ile list_lru yapıları arasındaki 
+    farklılıkları aşağıda bir tablo halinde veriyoruz:
 
     ┌──────────────────────┬──────────────────────────────┬──────────────────────────────────────────┐
     │       Özellik        │          list_head           │                 list_lru                 │
@@ -21128,7 +21130,7 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
     │              │                                              │ alınır.                                  |
     └──────────────┴──────────────────────────────────────────────┴──────────────────────────────────────────┘
 ─
-    inode_lru_isolate fonksiyonu daha önce görmüş olduğumuz dentry_lru_isolate fonksiyonun yaptığı işlemlerin 
+    inode_lru_isolate fonksiyonu daha önce görmüş olduğumuz dentry_lru_isolate fonksiyonunun yaptığı işlemlerin 
     inode nesneleri için benzerini yapmaktadır:
 
     1) Kilit çekişmesi (LRU_SKIP) yaşanıyorsa: lru_lock ile i_lock arasında kilit sırası ters olduğu için spin_trylock
@@ -21136,12 +21138,12 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
 
     2) Listede olduğu halde yeniden referans edilmiş (yani i_count > 0) nesneler: Nesne listedeyken iget() ile bulunup 
     kullanılmaya başlanmış olabilir. Listeden tembel biçimde (lazily) inode_lru_isolate fonksiyonu tarafından (iget 
-    tarafından değil) çıkarılır, ama  sonraki iput() onu tekrar listenin sonuna ekler. (list_lru yapısında tam ters olarak 
+    tarafından değil) çıkarılır, ama sonraki iput() onu tekrar listenin sonuna ekler. (list_lru yapısında tam ters olarak 
     listenin başındakilerin en eski, sonundakilerin en yeni olduğunu anımsayınız.)
 
-    3) Durum bitleri temiz değilse : I_DIRTY, I_SYNC, I_NEW, I_FREEING gini durum bitlerinden herhangi biri set edilmiş ise 
+    3) Durum bitleri temiz değilse: I_DIRTY, I_SYNC, I_NEW, I_FREEING gibi durum bitlerinden herhangi biri set edilmiş ise 
     nesne dokunulmadan listeden düşürülür. Geri yazma tamamlandığında yeniden listeye alınır. Bu kontrol i_state & ~I_REFERENCED
-    ile yapılmaktadır. Bu işlemde I_REFERENCE biti reset durumdayken diğer durum bitlerinin herhangi birinin set olup 
+    ile yapılmaktadır. Bu işlemde I_REFERENCED biti reset durumdayken diğer durum bitlerinin herhangi birinin set olup 
     olmadığına bakılmaktadır.
 
     4) İkinci şans hakkı verilen nesneler: Nesne listedeyken kullanılıp bırakıldıysa inode_lru_list_add fonksiyonu 
@@ -21150,39 +21152,39 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
 
     5) Sayfa önbelleğinin özellikle korunduğu durumlar: mapping_shrinkable fonksiyonu çağrıldığında bu fonksiyon sayfa 
     önbelleğinin korunmasını söylüyorsa nesne listeden atılır. Söylemiyorsa önce remove_inode_buffers ve 
-    invalidate_mapping_pages fonksiyonalrıyla sayfalar atılır, inode_lru_isolate fonksiyonundan LRU_RETRY döndürülerek 
+    invalidate_mapping_pages fonksiyonalarıyla sayfalar atılır, inode_lru_isolate fonksiyonundan LRU_RETRY döndürülerek 
     tarama tekrarlanır; nesne ancak bir sonraki turda gerçekten dilime iade edilebilir.
 
-    6) Yukarıdaki durumların dışında inode_lru_isolate fonksiyonu listeden indeo nesnesini lisyeden çıkartır ve
-    onu freeable listesine alır. Bu duurmda fonksiyon LRU_REMOVED değeir ile geri dönmektedir. 
+    6) Yukarıdaki durumların dışında inode_lru_isolate fonksiyonu listeden inode nesnesini lisyeden çıkartır ve
+    onu freeable listesine alır. Bu durumda fonksiyon LRU_REMOVED değeri ile geri dönmektedir. 
 
     Burada bir noktaya dikkat ediniz. LRU listesinde bulunup da artık referans edilmeye başlanmış olan (örneğin ona 
     ilişkin dosya açılmış olabilir) inode nesneleri o anda listeden çıkartılmamaktadır. Çekirdek yalnızca inode nesnesinin 
-    i_count elemanını artırır ve I_REFERENCED bitini set eder. Listeden çıkartma işlemi shirnker taraması sırasında 
+    i_count elemanını artırır ve I_REFERENCED bitini set eder. Listeden çıkartma işlemi büzücünün uyguladığı tarama sırasında 
     yapılmaktadır. Veri yapıları ve algoritmalar dünyasında "tembel (lazy)" terimi "o anda hemen yapılmayan, daha sonraki 
-    bir aşamada yapılan işlemler" için kullanılmaktadır. Buradaki LRU listesinden çıkarma işlemi de "tembel" bir işlemdir. 
-    LRU listesinde bulunan bir inode nesnesine referans edidiğinde inode nesnesinin i_count referans sayacı artırılmakla 
+    bir aşamada yapılan işlemler" için kullanılmaktadır. Buradaki LRU listesinden çıkartma işlemi de "tembel" bir işlemdir. 
+    LRU listesinde bulunan bir inode nesnesine referans edildiğinde inode nesnesinin i_count referans sayacı artırılmakla 
     birlikte I_REFERENCED biti de set edilmektedir. Çünkü bazen nesneler hemen kullanılıp bırakılabilmektedir. Bu durumda 
-    shrinker (inode_lru_isolate fonksiyonu) nesnenin i_count referans sayacının 0 olduğunu ancak I_REFERENCED bitinin 
-    set edildiğini gördüğünde hemen nesnenin sayfa önbellleğinin boşaltılacağına hükmetmez. I_REFERENCED bitini 0 yapar 
-    ve nesneyi LRU listesinin yukarısına taşır. Böylece bu nesneye bir şans daha verilmektedir. Bu sürece çekirdek 
+    büzücü (inode_lru_isolate fonksiyonu) nesnenin i_count referans sayacının 0 olduğunu ancak I_REFERENCED bitinin 
+    set edildiğini gördüğünde hemen nesneyi dilime iade etmez, I_REFERENCED bitini 0 yapar ve nesneyi “nesneyi LRU listesinin 
+    sonuna (yani en yenilerin bulunduğu kısma) taşır. Böylece bu nesneye bir şans daha verilmektedir. Bu sürece çekirdek 
     kodlamasında "ikinci şans (second chance)" de denilmektedir. 
 
-    Aşağıdak taboda LRU listesindeki bir inode nesnesinin kullanılmaya başlandığındaki süreç aşamalandırılmıştır:
+    Aşağıdaki taboda LRU listesindeki bir inode nesnesinin kullanılmaya başlandığındaki süreç aşamalandırılmıştır:
 
     ┌────┬─────────────────┬──────────────────────────────────────┬─────────────────────┐
     │ An │      Olay       │               Yapılan                │    Liste durumu     │
     ├────┼─────────────────┼──────────────────────────────────────┼─────────────────────┤
     │ t1 │ son iput()      │ i_count = 0, inode_add_lru()         │ listeye eklenir     │
     │ t2 │ open()          │ __iget(), i_count = 1                │ Hala listede        │
-    │ t3 │ close()         │ iput_final() i_count = 0             │ Hala listede        │
-    │    │                 │ I_REFERENCED  set edilir             │                     |
+    │ t3 │ close()         │ iput_final(), i_count = 0            │ Hala listede        │
+    │    │                 │ I_REFERENCED set edilir              │                     |
     │ t4 │ shrinker        │ inode_lru_isolate() kararı verir     │ ancak burada çıkar  │
     └────┴─────────────────┴──────────────────────────────────────┴─────────────────────┘  
 
     I_REFERENCED bitinin iput tarafından set edilmesi sürecini aşağıdaki şekille özetlemek istiyoruz:
 
-                           iput(inode)
+                          iput(inode)
                               │
                               │  i_count → 0
                               ▼
@@ -21201,17 +21203,16 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
         └───────────────────────────────────────────────────┘
                     │                          │
              true   │                          │   false
-   (LRU'da yoktu, ilk kez ekleniyor)   (ZATEN LRU'daydı: eklendikten
+    (LRU'da yoktu, ilk kez ekleniyor)   (ZATEN LRU'daydı: eklendikten
                     │                   sonra yeniden iget edilip
                     ▼                   şimdi tekrar bırakılıyor)
         this_cpu_inc(nr_unused)                │
         (bayrak set EDİLMEZ)                   ▼
                                     ★ I_REFERENCED = 1   ← SET
 
-    Burada bir noktaya dikkat ediniz. Inode nesnesi LRU listesine ilk kez girdiğinde I_REFERENCED biti set edilmemektedir. 
-    
-    I_REFERENCED biti yukarıda görmüş olduğumuz inode_lru_isolate fonksiyonu içerisinde reset edilmektedir. Bu bitin reset edilme 
-    akışını aşağıda veriyoruz:
+    Burada bir noktaya dikkat ediniz. Inode nesnesi LRU listesine ilk kez girdiğinde I_REFERENCED biti set edilmemektedir.
+    Bu bitin reset edilmesi işlemi yukarıda görmüş olduğumuz inode_lru_isolate fonksiyonu içerisinde yapılmaktadır. I_REFERENCED 
+    bitinin reset edilme akışını aşağıda veriyoruz:
 
        Bellek baskısı → shrink_slab() → super_cache_scan() → prune_icache_sb()
                               │
@@ -21223,25 +21224,25 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
                 │    inode_lru_isolate()    │
                 └───────────────────────────┘
                               │
-   (1) spin_trylock(&inode->i_lock) başarısız ───────────► LRU_SKIP
+    (1) spin_trylock(&inode->i_lock) başarısız ───────────► LRU_SKIP
                               │
-   (2) i_count != 0 || (i_state & ~I_REFERENCED) != 0 ||
+    (2) i_count != 0 || (i_state & ~I_REFERENCED) != 0 ||
        !mapping_shrinkable()                     ────────► LRU_REMOVED
        (kullanımda / kirli → listeden tembel çıkarma)
                               │
-   (3) i_state & I_REFERENCED ?
+    (3) i_state & I_REFERENCED ?
        │
        ├── EVET ─► ┌────────────────────────────────────────────────┐
        │           │ inode_state_clear(inode, I_REFERENCED); RESET  │
-       │           │ return LRU_ROTATE;  → listenin başına          │
+       │           │ return LRU_ROTATE;  → listenin sonuna          │
        │           └────────────────────────────────────────────────┘
        │
        └── HAYIR ─► I_FREEING set edilir → dispose listesine alınır
                     → evict() → inode gerçekten yok edilir
 
-    LRU listesinden atılan inode nesneleri hemen dilime iade edilmez. Önce yerel bir freeable listede toplanır. İade
-    işlemi bu listeyi dolaşan destroy_inode fonksiyonun tarafından RCU mekanizması raracılığıyla i_callback çağrısı 
-    ile yapılmaktadır. Inode nesnelerinin yok edilmesi sürecini yeniden bir bütün olarak veriyoruz:
+    LRU listesinden atılan inode nesneleri hemen dilime iade edilmez. Önce yerel bir freeable listede toplanır. İade işlemi
+    bu listeyi dolaşan destroy_inode fonksiyonu tarafından RCU mekanizması aracılığıyla i_callback çağrısı ile yapılmaktadır. 
+    Inode nesnelerinin yok edilmesi sürecini yeniden bir bütün olarak veriyoruz:
 
    ╔══════════════════════════════════════════════════════════════════════════╗
    ║  0. TETİKLEYİCİ                                                          ║
@@ -21255,105 +21256,110 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
                              ├─► shrinker->count_objects = super_cache_count()
                              └─► shrinker->scan_objects  = super_cache_scan()
 
-   ╔══════════════════════════════════════════════════════════════════════════╗
-   ║  1. SÜPER BLOK DÜZEYİ                                                    ║
-   ╚══════════════════════════════════════════════════════════════════════════╝
-   super_cache_scan(shrink, sc)
-     ├─► super_trylock_shared(sb)                      [s_umount; alınamazsa SHRINK_STOP]
-     ├─► nr_to_scan'i dentry / inode / fs nesnelerine orantılı böl
-     ├─► prune_dcache_sb(sb, sc)                       [önce dentry'ler → iput → inode'lar
-     │                                                   LRU'ya düşer]
-     ├─► prune_icache_sb(sb, sc)                       ← asıl konu
-     └─► ->free_cached_objects()                       [varsa, fs'e özgü]
+    ╔══════════════════════════════════════════════════════════════════════════╗
+    ║  1. SÜPER BLOK DÜZEYİ                                                    ║
+    ╚══════════════════════════════════════════════════════════════════════════╝
+    super_cache_scan(shrink, sc)
+        ├─► super_trylock_shared(sb)                      [s_umount; alınamazsa SHRINK_STOP]
+        ├─► nr_to_scan'i dentry / inode / fs nesnelerine orantılı böl
+        ├─► prune_dcache_sb(sb, sc)                       [önce dentry'ler → iput → inode'lar
+        │                                                   LRU'ya düşer]
+        ├─► prune_icache_sb(sb, sc)                       ← asıl konu
+        └─► ->free_cached_objects()                       [varsa, fs'e özgü]
 
-   ╔══════════════════════════════════════════════════════════════════════════╗
-   ║  2. TOPLAMA AŞAMASI  (list_lru kilidi altında)                           ║
-   ╚══════════════════════════════════════════════════════════════════════════╝
-   prune_icache_sb(sb, sc)
-     │   LIST_HEAD(freeable);                          [yığında, yerel liste]
-     │
-     └─► list_lru_shrink_walk(&sb->s_inode_lru, sc, inode_lru_isolate, &freeable)
-           └─► list_lru_walk_one(lru, sc->nid, sc->memcg, ...)
-                 └─► __list_lru_walk_one()
-                       │   spin_lock(&l->lock)
-                       │   restart:
-                       │   list_for_each_safe(item, n, &l->list)   [baştan = en eski]
-                       │       nr_to_walk--
-                       │       ret = inode_lru_isolate(item, l, &freeable)
-                       │       │
-                       │       │   ┌───────────────────────────────────────────────────┐
-                       │       │   │ inode_lru_isolate()                               │
-                       │       │   │                                                   │
-                       │       │   │ a) spin_trylock(&inode->i_lock) başarısız         │
-                       │       │   │      → LRU_SKIP                                   │
-                       │       │   │                                                   │
-                       │       │   │ b) i_count > 0 || i_state & ~I_REFERENCED ||      │
-                       │       │   │    !mapping_shrinkable()                          │
-                       │       │   │      → list_lru_isolate()          [tembel çıkar] │
-                       │       │   │      → LRU_REMOVED                 (inode yaşar)  │
-                       │       │   │                                                   │
-                       │       │   │ c) I_REFERENCED set                               │
-                       │       │   │      → bayrağı temizle                            │
-                       │       │   │      → LRU_ROTATE                                 │
-                       │       │   │                                                   │
-                       │       │   │ d) buffer var || !mapping_empty()                 │
-                       │       │   │      → inode_pin_lru_isolating()                  │
-                       │       │   │      → i_lock ve l->lock bırak                    │
-                       │       │   │      → remove_inode_buffers()                     │
-                       │       │   │      → invalidate_mapping_pages()                 │
-                       │       │   │      → inode_unpin_lru_isolating()                │
-                       │       │   │      → l->lock yeniden al                         │
-                       │       │   │      → LRU_RETRY                                  │
-                       │       │   │                                                   │
-                       │       │   │ e) diğer her durum                                │
-                       │       │   │      → i_state |= I_FREEING                       │
-                       │       │   │      → list_lru_isolate_move(l, &inode->i_lru,    │
-                       │       │   │                              freeable)            │
-                       │       │   │      → this_cpu_dec(nr_unused)                    │
-                       │       │   │      → LRU_REMOVED                                │
-                       │       │   └───────────────────────────────────────────────────┘
-                       │       │
-                       │       └─ switch (ret)
-                       │            LRU_REMOVED  → isolated++, nlru->nr_items--
-                       │            LRU_ROTATE   → list_move_tail(item, &l->list)
-                       │            LRU_SKIP     → devam
-                       │            LRU_RETRY    → goto restart
-                       │   spin_unlock(&l->lock)
-                       └─► return isolated                    [tembel çıkarılanlar dahil]
+    ╔══════════════════════════════════════════════════════════════════════════╗
+    ║  2. TOPLAMA AŞAMASI  (list_lru kilidi altında)                           ║
+    ╚══════════════════════════════════════════════════════════════════════════╝
+    prune_icache_sb(sb, sc)
+        │   LIST_HEAD(freeable);                          [yığında, yerel liste]
+        │
+        └─► list_lru_shrink_walk(&sb->s_inode_lru, sc, inode_lru_isolate, &freeable)
+            └─► list_lru_walk_one(lru, sc->nid, sc->memcg, ...)
+                    └─► __list_lru_walk_one()
+                        │   spin_lock(&l->lock)
+                        │   restart:
+                        │   list_for_each_safe(item, n, &l->list)   [baştan = en eski]
+                        │       nr_to_walk--
+                        │       ret = inode_lru_isolate(item, l, &freeable)
+                        │       │
+                        │       │   ┌───────────────────────────────────────────────────┐
+                        │       │   │ inode_lru_isolate()                               │
+                        │       │   │                                                   │
+                        │       │   │ a) spin_trylock(&inode->i_lock) başarısız         │
+                        │       │   │      → LRU_SKIP                                   │
+                        │       │   │                                                   │
+                        │       │   │ b) i_count > 0 || i_state & ~I_REFERENCED ||      │
+                        │       │   │    !mapping_shrinkable()                          │
+                        │       │   │      → list_lru_isolate()          [tembel çıkar] │
+                        │       │   │      → LRU_REMOVED                 (inode yaşar)  │
+                        │       │   │                                                   │
+                        │       │   │ c) I_REFERENCED set                               │
+                        │       │   │      → bayrağı temizle                            │
+                        │       │   │      → LRU_ROTATE                                 │
+                        │       │   │                                                   │
+                        │       │   │ d) buffer var || !mapping_empty()                 │
+                        │       │   │      → inode_pin_lru_isolating()                  │
+                        │       │   │      → i_lock ve l->lock bırak                    │
+                        │       │   │      → remove_inode_buffers()                     │
+                        │       │   │      → invalidate_mapping_pages()                 │
+                        │       │   │      → inode_unpin_lru_isolating()                │
+                        │       │   │      → l->lock yeniden al                         │
+                        │       │   │      → LRU_RETRY                                  │
+                        │       │   │                                                   │
+                        │       │   │ e) diğer her durum                                │
+                        │       │   │      → i_state |= I_FREEING                       │
+                        │       │   │      → list_lru_isolate_move(l, &inode->i_lru,    │
+                        │       │   │                              freeable)            │
+                        │       │   │      → this_cpu_dec(nr_unused)                    │
+                        │       │   │      → LRU_REMOVED                                │
+                        │       │   └───────────────────────────────────────────────────┘
+                        │       │
+                        │       └─ switch (ret)
+                        │            LRU_REMOVED  → isolated++, nlru->nr_items--
+                        │            LRU_ROTATE   → list_move_tail(item, &l->list)
+                        │            LRU_SKIP     → devam
+                        │            LRU_RETRY    → goto restart
+                        │   spin_unlock(&l->lock)
+                        └─► return isolated                    [tembel çıkarılanlar dahil]
 
-   ╔══════════════════════════════════════════════════════════════════════════╗
-   ║  3. YIKIM AŞAMASI  (kilitsiz, uyuyabilir)                                ║
-   ╚══════════════════════════════════════════════════════════════════════════╝
-     └─► dispose_list(&freeable)
-           └─► her inode için:
-                 list_del_init(&inode->i_lru)
-                 evict(inode)
-                   ├─► inode_io_list_del()                    [writeback listeleri]
-                   ├─► inode_sb_list_del()                    [sb->s_inodes]
-                   ├─► inode_wait_for_lru_isolating()         [d) adımındaki pin]
-                   ├─► inode_wait_for_writeback()
-                   ├─► ->evict_inode()                        [ör. ext4_evict_inode]
-                   │     ya da truncate_inode_pages_final() + clear_inode()
-                   ├─► remove_inode_hash()                    [artık iget bulamaz]
-                   ├─► wake_up_bit(&inode->i_state, __I_NEW)
-                   └─► destroy_inode(inode)
-                         ├─► __destroy_inode()                [güvenlik, fsnotify, ACL,
-                         │                                     nr_inodes--]
-                         ├─► ->destroy_inode()                [varsa]
-                         └─► call_rcu(&inode->i_rcu, i_callback)
-                 cond_resched()
+    ╔══════════════════════════════════════════════════════════════════════════╗
+    ║  3. YIKIM AŞAMASI  (kilitsiz, uyuyabilir)                                ║
+    ╚══════════════════════════════════════════════════════════════════════════╝
+        └─► dispose_list(&freeable)
+            └─► her inode için:
+                    list_del_init(&inode->i_lru)
+                    evict(inode)
+                    ├─► inode_io_list_del()                    [writeback listeleri]
+                    ├─► inode_sb_list_del()                    [sb->s_inodes]
+                    ├─► inode_wait_for_lru_isolating()         [d) adımındaki pin]
+                    ├─► inode_wait_for_writeback()
+                    ├─► ->evict_inode()                        [ör. ext4_evict_inode]
+                    │     ya da truncate_inode_pages_final() + clear_inode()
+                    ├─► remove_inode_hash()                    [artık iget bulamaz]
+                    ├─► wake_up_bit(&inode->i_state, __I_NEW)
+                    └─► destroy_inode(inode)
+                            ├─► __destroy_inode()                [güvenlik, fsnotify, ACL,
+                            │                                     nr_inodes--]
+                            ├─► ->destroy_inode()                [varsa]
+                            └─► call_rcu(&inode->i_rcu, i_callback)
+                    cond_resched()
 
-   ╔══════════════════════════════════════════════════════════════════════════╗
-   ║  4. İADE AŞAMASI  (RCU bekleme süresinden sonra, softirq / rcuc)         ║
-   ╚══════════════════════════════════════════════════════════════════════════╝
-   i_callback(head)
-     ├─► ->free_inode(inode)                          [ör. ext4_free_in_core_inode]
-     │     └─► kmem_cache_free(ext4_inode_cachep, EXT4_I(inode))
-     └─► ya da free_inode_nonrcu(inode)
-           └─► kmem_cache_free(inode_cachep, inode)
-                 └─► slab_free()                      [SLUB]
-                       └─► dilimdeki tüm nesneler boşaldıysa ve
-                           kısmi liste min_partial'ı aşıyorsa:
-                             discard_slab() → __free_slab()
-                               ├─► mm_account_reclaimed_pages()   [reclaim_state]
-                               └─► __free_pages()                 → buddy
+    ╔══════════════════════════════════════════════════════════════════════════╗
+    ║  4. İADE AŞAMASI  (RCU bekleme süresinden sonra, softirq / rcuc)         ║
+    ╚══════════════════════════════════════════════════════════════════════════╝
+    i_callback(head)
+        ├─► ->free_inode(inode)                          [ör. ext4_free_in_core_inode]
+        │     └─► kmem_cache_free(ext4_inode_cachep, EXT4_I(inode))
+        └─► ya da free_inode_nonrcu(inode)
+            └─► kmem_cache_free(inode_cachep, inode)
+                    └─► slab_free()                      [SLUB]
+                        └─► dilimdeki tüm nesneler boşaldıysa ve
+                            kısmi liste min_partial'ı aşıyorsa:
+                                discard_slab() → __free_slab()
+                                ├─► mm_account_reclaimed_pages()   [reclaim_state]
+                                └─► __free_pages()                 → buddy
+
+    Bir noktayı daha yeniden vurgulamak istiyoruz. LRU listesindeki bir inode geri alınırken önce onun sayfa önbelleğine 
+    bakılmaktadır. Sayfa önbelleği boş dğilse (ayni orada sayfalar ya da tamponlar varsa) önce bunlar boşaltılıp sonra 
+    inode nesnesi dilime iade edilmektedir.
+
