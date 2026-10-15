@@ -17,7 +17,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                            Son Güncelleme: 30/09/2026 - Çarşamba
+                                            Son Güncelleme: 15/10/2026 - Perşembe
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -2655,8 +2655,11 @@ impl Termination for Outcome {
     spawn fonksiyonu yeni bir thread'in yaratılarak o thread'in belirtilen fonksiyonla (örneğimizdeki thread_proc) çalışmasını
     sağlamaktadır. Artık yukarıdaki işlemle birlikte programda iki thread söz konusu olmaktadır. Birincisi programın ana threadi, 
     ikincisi bizim spawn ile yarattıpımız thread. Programın ana thread'i yukarıda da belirttiğimiz gibi işletim sistemi tarafından 
-    yaratılmaktadır. Ana thread'in başlangıç fonksiyonunun main olduğunu düşünebilirsiniz. Artuık yukarıdaki örnekte birbirinden 
+    yaratılmaktadır. Ana thread'in başlangıç fonksiyonunun main olduğunu düşünebilirsiniz. Artık yukarıdaki örnekte birbirinden 
     bağımısz olarak çizelgelenen (yani biri dursa da diğeri çalışmaya devam edebilecek olan) iki ayrı thread vardır. 
+
+    spawn ile thread yaratımı başarısız da olabilir. (Örneğin işletim sistemlerinde bir prosesin ya da kullanıcının yaratabileceği 
+    thread sayısı sınırlandırılabilmektedir.) Bu durumda spawn panic oluşmasına yol açmaktadır. 
 
     Rust'ta tıpkı C'de olduğu gibi main fonksiyonu bittiğinde yalnızca ana thread değil tüm proses sonlanmaktadır. Thread'ler 
     proseslerin içerisinde akış belirtmektedir. Eğer akış main fonksiyonun ana bloğunu bitrirse programla birlikte tüm 
@@ -2702,7 +2705,7 @@ impl Termination for Outcome {
     main running: 4
     thread running: 4
 
-    Yukarıda bşiz kasten "muhtemelen" sözcüğünü kullandık. Çünkü main fonks,yonu hizlı bir biçimde işlemini bitirirse 
+    Yukarıda biz kasten "muhtemelen" sözcüğünü kullandık. Çünkü main fonks,yonu hizlı bir biçimde işlemini bitirirse 
     (bu durum çok da mümkün değildir) thread 4 değerini henüz ekrana (stdout dosyasına) basamayabilir. 
 
     Aşağıdaki programda maim akışı hemen biteceği için yaratılan thread de sonlandırılacaktır:
@@ -2897,38 +2900,850 @@ impl Termination for Outcome {
 
     Burada vektör oluşturmanın fonksiyonel programlama tekniği ile nasıl yapıldığına dikkat edimiz. Range yapısının
     map metodu aldığı fonksiyonun (callable nesnenin) geri dönüş değerlerini veren bir dolaşılabilir bir değer üretmektedir. 
-    Bu değerler collect metodu ile toplanıp bir vektöre dönüştürülmüştüri  
-
-
-
-
-
-
-
-
-
-
-
-                                        
+    Bu değerler collect metodu ile toplanıp bir vektöre dönüştürülmüştür.                 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                          
+                                            137. Ders 07/10/2026 - Çarşamba                   
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                          
+    Bir thread yaratıldığında thread akışının kullanabileceği değişkenlerin ömürlerinin static olması gerekir. Örneğin 
+    thread akışının başlatıldığı fonksiyon bir kapanım olarak yazılmış olsun. Kapanımların dıl fonksiyonlaırn yerel değişkenlerini
+    eğer sahipliğini devretmiyorsa referans yoluyla alıp kullandığını belirtmiştik. İşte dış fonksiyonun yerel değerişkenleri
+    referans yoluyla kapanımlarda kullanılamamaktadır. Çünkü thread akışı dış fonksiyondan daha uzun süre devam edebilir. 
+    Bu durumda dış fonksiyonun stack'te yaratılmış olan yerel değişkenleri fonksiyon bittiğinde boşaltıldığı için kapanım
+    gerçekte var olmayan nesnelere erişmiş olur. Örneğin:
+
+    fn foo() {
+        let a = 10;
+        let jh = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(1000));
+            println!("{}", a);
+        });
+        //...
+    }
+
+    Burada kapanım içerisinde dış fonksiyondaki a değişkeni kullanılmıştır. Ancak örneğimizde foo fonksiyonu sonlandığında 
+    a yerel değişkeni de bellekten yok edilecektir. İşte bu nenle thread fonksiyonda a değişkeni kullanılamaz. Yukarıdaki 
+    kodda Rust derleyicisi tarafından şöyle error mesajı verilmektedir:
+
+    "error[E0373]: closure may outlive the current function, but it borrows `a`, which is owned by the current function"
+
+    Eğer biz foo içerisindeki a değişkenini static yaparsak bu değişken tüm program boyunca bellekte kalacağı için sorun
+    ortadan kalkar:
+
+    fn foo() {
+        static a: i32 = 10;
+        let jh = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(1000));
+            println!("{}", a);
+        });
+        //...
+    }
+
+    Anımsanacağı gibi kapanımlarda |...| atomlarının soluna move anahtar sözcüğü getirilirse bu durumda dış fonksiyondaki
+    değişkenler kapanıma kopyalanarak başka bir ifadeyle taşınarak aktarılmaktadır. Dolayısıyla artık kapanım kendine 
+    özgü bir kopyayı kullanır durumda olmaktadır. Örneğin:
+
+    fn foo() {
+        let a = 10;
+        let jh = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(1000));
+            println!("{}", a);          // geçerli
+        });
+        //...
+    }
+
+    Burada artık kapanım dış fonksiyondaki yerel a değişkenini kullanmamaktadır. Dış fonksiyondaki yerel a değişkeninin 
+    içerisindeki değer kapanımdaki bir a değişkenine atanmıştır. Dolayıısyla artık dış fonksiyonun sonlanıp sonlanmamasının 
+    bu bağlamda bir dönemi yoktur. Örneğin:
+
+    fn main() {
+        let s: String = String::from("ankara");
+        let jh = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(1000));
+            println!("{}", s);          // geçerli
+        });
+
+        println!("{}", s);              // error!
+        //...
+    }
+
+    Bu örnkekte dış fonksiyondaki s değişkeni sahipliğini devrederek kapanıma aktarılmıştır. Artık kapanım içerisinde s 
+    kullanılabilir ancak sahip devredildiği için s'i daha sonra kullanamayız. 
+
+    Peki biz dış fonksiyondaki Copy türünden olmayan bir değişkeni move ile kapanıma aktardıktan sonra bu değişkeni dış 
+    fonksiyonda kullanmaya devam etmek istiyorsak ne yapabiliriz? İşte bu durumda ilk akla gelen yöntem eğer ilgili tür 
+    Clone trait'ini destekliyorsa onun clone metodu ile bir kopyasını çıkartıp kopyasını move etmektir. Örneğin:
+
+    fn main() {
+        let s: String = String::from("ankara");
+        let k = s.clone();
+
+        let jh = thread::spawn(
+            move || {
+                thread::sleep(Duration::from_millis(1000));
+                println!("{}", k);          // geçerli
+            }
+        );
+
+        println!("{}", s);                 // geçerli
+        //...
+    }
+
+    Artık kapanım içerisinde s değiş onun kopyası olan k kullanılmıştır. Yukarıdaki işlemi Rust'ça şöyle de yapabilirdik:
+
+    fn main() {
+        let s: String = String::from("ankara");
+
+        let jh = thread::spawn({
+            let k = s.clone();
+            move || {
+                thread::sleep(Duration::from_millis(1000));
+                println!("{}", k);          // geçerli
+            }
+        });
+
+        println!("{}", s);                 // geçerli
+        //...
+    }
+
+    Burada sapwn fonksiyonuna argüman olarak blok ifadesi geçirilmiştir. Blok ifadesini ürettiği değerin bloktaki son ifadenin 
+    değeri olduğunu anımsayınız. Örneğimizki son ifade kapanım ifadesidir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                          
+    Kapanımlar içerisinde dış fonksiyondaki değişkenlerin move edilmeden kullanılabilmesi için Rust'un 1.63 versiyonuyla 
+    birlikte scope isimli bir fonksiyon da eklnemiştir. scope fonksiyonun sonunda kesinlikle join işlemi yapılmaktadır. 
+    Dolayısıyla thread akışı bitmeden akış scope fonksiyonunda çıkmamaktadır. Böyle bir garanti verildiği için thread akışı 
+    içerisinde artık dış fonksiyonların değişkenleri referans yoluyla (yani ödünç alınarak) kullanılabilmektedir. scope
+    fonksiyonunun parametrik yapısı şöyledir:
+
+    pub fn scope<'env, F, T>(f: F) -> T
+    where
+        F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
+
+    Buradan şu anlaşılmaktadır: scope fonksiyonu yine parametre olarak çağrılabilir (callable) bir değeri almaktadır. Ancak 
+    artık bu çağrılabilir akışta dış fonksiyonun statik ömürlü olmayan değişkenleri kullanılabilir. scope fonksiyonuna 
+    geçirilen fonksiyonun ya da kapanımın parametresi türünden bir referans olmak zorundadır. Scope türü threda modülü 
+    içerisinde bir yapı biçiminde tanımlanmıştır. Scope yapısının spawn isimli bir metodu vcardır. Bu metot da aslında 
+    dolaylı biçimde thread modülündeki spawn fonksiyonu çağırmaktadır. Biz scope fonksiyonuna geçirdiğimiz çağrılabilir 
+    ifadenin akışı içerisinde bu Scope yapısının spawn metodunu kullnarak thread'ler uaratabiliriz. Ancak yarattığımz bu 
+    thread'ler scope tarafında daha scope geri dönmeden join edilmektedir. Böylece scope fonksiyonu geri döndüğünde 
+    yaratılmış olan thread'lerin bitmiş olduğu garanti edilmektedir. Örneğin:
+
+    thread::scope(|s| {
+        s.spawn(|| {
+            println!("thread-1");
+        });
+
+        s.spawn(|| {
+            println!("thread-2");
+        });
+    });
+    // akış bu noktaya geldiğinde kesinlikle thread'ler sonlanmış durumda olacak
+
+    Burada akış scope fonksiyonundan çıktığında kesinlikle iki thread de sonlanmış olacaktır. Bunu aşağıdaki gibi bir deneme 
+    koduyla doğrulayabiliriz:
+
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        thread::scope(|s| {
+            s.spawn(|| {
+                thread::sleep(Duration::from_millis(5000));
+                println!("thread-1");
+            });
+
+            s.spawn(|| {
+                thread::sleep(Duration::from_millis(5000));
+                println!("thread-2");
+            });
+
+        });
+        println!("main continues...");
+    }
+
+    Bu örnekte thread'ler sonlandıktan sonra "main continuous..." yazısı ekrana (stdout dosyasına) basılacaktır. 
+
+    scope fonksiyonu sayesinde biz artık thread akışlarında dış fonksiyonun yerel değişkenlerini taşıma yapmadan kullanabiliriz. 
+    Örneğin:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let message: String = String::from("ankara");
+
+        thread::scope(|s| {
+            s.spawn(|| {
+                thread::sleep(Duration::from_millis(5000));
+                println!("thread-1: {}", message);          // geçerli
+            });
+
+            s.spawn(|| {
+                thread::sleep(Duration::from_millis(5000));
+                println!("thread-2: {}", message);          // geçerli
+            });
+
+        });
+        println!("main continues...");
+    }
+
+    Burada scope içerisindeki iki thread'te de message değişkeni referans yoluyla kullanılmıştır. Çünkü bu message değişkeni 
+    thread akışları devam ettiği sürece yaşamaya devam etmektedir. 
+
+    Peki scope otomatik join işlemi yaptığına göre biz thread akışının geri döndürdüğü değeri nasıl elde edebiliriz? scope
+    fonksiyonu parametre olarak aldığı çağrılabilir akıştan geri döndürülen değerle geri döndmektedir. Biz de scope 
+    fonksiyonu içerisinde spawn metodundan elde etttiğimiz ScopedJoinHandle değeri ile join yapıp onun sonucunu iletebiliriz. 
+    Örneğin:
+
+    use std::thread;
+    use std::time::Duration;
+
+    fn main() {
+        let message: String = String::from("ankara");
+
+        let result = thread::scope(|s| {
+            let sjh = s.spawn(|| {
+                thread::sleep(Duration::from_millis(5000));
+                println!("thread: {}", message);
+                100
+            });
+
+            sjh.join().unwrap()
+        });
+        println!("main continues: {:?}", result);
+    }
+
+    Burada result değişkenine thread fonksiyonun geri döndürdüğü 100 değeri atanacaktır.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bir vektörü parçalara ayırıp her parçasını ayrı bir thread yaratıp o thread'e işletmek isteyelim. Vektörümüzün içerisinde 
+    1'den 1000'e kadar (1000 dahil) sayılar olsun:
+
+    let v: Vec<i32> = (1..=1000).collect();
+
+    Biz de örneğin bu vektörü 100'lük parçalara ayırarak her parçanın toplamını ayrı bir thread'e yaptıracak olalım. Bunun 
+    için scope fonksiyonunu kullanalım:
+
+    let result:i32 = thread::scope(|s| {
+        let mut sjhs: Vec<_> = Vec::new();
+        //...
+    });
+
+    Burada toplamları tutacak olan bir sjhs isimli vektör oluşturulmuştur. Sonra thread'ler yaratılmış ScopedJoinHandle 
+    değerleri bu thread'in içerisinde vektöre eklenmiştir:
+
+    let result:i32 = thread::scope(|s| {
+        let mut sjhs: Vec<_> = Vec::new();
+        
+         for chunk in v.chunks(100) {
+            sjhs.push(s.spawn(|| {chunk.iter().sum::<i32>()}));
+        }
+        //...
+    });
+
+    Burada for döngüsü içerisinde thread'ler yaratılmış ve onlara ilişkin ScopedJoinHandle değerleri vektöre eklnemiştir. 
+    Artık sjhs vektörü içerisinde yaratılmış olan thread'lere ilişkin ScopedJoinHandle değerleri bulunmaktadır. Tabii bu aşamada
+    thread'ler çalışmaya devam ediyor da olabilir. Şimdi bizim vektöre yerleştirdiğimiz bu değerlerle join yapın bunların 
+    sonucunu toplamamız gerekir:
+
+    let result:i32 = thread::scope(|s| {
+        let mut sjhs: Vec<_> = Vec::new();
+        
+         for chunk in v.chunks(100) {
+            sjhs.push(s.spawn(|| {chunk.iter().sum::<i32>()}));
+        }
+        sjhs.into_iter().map(|x| {x.join().unwrap()}).sum()
+    });
+
+    Burada map metodu çağrılan fonksiyonun geri döndürdüğü değerlerden oluşan bir iterator vermektedir. Bu iteratör 
+    üzerinde sum işlemi uygulanıp sonuö geri döndürülmüştür. Örneği bir bütün olarak aşağıda veriyoruz.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::thread;
+
+fn main() {
+    let v: Vec<i32> = (1..=1000).collect();
+
+    let result:i32 = thread::scope(|s| {
+        let mut sjhs: Vec<_> = Vec::new();
+
+        for chunk in v.chunks(100) {
+            sjhs.push(s.spawn(|| {chunk.iter().sum::<i32>()}));
+        }
+
+      sjhs.into_iter().map(|x| {x.join().unwrap()}).sum()
+    });
+    println!("{}", result);
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki işlemi biraz daha fonksiyonel olarak aşağıdaki gibi yazabiliriz.                                   
+
+    use std::thread;
+
+    fn main() {
+        let v: Vec<i32> = (1..=1000).collect();
+
+        let result:i32 = thread::scope(|s| {
+            let sjhs: Vec<_> = v
+                .chunks(100)
+                .map(|chunk| {
+                    s.spawn(|| {chunk.iter().sum::<i32>()})
+                })
+                .collect();
+
+            sjhs.into_iter().map(|x| {x.join().unwrap()}).sum()
+
+        });
+        println!("{}", result);
+    }
+
+    Buradaki coolect metdou hedef türü bilmek zorundadır. Aslında biz bu collect metoduna hedef türü verirsek tüm scope 
+    ifadesini tek ifade olarak da yazabiliriz:
+
+    use std::thread;
+
+    fn main() {
+        let v: Vec<i32> = (1..=1000).collect();
+
+        let result:i32 = thread::scope(|s| {
+            v.chunks(100)
+            .map(|chunk| {
+                s.spawn(|| {chunk.iter().sum::<i32>()})
+                })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|x| {x.join().unwrap()})
+            .sum()
+        });
+
+        println!("{}", result);
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            138. Ders 12/10/2026 - Pazartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Thread yaratmak için yaygın kullanılan bir yapı da Builder isimli yapıdır. Builder yapısı thread'e belirli özelliklerin 
+    verilmesi için kullanılmaktadır. Thread'lerinin stack'lerinin birbirinden ayrıldığını belirtmiştik. thread modülündeki 
+    spawn fonksiyonuyla bir thread yarattığımızda thread'in default stack uzunluğu 2MB alınmaktadır. Biz bu stack uzunluğunu 
+    Builder yapısı sayesinde değiştirebilriz. 
+
+    Builder yapısı ile thread yaratımı şöye yapılmaktadır:
+
+    - Önce bir Builder türünden değer Builder yapısının new ilişkili fonksiyonuyla yaratılır. Örneğin:
+
+    let builder = Builder::new();
+
+    - Builder türünden değer yaratıldıktan sonra Builder yapısının metotları ile thread'din özellikleri belirlenir. Builder 
+    yapısının name metodu thread'e isim vermek için kullanılmaktadır. Metodun parametrik yapısı şöyledir:
+
+    pub fn name(self, name: String) -> Builder
+
+    Metodun parametresinin &mut self biçiminde olmadığına self biçiminde olduğuna dikkat ediniz. Metot sahipliği alıp ona 
+    ismi set edip geri dönüş değeri olarak yeni bir Builder değeri vermektedir. Metot şöyle yazılmıştır:
+
+    pub fn name(mut self, name: String) -> Builder {
+        self.name = Some(name);
+        self
+    }
+
+    O halde şöyle kullanılması gerekir:
+
+    let mut builder = Builder::new();
+
+    builder = builder.name("my thread".to_string());
+
+    Builder yapısının stack_size metodu yaratılacak thread'in  stack boyutunu belirlemek içinb kullanılmaktadır:
+
+    pub fn stack_size(self, size: usize) -> Builder
+
+    Burada da yanı kalıbın uyguşandığını görüyorsunuz. Örneğin:
+
+    let mut builder = Builder::new();
+
+    builder = builder.name("my thread".to_string());
+    builder = builder.stack_size(512 * 1024);
+    
+    Nihayetinde thread Builder yapısının spawn metodu tarafından yaratılmaktadır. spawn metodunun parametrik yapısı da 
+    şöyledir:
+
+    pub fn spawn<F, T>(self, f: F) -> Result<JoinHandle<T>>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+
+    Biz bu parametrik yapıdaki tür sınırlamalarının anlamını spawn fonksiyonunda görmüştük. Ancak burada bir noktaya dikkat 
+    ediniz. Metot spawn fonksiyonunda olduğu gibi JoinHandle<T> ile değil Result<JoinHandle<T>> türü ile geri dönmektedir. 
+    Thread yaratılmaza bu Result türünden hatanın nedeni elde edilebilmektedir. (Anımsanacağı gibi spawn fonksiyonu ile 
+    thread yaratılmazsa spawn fonksiyonu panic oluşturmaktadır.) Örneğin:
+
+    let mut builder = Builder::new();
+
+    builder = builder.name("my thread".to_string());
+    builder = builder.stack_size(1024 * 1024);
+
+    let jh = match builder.spawn(thread_proc) {
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(1);
+        },
+        Ok(jh) => jh,
+    };
+
+    jh.join().unwrap();
+
+    Burada spawn fonksiyonundan farklı olarak thread'in neden yaratılamadığına ilişkin hata mesajını da el etmiş olmaktayız. 
+
+    Biz yukarıda metotları tek tek çağırdık. Aslında "builder kalıpları" doğrudan zincir oluşturularak kullanılmaktadır. 
+    Yani bu kalıpla yaratım tipik olarak şöyle yapılmaktadır:
+
+    let jh = Builder::new()
+        .name("my thread".to_string())
+        .stack_size(1024 * 1024)
+        .spawn(thread_proc).unwrap();
+
+    jh.join().unwrap();
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::thread::{Builder, sleep};
+use std::time::Duration;
+
+fn main() {
+    let jh = Builder::new()
+        .name("my thread".to_string())
+        .stack_size(1024 * 1024)
+        .spawn(thread_proc).unwrap();
+
+    jh.join().unwrap();
+}
+
+fn thread_proc() {
+    for i in 0..10 {
+        println!("{}", i);
+        sleep(Duration::from_millis(1000));
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aslında konunun başında gördüğümüz threda modülündeki spawn fonksiyonu Builder yapısı üzerine sarmalanmış bir fonksiyondur. 
+    Rust Standart Kütüphanesinin kaynak kodlarında spawn fonksiyonu şöyle yazılmıştır:
+
+    pub fn spawn<F, T>(f: F) -> JoinHandle<T>
+    where
+        F: FnOnce() -> T,
+        F: Send + 'static,
+        T: Send + 'static,
+    {
+        Builder::new().spawn(f).expect("failed to spawn thread")
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aslında thread'ler konusunun asıl zor ve ayrıntılı olan kısmı thread senkroinzasyonudur. Biz burada belli bir derinliğe 
+    kadar thread senkronizasyonu konusunu ele alacağız. Tabii önce thread senkronizasyonuna neden gerek olduğunu açıklamalıyız. 
+
+    Birden fazla thread aynı kaynağa erişirken birinin kaynak üzerinden yaptığı işlemleri diğeri bozabilmektedir. Bu tür 
+    durumlarda bir thread'in kaynakla işini bitirdikten sonra diğer bir thread'in o kaynağı kullanması gerekir. Başından 
+    sonuna kadar tek bir thread akışı tarafından çalıştırıması gereken kod bloklarına "kritik kod blokları (criticical 
+    sections)" denilmektedir. Kritik kod bloklarına neden gereksinim duyulduğuna ilişkin bir çırpıda onlarca örnek verilebilir. 
+    Örneğin iki thread aynı bağlı liste üzerinde işlem yapıyor olsun. Birisi bağlı listeye düğüm eklerken diğeri bağlı listeyi
+    dolaşıyor olabilir. Bağlı listeye düğüm eklenirken füğümlerdeki göstericilerle oynamak gerekir. İşte tam bu sırada 
+    ekleme işleminin ortasında bağlı listeyi dolaşan thread çökebilir. İki thread'in aynı vektöre eleman insert ettiğini 
+    düşünelim. İşlem sırasında vektörün kaydırılması gerekmektedir. İşte iki bu işlemi aynı zaman dilimi içerisinde yaparsa
+    vektör bozulabilir. 
+
+    Burada bir noktaya dkkat ediniz. Birden fazla thread paylaşılan kaynak üzerinde bir değişikilik yapmıyorsa yani o kaynağı
+    okuyan durumdaysa herhangi bir sorun oluşmayacaktır. Senkronizasyon sorununun oluşması için kaynağa erişenl thread'lerin 
+    en az birinin onun üzerinde değişikilik (yani yazma işlemi) yapıyor olması gerekir. Son zamanlarda bu soruna İngilizce 
+    "data race" denilmeye başlanmıştır. 
+
+    Paylaşılan kaynaktaki bozulmayı basit örnekle görebiliriz. Aşağıdaki Rust programına dikkat ediniz:
+
+    use std::thread;
+
+    static mut COUNT: i32 = 0;
+
+    fn main() {
+        let jh1 = thread::spawn(thread_proc1);
+        let jh2 = thread::spawn(thread_proc2);
+
+        jh1.join().unwrap();
+        jh2.join().unwrap();
+
+        unsafe {
+            let count = COUNT;
+            println!("{}", count);
+        }
+    }
+
+    fn thread_proc1() {
+        for _ in 0..1000000 {
+            unsafe {
+                COUNT += 1;
+            }
+        }
+    }
+
+    fn thread_proc2() {
+        for _ in 0..1000000 {
+            unsafe {
+                COUNT += 1;
+            }
+        }
+    }
+
+    Burada aynı global değişkeni farklı iki thread bir milyon kez artırmıştır. Thread'lerin çalşışması bittikten sonra 
+    bu değişkenin 2000000 olması beklenir. Ancak bu sonuç elde edilmeyecektir. Peki neden? İşte derleyiciler COUNT += 1 
+    işlemini tek bir makine komutuyla yapmayabilirler. (RISC işlemcilerinde zaten mümkün de değildir. Intel işlemcilerinde 
+    bu mümkün olsa da atomik değildir.) Örneğin tipik olarak derleyiciler COUNT değişkeninin 1 artırılması için aşağıdaki 
+    gibi üç makine komutu üretmektedir:
+
+    MOV reg, COUNT
+    INC COUNT
+    MOV COUNT, reg
+
+    Burada thread'in quantum süresinin (yani parçalı çalışma süresinin) COUNt değeri 100000'deyken ok ile gösterilen noktada 
+    bittiğini ve bağlamsal geçiş oluşturğunu varsayalım:
+
+    MOV reg, COUNT
+    INC COUNT
+    ---> bağlamsal geçiş
+    MOV COUNT, reg
+
+    CPU yazmaçların değerlerini saklayarak bağlamsal geçişi yapacaktır. Bu sırada diğer thread COUNT değerini artırmaya 
+    devam edecektir. Örneğin diğer thread'in COUNT değerini 200000'e kadar artırdığını düşünelim. Şimdi thread yeniden
+    CPU'ya atandığında kaldığı noktadan çalışmaya devam edecektir ve COUNT değişkenine 100001 değerini yerleştirecektir. 
+    Görüldüğü gibi sayaç bozulacaktır. 
+
+    Senkronizasyon dünyasında "atomiklik (atomicity)" denilen bir kavram vardır. Atomiklik bir grup işlemin sanki tek 
+    işlemmiş gibi kesilmeden yapılmasına denilmektedir. Atomik bir işlem diğer thread'ler tarafından ara bir nokta bir 
+    noktada görülmez. Diğer thread'ler ya o işlemden öncesini görür ya da sonrasını görür. Makşne komutlarının büyük 
+    kısmı atomiktir. Ancak Intel işlemcilerinde doğrudan bellek üzerinde işlem yapan makine komutları (RISC işlemcilerinde 
+    böyle komutlar yoktur) atomik değildir. Örneğin:
+
+    INC COUNT
+
+    Bu makine komutu Intel işlemcilerinde doğrudan bellekteki bir nesneyi 1 artırmaktadır. Tabii bu tek makine komutu olsa 
+    da CPU yine önce COUNT değişkenini CPU'ya çekip, artırımı CPU'da yapıp, artırılmış değeri yeniden belleğe yazmaktadır. 
+    Bu komut Intel işlemcilerinde atomik değildir. 
+
+    Genel olarak CPU'larda makine komıtlarının ortasında (atomik olmayanlar da dahil olmak üzere) thread'ler arası geçiş
+    oluşmamaktadır. Çünkü kesmeler ancak makine komutlarının arasında işleme sokulmaktadır. 
+
+    Yukarıdaki örnekte eğer COUNT değişkeninin artırılması atomik bir biçimde yapılabilseydi bir sorun oluşmayacaktı. Programlama
+    dilleri basit aritmektik işlemlerinin atomik yapılmasını sağlayabilmektedir. Ancak birdeb fazl makine komutunun gerektiği 
+    işlemler işlemci düzeyinden atomik yapılamamaktadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                        139. Ders 14/10/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Kritik kod oluşturmak için en çok kullanılan senkronizasyon nesneleri "mutex" nesneleridir. "Mutex" sözcüğü İngilizce
+    "mutual exclusion" sözcüklerinden kısaltme yapılarak uydurulmuştur. Rust'ta mutex nesneleri std::sync modülündeki Mutex 
+    isimli yapıyla temsil edilmektedir. Yapının kullanılmasını kolaylaştırmak için aşağıdaki use bildirimi kullanılabilir:
+
+    use std::sync::Mutex;
+
+    MUtex generic bir yapıdır:
+
+    pub struct Mutex<T: ?Sized> { /* private fields */ }
+
+    Görüldüğü g,b, Mutx yapısının bir generic parametresi vardır. Bu generic parametre uzunluğu derleme aşamasında belirlen 
+    bir tür olmak zorunda değildir. 
+
+    Rust'ta Mutex nesneleri hem bir kilit hem de bir veri tutmaktadır. (Halbuki diğer dillerden kullanılan kütüphanelerde 
+    mutex nesneleri yalnızca kilit tutmaktadır.) Mutex yapısının generic parametresi mutex tarafından tutulan değerin türünü 
+    belirtmektedir. 
+
+    Mutex türünden değerler Mutex yapısının new ilişkili fonksiyonu ile yaratılmaktadır:
+
+    pub const fn new(t: T) -> Mutex<T>
+
+    Örneğin:
+
+    let m: Mutex<i32> = Mutex::new(10);
+
+    Tabii burada biz generic parametrenin türünü belirtmeseydik de new ilişkili, fonksiyonuna verilen argümandan generic
+    parametrenin türü tespit edilirdi:
+
+    let m = Mutex::new(10);
+
+    İşletim sistemlerinde mutex nesneleri için iki eylem tanımlanmıştır:
+
+    1) Nesnenin sahipliğinin alınması (ya da nesnenin kilitlenmesi)
+    2) Nesnenin sahipliğinin bırakılması (ya da nesnenin kilidinin açılması)
+
+    Bir thread mutex'in sahipliğini almışsa (yani onu kilitlemişse) başka bir thread onun sahipliğini almaya çalışırsa 
+    diğer thread onun sahipliğini bırakana kadar bloke oluşur. Burada "bloke (blocking)" sözcüğü "CPU zamanı harcanmadan 
+    uykuya yatırılarak belli bir olay geçröekleşene kadar thread'in bekletilmesi" anlamına gelmektedir. 
+
+    Mutex nesnesinin sahipliğini almak için Mutex yapısının lock metodu kullanılmaktadır. lock metodunun parametrik yapısı 
+    şöyledir:
+
+    pub fn lock(&self) -> LockResult<MutexGuard<'_, T>>
+
+    Metodun geri dönüş değerine dikkat ediniz. Buradaki LockResult aslında Result türünü temsil etmektedri:
+
+    pub type LockResult<T> = Result<T, PoisonError<T>>;
+
+    O halde lock Ok(MutexGuard<'_, T>) değerine ya da Err(PoissonError<T>) değerine geri dönmektedir. Buradan anlamamız 
+    gereken lock işleminin başarısız olabileceğiditr. Bu nedenle biz lock metodunu unwrap, expect gibi metotlarla ya da 
+    match deyimi ile kullanırız. Örneğin:
+
+    let m: Mutex<i32> = Mutex::new(10);
+    let mg = m.lock().unwrap();
+
+    Peki kilitleme sonucunda bize verilen MutexGuard değeri ne anlama gelmektedir? MutexGuard RAII (Resource Aquasition
+    is Initialization) nesnesini temsil etmektedir. MutexGuard türünden bir değişken faaliyet alanı bittiğinde mutex nesnesininin 
+    sahipliğini otomatik olarak bırakmaktadır (yani mutex nesnesini unlock etmektedir). Örneğin:
+
+    let m: Mutex<i32> = Mutex::new(10);
+    {
+        let mg = m.lock().unwrap();
+        //...
+    }
+
+    Burada iç blok sonlandığında mutex nesnesinin sahipliği geri bırakılacaktır. Buradan amaç mutex nesnesinin kilidinin 
+    en kötü olasılıkla otomatik bir biçimde bırakılmasını sağlamaktır. 
+    
+    lock metodunun bize verdiği MutexGuard değeri Deref trait'ini desteklemektedir. Başka bir deyişle sanki bir referans 
+    gibi kullanılabilmektedir. MutexGuard değişkeninin biz * operatörüyle kullanırsak mutex nesnesinin koruruğu değere 
+    erişebiliriz. Örneğin:
+
+    let m = Mutex::new(10);
+    let mg = m.lock().unwrap();
+    println!("{}", *mg);        // 10
+    
+    Eğer MutexGuard değişkeni mut ise bu durumda biz mutex nesnesinin koruduğu değeri de değiştirebiliriz. Örneğin:
+
+    let m = Mutex::new(10);
+    let mut mg = m.lock().unwrap();
+
+    *mg = 20;
+    println!("{}", *mg);        // 20
+
+    Burada *mg ile aslında Mutex besbesi tarafındna tutulan i32 türünden değişkenin içerisindeki değer değiştirilmiştir. 
+    Anımsanacağı gibi geçici değerler zaten mut kabul edilmektedir. Yani biz bu işlmei şöyle de yapabilirdik:
+
+    use std::sync::Mutex;
+
+    fn main() {
+        let m = Mutex::new(10);
+
+        let val = *m.lock().unwrap();
+        println!("{}", val);                // 10
+        
+        *m.lock().unwrap() = 20;
+
+        let val = *m.lock().unwrap();
+        println!("{}", val);                // 20
+    }
+
+    Her ne kadar MutexGuard türünden değişken faaliyet alanını bitirdiğinde mutex nesnesinin sahipliği bırakılıyorsa da 
+    bırakma işlemini daha önce MutexGuard değişkenini açıkça drop ederek de yapabiliriz. Örneğin:
+
+    let m = Mutex::new(10);
+    let mg = m.lock().unwrap();
+    //...
+    drop(mg);
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de yukarıda yaptığımız bozuk sayaç artırma örneğini mutex nesnesi kullanarak düzeltelim:
+
+    use std::thread;
+    use std::sync::Mutex;
+
+    static MUTEX: Mutex<i32> = Mutex::new(0);
+
+    fn main() {
+        let jh1 = thread::spawn(thread_proc1);
+        let jh2 = thread::spawn(thread_proc2);
+
+        jh1.join().unwrap();
+        jh2.join().unwrap();
+
+        let val = MUTEX.lock().unwrap();
+        println!("{}", val);
+    }
+
+    fn thread_proc1() {
+        for _ in 0..1000000 {
+            let mut mg = MUTEX.lock().unwrap();
+            *mg += 1;
+        }
+    }
+
+    fn thread_proc2() {
+        for _ in 0..1000000 {
+            let mut mg = MUTEX.lock().unwrap();
+            *mg += 1;
+        }
+    } 
+
+    Burada thread'ler içerisindeki döngüye dikkat ediniz:
+
+    for _ in 0..1000000 {
+        let mut mg = MUTEX.lock().unwrap();
+        *mg += 1;
+    }
+
+    Burada for döngüsünün bir bloğu vardır. Dolayısıyla for dönüsünün her yinelenmesinde blok sona erdiği için mutex
+    nesnesinin sahipliği otomatik biçimde bırakılacaktır. Mutex nesnesinin sahipliği alındığı zaman diğer thread'ler lock 
+    işlemi yaptıklarında lock içerisinde uykuya yatırılıp bekletilirler, ta ki mutext nesnesinin sahipliğini alan threda onu 
+    bırakana kadar. Artık örneğimizde kesinlikle artırımda bir "veri yarışı (data race)" söz konusu olmayacaktır. Örneğimizde
+    mutext nesnesi statik ömürlü olduğu için thread fonksionlarında doğrudan kullanılabilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Peki yukarıdaki örnekte mutex nesnesi yerel yapılabilir miydi? Eğer mutex nesnesi yerel yapılırsa bu durumda thread'lerin 
+    ona erişebilmesi için kapanım kullanmak gerekir. Çünkü kapanımlar üst bloktaki değişkenleri kullanabilmektedir. Çte 
+    yandan thread kapanımları içerisinde kullanılan dış bloktaki değişkenlerin de statik olması gerekir. Örneğin:
+
+    use std::thread;
+    use std::sync::Mutex;
+
+    fn main() {
+        static mutex: Mutex<i32> = Mutex::new(0);
+
+        let jh1 = thread::spawn(|| {
+            for _ in 0..1000000 {
+                let mut mg = mutex.lock().unwrap();
+                *mg += 1;
+            }
+        });
+        let jh2 = thread::spawn(|| {
+            for _ in 0..1000000 {
+                let mut mg = mutex.lock().unwrap();
+                *mg += 1;
+            }
+        });
+
+        jh1.join().unwrap();
+        jh2.join().unwrap();
+
+        let val = mutex.lock().unwrap();
+        println!("{}", val);
+    }
+
+    Bu örnekte Kapanımlar içerisinde main fonksiyonun yerel mutex değişkeni static olduğu için bir sorun çıkmamaktadır. 
+    Peki Mutex değişkeni static olmaaydı ne olurdu? Bu durumda kapanımlardaki kullanım derleme aşamasında error ile 
+    sonuçlanırdı. Bu durumda biz daha önce görmüş olduğumuz scope fonksiyonunu kullanabiliriz:
+
+     std::thread;
+    use std::sync::Mutex;
+
+    fn main() {
+        let mutex: Mutex<i32> = Mutex::new(0);
+
+        thread::scope(|s| {
+            s.spawn(|| {
+                for _ in 0..1000000 {
+                    let mut mg = mutex.lock().unwrap();
+                    *mg += 1;
+                }
+            });
+
+            s.spawn(|| {
+                for _ in 0..1000000 {
+                    let mut mg = mutex.lock().unwrap();
+                    *mg += 1;
+                }
+            });
+        });
+
+        let val = mutex.lock().unwrap();
+        println!("{}", val);
+    }
+
+    Rust'ta thread akışlarına parametre geçirilemediğini anımsayınız. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Peki biz Rust'ta değer tutmayan yalnızca kritik kod için kullanılacak olan bir mutex oluşturamaz mıyız? İte bunun tek 
+    yolu mutex nesnesinin generic parametresini birim yapmaktır. Örneğin:
+
+    let mutex = Mutex::new(());   
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bir thread'te panic oluştuğunda yalnızca o thread sonlandırılmaktadır. Tüm thread sonlandırılmamaktadır. Ancak eğer thread 
+    prosesin tek thread'iyse proses de sonlandırılmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                            136. Ders 30/09/2026 - Çarşamba                           
+    Aslında Rust'ta tek bir makine bir makine komutu ile yapılabilecek bazı işlemlerin hiç mutex gerekmeden yapılabilmesi 
+    için std::sync::atomic modülünde AtomicXXX isimli yapılar bulundurulmuştur. Aslında bu yapılar aynı modüldeki Atomic<T> 
+    türüne type bildirimi ile elde edilmiştir. Örneğin:
+
+    pub type AtomicI32 = Atomic<i32>;
+
+    Ancak Atomic<T> türünü biz dışarıdan henüz kullanamamaktayız. Çünkü bu yapı henüz stabil hale getirilmemiştir, şimdilik 
+    yalnızca "nightly" sürümlerde kullanılabilmektedir. 
+    
+    AtomicXXX türlerinni metotları bu türlerin tuttuğu derler üzerinde atomik biçimde işlem yapabilmektedir. AtomicXXX türünden 
+    değerler new ilişkili fonksiyonu ile yaratılabilmektedir. Örneğin AtomicI32 türünden bir değeri şöyle yaratabiliriz:
+
+    let count = AtomicI32::new(0);
+
+    Burada bize aslında Atomic<i32> değeri verilmektedir. Zaten aslında AtomicI32 ile Atomic<i32> tamamen aynı anlamdadır. 
+    Ancak yukarıda da belirtitğimiz gibi biz doğrudan henüz Atomic<T> yapısını kullanamamaktayız. 
+
+    Atomic<T> türünün çeşitli metotları değişken üzerinde atomik bağlamda işlemler yapmaktadır. Örneğin atomik bir 
+    değişkeni tek hamlede bir veri yarışı oluşmadan artırmak için fetch_and_add metodu kullanılmaktadır:
+
+    pub fn fetch_add(&self, val: i32, order: Ordering) -> i32
+
+    Burada metodun ikinci parametresi "bellek sıralaması (memory ordering)" denilen kavramla ilgilidir. Bu parametre için
+    örneğin Ordering::Relaxed değeri girilebilir. Metot atomik değişkenin artırımdan önceki değeriyle geri dönmektedir. 
+    Burada ilginç bir noktaya dikkat ediniz. Her ne kadar bu metot yapı içerisinde tutulan değeri artırıyorsa da metodun 
+    parametresi &mut self değil &self biçimindedir. Böylece biz bu metodu bireden fazla thread'te adres referans yoluyla 
+    kullanabiliriz. Örneğin:
+
+    use std::thread;
+    use std::sync::atomic::{AtomicI32, Ordering};
+
+    fn main() {
+        let count: AtomicI32 = AtomicI32::new(0);
+
+        thread::scope(|s| {
+            s.spawn(|| {
+                for _ in 0..1000000 {
+                    unsafe {
+                        count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+
+            s.spawn(|| {
+                for _ in 0..1000000 {
+                    unsafe {
+                        count.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+        });
+
+        println!("{}", count.into_inner());
+    }
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
 
 
 
