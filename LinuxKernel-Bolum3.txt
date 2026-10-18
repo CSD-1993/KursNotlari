@@ -654,8 +654,8 @@
     Böylece ağacın yüksekliği ikili arama ağacına göre düşürülmektedir. Tabii ağacın yüksekliğinin düşürülmesi ek birtakım 
     maliyetler de doğurmaktadır. Bu nedenle içsel aramalarda (internal search) B-Tree çok seyrek kullanılmaktadır. 
     Disk tabanlı aramalarda (external search) her düğüm geçişi bir disk okuması gerektirdiği için ağacın yüksekliğinin
-    düşürülmesi ikili arama ağacına göre ciddi bir hız kazancı sağlamaktadır. Üç anahtarlı bir B-Tree düğümünün 
-    yapısı aşağıdakine benzemektedir:
+    düşürülmesi ikili arama ağacına göre ciddi bir hız kazancı sağlamaktadır. B-Tree dengelenmiş (*balanced*) bir ağaç yapısıdır. 
+    Ağacın yaprakları hep aynı düzeyde bulunmaktadır. Üç anahtarlı bir B-Tree düğümünün yapısı aşağıdakine benzemektedir:
            
            p0                 p1                 p2                 p3
          ┌───┬──────────────┬───┬──────────────┬───┬──────────────┬───┐
@@ -841,16 +841,21 @@
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Maple  ağacı gerçekleştiriminde ara düğümlerle yaprak düğümler farklı bilgileri tutmaktadır. Ara düğümlerde pivot'lar 
-    ve alt düğümlerin yerleri saklanırken yaprak düğümler için bir yer ayrılmamakta doğrudan yaprak düğümlerdeki göstericiler 
-    vm_area_struct nesnelerini (VMA nesnelerini) göstermektedir. 
+    Maple ağacı gerçekleştiriminde yaprak düğümlerdeki slotlarda (yani göstericilerde) VMA nesnelerinin adresleri 
+    tutulmaktadır. Maple ağaçları B-Tree türevi olduğu için tüm yapraklar aynı derinliktedir. Yapraklardaki bir slotun 
+    (göstericinin) NULL olması ilgili aralığın tahsis edilmediğini yani boş olduğunu belirtmektedir. NULL slot yalnızca 
+    yapraklarda bulunabilir. Bir ara düğümde bir alt aralık "burası boş” biçiminde NULL gösterici ile belirtilemez. 
+    O aralık da bir alt düğümle temsil edilmek zorundadır. Aralık ne kadar büyük olursa olsun, en altta onu kaplayan 
+    bir yaprak ve o yaprakta bir NULL gösterici bulunmaktadır. Tabii bir düğümün tüm slotları dolu olmak zorunda da 
+    değildir. Bir düğümün son geçerli slotunun indeksi ara düğümler için maple_node yapısı içerisindeki maple_arange_64
+    yapısının maple_metadata türünden elemanında, yaprak düğümler için maple_node yapısı içerisindeki maple_range_64 yapısının 
+    maple_metadata türünden elemanında tutulmaktadır.
 
-    Ara düğümlerin çakışık iki ayrı yapı ile temsil edildiğine dikkat ediniz: maple_range_64 ve maple_arange_64. Buradaki 
-    maple_range_64 yspısı VMA'nın olup olmadığını tespit etmek amacıyla bulundurulukren maple_arange_64 yapısı sanal bellek 
-    alanında yeni bir VMA tahsis ederken kullanılmaktadır. Görüldüğü gibi mapl_node yapısı sanki tek bir yapıymış gibi 
-    tanımlanmış olsa da onun içeriği değişebilmektedir. Bir düğüm içerisindeki bilginin türü ayrı bir alanda tutulmamaktadır. 
-    Slot içerisindeki göstericilerin içerisinde tutulmaktadır. Tahsisat amaçlı gezinmede düğüm içerisinde boşlukların tutulduğu 
-    ayrı bir gap elemanı da bulunmaktadır: maple_range_64 yapısıyla maple_arange_64 yaısının tanımlamalarını aşağıda veriyoruz:
+    Düğümlerin çakışık iki ayrı yapı ile temsil edildiğine dikkat ediniz: maple_arange_64 ve maple_range_64. VMA
+    ağaçlarında ara düğümler maple_arange_64 elemanını kullanırken yaprak düğümler maple_range_64 elemanını kullanmaktadır.
+    Yani düğümün türü maple_arange_64 ise yapının maple_arange_64 elemanı, düğümün türü maple_leaf_64 ise yapının 
+    maple_range_64 elemanı kullanılmaktadır. Yukarıda da belirttiğimiz gibi zaten VMA için oluşturulan maple ağaçlarında 
+    başka türden düğümler bulunmamaktadır. maple_range_64 yapısıyla maple_arange_64 yapısının tanımlamalarını aşağıda veriyoruz:
 
     struct maple_range_64 {
         struct maple_pnode *parent;
@@ -873,18 +878,15 @@
     };
 
     maple_arange_64 yapısında bir gap alanı olduğuna dikkat ediniz. Bu gap alanı alt düğümlerdeki yani her slotun
-    gösterdiği alt ağaçtaki en büyük boş (NULL) aralığın uzunluğunu tutan bir dizdir. Böylece tahsisat için arama 
-    yapılırken boşuna eğer alt ağaçta yer yoksa boşuna aşağıya doğru gidilmemektedir. Peki neden bazı düğümlerde 
-    gap olurken (maple_arange_64) bazılarında gap yoktur (struct maple_range_64)? İşte bu tasarım daha etkinliği
-    artırmak için dşünülmüştür. Örneğin bazı proseslerde zaten çok az VMA bulunduğu için ağaç tek kademe olabilir. 
-    Bu durumda bu ilk düğümde örneğin gap alanına hiç gerek yoktur. 
+    gösterdiği alt ağaçtaki en büyük boş (NULL) aralığın uzunluğunu tutan bir dizidir. Böylece tahsisat için arama 
+    yapılırken eğer alt ağaçta yeteri kadar yer yoksa boşuna aşağıya doğru gidilmemektedir. 
 
     Yukarıda düğümlerin türlerinin slot içerisindeki göstericilerde saklandığını belirtmiştik. Bu göstericilerin 
     gösterdiği yerdeki düğüm nesneleri belli uzunluklara hizalanmıştır. Buradaki slot göstericilerinin formatı şöyledir:
    
     ┌────────────────────────────────────────────┬──────────────────┐
     │         maple_node adresi   [63:8]         │ bayraklar  [7:0] │
-    │           (256 byte' hizalı, 56 bit)       │     (8 bit)      │
+    │           (256 byte'a hizalı, 56 bit)      │     (8 bit)      │
     └────────────────────────────────────────────┴──────────────────┘
                                                          │
                                                          ▼
@@ -900,7 +902,7 @@
 
 
     Görüldüğü gibi alt düğümlerin yerlerini belirten göstericilerin düşük anlamlı 8 biti bayraklar için ayrılmıştır. 
-    maple ağacının düğümleri de 256 byte'a hizalanmış durumdadır. Düşün anlamlı 8 bitin [6:3] bitleri (toplam 4 bit)
+    Maple ağacının düğümleri de 256 byte'a hizalanmış durumdadır. Düşük anlamlı 8 bitin [6:3] bitleri (toplam 4 bit)
     alt düğümün türünü tutmaktadır. Yani bu değer sağa 3 kez ötelenirse yukarıda verdiğimiz enum değerleri elde 
     edilmektedir:
 
@@ -912,7 +914,7 @@
         maple_copy,
     };
 
-    Bir byte alan içerisindeki değerleri de aşağıdaki tabloda belirtiyoruz:
+    Bir byte'lık alan içerisindeki değerleri de aşağıdaki tabloda belirtiyoruz:
 
     ┌─────────────────┬────────────┬───────────────────────┐
     │   maple_type    │  Alt düğüm │      Üst düğüm        │
@@ -923,9 +925,9 @@
     │ maple_arange_64 │ 0x1C       │ 0x06                  │
     └─────────────────┴────────────┴───────────────────────┘
 
-    Burada üçüncü sütuna dikkat ediniz. BTree gerçekleştirimlerinde üst düğümün yeri tutulmak zorundadır. İşte üst 
-    düğümün yeri de aynı zamanda düğümlerdeki parent göstericisinde tür bilgisiyla tutulmaktadır. Üçüncü sütun bu 
-    parent göstericisine ilişkindir. Üst düğüm göstericisinin bayraklarını şöyle de gösterebiliriz:
+    Burada üçüncü sütuna dikkat ediniz. B-Tree gerçekleştirimlerinde üst düğümün yeri tutulmak zorundadır. İşte üst 
+    düğümün yeri de aynı zamanda parent göstericisinde tür bilgisiyla tutulmaktadır. Üçüncü sütun bu parent göstericisine 
+    ilişkindir. Üst düğüm göstericisinin bayraklarını şöyle de gösterebiliriz:
 
     ┌────────────────────────────────────────────┬──────────────────┐
     │        üst düğümün adresi   [63:8]         │ bayraklar  [7:0] │
@@ -945,10 +947,10 @@
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Peki arama sonucunda elde edilen VMA'nın yeri (yani vm_area_struct nesnesinin yeri) ağaçta nasıl tutulmaktadır? İşte 
-    düğümlerdeki yaprağa ilişkin bir slot'taki adresin düşük anlamı 8 biti 00 ise (yaprak düğümlerde NULL yoksa böyledir) 
-    bu slottaki adres artık doğrudan vma_area_struct nesnesini göstermektedir. Burada temsili bir adesle durumu şekilsel 
-    olarak gösterelim:
+    Yukarıda da belirttiğimiz gibi arama sonucunda yapraklara inilip VMA nesnelerinin adresleri yapraklardaki slotlardan 
+    elde edilmektedir. Yaprak düğümlerdeki slotlarda bulunan adreslerin düşük anlamı 8 biti her zaman 0'dır. Bu slottaki 
+    adres artık doğrudan vma_area_struct nesnesini göstermektedir. Burada temsili bir adesle durumu şekilsel olarak 
+    gösterelim:
 
       +7   +6   +5   +4   +3   +2   +1   +0     ← slot içi bayt offset'i
     ┌────┬────┬────┬────┬────┬────┬────┬────┐
@@ -964,19 +966,21 @@
     ┌────┬────┬────┬────┬────┬────┬────┬────┐
     │ ff │ ff │ 88 │ 81 │ 04 │ a3 │ f0 │ 0c │   = 0xffff888104a3f00C
     └────┴────┴────┴────┴────┴────┴────┴────┘
-     ◀── yüksek adres          düşük adres ──▶   ▲
-                                                 │
+     ◀── yüksek adres          düşük adres ──▶.      ▲
+                                                     │
                         etiket baytı = 0x0C  ────────┘
                                 = 0b0000_1100
                                         │  │└── bit 0 : -
                                         │  └─── bit 1 : ROOT       = 0
                                         │       bit 2 : ENODE_NULL = 1
                                         └────── bit[6:3] = 1 → maple_leaf_64
-
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimd, maple ağacının görünümünü kafnızda canlandırabilmeniz için bazı örnekler verelim. Aşağıda en alt düzeydeki 
+    Maple ağacında her zaman prosesin tüm adres alanı kesiksiz tutulmaktadır. Yani prosesin adres alannda dolu ya da boş
+    her alan maple ağacının kökünden girilip yapraklara kadar ilerlendiğinde yapraklarda bulunmaktadır.
+
+    Şimdi maple ağacının görünümünü kafnızda canlandırabilmeniz için bazı örnekler verelim. Aşağıda en alt düzeydeki 
     bir düğümü görüyorsunuz:
     
               ┌───────────────────────────────────────────────────────────┐
@@ -1032,7 +1036,7 @@
 
     mt_store_range(&mm_mt, 0x600000, 0x600FFF, vma_data);
 
-    Şimdi prosesin snaal adres alanının görünümü şöyle olacaktır:
+    Şimdi prosesin sanal adres alanının görünümü şöyle olacaktır:
 
     0x000000 ┌──────────────────────────────────┐
              │  NULL                            │   
@@ -1130,8 +1134,8 @@
     Maple  ağacının ne işe yaradığını ve hangi işlevler için bulundurulduğunu yeniden özetleme istiyoruz:
 
     - Maple ağacı prosesin bellek alanı içerisindeki VMA'ların (memory_area_struct) yerlerini tutmektedir. 
-    - Maple ağacı sayesinde belli bir adresn prosesin bellek alanı içerisinde tahsis edilmiş bir VMA içerisinde olup olmadığı
-    hızlı bir biçimde sorgulanabilmektedir.
+    - Maple ağacı sayesinde belli bir adresn prosesin bellek alanı içerisinde tahsis edilmiş bir VMA içerisinde olup 
+    olmadığı hızlı bir biçimde sorgulanabilmektedir.
     - Maple ağacı prosesin sanal bellek alanında yeni bir VMA tahsisatı yapılırken boş alanların hızlı bir biçimde tespit 
     edilmesini de sağlamaktadır. 
     - Maple ağacı sayesinde artık prosesin bütün VMA'larının ayrı bir listede saklanmasına da gerek kalmamaktadır. 
@@ -2928,10 +2932,12 @@ void exit_sys(const char *msg)
     Linux sistemlerinde yeni bir proses yaratmak için çekirdekte sys_fork isimli sistem fonksiyonu bulunmaktadır. Ancak 
     Linux sistemlerinde aslında proses ve thread yaratımı için kullanılan asıl taban sistem fonksiyonu sys_clone (ve 
     daha gelişmiş biçimi olan sys_clone3) isimli sistem fonksiyonudur. sys_clone sistem fonksiyonudur. sys_clone ve 
-    sys_clone3 sistem fonksiyonları zaten sys_fork fonksiyonunun tüm işlevselliğini de sağlamaktadır. "glibc" kütüphanesinde 
-    sys_clone fonksiyonunu çağıran clone isimli bir kütüphane fonksiyonu da bulunmaktadır. Tabii clone fonksiyonu POSIX 
-    standartlarında yoktur. Çekirdekte aslında sys_fork, sys_clone ve sys_clone3 aynı ortak kernel_clone fonksiyonunu 
-    çağırmaktadır. Güncel öekirdeklerde sys_fork fonksiyonu "ketnel/fork.c" dosyası içerisinde şöyle tanımlanmıştır:
+    sys_clone3 sistem fonksiyonları zaten sys_fork fonksiyonunun tüm işlevselliğini de sağlamaktadır. (Eskidnen Linux'un
+    yalnızca IA64 port'larında sys_clone2 fonksiyonu vardı. Bu nedenle daha sonra tasarlanmış olan clone sistem fonksiyonuna 
+    sys_clone3 ismi verilmiştir. Artık sys_clone2 hiçbir port'ta bulunmamaktadır.) "glibc" kütüphanesinde sys_clone 
+    fonksiyonunu çağıran clone isimli bir kütüphane fonksiyonu da bulunmaktadır. Tabii clone fonksiyonu POSIX standartlarında 
+    yoktur. Çekirdekte aslında sys_fork, sys_clone ve sys_clone3 aynı ortak kernel_clone fonksiyonunu çağırmaktadır. Güncel 
+    çekirdeklerde sys_fork fonksiyonu "ketnel/fork.c" dosyası içerisinde şöyle tanımlanmıştır:
 
     #ifdef __ARCH_WANT_SYS_FORK
     SYSCALL_DEFINE0(fork)
@@ -3023,7 +3029,6 @@ void exit_sys(const char *msg)
     tarafından sarmalanmamıştır. Ancak syscall isimli "glibc" fonksiyonu yoluyla bu sistem fonksiyonu kullanıcı 
     modundan çağrılabilmektedir.kernel_clone_args yapısı "include/linuc/sched/task.h" dosyası içerisinde şöyle 
     tanımlanmıştır:
-
 
     struct kernel_clone_args {
         u64 flags;
@@ -3205,7 +3210,7 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Güncel çekirdeklerede yukarıda da belirttiğimiz gibi taban sistem fonksiyonu sys_clone ve sys_clone2 fonksiyonlarıdır. 
+    Güncel çekirdeklerde yukarıda da belirttiğimiz gibi taban sistem fonksiyonu sys_clone ve sys_clone3 fonksiyonlarıdır. 
     Kullanıcı modundaki "glibc" kütüphanesinin clone fonksiyonu da doğrudan sys_clone sistem fonksiyonunu çağırmaktadır. 
     Öte yandan yukarıda da gördüğünüz gibi sys_clone fonksiyonu da aslında kernel_clone fonksiyonun bir sarmalayıcısıdır. 
     O halde güncel çekirdeklerdeki asıl taban fonksiyon kernel_clone fonksonudur. 
@@ -3769,27 +3774,587 @@ void exit_sys(const char *msg)
     Peki bir thread'i biz "glibc" kütüphanesinin sarma fonksiyonu yerine doğrudan sys_clone ya da sys_clone3 sistem 
     fonksiyonlarıyla nasıl yaratabilrdik? Bu sistem fonksiyonları akışı çekirdek içerisinden başlatmaktadır. Dolayısıyla
     thread akışını bir fonksiyonla başlatmak isterseniz "glibc" kütüphanesindeki clone gibi bir sarma fonksiyon 
-    yazmanız gerekir. Biz aşağıda doğrudan 
+    yazmanız gerekir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+                                        110. Ders 18/10/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi çekirdekte sys_fork ve sys_clone, sysclone3 gibi sistem fonksiyonlarının gerçekleştirimi üzerinde duralım. 
+    Daha önce de belirttiğimiz gibi aslında bu bu sistem fonksiyonları hemen ortak kernel_clone fonksiyonunu çağırmaktadır. 
+    Yani çekirdekteki ana clone işlevselliği kernel_clone fonksiyonu tarafından sağlanmaktadır. Bu fonksiyonun export 
+    edilmediğini söylemiştik. kernel_clone fonksiyonun parametrik yapısı şöyledir:
+
+    pid_t kernel_clone(struct kernel_clone_args *args);
+
+    Fonksiyonun kernel_clone_args isimli bir yapı yapı nesnesinin adresini aldığını daha önce de belirtmiştik. Dolayısıyla
+    aslında sys?forki sys_clone ve sys_clone3 sistem fonksiyonları aldıkları parametreleri kernel_clone_args nesnesine 
+    yerleştirip kernel_clone fonksiyonunu çağırmaktadır. Bu fonksiyonları aşağıda yeniden veriyoruz:
+
+    SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
+		 int __user *, parent_tidptr,
+		 int __user *, child_tidptr,
+		 unsigned long, tls)
+    {
+        struct kernel_clone_args args = {
+            .flags		= (lower_32_bits(clone_flags) & ~CSIGNAL),
+            .pidfd		= parent_tidptr,
+            .child_tid	= child_tidptr,
+            .parent_tid	= parent_tidptr,
+            .exit_signal	= (lower_32_bits(clone_flags) & CSIGNAL),
+            .stack		= newsp,
+            .tls		= tls,
+        };
+
+        return kernel_clone(&args);
+    }
+
+    SYSCALL_DEFINE0(fork)
+    {
+    #ifdef CONFIG_MMU
+        struct kernel_clone_args args = {
+            .exit_signal = SIGCHLD,
+        };
+
+        return kernel_clone(&args);
+    #else
+        /* can not support in nommu mode */
+        return -EINVAL;
+    #endif
+    }
+
+    SYSCALL_DEFINE2(clone3, struct clone_args __user *, uargs, size_t, size)
+    {
+        int err;
+
+        struct kernel_clone_args kargs;
+        pid_t set_tid[MAX_PID_NS_LEVEL];
+
+    #ifdef __ARCH_BROKEN_SYS_CLONE3
+    #warning clone3() entry point is missing, please fix
+        return -ENOSYS;
+    #endif
+
+        kargs.set_tid = set_tid;
+
+        err = copy_clone_args_from_user(&kargs, uargs, size);
+        if (err)
+            return err;
+
+        if (!clone3_args_valid(&kargs))
+            return -EINVAL;
+
+        return kernel_clone(&kargs);
+    }
+
+    sys_clone3 fonksiyonunun çağırdığı copy_clone_args_from_user fonksiyonu kullanıcı aalanındaki clone_args yapısının 
+    içeriğine çekirdekteki kernel_clone_args yapısına kopyalamaktadır. 
+
+    kernel_clone fonksiyonu başarı durumunda yeni yaratılan task_struct nesnesinin pid değerine, başarısızlık durumunda 
+    ise negatif errno değerine geri dönmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Konuya girişte de belirttiğimiz gibi fork ya da clone işlemleri önce çağrıyı yapan thread'in task_struct nesnesinin
+    yeni oluşturulan task_struct nesnesine kopyalanıp sonra diğer düzeltme işlemlerini yapmaktadır. kernel_clone
+    fonksiyonunun temel işleyişi şöyledir:
+
+    fork()  (glibc → syscall)
+    └─ sys_fork / sys_clone / sys_clone3
+        └─ kernel_clone(struct kernel_clone_args *args)
+                ├─ copy_process()            ← asıl iş burada yapılır
+                │    ├─ dup_task_struct()    ← task_struct ve kernel stack kopyası
+                │    ├─ copy_creds()
+                │    ├─ ... alan sıfırlamaları ...
+                │    ├─ sched_fork()
+                │    ├─ copy_semundo()
+                │    ├─ copy_files()
+                │    ├─ copy_fs()
+                │    ├─ copy_sighand()
+                │    ├─ copy_signal()
+                │    ├─ copy_mm()
+                │    ├─ copy_namespaces()
+                │    ├─ copy_io()
+                │    ├─ copy_thread()        ← mimariye özgü: register'lar, dönüş adresi
+                │    ├─ alloc_pid()
+                │    └─ proses ağacına ve PID tablolarına bağlama
+                └─ wake_up_new_task()        ← alt proses çalıştırma kuyruğuna girer
+
+    Burada ana işlemin copy_process fonksiyonu tarafından yapıldığını görüyorsunuz. copy_process fonksiyonun çağrılmadan 
+    önce bazı kontroller yapılmıştır. Güncel çekirdeklerde kernel_clone fonksiyonu "kernel/fork.c" dosyası içerisinde 
+    aşağıdaki gibi tanımlanmıştır:
+
+    pid_t kernel_clone(struct kernel_clone_args *args)
+    {
+        u64 clone_flags = args->flags;
+        struct completion vfork;
+        struct pid *pid;
+        struct task_struct *p;
+        int trace = 0;
+        pid_t nr;
+
+        /*
+        * Creating an empty mount namespace implies creating a new mount
+        * namespace.  Set this before copy_process() so that the
+        * CLONE_NEWNS|CLONE_FS mutual exclusion check works correctly.
+        */
+        if (clone_flags & CLONE_EMPTY_MNTNS) {
+            clone_flags |= CLONE_NEWNS;
+            args->flags = clone_flags;
+        }
+
+        /*
+        * For legacy clone() calls, CLONE_PIDFD uses the parent_tid argument
+        * to return the pidfd. Hence, CLONE_PIDFD and CLONE_PARENT_SETTID are
+        * mutually exclusive. With clone3() CLONE_PIDFD has grown a separate
+        * field in struct clone_args and it still doesn't make sense to have
+        * them both point at the same memory location. Performing this check
+        * here has the advantage that we don't need to have a separate helper
+        * to check for legacy clone().
+        */
+        if ((clone_flags & CLONE_PIDFD) &&
+            (clone_flags & CLONE_PARENT_SETTID) &&
+            (args->pidfd == args->parent_tid))
+            return -EINVAL;
+
+        if (!valid_signal(args->exit_signal))
+            return -EINVAL;
+
+        /*
+        * Determine whether and which event to report to ptracer.  When
+        * called from kernel_thread or CLONE_UNTRACED is explicitly
+        * requested, no event is reported; otherwise, report if the event
+        * for the type of forking is enabled.
+        */
+        if (!(clone_flags & CLONE_UNTRACED)) {
+            if (clone_flags & CLONE_VFORK)
+                trace = PTRACE_EVENT_VFORK;
+            else if (args->exit_signal != SIGCHLD)
+                trace = PTRACE_EVENT_CLONE;
+            else
+                trace = PTRACE_EVENT_FORK;
+
+            if (likely(!ptrace_event_enabled(current, trace)))
+                trace = 0;
+        }
+
+        p = copy_process(NULL, trace, NUMA_NO_NODE, args);
+        add_latent_entropy();
+
+        if (IS_ERR(p))
+            return PTR_ERR(p);
+
+        /*
+        * Do this prior waking up the new thread - the thread pointer
+        * might get invalid after that point, if the thread exits quickly.
+        */
+        trace_sched_process_fork(current, p);
+
+        pid = get_task_pid(p, PIDTYPE_PID);
+        nr = pid_vnr(pid);
+
+        if (clone_flags & CLONE_PARENT_SETTID)
+            put_user(nr, args->parent_tid);
+
+        if (clone_flags & CLONE_VFORK) {
+            p->vfork_done = &vfork;
+            init_completion(&vfork);
+            get_task_struct(p);
+        }
+
+        if (IS_ENABLED(CONFIG_LRU_GEN_WALKS_MMU) && !(clone_flags & CLONE_VM)) {
+            /* lock the task to synchronize with memcg migration */
+            task_lock(p);
+            lru_gen_add_mm(p->mm);
+            task_unlock(p);
+        }
+
+        wake_up_new_task(p);
+
+        /* forking complete and child started to run, tell ptracer */
+        if (unlikely(trace))
+            ptrace_event_pid(trace, pid);
+
+        if (clone_flags & CLONE_VFORK) {
+            if (!wait_for_vfork_done(p, &vfork))
+                ptrace_event_pid(PTRACE_EVENT_VFORK_DONE, pid);
+        }
+
+        put_pid(pid);
+        return nr;
+    }
+
+    Fonksiyonda önce bazı clone bayraklarının ve sonlnama sinyalinin geçerliliğinin kontrol edildiğini görüyorsunuz. 
+    Sonra trace işlemleri için belirleme yapılmıştır. Ancak yukarıda da belirttiğimiz gibi ana işlevsellik copy_process
+    fonksiyonu tarafından yapılmaktadır. 
+    
+    copy_process fonksiyonunda önce clone bayraklarının tutarlı ve geçerli olup olmadığı kontrol edilmiştir. Sonra 
+    dup_task_struct fonksiyonu çağrılarak yeni bir task_struct nesnesi yaratılıp çağrıyı yapan thread'in task_struct 
+    nesnesi yeni yaratılan task_struct nesnesine kopyalanmıştır. 
+
+    __latent_entropy struct task_struct *copy_process(
+                struct pid *pid,
+				int trace,
+				int node,
+				struct kernel_clone_args *args)
+    {
+            /* ... */
+
+            p = dup_task_struct(current, node);
+            if (!p)
+		        goto fork_out;
+
+            /* ... */
+    }
+
+    dup_task_struct fonksiyonuna geçirilen current göstericisinin o anda çalışmakta olan thread'in task_struct 
+    nesnesini gösterdiğini anımsayınız. Fonksiyona geçirilen node argümanı yeni task_struct nesnesinin hangi NUMA 
+    düğümünden tahsis edileceğini belirtmektedir. Güncel çekirdeklerde dup_task_struct fonksiyonu "kernel/fork.c" 
+    dosyası içerisinde şöyle tanımlanmıştır:
+
+    static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
+    {
+        struct task_struct *tsk;
+        int err;
+
+        if (node == NUMA_NO_NODE)
+            node = tsk_fork_get_node(orig);
+        tsk = alloc_task_struct_node(node);
+        if (!tsk)
+            return NULL;
+
+        err = arch_dup_task_struct(tsk, orig);
+        if (err)
+            goto free_tsk;
+
+        err = alloc_thread_stack_node(tsk, node);
+        if (err)
+            goto free_tsk;
+
+    #ifdef CONFIG_THREAD_INFO_IN_TASK
+        refcount_set(&tsk->stack_refcount, 1);
+    #endif
+        account_kernel_stack(tsk, 1);
+
+        err = scs_prepare(tsk, node);
+        if (err)
+            goto free_stack;
+
+    #ifdef CONFIG_SECCOMP
+        /*
+        * We must handle setting up seccomp filters once we're under
+        * the sighand lock in case orig has changed between now and
+        * then. Until then, filter must be NULL to avoid messing up
+        * the usage counts on the error path calling free_task.
+        */
+        tsk->seccomp.filter = NULL;
+    #endif
+
+        RCU_INIT_POINTER(tsk->exec_state, NULL);
+
+        setup_thread_stack(tsk, orig);
+        clear_user_return_notifier(tsk);
+        clear_tsk_need_resched(tsk);
+        set_task_stack_end_magic(tsk);
+        clear_syscall_work_syscall_user_dispatch(tsk);
+
+    #ifdef CONFIG_STACKPROTECTOR
+        tsk->stack_canary = get_random_canary();
+    #endif
+        if (orig->cpus_ptr == &orig->cpus_mask)
+            tsk->cpus_ptr = &tsk->cpus_mask;
+        dup_user_cpus_ptr(tsk, orig, node);
+
+        /*
+        * One for the user space visible state that goes away when reaped.
+        * One for the scheduler.
+        */
+        refcount_set(&tsk->rcu_users, 2);
+        /* One for the rcu users */
+        refcount_set(&tsk->usage, 1);
+    #ifdef CONFIG_BLK_DEV_IO_TRACE
+        tsk->btrace_seq = 0;
+    #endif
+        tsk->splice_pipe = NULL;
+        tsk->task_frag.page = NULL;
+        tsk->wake_q.next = NULL;
+        tsk->worker_private = NULL;
+
+        kcov_task_init(tsk);
+        kmsan_task_create(tsk);
+        kmap_local_fork(tsk);
+
+    #ifdef CONFIG_FAULT_INJECTION
+        tsk->fail_nth = 0;
+    #endif
+
+    #ifdef CONFIG_BLK_CGROUP
+        tsk->throttle_disk = NULL;
+        tsk->use_memdelay = 0;
+    #endif
+
+    #ifdef CONFIG_ARCH_HAS_CPU_PASID
+        tsk->pasid_activated = 0;
+    #endif
+
+    #ifdef CONFIG_MEMCG
+        tsk->active_memcg = NULL;
+    #endif
+
+    #ifdef CONFIG_X86_BUS_LOCK_DETECT
+        tsk->reported_split_lock = 0;
+    #endif
+
+    #ifdef CONFIG_SCHED_MM_CID
+        tsk->mm_cid.cid = MM_CID_UNSET;
+        tsk->mm_cid.active = 0;
+        INIT_HLIST_NODE(&tsk->mm_cid.node);
+    #endif
+
+    #ifdef CONFIG_BPF_SYSCALL
+        RCU_INIT_POINTER(tsk->bpf_storage, NULL);
+        tsk->bpf_ctx = NULL;
+    #endif
+        return tsk;
+
+    free_stack:
+        exit_task_stack_account(tsk);
+        free_thread_stack(tsk);
+    free_tsk:
+        free_task_struct(tsk);
+        return NULL;
+    } 
+
+    Fonksiyonun temel akışı şöyledir:
+
+    dup_task_struct(current, node)
+        ├─ alloc_task_struct_node()         ← task_struct için slab nesnesi
+        ├─ arch_dup_task_struct()           ← *tsk = *orig (tam kopya)
+        ├─ alloc_thread_stack_node()        ← kernel stack tahsisi (vmalloc)
+        ├─ setup_thread_stack()             ← thread_info bağlantısı
+        ├─ set_task_stack_end_magic()       ← stack taşma denetimi için işaret
+        ├─ ... alan sıfırlamaları ...       ← paylaşılmaması gereken alanlar
+        ├─ refcount_set(rcu_users / usage)  ← referans sayaçları
+        └─ return tsk                       ← hata durumunda NULL
+
+    Burada alloc_task_struct_node fonksiyonu belirtilen NUMA düğümünden task_struct için oluşturulmuş olan dilim 
+    öncelleğini kullanarak task_struct nesnesini tahsis etmektedir. Bu fonksiyon da şöyle tanımlanmıştır:
+
+    static inline struct task_struct *alloc_task_struct_node(int node)
+    {
+        return kmem_cache_alloc_node(task_struct_cachep, GFP_KERNEL, node);
+    }
+
+    dup_task_struct fonksiyonu içerisinde alloc_task_struct_node çağrısından sonra arch_dup_task_struct fonksiyonu 
+    çağrılmıştır. İşte işlemi uygulayan thread'in task_struct nesnesini yeni task_struct nesnesine kopyalanması bu 
+    fonksiyon içerisinde yapılmaktadır. arch_dup_task_struct fonksiyonu farklı mimariler için onlara özgü birtakım
+    ayrıntıları da içerecek biçimde ayrı ayrı yazılmıştır. Örneğin x86 için bu fonksiyon şöyle tanımlanmıştır:
+
+    int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
+    {
+        /* fpu_clone() will initialize the "dst_fpu" memory */
+        memcpy_and_pad(dst, arch_task_struct_size, src, sizeof(*dst), 0);
+
+    #ifdef CONFIG_VM86
+        dst->thread.vm86 = NULL;
+    #endif
+
+        return 0;
+    }
+   
+    Burada görüldüğü gibi işlemi uygulayan thread'in task_struct nesnesi yeni yaratılan task_struct nesnesine memcpy_and_pad
+    fonksiyonuyla kopyalanmaktadır. 
+    
+    Bundan sonra yeni yaratılan thread için  alloc_thread_stack_node fonksiyonu ile çekirdek stack'i tahsisatı yapılmıştır. 
+    Thread'lerin hem kullanıcı alanlarında hem de çekirdek alanlarında stack'leri vardır. Thread akışı bir sistem fonksiyonu 
+    ile çekirdek moduna geçtiğinde bağlamsal geçiş sırasında thread'in stack'i de otomatik olarak çekirdek alanında tahsis 
+    edilen çekirdek stack alanını kullanmaya başlamaktadır. Buna stack değişimi "stack switch" de denilmektedir. Eğer bir 
+    stack değişimi olmasaydı akış çekirdek moduna geçtiğinde kullanıcı modundaki stack güvensiz olduğu için sistem 
+    çökertilebilirdi. Thread'lerin çekirdek stack'leri task_struct yapısının içerisindeki stack isimli elemanda tutulmaktadır. 
+    Çekirdek stack'leri tipik olarak 2 sayfa (örneğin 8192 byte) büyüklüğünde tahsis edilmektedir. Thread'lererin kullanıcı 
+    alanındaki stack'leri zaten fork işlemi sırasında üst prosesten alınmaktadır. Yani fork işlemi sırasında zaten 
+    üst prosesin tüm sanal bellek alanı alt prosese aktarıldığı için stack alanı da aktarılmış olmaktadır. Tabii 
+    buradaki aktarın yalnızca bölgeseldir. Alt proseste stack kullanılmaya başlandığında copy-on-write mekanizması 
+    devreye sokularak alt prosesin satck sayfaları üst prosesten ayrıştırılmaktadır. Yeni yaratılan thread için 
+    çekirdek stack'i tahsis edildikten sonra setup_thread_stack fonksiyonu ile asıl task_struct nesnesinin thread_info
+    yapısı yeni yaratılan task_struct nesnesinin thread_info yapısına kopyalanmıştır. 
+
+    Özetle dup_task_struct fonksiyonu yeni bir task_struct nesnesin yaratıp kullanıma hazır hale getirmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    copy_process fonksiyonunda dup_task_struct fonksiyonu ile yeni bir task_struct nesnesi oluşturulduktan sonra 
+    artık sıra işlemi uygulayan üst prosesin (ya da thread'in) task_struct nesnesinin içeriğinin yeni task_struct nesnesine
+    kopyalanmasına gelmiştir. Yukarıda da belirttiğimiz gibi bu kopyalama işlemi clone bayraklarına bakılarak sığ ya da
+    derin biçimde yapılmaktadır. copy_process fonksiyonu içerisinde task_struct nesnesinin çeşitli alanlarını kopyalamak 
+    için copy_xxx isimli fonksiyonlar çağrılmıştır:
+
+    fork()  (glibc → syscall)
+    └─ sys_fork / sys_clone / sys_clone3
+        └─ kernel_clone(struct kernel_clone_args *args)
+                ├─ copy_process()            ← asıl iş burada yapılır
+                │    ├─ dup_task_struct()    ← task_struct ve kernel stack kopyası
+                │    ├─ copy_creds()
+                │    ├─ ... alan sıfırlamaları ...
+                │    ├─ sched_fork()
+                │    ├─ copy_semundo()
+                │    ├─ copy_files()
+                │    ├─ copy_fs()
+                │    ├─ copy_sighand()
+                │    ├─ copy_signal()
+                │    ├─ copy_mm()
+                │    ├─ copy_namespaces()
+                │    ├─ copy_io()
+                │    ├─ copy_thread()        ← mimariye özgü: register'lar, dönüş adresi
+                │    ├─ alloc_pid()
+                │    └─ proses ağacına ve PID tablolarına bağlama
+                └─ wake_up_new_task()        ← alt proses çalıştırma kuyruğuna girer
+
+    Bu copy fonksiyonlarının bazıların inceleyelim. (Bazı copy fonksiyonları henüz görmediğimiz konulara ilişkin olduğu 
+    için burada onların ayrıntılarına girmeyeceğiz.)
+
+    copy_creds fonksiyonu çağrıyı yapan thread'in "gerçek ve etkin user id, group id gibi" yetkisel alanlarını kopyalamaktadır. 
+    Güncel çekirdeklerde prosesin yetkisel bilgileri task_struct içerisindeki üç farklı cred türünden elemanda 
+    tutulmaktadır:
+
+    struct task_struct {
+        /* ... */
+        
+        const struct cred __rcu		*ptracer_cred;
+	    const struct cred __rcu		*real_cred;     /* Objective and real subjective task credentials (COW): */
+	    const struct cred __rcu		*cred;          /* Effective (overridable) subjective task credentials (COW): */
+
+        /* ... */
+    };
+
+    Burada çekirdek test işlemlerinde cred göstericisinin gösterdiği yerdeki yetkisel bilgileri kullanmaktadır. cred
+    göstericisi normal oalrak real_cred göstericisi ile aynı cred nesnesini göstermektedir. ptracer_cred ise 
+    trace işlemi sırasında kullanılacak yetki derecesini belirtmektedir. cred yapısı "include/linux/cred.h" doayası
+    içerisinde aşağıdaki gibi tanımlanmıştır:
+
+    struct cred {
+        atomic_long_t	usage;
+        kuid_t		uid;		/* real UID of the task */
+        kgid_t		gid;		/* real GID of the task */
+        kuid_t		suid;		/* saved UID of the task */
+        kgid_t		sgid;		/* saved GID of the task */
+        kuid_t		euid;		/* effective UID of the task */
+        kgid_t		egid;		/* effective GID of the task */
+        kuid_t		fsuid;		/* UID for VFS ops */
+        kgid_t		fsgid;		/* GID for VFS ops */
+        unsigned	securebits;	/* SUID-less security management */
+        kernel_cap_t	cap_inheritable; /* caps our children can inherit */
+        kernel_cap_t	cap_permitted;	/* caps we're permitted */
+        kernel_cap_t	cap_effective;	/* caps we can actually use */
+        kernel_cap_t	cap_bset;	/* capability bounding set */
+        kernel_cap_t	cap_ambient;	/* Ambient capability set */
+    #ifdef CONFIG_KEYS
+        unsigned char	jit_keyring;	/* default keyring to attach requested
+                        * keys to */
+        struct key	*session_keyring; /* keyring inherited over fork */
+        struct key	*process_keyring; /* keyring private to this process */
+        struct key	*thread_keyring; /* keyring private to this thread */
+        struct key	*request_key_auth; /* assumed request_key authority */
+    #endif
+    #ifdef CONFIG_SECURITY
+        void		*security;	        /* LSM security */
+    #endif
+        struct user_struct *user;	    /* real user ID subscription */
+        struct user_namespace *user_ns; /* user_ns the caps and keyrings are relative to. */
+        struct ucounts *ucounts;
+        struct group_info *group_info;	/* supplementary groups for euid/fsgid */
+        /* RCU deletion */
+        union {
+            int non_rcu;			    /* Can we skip RCU deletion? */
+            struct rcu_head	rcu;		/* RCU deletion hook */
+        };
+    } __randomize_layout;
+
+    Görüldüğü gibi bu yapı içerisinde prosesin tüm yetkisel bilgileri bulunmaktadır. Eski çekirdeklerde bu bilgiler 
+    doğrudan task_struct içerisinde tutuluyordu. Anımsanacağı gibi Linux sistemleri "yetenek (capability)" denilen 
+    bir özelliği de destekliyordu. Bu sayede bir proses root (etkin user ID 0) olmasa bile bazı yeteneklere sahip 
+    olabiliyordu. Yeteneklilik (capability) klasik UNIX sistemlerinin "ya hep ya hiç" kısıtlayıcılığını ortadan 
+    kaldırmak için Linux sistemlerine sokulmuştur. cred yapısı içerisinde prosesin yeteneklerine ilişkin bilgilerin de
+    tutulduğuna dikkat ediniz. 
+
+    copy_cred fonksiyonunda clone bayraklarına da bakılarak işlemi uygulayan task_struct nesnesindeki cred ve real_cred
+    göstericileri yeni task_struct nesnesine kopyalanmaktadır. 
+
+
+    copy_files fonksiyonu yaratımı yapan task_struct nesnesindeki açık dosya bilgilerini yeni yaratılan task_struct 
+    nesnesine clone bayraklarına balarak kopyalamakatdır. Anımsanacağı gibi task_struct nesnesinin içerisindeki 
+    files göstericisi files_strcut nesnesini gösteriyordu. files_struct nesnesinin fdt elemanı da file nesnelerinin 
+    adreslerini tutan ve ismine "dosya betimleyici tablosu (file descriptor table)" denilen gösterici dizisinin adresini 
+    tutuyordu. Açık dosyalara ilişkin bilgiler bu nesnelerde saklanıyordu:
+
+    task_struct 
+    ...
+    files ------------> files_struct          fd_table
+    ...                  ...                  ...
+                         fdtab ------------>  fd    ------------> Dosya Betimleyici Tablosu
+                         ...                  ...
+
+    Yaratımı yapan task_struct nesnesinin tüm içeriğinin arch_dup_task_struct fonksiyonu tarafından yeni ryaratılan 
+    task_sturct nesnesine kopyalandığını belirtmiştik. O halde bu kapyalama sırasında yaratımı yapan task_struct 
+    nesnesinin files göstericisi de yeni yaratılan task_struct nesnesinin files göstericisine kopyalanmaktadır. Bu 
+    sığ kopyalama anlamına gelmektedir. Thread'ler yaratılırken bu yeterli olmaktadır. (Tabii sayaçların da artırılması
+    gerekmektedir.) Ancak fork işlemi sırasında bu nesnelerin kopyaları oluşturulmaktadır. Yani yeni yaratılan 
+    task_struct için ayrı bir files_struct nesnesi ve fd_table dizisi oluşturulmalıdır. İşte anımsanacağı gibi açık 
+    dosya bilgilerinin paylaşılabilirliği için CLONE_FILES bayrağının kullanıldığını anımsayınız. Bu bayrak set edilmişse 
+    bir therad yaratımı söz konusudur, eni yaratılan thread'e ilişkin task_struct nesnesinin files göstericisisi 
+    yaratımı yapan thread'in task_struct nesnesindeki files göstericisi ile aynı files_structe nesnesini gösterir. 
+    Böylece hem yaratımı yapan thread hem de yeni yaratılan thread aynı dosya bilgilerin kullanır. Thread'ler zaten 
+    aynı dosyalar üzerinde işlem yapmaktadır. copy_files fonksiyonu güncel çekirdeklerde şöyle yazılmıştır:
+
+    static int copy_files(u64 clone_flags, struct task_struct *tsk,
+		      int no_files)
+    {
+        struct files_struct *oldf, *newf;
+
+        /*
+        * A background process may not have any files ...
+        */
+        oldf = current->files;
+        if (!oldf)
+            return 0;
+
+        if (no_files) {
+            tsk->files = NULL;
+            return 0;
+        }
+
+        if (clone_flags & CLONE_FILES) {
+            atomic_inc(&oldf->count);
+            return 0;
+        }
+
+        newf = dup_fd(oldf, NULL);
+        if (IS_ERR(newf))
+            return PTR_ERR(newf);
+
+        tsk->files = newf;
+        return 0;
+    }
+
+    Fonksiyonda önce birkaç kontrol yapılmıştır. Sonra eğer CLONE_FILES baurağı set edilmişse yalnızca files_struct 
+    içerisindeki sayaç artırılmıştır:
+
+    if (clone_flags & CLONE_FILES) {
+        atomic_inc(&oldf->count);
+        return 0;
+    }
+
+    Eğer CLONE_FILES bayrağı set edilmemişse bu durumda yaratımı yapan thread'in yukarıda belirttiğimiz task_strcut 
+    elemanları dup_fd fonksiyonunda kopyalnmıştır. dup_fd fonksiyonu da şöyle yazılmıştır:
+
+    
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
+    
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
