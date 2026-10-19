@@ -3683,7 +3683,6 @@ fn thread_proc() {
     prosesin tek thread'iyse proses de sonlandırılmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-
 /*---------------------------------------------------------------------------------------------------------------------------
     Aslında Rust'ta tek bir makine bir makine komutu ile yapılabilecek bazı işlemlerin hiç mutex gerekmeden yapılabilmesi 
     için std::sync::atomic modülünde AtomicXXX isimli yapılar bulundurulmuştur. Aslında bu yapılar aynı modüldeki Atomic<T> 
@@ -3742,6 +3741,251 @@ fn thread_proc() {
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+                                        140. Ders 19/10/2026 - Pazartesi
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Birden fazla thread aynı nesne üzerinde işlem yaparken söz konusu nesnenin ömürünün thread'lerin ömürlerinden daha fazla 
+    olması gerektiğini belirtmiştik. Bunu sağlamak için static global ve yerel değişkenler kullanmıştık. Sonra da scope 
+    fonksiyonuyla bu sorunun üstesinden gelmiştik. 
+    
+    Rust'ta std::sync modülünde Arc<T> isminde referans sayaçlı gösterici gibi davranan bir "akıllı gösterici (smart pointer)" 
+    yapısı da bulunmaktadır. Bu yapı işlevsel olarak C++'taki shared_ptr sınıfına oldukça benzemektedir. Arc<T> türünden bir 
+    değer yaratıldığında T türünden değer ve iki sayaç da heap'te tahsis edilir, Arc<T> de türünden değişken de aslında bu 
+    heap'teki bu T türünden değerin bulunduğu nesnenin adresini tutmaktadır. Örneğin:
+
+    let a: Arc<i32>;
+    a = Arc::new(10);
+
+    Burada a değişkeni Arc<i32> türündendir. Ancak i32 türünden değer ve iki sayaç değeri heap'te tahsis edilmiştir ve a 
+    değişkeni içerisinde heap'teki bu nesneyi gösteren bir gösterici bulunmaktadır. Arc<T> türü deref trait'ini desteklediği 
+    için bir referans gibi kullanılabilmektedir. Yani biz * operatörüyle bu i32 değerine erişebiliriz. Örneğin:
+
+    let a = Arc::new(10);
+
+    println!("{}", *a);     // 10
+
+    Arc yapısı aslında iki generic parametreye sahiptir. Ancak allocator belirten ikinci generic parametre default tür 
+    aldığı için belirtilmek zorunda değildir. Biz Arc türünü burada Arc<T, A> biçiminde değil Arc<T> biçiminde belirteceğiz. 
+
+    Arc<T> türü Clone trait'ini desteklemektedir. Aynı T değerini gösteren yeni bir Arc<T> türünden değişken Arc<T> yapısının 
+    clone metoduyla oluşturulmaktadır. clone metodu Clone traitinden gelmektedir. Örneğin:
+
+    let a = Arc::new(10);
+    let b = a.clone();
+    let c = b.clone();
+
+    Burada heap'teki i32 türünden değerin tutulduğu nesneye hem a hem de b değişkenleri referans etmektedir. Bu i32 türünden 
+    değişkenin referans sayacı 3'tür. 
+   
+    Arc<T> akıllı gösterici yapısı aşağıdakine benzer biçimde gerçekelştirilmiştir:
+
+    pub struct Arc<T: ?Sized, A: Allocator = Global> {
+        ptr: NonNull<ArcInner<T>>,
+        phantom: PhantomData<ArcInner<T>>,
+        alloc: A,
+    }
+
+    #[repr(C)]
+    struct ArcInner<T: ?Sized> {
+        strong: atomic::AtomicUsize,
+        weak: atomic::AtomicUsize,
+        data: T,
+    }
+
+    Aslında burada Arc<T> türünden bir değişkende yapnızca ptr gösterici yer kaplamaktadır. Bunu şöyle gösterebiliriz:
+
+    let a = Arc::new(vec![1, 2, 3, 4, 5]);
+
+    println!("{}", std::mem::size_of_val(&a));      // 8
+
+    Burada a değişkenin içerisindeki gösterici aslında heap'teki vektörü göstermektedir. a değişkenin kendi uzunluğu 
+    64 bit sistemlerde 8 byte'tır. Yukarıdan da görüldüğü gibi Arc<T> türünden değişkenin gösterdiği yerde üç elemandna 
+    oluşan bir yapı nesnesi bulunmaktadır. Bu yapı nesnesinin içerisinde iki farklı sayaç ve bir de T türünden nesnenin 
+    kendisi tutulmaktadır. Sayaçların Arc<T> türündne değerin içerisinde değil onun gösteridği heap'teki nesnenin içerisinde 
+    olduğuna dikkat ediniz. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Arc<T> türünden değişkenin gösterdiği yerdeki nesnenin iki farklı referans sayacı olduğunu belirtmiştik. Bu sayaçlardan 
+    birine strong, diğerine ise weak denilmektedir. Heap'teki nesne strong sayacı 0'a düştüğünde yok edilmektedir. weak 
+    sayacın nesnenin yaşaması üzerinde tkisi yoktur. Her clone işlemi yapıldığında strong sayaç 1 atrırılır, Arc<T> türünden
+    değişken faaliyet alanını bitirip drop edilirken (açıkça da drop edilebilir) strong sayaç 1 eksiltilir. Heap'teki nesneyi 
+    gösteren son akıllı gösterici yok edildiğinde bu heap'teki nesne de yok edilmektedir. Heap'teki nesnenin strong ve weak 
+    sayaçlarını elde etmek için iki ilişkili fonksiyon kullanılmaktadır:
+
+    pub fn weak_count(this: &Arc<T, A>) -> usize
+    pub fn strong_count(this: &Arc<T, A>) -> usize
+
+    Bu ilişki fonksiyonların parametresinin Arc<T> türünden referans olduğuna dikkat ediniz. Örneğin:
+
+    use std::sync::Arc;
+
+    fn main() {
+        let a = Arc::new(vec![1, 2, 3, 4, 5]);
+
+        println!("{}", Arc::strong_count(&a));          // 1
+        {
+            let b = a.clone();
+
+            println!("{}", Arc::strong_count(&b));      // 2
+        }
+
+        println!("{}", Arc::strong_count(&a));          // 1
+
+    }
+
+    Peki Arc<T> yapısının kullanım amacı nedir? İşte bu yapı aslında bir nesnenin referansının birden fazla kaynak tarafından 
+    tutulabilmesini sağlamak için düşünülmüştür. 
+
+    Arc<T> türünden bir değerin tuttuğu heap'teki değeri * operatörle değiştirilemez. Çünkü deref metodu bize Arc<T> değişkeni 
+    mut bile olsa &T vermektedir, &mut T vermemektedir. Örneğin:
+
+    let mut a = Arc::new(10);
+
+    println!("{}", *a);          // 10
+
+    *a = 20;                    // error!
+
+    Arc<T> değerinin referans ettiği T nesnesini değiştirmek için get_mut ilişkili fonksşyonu ile mut bir referans elde 
+    edilebilir. Ancak bunun bir koşulu vardır: mut referansın elde edilebilmesi için nesnenin strong sayacının 1, weak 
+    sayacının 0 olması gerekir. Başka bir deyişle nesneye yalnızca get_mut çağrısını yapan değişkenden başka hiçbir değişkenin 
+    referans etmemesi gerekir. get_mut ilişki fonksiyonun parametrik yapısı şöyledri:
+
+    pub fn get_mut(this: &mut Arc<T, A>) -> Option<&mut T>
+
+    Görüldüğü gibi fonksiyon başarısız da olabilmektedir. Fonksiyom mut referans aldığı için adresi geçirilecek değişkenin 
+    mut olması gerekir. Örneğin:
+
+    use std::sync::Arc;
+
+    fn main() {
+        let mut a = Arc::new(10);
+        let r: &mut i32;
+
+        println!("{}", *a);     // 10
+
+        r = Arc::get_mut(&mut a).unwrap();
+
+        *r = 20;        // geçerli
+
+        println!("{}", *a);     // 20
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Peki Arc üzerinden elde edilen weak akıllı göstericisi nedir? Aslında weak gösterici C++'taki weak_ptr sınıfının işlevine
+    benzer işlev görmektedir. Biz Arc nesnesine ilişkin weak bir gösterici elde edersek nesnenin strong referans sayacı 
+    artırılmaz, weak referans sayacı artırılır. weak referans sayacının artırılması heap'teki nesnein drop edilmesini 
+    engellememktedir. Ancak weak gösterici de kendi bir işe yaramaz, ondan yenidne strong bir gösterici elde etmek 
+    gerekir. 
+
+    Bir Arc<T> değişkeninden weak bir akıllı gösterici elde etmek için downgrade ilişkili fonksiyonu kullanılmaktadır. 
+    Bu ilişkili fonksiyon heap'teki nesnenim weak referans sayacını arırarak bize Weak<T> türünden bir değer verir:
+
+    pub fn downgrade(this: &Arc<T, A>) -> Weak<T, A>
+
+    Örneğin:
+
+    let  a = Arc::new(10);
+    let w: Weak<i32> = Arc::downgrade(&a);
+
+    downgrade ilişkili fonksiyonu çağrıldıktan sonra elde edilen weak gösterici nesnenin yaşamı üzerinde etkili olmamaktadır. 
+    Bu nedenle weak gösteriic doğrudan * operatöryle kullanılamaz. Weak<T> yapısının upgrade isimli metodu ile onun yeniden 
+    strong bir Arc<T> haline getirilmesi gerekmektedir. upgrade metodunun parametrik yapısı şöyledir:
+
+    pub fn upgrade(&self) -> Option<Arc<T, A>>
+    where
+        A: AllocatorClone,
+
+    Metodun Option ile geri döndüüne dikkat ediniz. Eğer nesne yaşamını yitirdiyse None varyantı elde edilmektedir. 
+    Örneğin:
+
+    use std::sync::{Arc, Weak};
+
+    fn main() {
+        let a = Arc::new(10);
+        let w = Arc::downgrade(&a);
+        drop(a);
+
+        if let Some(b) = w.upgrade() {
+            println!("{}", *b);
+        }
+        else {
+            eprintln!("Arc value does not exist!..");
+        }
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Anımsayacağınız gibi eğer scope kullanmayacaksak thread fonksiyonuna ancak değişkenleri kopyalayarak akrtarabiliriz. 
+    İşte bu tür durumlarda Arc değişkeni clone edilerek thread fonksiyonlarına aktarılabilir. Böylece ARc bir akıllı gösterici 
+    olduğu için aslında aynı nesneye referans yoluyla erişilmiş olur. Örneğin:
+
+    use std::thread;
+    use std::sync::Arc;
+
+    fn main() {
+        let a = Arc::new(vec![1, 2, 3, 4, 5]);
+
+        let jh1 = thread::spawn({
+            let b = a.clone();
+            move || {
+                for i in 0..b.len() {
+                    println!("{}", b[i]);
+                }
+            }
+        });
+
+        let jh2 = thread::spawn({
+            let b = a.clone();
+            move || {
+                for i in 0..b.len() {
+                    println!("{}", b[i]);
+                }
+            }
+        });
+
+        jh1.join();
+        jh2.join();
+    }
+
+    Burada spawn fonksiyonuna argüman olarak bir blok ifadesi verilmiştir. Blok ifadesindeki deyimler tek tek çalıştırılıp 
+    son ifade olan kapanım spawn fonksiyonun parametre değişkenine aktarılacaktır. Kapanımlar içerisinde kullaılan b dğeişkenleri 
+    aslında a değişkenin belirttiği aynı vektöre referans eden klonlardır. Anımsanacağı gibi kapanıma üset bloktaki yerel 
+    değişkenlerden yalnızca kullanılanlar geçirilmektedir. Yani örneğimizde a değişkeni kapanımlarda kullanılmadığı için 
+    zaten kapanıma taşınmayacaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Çok thread'li uygulamalarda birden fazla thread'in aynı paylaşılan kaynak üzerinde (örneğin bir veri yapısı) okuma 
+    yapmasının bir sakıncısa yoktur. Birden fazla thread'in okuma amacıyla kaynağa erişmesi kaynakta bir bozulma yaratmamaktadır. 
+    Ancak kaynak üzerinde en az bir yazma yapan thread varsa okuma yapan thread'lerin de yazma yapan thread'lerin de 
+    blokede yazma ya da okuma eylemi bitene kadar beklemesi gerekir. Örneğin iki thread söz konusu olsun. Olası 4 durum 
+    şöyledir:
+
+    ┌───────┬───────┬────────────────┐
+    │  T1   │  T2   │     Durum      │
+    ├───────┼───────┼────────────────┤
+    │ Okuma │ Okuma │ Kilit gerekmez │
+    │ Okuma │ Yazma │ Kilit gerekir  │
+    │ Yazma │ Okuma │ Kilit gerekir  │
+    │ Yazma │ Yazma │ Kilit gerekir  │
+    └───────┴───────┴────────────────┘
+
+    Bu tür durumlarda yani kaynaktan hem okuma yapan hem de kaynağa yazma yapan thread'lerin bulunduğu durumlarda mutex 
+    kullanmak iyi bir teknik değildir. Çünkü mutex kullanımında okuma sırasında da mutex nesnesinin kilitlenmesi gerekir. 
+    Bu da birden fazla okuyan thread'in gereksiz bir biçimde birbirlerini beklemesi sonucunu doğurur. İşte bu tür durumlarda
+    "okuma-yazma kilitleri (reader-writer lock)". 
+
+    Rust'ta okuma-yazma kilitleri RWLock isimli bir yapıyla temsil edilmiştir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
