@@ -16,7 +16,7 @@
                         (Notları sabit genişlikli font kullanan programlama editörleri ile açınız.)
                             (Editörünüzün "Line Wrapping" özelliğini pasif hale getiriniz.)
 
-                                          Son Güncelleme: 15/10/2026 - Perşembe
+                                          Son Güncelleme: 20/10/2026 - Salı
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -810,75 +810,112 @@ void exit_sys(const char *msg)
     kısmını RAM'e yükler, sayfa tablosunu günceller ve kesme kodundan çıkar. Artık işlemci fault oluşturan makine komutuyla 
     çalışmasına devam eder. Ancak sayfa tablosu düzeltildiği için bu kez fault oluşturmaz. 
 ---------------------------------------------------------------------------------------------------------------------------*/
-<BURADA KALDIK>
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            43. Ders 20/10/2026 - Salı
+---------------------------------------------------------------------------------------------------------------------------*/
+
 /*---------------------------------------------------------------------------------------------------------------------------
     Peki işletim sisteminin "bellek yönetimi (memory management)" kısmını yazanlar hangi bilgileri tutmak zorundadır? 
     İşte işletim sistemleri tipik olarak bu mekanizma için şu bilgileri çekirdek alanı içerisinde oluşturmak zorundadır:
 
-    1) Tüm fiziksel RAM'deki tüm sayfaların "free" olup olmadığına ilişkin tablo
-    2) Bir fiziksel sayfanın free değilse hangi proses tarafından kullanıldığına ilişkin bilgi
-    3) Swap dosyalarının yerleri ve organizasyonu
-    4) Hani proseslerin hangi sayfalarının o anda fiziksel RAM'de hangi fiziksel sayfalarda bulunduğu
+    1) Fiziksel RAM'deki tüm sayfaların tahsisat durumunu tutan bir veri yapısı.
+    2) Bir fiziksel sayfa eğer tahsis edilmişse onun hangi proses tarafından kullanıldığı bilgisi
+    3) Takas (swap) dosyalarının yerleri ve organizasyonu
+    4) Hani proseslerin hangi sayfalarının o anda fiziksel RAM'de hangi fiziksel sayfalarda bulunduğu bilgisi
     5) Diğer başka bilgiler
 
-    Bellek yönetimi (memory management) bir işletim sisteminin en önemli ve en zor yazılan alt sistemlerden biridir. 
+    Bellek yönetimi (memory management) bir işletim sisteminin en önemli ve en karmaşık alt sistemlerden biridir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Peki sanal bellek toplamda bize ne sağlamaktadır? Şüphesiz sanal bellek mekanizmasının en önemli faydası RAM yeterli olmasa bile
-    çok sayıda büyük programın aynı anda çalışır durumda tutulabilmesidir. Bizim elimizde 8 GB RAM olsa bile biz onlarca büyük programı 
-    çalışır durumda tutabiliriz. Ancak yukarıda da belirtildiği gibi işletim sistemi bir swap alanı bulundurmaktadır. Eğer bu swap alanı 
-    dolarsa başka bir limit nedeniyle "out of memory" durumu oluşabilmektedir. Bu nedenle eğer programlar çok fazla bellek kullanıyorsa
-    bu swap alanlarının büyütülmesi de gerekebilir. 
+    Peki sanal bellek toplamda bize ne sağlamaktadır? Sanal bellek mekanizması sayesinde fiziksel bellekte yeterli yer olmasa 
+    bile çok sayıda büyük program birlikte çalıştırılabilmektedir. Çünkü programların hepsinin fiziksel belleğe yüklenmesi 
+    gerekmemektedir. Örneğin bizim elimizde 8 GB RAM olsa bile biz onlarca büyük programı çalışır durumda tutabiliriz. Ancak 
+    yukarıda da belirttiğimiz gibi işletim sistemi bir takas alanı bulundurmaktadır. Eğer bu takas alanı dolarsa gerçekten 
+    bu sefer "out of memory" durumu oluşabilmektedir. Bu nedenle eğer programlar çok fazla bellek kullanıyorsa bu takas 
+    alanlarının büyütülmesi gerekir. Linux gibi modern işletim sistemleri fiziksel RAM'deki sayfaları sürekli izler, boş 
+    sayfa sayısı belli bir eşiğin altına düştüğünde program dosyalarından geri alınamayacak olan sayfaları takas dosyalarına 
+    yazar. İşte bu yazım sırasında takas dosyası da dolarsa bu durumda sistemde gerçekten sanal bellek alanı limitine 
+    ulaşılmaktadır. Bu tür durumlarda yapılacak şey takas dosyalarını büyütmektir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Sayfalama ve sanal bellek mekanizmasında işletim sistemi de o anda sanal bellek alanı içerisinde bulunmak zorundadır. Peki 
-    işletim sisteminin kodları sayfa tablosunda sanal belleğin neresindedir? İşte genellikle işletim sistemi tasarımcıları
-    sanal bellek alanını "user space" ve "çekirdek space" olarak ikiye ayırmaktadır. "user space" genellikle sanal bellek alanının düşük 
-    anlamlı kısmında, çekirdek space ise yüksek anlamlı kısmında bulundurulur. Örneğin 32 bit Linux sistemleri 4 GB'lik sanal bellek alanını 
-    şöyle ayırmıştır:
+    Sayfalama ve sanal bellek mekanizmasında işletim sistemi de o anda sanal bellek alanı içerisinde bulunmak zorundadır. 
+    Peki işletim sisteminin kodları sayfa tablosunda sanal belleğin neresindedir? İşte genellikle işletim sistemi tasarımcıları
+    sanal bellek alanını "kullanıcı alanı (user space)" ve "çekirdek alanı (kernel space)" biçiminde ikiye ayırmaktadır. 
+    "Kullanıcı alanı" genellikle sanal bellek alanının düşük anlamlı kısmında, çekirdek alanı ise yüksek anlamlı kısmında 
+    bulundurulur. Örneğin 32 bit Linux sistemleri 4 GB'lik sanal bellek alanını şöyle ayırmıştır:
 
-    32 Bit Linux Proses Sanal Bellek Alanı
+    0x00000000 ┌────────────────────┐
+               │                    │
+               │                    │
+               │                    │
+               │  Kullanıcı Alanı   │  3 GB
+               │    (User Space)    │
+               │                    │
+               │                    │
+    0xBFFFFFFF │                    │
+    0xC0000000 ├────────────────────┤  
+               │                    │
+               │   Çekirdek Alanı   │  1 GB
+               │   (Kernel Space)   │
+               │                    │
+    0xFFFFFFFF └────────────────────┘
 
-    3 GB        User Space
-    1 GB        Çekirdek Space
+    Bu durumda 32 bit Linux sistemlerinde bir programın kullanabileceği maksimum sanal bellek 3 GB'dir. (Windows ta 2 GB 
+    kullanıcı alanı için, 2 GB da çekirdek space için ayrılmaktadır.) 64 bit Linux sistemlerinde ise prosesin sanal bellek 
+    alanı şöyle organize edilmiştir:
 
-    Bu durumda 32 bit Linux sistemlerinde bir programın kullanabileceği maksimum sanal bellek 3 GB'dir. (Windows ta 2 GB user space için, 
-    2 GB çekirdek space için kullanılmıştır.) 64 bit Linux sistemlerinde ise prosesin sanal bellek alanı şöyle organize edilmiştir:
+    0x0000000000000000 ┌─────────────────────────┐
+                       │                         │
+                       │     Kullanıcı Alanı     │  128 TB
+                       │      (User Space)       │
+                       │                         │
+    0x00007FFFFFFFFFFF │                         │
+    0x0000800000000000 ├─────────────────────────┤
+                       │                         │
+                       │  Kanonik Olmayan Bölge  │  ~16 EB
+                       │  (Non-canonical hole)   │
+                       │                         │
+    0xFFFF7FFFFFFFFFFF │                         │
+    0xFFFF800000000000 ├─────────────────────────┤
+                       │                         │
+                       │     Çekirdek Alanı      │  128 TB
+                       │     (Kernel Space)      │
+                       │                         │
+    0xFFFFFFFFFFFFFFFF └─────────────────────────┘
 
-    64 Bit Linux Proses Sanal Bellek Alanı
+    Görüldüğü gibi 64 bit sistemlerde teorik sanal bellek 16 EB olduğu halde 64 bit Linux sistemleri yalnızca 256 TB sanal 
+    belleğe izin vermektedir.
 
-    128 TB        User Space
-    128 TB        Çekirdek Space
-
-    Görüldüğü gibi aslında teorik sanal bellek 16 exabyte olduğu halde 64 bit Linux sistemleri yalnızca 256 TB sanal belleğe
-    izin vermektedir.
-
-    Proseslerin sayfa tablolarında çekirdek alanınının içeriği hep aynıdır. Yani context switch yapılsa bile çekirdek kodları hep aynı 
-    sanal adreslerde bulunmaktadır. 
+    Proseslerin sayfa tablolarında çekirdek alanınının içeriği hep aynıdır. Yani bağlamsal geçiş yapılsa bile çekirdek 
+    kodları hep aynı sanal adreslerde bulunmaktadır. Böylece proses çalışırken bir sistem fonksiyonu çağrıldığında sistem 
+    fonksiyonu her proseste hep aynı sanal adreste bulunur. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Biz bir program içerisinde yüksek miktarda dinamik tahsisat yaptığımızda ne olur? Linux sistemlerinde malloc fonksiyonu
-    brk ya da sbrk denilen sistem fonksiyonunu çağırabilmektedir. Ancak arka planda sanal bellek bakımından şunlar gerçekleşir:
+    Peki biz bir program içerisinde yüksek miktarda dinamik tahsisat yaptığımızda ne olur? Linux sistemlerinde malloc fonksiyonu
+    brk ya da sbrk denilen sistem fonksiyonunu çağırabilmektedir. Eğer tahsis edilen alan 128 MB'tan büyükse malloc fonksiyonu 
+    doğrudan mmap fonksiyonunu çağırmaktadır. Ancak arka planda sanal bellek bakımından şunlar gerçekleşir:
 
     - İşletim sistemi malloc ile tahsis edilen alanı sayfa tablosunda oluşturur. Oluştururken de tahsis edilen alanın 
-    toplam swap alanından küçük olduğunu garanti etmeye çalışır. Çünkü malloc ile tahsis edilen alan eninde sonunda swap dosyası 
-    içerisinde bulundurulacaktır.
+    toplam takas (swap) alanından küçük olduğunu garanti etmeye çalışır. Çünkü malloc ile tahsis edilen alan eninde sonunda 
+    takas dosyası içerisinde bulundurulacaktır.
 
-    - İşletim sistemi swap dosyasının boyutu yeterliyse tahsisatı kabul etmektedir. Ancak sistemden sisteme değişebilecek biçimde
-    bu sırada swap dosyasında tahsisat yapılabilir ya da yapılmayabilir. Eğer swap dosyasında o anda tahsisat yapılırsa bu durumda 
-    swap alanı ciddi biçimde azalacak ve belki de başka proses artık aynı tahsisatı yapamayacaktır. Ancak işletim sistemi swap 
-    dosyasında tahsisatı henüz yapmayabilir. Bu işlemi dinamik alan kullanıldığında yapabilir. Genellikle Linux sistemleri bu 
-    yola başvurmaktadır. Literatürde dinamik alan için swap dosyasında baştan yer ayrılmasına "alanın commit edilmesi" denilmektedir.
+    - İşletim sistemi takas dosyasının boyutu yeterliyse tahsisatı kabul etmektedir. Ancak sistemden sisteme değişebilecek 
+    biçimde bu sırada takas dosyasında tahsisat yapılabilir ya da yapılmayabilir. Eğer takas dosyasında o anda tahsisat 
+    yapılırsa bu durumda takas alanı ciddi biçimde azalacak ve belki de başka prosesler artık aynı tahsisatı yapamayacaktır. 
+    Ancak işletim sistemi takas dosyasında tahsisatı henüz yapmayabilir. Bu işlemi dinamik alan kullanıldığında yapabilir. 
+    Linux sistemleri bu yola başvurmaktadır. Literatürde dinamik alan için takas dosyasında baştan yer ayrılmasına "alanın 
+    commit edilmesi" denilmektedir. 
 
-    Aşağıdaki 3 GB RAM olan 2 GB swap alanına sahip 64 bit Linux sisteminde 5 GB alan dinamik olarak tahsis edilmek istenmiştir. 
-    Burada tahsisat başarılı gibi gözükse de tahsis edilen alan kullanılırken swap alanı yetersizliğinden dolayı sinyal oluşacak 
-    ve proses sonlandırılacaktır.
+    Aşağıdaki 3 GB RAM olan 2 GB takas alanına sahip 64 bit Linux sisteminde 5 GB alan dinamik olarak tahsis edilmek istenmiştir. 
+    Burada tahsisat başarılı gibi gözükse de tahsis edilen alan kullanılırken takas alanı yetersiz kalaacak ve proses 
+    sonlandırılacaktır. 
 
     O halde 64 bit Linux sistemlerinde biz teorik olarak her biri 128 TB olan onlarca programı bir arada çalıştırabiliriz. Ancak 
-    bunun için swap alanımızın da yeterli büyüklükte diskte oluşturulmuş olması gerekir. Swap alanının yetersizliği durumunda 
+    bunun için takas alanımızın da yeterli büyüklükte diskte oluşturulmuş olması gerekir. Takas alanının yetersizliği durumunda 
     bir sinyal ile proses sonlandırılmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -908,141 +945,255 @@ int main(void)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-                                                36. Ders 11/03/2023 - Cumartesi
+    Peki Linux'ta takas alanını nasıl büyütebiliriz? Linux'ta disk bölümleri (disk partitions) de normal dosyalar da takas
+    alanı olarak kullanılabilmektedir. Bir dosyayı swap alanına dahil etmek için sırasıyla şu işlemler yapılmalıdır:
+
+    1) Önce dosya içi sıfırlarla dolu bir biçimde oluşturulmalıdır. Dosyanın kök dizide oluşturulması, kullanıcı ID'sinin  
+    grup ID'sinin root olması güvenli bir durumdur. Ayrıca yalnızca sahibinin (yani root prosesinin) dosyadan okuma ve 
+    yazma yapmasına izin verilmelidir. Boş bir dosya kabul üzerinde "dd" komutuyla ya da "fallocate" komutuyla oluşturulabilir. 
+    Örneğin:
+
+    $ sudo fallocate -l 4G /extra-swapfile
+
+    Ya da örneğin:
+
+    $ sudo dd if=/dev/zero of=/extra-swapfile bs=1K count=4M
+
+    "fallocate" komutu bir kopyalama yapmadığı için daha hızlı çalışmaktadır. "dd" komutu ise daha geneldir. 
+
+    Biz dosyayı "sudo" ile yarattığımız için zaten dosyanın kullanıcı ID'si ve grup ID'si root olmaktadır:
+
+    $ ls -l /extra-swapfile 
+    -rw-r--r-- 1 root root 4294967296 Eki 20 11:46 /extra-swapfile
+
+    Şimdi bu dosyanın erişim haklarını bizim değiştirmemiz uygun olur:
+
+    $ sudo chmod 600 /extra-swapfile 
+    $ ls -l /extra-swapfile 
+    -rw------- 1 root root 4294967296 Eki 20 11:46 /extra-swapfile
+
+    2) Takas dosyalarının başında bir başlık dosyasının bulunması gerekir. Bu başlık dosyası "mkswap" programı tarafından
+    oluşturulmaktadır:
+
+    $ sudo mkswap /extra-swapfile
+    
+    3) Artık dosyayı çekirdeğin kullanabilmesi için sisteme dahil etmemiz gerekir. Bu işlem "swapon" programıyla yapılmaktadır:
+
+    $ sudo swapon /extra-swapfile
+
+    Artık biz "/proc/swaps" dosyasına baktığımızda ya da "swapon -s" komutunu kullandığımızda yeni eklediğimiz dosyayı da 
+    takas dosyası olarak görürüz:
+
+    $ cat /proc/swaps
+    Filename				Type		Size		Used	Priority
+    /swapfile               file		3991548		968880	-2
+    /extra-swapfile         file		4194300		0	    -3
+
+    Linux dağıtımları kurulum sırasında zaten bir takas alanını sizin için oluşturmaktadır. Eğer siz kurulum sırasında bir 
+    "takas disk bölümü" oluşturursanız kurulum bu disk bölümünü de takas alanı olarak kullanmaktadır. Bazı dağıtımlarda 
+    bu soru kurulumu yapan kişiye açıkça sorulmaktadır. Daha sonra bir takas disk bölümü oluşturursanız onu da yukarıdakine 
+    benzer bir biçimde takas alanlarına dahil edebilirsiniz. Örneğin "fdisk" komutu ile diskte "/dev/sda2" aygıtı altında 
+    bir takas disk bölümü oluşturduğumuzu düşünelim. İşlemler sırasıyla şöyle yürütülür:
+
+    1) Yine mkswap programı ile disk bölümü sanki bir dosyaymış gibi onun başında bir başlık oluşturulur:
+
+    $ sudo mkswap -L swap-part /dev/sda2
+
+    Buradaki -L isteğe bağlı olarak takas disk bölümüne bir etiket iliştirmek için kullanılmaktadır. 
+
+    2) Yine "swapon" programı ile takas disk bölümü sisteme dahil edilir:
+
+    $ sudo swapon /dev/sdb2
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Anımsanacağı gibi işletim sistemi sayfa tabloları yoluyla proseslerin bellek alanlarını tam olarak birbirinden izole
-    etmektedir. Dolayısıyla bir proses istese de başka bir prosesin bellek alanına erişememektedir. Ancak ismine "paylaşılan bellek alanları 
-    (shared memory)" denilen bir teknik ile işletim sistemi farklı proseslerin aynı fiziksel sayfaya erişimini sağlayabilmektedir. 
-    Şöyle ki: İşletim sistemi iki prosesin sayfa tablosunda farklı sanal sayfaları aynı fiziksel sayfaya eşlerse bu iki proses farklı sanal adreslerle
-    aslında aynı fiziksel sayfayı görüyor durumda olur. Örneğin:
+    Yukarıda da açıkladığımız gibi işletim sistemi sayfa tabloları yoluyla proseslerin bellek alanlarını tam olarak birbirinden 
+    izole etmektedir. Dolayısıyla bir proses istese de başka bir prosesin bellek alanına erişememektedir. Ancak ismine 
+    "paylaşılan bellek alanları (shared memory)" denilen bir teknik ile işletim sistemi farklı proseslerin aynı fiziksel 
+    sayfaya erişimini sağlayabilmektedir. Şöyle ki: İşletim sistemi iki prosesin sayfa tablosunda farklı sanal sayfaları aynı 
+    fiziksel sayfaya eşlerse bu iki proses farklı sanal adreslerle aslında aynı fiziksel sayfayı görüyor durumda olur. Örneğin:
 
     Proses-1 Sayfa Tablosu
 
-    Sanal Sayfa Numarası            Fiziksel Sayfa Numarası
-    ...                             ...
-    987                             1245
-    988                             1356
-    999                             1412
-    ...                             ...
-
-    Proses-2 Sayfa Tablosu
-
-    Sanal Sayfa Numarası            Fiziksel Sayfa Numarası
-    ...                             ...
-    356                             7645
-    357                             1356
-    358                             489
-    ...                             ...
+    ┌──────────────────────┬─────────────────────────┐
+    │ Sanal Sayfa Numarası │ Fiziksel Sayfa Numarası │
+    ├──────────────────────┼─────────────────────────┤
+    │         ...          │           ...           │
+    │         987          │           1245          │
+    │         988          │           1356          │ ─────────┐
+    │         989          │           1412          │          │
+    │         ...          │           ...           │          │
+    └──────────────────────┴─────────────────────────┘          │
+                                                                ▼
+                                                        ┌────────────────┐
+                                                        │ Fiziksel Sayfa │
+                                                        │      1356      │
+                                                        └────────────────┘
+                                                                ▲
+    Proses-2 Sayfa Tablosu                                      │
+                                                                │
+    ┌──────────────────────┬─────────────────────────┐          │
+    │ Sanal Sayfa Numarası │ Fiziksel Sayfa Numarası │          │
+    ├──────────────────────┼─────────────────────────┤          │
+    │         ...          │           ...           │          │
+    │         356          │           7645          │          │
+    │         357          │           1356          │ ─────────┘
+    │         358          │           489           │
+    │         ...          │           ...           │
+    └──────────────────────┴─────────────────────────┘
 
     Görüldüğü gibi birinci prosesin 988'inci sanal sayfa numarası ikinci prosesin 357'nci sanal sayfa numarasıyla aynı fiziksel 
-    adrese yönlendirilmiştir.
+    adrese yönlendirilmiştir. Bu iki proses farklı sanal adreslerle aslında aynı fiziksel sayfaya erişecektir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Aslında sayfa tablolarında her bir sayfanın da ayrıca bir "özellik bilgisi (attribute)" vardır. Yani sayfa tablolarının formatı
-    daha gerçekçi bir biçimde şöyledir:
+    Aslında sayfa tablolarında her bir sayfanın da ayrıca bir "özellik bilgisi (attribute)" vardır. Yani sayfa tablolarındaki
+    girişlerin (page table entry) daha gerçekçi bir formatı şöyledir:
 
-    Sanal Sayfa No          Fiziksel Sayfa No       Sayfa özelliği
+    Sanal Sayfa No          Fiziksel Sayfa No       Sayfa Özelliği
     ...                     ...                     ...
 
-    Sayfa özelliği o fiziksel sayfanın "read only" mi, "read/write" mı "execute" özelliğine sahip mi olduğunu belirtmektedir. 
-    Ayrıca bir fiziksel sayfa "user mode" ya da "çekirdek mode" sayfa olarak belirlenebilmektedir. İşletim sistemi prosesin tüm fiziksel 
-    sayfalarını "user mode" olarak ancak çekirdek'ın tüm sayfalarını "çekirdek mode" olarak ayarlamaktadır. User mode bir proses yalnızca 
-    user mode sayfalara erişebilmektedir. Çekirdek mode sayfalara erişememektedir. Eğer user mode bir proses çekirdek mode sayfaya erişmek 
-    isterse işlemci bir "içsel kesme (fault)" oluşturmakta ve işletim sistemi devreye girerek prosesi sonlandırmaktadır. Ancak çekirdek mode 
-    bir proses hem çekirdek mode sayfalara hem de user mode sayfalara erişebilmektedir. Bizim prosesimiz kullanıcı modunda çalışmaktadır. User mode 
-    prosesler bir user mode sayfaya erişirken işlemci erişim biçimine bakar ve duruma göre yine içsel kesme oluşturur. User mode bir proses
-    user mode ancak read-only bir sayfaya yazma yaparsa içsel kesme (page fault) oluşturulmaktadır. Bu durumda işletim sistemi prosesi cezalandırarak
-    sonlandırma yoluna gitmektedir. Ayrıca pek çok işlemci ailesinde bir kodun bir fiziksel sayfada çalışabilmesi için o kodun "execute" 
-    özelliğine sahip bir fiziksel sayfada bulunması gerekmektedir. Bu mekanizma altında örneğin bir proses "execute" olmayan bir fiziksel 
-    sayfadaki bir fonksiyonu çağırmak isterse yine işlemci içsel kesme (page fault) oluşturmaktadır. Örneğin C derleyicileri string'leri
-    ELF formatında özel bir bölüme (section) yerleştirirler ve işletim sisteminin yükleyicisi de (UNIX/Linux sistemlerindeki exec fonksiyonları)
-    bu sayfaları sayfa tablosunda oluştururken bu sayfaların özelliklerini "read-only" yaparlar. Böylece biz bir string'i değiştirmek istediğimizde
-    koruma mekanizması yüzünden prosesimiz sonlandırılır. Zaten C'de string'lerin güncellenmesi "tanımsız davranış (undefined behavior)" olarak 
-    belirtilmektedir. Benzer biçimde derleyiciler genellikle global const nesneleri de yine "read-only" bölümlere (sections) yerleştirmektedir. 
-    (Ancak yerel const nesneler stack'te olduğu için read-only yerleştirilememektedir.) 
+    Bir fiziksel sayfanın erişim bilgis (yani sayfanın "read-only" mi, "read-write" mı, "executetable" mı olduğu bilgisi) 
+    sayfa özelliğine ilişkin kısımda tutulmaktadır. Ayrıca bir fiziksel sayfa "kullanıcı modu (user mode)" ya da "çekirdek 
+    modu (kernek mode)" olarak da belirlenebilmektedir. İşletim sistemi prosesin tüm fiziksel sayfalarını "kullanıcı modu 
+    sayfası" olarak ancak çekirdeğin tüm sayfalarını "çekirdek modu sayfası" olarak ayarlamaktadır. Kullanıcı modundaki bir 
+    proses yalnızca kullanıcı modu sayfalarına erişebilmektedir. Çekirdek modu sayfalarına erişememektedir. Eğer kullanıcı 
+    modundaki bir proses çekirdek modu sayfasına erişmek isterse işlemci bir "içsel kesme (fault)" oluşturmakta ve işletim 
+    sistemi devreye girerek prosesi sonlandırmaktadır. Ancak çekirdek modunda çaşlışan bir kod hem çekirdek mdou sayfalarına 
+    hem de kullanıcı modu sayfalarına erişebilmektedir. Bizim prosesimiz kullanıcı modunda çalışmaktadır. Kullanıcı modundaki 
+    prosesler bir kullanıcı modundaki sayfaya erişirken işlemci erişim biçimine bakar ve duruma göre yine içsel kesme oluşturur. 
+    Örneğin kullanıcı modundaki bir proses kullanıcı modu sayfasına yazmak yapmak istesin, ancak bu sayfa "read-only" işaretleniş 
+    olsun. İşte bu durumda bir içsel kesme (page fault) oluşturulmaktadır. Bu içsel kesme ile işletim sistemi prosesi cezalandırarak
+    sonlandırma yoluna gitmektedir. Ayrıca pek çok işlemci ailesinde bir kodun bir fiziksel sayfada çalışabilmesi için o 
+    kodun "execute" özelliğine sahip bir fiziksel sayfada bulunması gerekmektedir. Bu mekanizma altında örneğin bir proses 
+    "execute" olmayan bir fiziksel sayfadaki fonksiyonu çağırmak isterse yine işlemci içsel kesme (page fault) oluşturmaktadır. 
+    Örneğin C derleyicileri string'leri ELF formatında özel bir bölüme (section) yerleştirirler ve işletim sisteminin 
+    yükleyicisi de (UNIX/Linux sistemlerindeki exec fonksiyonları) bu sayfaları sayfa tablosunda oluştururken bu sayfaların 
+    özelliklerini "read-only" yaparlar. Böylece biz bir string'i değiştirmek istediğimizde koruma mekanizması yüzünden 
+    prosesimiz sonlandırılır. Zaten C'de string'lerin güncellenmesi "tanımsız davranış (undefined behavior)" kabul edilmeketdir. 
+    Benzer biçimde derleyiciler genellikle global const nesneleri de yine "read-only" bölümlere (sections) yerleştirmektedir. 
+    (Ancak yerel const nesneler stack'te olduğu için read-only yerleştirilememektedir.) C'de const nesnelerin de güncellenmesinin 
+    tanımsız davranış oluşturduğunu anımsayınız. 
+
+    Aşağıdaki programı derleyerek çalıştırmayı deneyiniz. Program çalıştırıldığında "page fault" oluşacak ve program 
+    sonlandırılacaktır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+#include <stdio.h>
+
+const int x = 10;
+
+int main(void)
+{
+    char *str = "ankara";
+
+    *str = 'a';     /* program çökecek */
+    puts(s);
+
+    return 0;
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    fork işleminden sonra üst prosesin sayfa tablosuyla alt prosesin sayfa tablosu başlangıçta aynıdır. (Linux'ta bazı 
+    ayrıntılar vardır.) Yani iki proses de aslında aynı fiziksel sayfaları kullanmaktadır. İşletim sistemi bu fiziksel sayfaları 
+    "read-only" olarak işaretler. Böylece proseslerden biri bu sayfaya yazma yaptığında "page fault" oluşur. Bunun sonucunda 
+    işletim sistei devreye girer ve iki fiziksel sayfayı birbirinden ayırır. Bu sürece copy-on-write denilmektedir. Görüldüğü 
+    gibi üst proses ile alt proses mümkün olduğunca aynı fiziksel sayfaları kullanmakta, ancak yazma yapıldığında bunlar 
+    ayrıştırışmaktadır. Örneğin programın makine kodlarının bulunduğu kısma (".text" bölümüne) yazma yapılmaz. Bu kısım hem 
+    üst proseste hem de alt proseste aynı fiziksel sayfaları kullanmaktadır. Aynı durum bir programı ikinci kez çalıştırdığımızda 
+    da benzer biçimde oluşmaktadır. Örneğin "sample" programını iki kez çalıştıralım. İşletim sistemi mümkün olduğunca bu 
+    iki programın fiziksel sayfalarını ortak kullanmaktadır. Ancak değişiklik yapıldığında copy-on-write mekanizması yoluyla 
+    bunları birbirinden ayırmaktadır. (Aynı programın birden fazla kez çalıştırılması durumunda aslında işletim sistemi 
+    mmap fonksiyonu ile dosya tabanlı haritalama yaptığı için bunlar ortak fiziksel sayfaları kullanıyor durumda olurlar.)
+    Copy-on-write mekanizması modern işletim sistemlerinde sistm performasnını yükselten önemli bir mekanizmadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Aynı programın ikinci kez çalıştırıldığını düşünelim. Bu durumda her şeyi aynı olan iki program çalışıyor durumda olacaktır.
-    Ancak bu iki proses birbirinden bağımsız olduğuna göre bu iki prosesin farklı sayfa tabloları vardır ve aslında bu iki prosesin
-    bellek alanı tamamen izole edilmelidir. İşte işletim sistemleri bu tür durumlarda "copy-on-write" denilen bir mekanizma uygulamaktadır. 
-    Bu mekanizmada işletim sistemi bir program ikinci kez çalıştırıldığında sayfa tablosunda önceki çalıştırma ile aynı fiziksel 
-    sayfaları eşler. Ancak bu sayfaları "read-only" biçimde işaretler. Proseslerden biri bu sayfaya yazma yaptığında içsel kesme (page fault)
-    oluşur, işletim sistemi devreye girer tam yazma yapıldığı sırada o sayfanın bir kopyasını oluşturup iki prosesin fiziksel sayfalarını birbirinden 
-    ayırır. Böylece iki proses baştan aynı fiziksel sayfaları paylaşırken daha sonra bu fiziksel sayfalar birbirinden ayrıştırılmaktadır. 
-    Bu mekanizma sayesinde aslında hiç yazma yapılmayan fiziksel sayfaların boşuna bir kopyası oluşturulmamış olur. Örneğin ikinci çalıştırılan
-    programın makine kodlarının bulunduğu sayfalar aslında hiç güncellenmemektedir. Bu durumda iki kopyanın aynı fiziksel sayfayı görmesinde
-    bir sakınca yoktur. İşletim sistemleri dinamik kütüphanelerde de benzer tekniği kullanmaktadır. Bir dinamik kütüphane iki farklı 
-    proses tarafından kullanıldığında mümkün olduğunca bu proseslerin sayfa tabloları aynı fiziksel sayfaları gösterir. Ancak proseslerden biri
-    dinamik kütüphanedeki bir sayfada değişiklik yaparsa o noktada bu sayfanın kopyasından oluşturulmaktadır.
+    Bu bölümde UNIX/Linux sistemlerinde proseslerarası haberleşme (interprocess communication) konusunu ele alacağız. 
+    Proseslerarası haberleşme oldukça önemli ve ayrıntılı bir konudur. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
     İşletim sistemleri dünyasında bir prosesin başka bir prosese bilgi göndermesi ve başka bir prosesten bilgi almasına 
-    "prosesler arası haberleşme (interprocess communication - IPC)" denilmektedir. Burada bilgi gönderip almadan kastedilen şey 
-    bir grup byte'ın gönderilip alınmasıdır. Prosesler arası haberleşme önemli bir konudur. Çünkü sayfa tabloları yoluyla 
+    "proseslerarası haberleşme (interprocess communication (IPC))" denilmektedir. Burada bilgi gönderip almadan kastedilen 
+    şey bir grup byte'ın gönderilip alınmasıdır. Proseslerarası haberleşme önemli bir konudur. Çünkü sayfa tabloları yoluyla 
     birbirinden izole edilmiş proseslerin başka yöntemlerle birbirleriyle haberleşmesi gerekebilmektedir. Bir program başka 
-    bir programa bir şeyler gönderebilir, o program da bunları işleyebilir. Prosesler arası haberleşmenin en bariz örneği 
-    "client-server" sistemlerdir. Bu sistemlerde client program server programa bir istek gönderir. Server program da bu isteği 
-    yerine getirip sonuçları client programa iletir. Client-server tarzda haberleşmenin sağlanabilmesi için prosesler arası 
+    bir programa bir şeyler gönderebilir, o program da bunları işleyebilir. Proseslerarası haberleşmenin en bariz örneği 
+    "client-server" sistemlerdir. Bu sistemlerde client program server programa bir istek gönderir. Server program da bu 
+    isteği yerine getirip sonuçları client programa iletir. Client-server tarzda haberleşmenin sağlanabilmesi için proseslerarası 
     haberleşme denilen mekanizmanın kullanılması gerekir. Benzer biçimde "dağıtık sistemlerde (distributed systems)" de esas 
-    olarak prosesler arası haberleşme mekanizmaları kullanılmaktadır.
+    olarak proseslerarası haberleşme mekanizmaları kullanılmaktadır.
 
-    Prosesler arası haberleşme mekanizmaları iki bölümde ele alınıp incelenmektedir:
+    Proseslerarası haberleşme mekanizmaları iki bölümde ele alınıp incelenmektedir:
 
     1) Aynı makinenin prosesleri arasında haberleşme
     2) Farklı makinelerin prosesleri arasında haberleşme
 
-    Aynı makinenin prosesleri arasında haberleşme işletim sisteminin sağladığı özel yöntemlerle gerçekleştirilmektedir. Farklı 
-    makinelerin prosesleri arasında haberleşme için ortak uyulması gereken bazı kuralların belirlenmiş olması gerekir. Bu ortak 
-    kurallara "protokol (protocol)" denilmektedir. Farklı makinelerin prosesleri arasında haberleşme için çeşitli protokol 
-    aileleri oluşturulmuştur. Ancak bunlardan en yaygın kullanılanı "IP (Internet Protocol)" isimli protokol ailesidir. Biz 
-    kursumuzda önce aynı makinenin prosesleri arasındaki haberleşme yöntemlerini inceleyeceğiz daha sonra farklı makinelerin 
-    prosesleri arasında haberleşme yöntemleri üzerinde duracağız. 
+    Aynı makinenin prosesleri arasında haberleşme işletim sisteminin sağladığı özel yöntemlerle gerçekleştirilmektedir. 
+    Farklı makinelerin prosesleri arasında haberleşme için ortak uyulması gereken bazı kuralların belirlenmiş olması 
+    gerekir. Bu ortak kurallara "protokol (protocol)" denilmektedir. Farklı makinelerin prosesleri arasında haberleşme 
+    için çeşitli protokol aileleri oluşturulmuştur. Ancak bunlardan en yaygın kullanılanı "IP (Internet Protocol)" isimli 
+    protokol ailesidir. Biz kursumuzda önce aynı makinenin prosesleri arasındaki haberleşme yöntemlerini inceleyeceğiz 
+    daha sonra başka bir bölümde farklı makinelerin prosesleri arasındaki haberleşme yöntemleri üzerinde duracağız. O bölümde
+    IP protok ailesini ve TCT/UDP haberleşmelerini ayrıntılı bir biçimde ele alacağız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Aynı makinenin prosesleri arasında haberleşme için çeşitli işletim sistemlerinde birbirine benzer yöntemler geliştirilmiştir. 
-    Örneğin "boru (pipe)" haberleşmesi yöntemi UNIX/Linux sistemleriyle Windows sistemleri arasında benzer biçimde yürütülür. 
-    Paylaşılan bellek alanları (shared memory)" denilen haberleşme yöntemine yine benzer biçimde uygulanmaktadır. Ancak bazı 
-    işletim sistemlerinde o sisteme özgü özel yöntemler de olabilmektedir. 
+    Aynı makinenin prosesleri arasındaki haberleşmeler işletim sistemine bağlı bir biçimde yani işletim sistemine özgü bir
+    biçimde yürütülmektedir. Ancak aynı makinenin prosesleri arasındaki haberleşmeler için işletim sistemlerinde birbirine 
+    benzer yöntemler kullanılmaktadır. Örneğin "boru (pipe)" haberleşmesi yöntemi UNIX/Linux sistemleriyle Windows sistemleri 
+    arasında benzer biçimde yürütülmektedir. Paylaşılan bellek alanları (shared memory)" denilen haberleşme yöntemi de yine 
+    UNIX/Linux sistemleriyle Windows s,stemlerinde benzer biçimde uygulanmaktadır. Ancak bazı işletim sistemlerinde o 
+    sisteme özgü özel yöntemler de bulunabilmektedir. Tabii biz kursumuzda UNIX/Linux sistemlerindeki prrseslerarası 
+    haberleşme yöntemleri üzerinde duracağız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Prosesler arası haberleşme mekanizmasının iki yönü vardır. Birincisi iki prosesin haberleşeceği bir ortamın oluşturulmasıdır.
-    İkincisi ise bu ortamın senkronize bir biçimde kullanılmasıdır. Yani prosesler arası haberleşme bir senkronizasyon sağlanarak 
-    gerçekleştirilmelidir.
+    Proseslerarası haberleşme mekanizmasının iki yönü vardır. Birincisi iki prosesin haberleşeceği bir ortamın oluşturulmasıdır.
+    İkincisi ise bu ortamın senkronize bir biçimde kullanılmasıdır. Yani proseslerarası haberleşme bir senkronizasyon sağlanarak 
+    gerçekleştirilmelidir. Biz bu bölümde sürecin senkronizasyon kısmı üzerinde durmayacağız. Thread senkronizasyonu thread'lerin
+    anlatıldığı kısımda ele alınacaktır.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    En yaygın kullanılan prosesler arası haberleşme yöntemi "boru (pipe)" haberleşmesi denilen yöntemdir. Boru haberleşmesi 
+    En yaygın kullanılan proseslerarası haberleşme yöntemi "boru (pipe)" haberleşmesi denilen yöntemdir. Boru haberleşmesi 
     hem bir ortam sunarken hem de senkronizasyonu kendi içerisinde sağlamaktadır. Bu nedenle boru haberleşmesi kolay kullanılabilen 
     bir IPC yöntemidir. Boru haberleşmeleri "isimsiz boru haberleşmeleri" ve "isimli boru haberleşmeleri" olmak üzere ikiye 
     ayrılmaktadır. İsimsiz boru haberleşmelerine İngilizce "unnamed pipe" ya da "anonymous pipe", isimli boru haberleşmelerine 
-    ise "named pipe" ya da "fifo" denilmektedir. 
+    ise "named pipe" ya da "fifo" denilmektedir. Bir kursumuzda önce "isimsiz boru haberleşmesini", sonra da "isimli boru
+    haberleşmesini" anlatacağız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Boru aslında FIFO tarzında çalışan bir kuyruk sistemidir. Bir proses boruya yazma yapar, diğeri de borundan yazılanları 
-    okur. UNIX/Linux sistemlerinde borular birer dosya gibi ele alınmaktadır. Dolayısıyla boruya yazma işlemi "write" fonksiyonu 
-    ile borudan okuma işlemi ise "read" fonksiyonu ile yapılmaktadır. Yazan taraf boruya bir grup byte'ı yazdığında okuyan taraf 
-    bunları aynı sırada okur.
+    Peki boru nedir? Boru aslında FIFO tarzında çalışan bir kuyruk sistemidir. Bu kuruk sistemi çekirdek tarafından çekirdek 
+    alanı içerisinde oluşturulmaktadır. Bir proses boruya yazma yapar, diğeri de borundan yazılanları okur. Boruya yazılan 
+    byte'lar FIFO prensibine göre yazılırlar, böylece borudan okuyan taraf olanları yazıldığı sırada okur. Örneğin boruya 
+    yazan taraf "ankara" yazısının karakterlerini boruya yazmış olsun. Şimdi okuyan taraf önce 'a' byte'ını sonra da 
+    sırasıyla 'n', 'k', 'a', 'r' ve 'a' byte'larını borudan okur. 
+    
+                                   BORU (çekirdek alanı)
+    ┌───────────────┐     ┌────────────────────────────────────────┐     ┌───────────────┐
+    │ Yazan proses  │ ──> │ ...                        a r a k n a │ ──> │ Okuyan proses │
+    └───────────────┘     └────────────────────────────────────────┘     └───────────────┘
+    Yazma/okuma sırası:                                6 5 4 3 2 1
+                        yazma ucu                        okuma ucu
+                        ──────────────── akış yönü ──────────────>
 
-    Boruların belli bir uzunlukları vardır. Eskiden BSD ve Linux sistemlerinde boru uzunlukları 4096 byte (bir sayfa) büyüklüğündeydi.
-    Linux daha sonra default boru uzunluğunu 65536'ya (16 sayfaya) yükseltmiştir.
+    UNIX/Linux sistemlerinde borular birer dosya gibi ele alınmaktadır. Dolayısıyla boruya yazma işlemi "write" 
+    fonksiyonu ile borudan okuma işlemi ise "read" fonksiyonu ile yapılmaktadır. 
 
-    UNIX/Linux sistemlerinde borular tek yönlüdür. Bu nedenle proseslerden biri boruya yazma yaparken diğeri borudan okuma yapar. 
-    (Halbuki örneğin Windows sistemlerinde borular çift yönlüdür.) Borunun tek yönlü olması demek iki prosesin de yazdıklarının 
-    aynı boruya yazılması demektir. P1 prosesi boruya yazma yapıp yine P1 prosesi borudan okuma yaparsa kendi yazdığını okur. 
-    Bunun da bir anlamı olmaz. Halbuki çift yönlü borularda borudan hem okuma hem yazma yapılabilmektedir. Borudan okuma 
-    yapıldığında karşı tarafın yazdığı okunur. Ancak UNIX/Linux sistemlerindeki yukarıda da belirttiğimiz gibi borular tek 
-    yönlüdür. Dolayısıyla haberleşmede bir taraf yazma yaparken diğer taraf okuma yapmalıdır. Eğer borularla karşılıklı okuma 
-    yazma yapılmak isteniyorsa iki boru kullanılmalıdır.
+    Boruların belli bir uzunlukları vardır. Eskiden BSD ve Linux sistemlerinde boru uzunlukları 4096 byte (bir sayfa) 
+    büyüklüğündeydi. Linux daha sonra default boru uzunluğunu 64K'ya (65536 byte'a (16 sayfaya)) yükseltmiştir.
+
+    UNIX/Linux sistemlerinde borular tek yönlüdür. Bu nedenle proseslerden biri boruya yazma yaparken diğeri borudan okuma 
+    yapar. (Halbuki örneğin Windows sistemlerinde borular çift yönlüdür.) Borunun tek yönlü olması demek iki prosesin de 
+    yazdıklarının aynı boruya yazılması demektir. P1 prosesi boruya yazma yapıp yine P1 prosesi borudan okuma yaparsa 
+    kendi yazdığını okur. Bunun da bir anlamı olmaz. Halbuki çift yönlü borularda borudan hem okuma hem yazma yapılabilmektedir. 
+    Borudan okuma yapıldığında karşı tarafın yazdığı okunur. Ancak UNIX/Linux sistemlerindeki yukarıda da belirttiğimiz 
+    gibi borular tek yönlüdür. Dolayısıyla haberleşmede bir taraf yazma yaparken diğer taraf okuma yapmalıdır. Eğer borularla 
+    karşılıklı okuma yazma yapılmak isteniyorsa iki boru kullanılmalıdır.
 ---------------------------------------------------------------------------------------------------------------------------*/
-
+<BURADA KALDIK>
 /*---------------------------------------------------------------------------------------------------------------------------
     Borulara write POSIX fonksiyonu ile yazma yapılırken yazılmak istenen byte kadar boruda yer yoksa write işlemi blokeye 
     yol açar ve boruda yazılmak istenen miktar kadar boş alan oluşana kadar ilgili thread blokede bekletilir. Örneğin biz boruya
@@ -1102,7 +1253,7 @@ int main(void)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    İsimsiz boru haberleşmesi üst ve alt prosesler arasında yapılabilen bir haberleşmedir. İsimsiz boru haberleşmesi tipik 
+    İsimsiz boru haberleşmesi üst ve alt proseslerarasında yapılabilen bir haberleşmedir. İsimsiz boru haberleşmesi tipik 
     olarak şu aşamalardan geçilerek gerçekleştirilir:
 
     1) Üst proses henüz fork ile alt prosesi yaratmadan önce pipe isimli POSIX fonksiyonu ile isimsiz boruyu yaratmalıdır. 
@@ -1127,7 +1278,7 @@ int main(void)
     tüm betimleyiciler alt proseste de aynı değerlerle aynı dosya nesnelerini gösterir biçimde oluşturulacaktır. Yani artık 
     üst ve alt prosesler aynı numaralı betimleyicilerle boruya erişebilir durumda olur.
 
-    3) Artık üst ve alt prosesler arasında haberleşme için bir karar verilmelidir. Kim yazacak kim okuyacaktır? Bundan sonra 
+    3) Artık üst ve alt proseslerarasında haberleşme için bir karar verilmelidir. Kim yazacak kim okuyacaktır? Bundan sonra 
     boruya yazma ve okuma potansiyelinde olan birer betimleyici bırakılmalıdır. Yani yazan taraf okuma betimleyicisini okuyan
     taraf yazma betimleyicisini kapatmalıdır.
 
@@ -1216,15 +1367,15 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Üst ve alt prosesler arasında haberleşme yapmak kişilere biraz tuhaf gelebilmektedir. Çünkü fork işleminden sonra zaten 
-    her iki kod da programı yazan kişi tarafından yazılmış olmaktadır. Ancak üst ve alt prosesler arasında boru haberleşmelerinin
+    Üst ve alt proseslerarasında haberleşme yapmak kişilere biraz tuhaf gelebilmektedir. Çünkü fork işleminden sonra zaten 
+    her iki kod da programı yazan kişi tarafından yazılmış olmaktadır. Ancak üst ve alt proseslerarasında boru haberleşmelerinin
     gerektiği önemli durumlar vardır.
 
     Eskiden thread'ler yokken bir işi daha hızlı yapmak için prosesler kullanılıyordu. Üst proses fork işlemi yapıp alt prosesle 
-    koordineli bir biçimde işleri paylaşıyordu. O günlerde bu koordinasyonun sağlanması için üst ve alt prosesler arasında 
+    koordineli bir biçimde işleri paylaşıyordu. O günlerde bu koordinasyonun sağlanması için üst ve alt proseslerarasında 
     haberleşme de gerekiyordu. Thread'lerden sonra artık bu tür işlemler prosesler yerine thread'lerle yapılmaya başlanmıştır.
 
-    Üst ve alt prosesler arasında exec sonrasına da haberleşmeler yapılabilmektedir. Tabii bu durumda exec yapılan alt prosesin 
+    Üst ve alt proseslerarasında exec sonrasına da haberleşmeler yapılabilmektedir. Tabii bu durumda exec yapılan alt prosesin 
     exec sonrasında boru betimleyicilerinin numaralarını biliyor olması gerekir. Ancak stdin, stdout ve stderr dosyalarının 
     betimleyicileri sabit olduğuna göre exec sonrasında haberleşme bu betimleyiciler yoluyla yapılabilmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -1469,7 +1620,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    İsimsiz borular yalnızca üst ve alt prosesler arasındaki haberleşmelerde kullanılmaktadır. Halbuki isimli borular herhangi 
+    İsimsiz borular yalnızca üst ve alt proseslerarasındaki haberleşmelerde kullanılmaktadır. Halbuki isimli borular herhangi 
     iki proses arasında haberleşmede kullanılabilmektedir. İsimli borularla çalışma tipik olarak şu aşamalardan geçilerek yapılır:
 
     1) Önce ismine "boru dosyası" ya da "fifo dosyası" denilen özel bir dosyanın yaratılması gerekir. Boru dosyaları "ls -l" 
@@ -3062,7 +3213,7 @@ void exit_sys(const char *msg)
     İki proses aynı anahtarı verirse aynı nesneyi kullanırlar. Bu xxxget fonksiyonları verilen anahtara ilişkin bir ID geri döndürmektedir. 
     Bu ID değeri aslında diğer fonksiyonlarda handle olarak kullanılmaktadır. Buradaki bir problem verilen anahtarın tesadüfen sistemdeki başka bir 
     prosesle çakışabilmesidir. Bunun için bazı kontrollerin yapılması gerekebilmektedir. xxxget fonksiyonlarının verdiği ID değerleri 
-    sistem genelinde "tek (unique)" bir değerdir. Yani aslında bu ID değeri, diğer prosese prosesler arası haberleşme yöntemleriyle gönderilse 
+    sistem genelinde "tek (unique)" bir değerdir. Yani aslında bu ID değeri, diğer prosese proseslerarası haberleşme yöntemleriyle gönderilse 
     diğer proses hiç xxxget işlemi yapmadan doğrudan bu ID değerini kullanabilir. Başka bir deyişle birden fazla proses xxxget fonksiyonlarında 
     aynı anahtarı verdiklerinde aslında aynı ID'yi elde etmektedir.
 
@@ -3126,7 +3277,7 @@ void exit_sys(const char *msg)
 
     Burada olmayan bir anahtardan hareketle mesaj kuyruğu yaratıldığı için bir çakışma söz konusu olmayacaktır. Tabii bu durumda 
     bu ID değerinin (anahtarı bilmiyoruz) diğer prosese aktarılması gerekmektedir. Bu aktarım da olsa olsa komut satırı argümanıyla 
-    ya da başka bir prosesler arası haberleşme yöntemiyle olabilir. IPC_PRIVATE anahtarı makul gibi gözükse de genel olarak kullanışsızdır.
+    ya da başka bir proseslerarası haberleşme yöntemiyle olabilir. IPC_PRIVATE anahtarı makul gibi gözükse de genel olarak kullanışsızdır.
 
     Bir program mesaj kuyruğunu yaratıp sonlanabilir. Bu durumda yukarıda da belirttiğimiz gibi mesaj kuyruğu yaratılmış biçimde 
     kalmaya devam eder. Ta ki msgctl fonksiyonu ile silinene kadar ya da sistem reboot edilene kadar.
@@ -5030,7 +5181,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Diğer önemli prosesler arası haberleşme yöntemlerinden biri de "paylaşılan bellek alanları (shared memory)" denilen yöntemdir. 
+    Diğer önemli proseslerarası haberleşme yöntemlerinden biri de "paylaşılan bellek alanları (shared memory)" denilen yöntemdir. 
     Paylaşılan bellek alanlarında işletim sistemi iki prosesin sayfa tablosundaki farklı sanal sayfa numaralarını aynı fiziksel 
     sayfaya yönlendirir. Böylece iki proses, farklı sanal adreslerle aynı fiziksel sayfaya erişirler. Proseslerden biri oraya 
     bir şey yazdığında diğeri onu hemen görür. Dolayısıyla yöntem çok hızlıdır. Ancak bu yöntem kendi içerisinde bir senkronizasyon 
@@ -5590,7 +5741,7 @@ void exit_sys(const char *msg)
 
     MAP_SHARED ise yazma işleminin paylaşılan bellek alanına yapılacağını yani "copy-on-write" yapılmayacağını belirtmektedir. 
     Dolayısıyla MAP_SHARED bir mapping'te paylaşılan alana yazılanlar diğer prosesler tarafından görülür. Normal olarak programcılar
-    prosesler arası haberleşme için shared mapping kullanırlar. Private mapping (yani "copy-on-write") bazı özel durumlarda tercih 
+    proseslerarası haberleşme için shared mapping kullanırlar. Private mapping (yani "copy-on-write") bazı özel durumlarda tercih 
     edilmektedir. Örneğin işletim sistemi (exec fonksiyonları) çalıştırılabilir dosyanın ".data" bölümünü private mapping yaparak
     belleğe mmap ile yüklemektedirler.
 
@@ -5911,7 +6062,7 @@ void exit_sys(const char *msg)
     bellek tabanlı dosyalardan bir farkı kalır mı? Bu soruda önerilen yöntem bellek tabanlı dosya çalışmasına benzemekle birlikte 
     bellek tabanlı dosyalar bu sorudaki çalışma biçiminden oldukça farklıdır. Birincisi, dosyanın tamamının belleğe okunması yine 
     iki tamponun devreye girmesine yol açmaktadır. İkincisi ise bellek tabanlı dosyaların bir mapping oluşturması ve dolayısıyla 
-    prosesler arasında etkin bir kullanıma yol açmasıdır. Yani örneğin iki proses aynı dosyayı bellek tabanlı olarak açtığında 
+    proseslerarasında etkin bir kullanıma yol açmasıdır. Yani örneğin iki proses aynı dosyayı bellek tabanlı olarak açtığında 
     işletim sistemi her proses için ayrı bir alan oluşturmamakta dosyanın parçalarını fiziksel bellekte bir yere yerleştirip o 
     proseslerin aynı yerden çalışmasını sağlamaktadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -6722,8 +6873,8 @@ void exit_sys(const char *msg)
     arasında şu önemli farklılıklar vardır:
 
     - Prosesin thread'leri aynı bellek alanını kullanmaktadır. Yani örneğin bir thread bir global değişkene bir şey yazsa 
-    diğer thread bunu görmektedir. Oysa proseslerin bellek alanları tamamen izole edilmiştir. Prosesler arasındaki haberleşme 
-    maliyeti yüksektir ve prosesler arası haberleşme kodu daha karmaşık hale getirmektedir. Halbuki thread'ler global değişkenler 
+    diğer thread bunu görmektedir. Oysa proseslerin bellek alanları tamamen izole edilmiştir. Proseslerarasındaki haberleşme 
+    maliyeti yüksektir ve proseslerarası haberleşme kodu daha karmaşık hale getirmektedir. Halbuki thread'ler global değişkenler 
     yoluyla ya da heap yoluyla çok daha az maliyetle haberleşebilmektedir.
 
     - Thread'lerin yaratılması ve yok edilmesi proseslere göre daha hızlıdır. Çünkü bir proses yaratılırken arka planda prosese 
@@ -9701,17 +9852,17 @@ namespace CSD
     iki proses de aynı mutex nesnesini nasıl görecektir? Eğer Windows sistemlerinde olduğu gibi mutex nesnelerinin UNIX/Linux 
     sistemlerinde isimleri olsaydı bu kullanım kolaylıkla sağlanabilirdi. Ancak UNIX/Linux sistemlerinde mutex nesnelerinin isimleri 
     yoktur. O halde tek yol mutex nesnesini paylaşılan bir bellek alanında yaratmaktır. Ancak POSIX standartlarına göre mutex 
-    nesnelerinin paylaşılan bellek alanlarında yaratılması prosesler arası kullanım için yeterli değildir. Aynı zamanda mutex 
-    nesnesinin prosesler arası paylaşılabilirliğini set etmek gerekir. Bu da mutex özellikleriyle yapılmaktadır. 
+    nesnelerinin paylaşılan bellek alanlarında yaratılması proseslerarası kullanım için yeterli değildir. Aynı zamanda mutex 
+    nesnesinin proseslerarası paylaşılabilirliğini set etmek gerekir. Bu da mutex özellikleriyle yapılmaktadır. 
     pthread_mutexattr_setpshared fonksiyonu ile mutex paylaşımlı moda sokulabilmektedir:
 
     #include <pthread.h>
 
     int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
 
-    Fonksiyonun birinci parametresi mutex özellik nesnesinin adresini almaktadır. İkinci parametresi ise nesnenin prosesler arası 
-    paylaşımını belirtmektedir. Bu parametre PTHREAD_PROCESS_SHARED geçilirse nesne prosesler arasında paylaşılmakta, 
-    PTHREAD_PROCESS_PRIVATE geçilirse nesne prosesler arasında paylaşılmamaktadır. Fonksiyon başarı durumunda 0 değerine, başarısızlık 
+    Fonksiyonun birinci parametresi mutex özellik nesnesinin adresini almaktadır. İkinci parametresi ise nesnenin proseslerarası 
+    paylaşımını belirtmektedir. Bu parametre PTHREAD_PROCESS_SHARED geçilirse nesne proseslerarasında paylaşılmakta, 
+    PTHREAD_PROCESS_PRIVATE geçilirse nesne proseslerarasında paylaşılmamaktadır. Fonksiyon başarı durumunda 0 değerine, başarısızlık 
     durumunda errno değerine geri dönmektedir. Mutex özellik nesnesinin paylaşılabilirlik özelliği pthread_mutexattr_getpshared 
     fonksiyonu ile elde edilebilir:
 
@@ -9726,7 +9877,7 @@ namespace CSD
     Mutex özellikleri belirtilmezse ya da pthread_mutexattr_setpshared fonksiyonu ile set edilmezse default durumda nesnenin paylaşım 
     özelliği PTHREAD_PROCESS_PRIVATE biçimindedir.
 
-    Görüldüğü gibi mutex nesnelerinin prosesler arasındaki paylaşımı biraz zahmetlidir. Bu nedenle prosesler arasındaki senkronizasyonlar 
+    Görüldüğü gibi mutex nesnelerinin proseslerarasındaki paylaşımı biraz zahmetlidir. Bu nedenle proseslerarasındaki senkronizasyonlar 
     için daha çok semaphore nesneleri tercih edilmektedir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
@@ -10896,7 +11047,7 @@ void exit_sys_errno(const char *msg, int eno)
     int pthread_condattr_destroy(pthread_condattr_t *attr);
     int pthread_condattr_init(pthread_condattr_t *attr);
 
-    Koşul değişkenlerine iki özellik set edip bunları alabiliriz. Birincisi, koşul değişkeninin prosesler arası kullanımını 
+    Koşul değişkenlerine iki özellik set edip bunları alabiliriz. Birincisi, koşul değişkeninin proseslerarası kullanımını 
     sağlayan özelliktir. Bu özellik pthread_condattr_setpshared fonksiyonu ile set edilmektedir. Fonksiyonun prototipi şöyledir:
 
     #include <pthread.h>
@@ -10918,12 +11069,12 @@ void exit_sys_errno(const char *msg, int eno)
 
     Fonksiyon, kullanılacak clock nesnesinin ID'sini parametre olarak almaktadır. Default olarak "system clock" kullanılmaktadır.
 
-    Tabii koşul değişkenlerinin prosesler arası kullanımı için yine onların paylaşılan bellek alanında oluşturulması gerekmektedir. 
+    Tabii koşul değişkenlerinin proseslerarası kullanımı için yine onların paylaşılan bellek alanında oluşturulması gerekmektedir. 
     Tabii bu durumda mutex nesnesinin de paylaşılan bellek alanında oluşturulması gerekecektir.
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Aşağıda üretici-tüketici probleminin prosesler arasında oluşturulmasına ilişkin bir örnek verilmiştir. Bu örnekte tüm koşul 
+    Aşağıda üretici-tüketici probleminin proseslerarasında oluşturulmasına ilişkin bir örnek verilmiştir. Bu örnekte tüm koşul 
     değişkenleri, mutex nesnesi ve kuyruk bilgileri paylaşılan bellek alanında oluşturulmuştur. Önce "producer" programı
     çalıştırılmalıdır. Tüm bu nesneleri producer yaratıp kendisi silmektedir. Derleme işlemlerini şöyle yapabilirsiniz:
 
@@ -11215,8 +11366,8 @@ void exit_sys_errno(const char *msg, int eno)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    POSIX semaphore nesneleri isimli ve isimsiz olarak yaratılabilmektedir. İsimli semaphore nesneleri prosesler arası kullanım
-    için daha uygundur. İsimsiz semaphore nesneleri -her ne kadar prosesler arasında da kullanılabiliyorsa da- özellikle prosesin 
+    POSIX semaphore nesneleri isimli ve isimsiz olarak yaratılabilmektedir. İsimli semaphore nesneleri proseslerarası kullanım
+    için daha uygundur. İsimsiz semaphore nesneleri -her ne kadar proseslerarasında da kullanılabiliyorsa da- özellikle prosesin 
     thread'leri arasındaki senkronizasyonda tercih edilmektedir.
 
     İsimsiz POSIX semaphore nesnelerinin kullanımı şöyledir:
@@ -11229,9 +11380,9 @@ void exit_sys_errno(const char *msg, int eno)
 
     int sem_init(sem_t *sem, int pshared, unsigned value);
 
-    Fonksiyonun birinci parametresi sem_t türünden nesnesinin adresini alır. İkinci parametre semaphore nesnesinin prosesler arasında 
-    paylaşılıp paylaşılmayacağını belirtir. Burada 0 değeri nesnenin prosesler arasında paylaşılmayacağını, sıfır dışı değer ise 
-    nesnenin prosesler arasında paylaşılacağını belirtmektedir. Üçüncü parametre başlangıçtaki semaphore sayacının değerini belirtir. 
+    Fonksiyonun birinci parametresi sem_t türünden nesnesinin adresini alır. İkinci parametre semaphore nesnesinin proseslerarasında 
+    paylaşılıp paylaşılmayacağını belirtir. Burada 0 değeri nesnenin proseslerarasında paylaşılmayacağını, sıfır dışı değer ise 
+    nesnenin proseslerarasında paylaşılacağını belirtmektedir. Üçüncü parametre başlangıçtaki semaphore sayacının değerini belirtir. 
     Yani bu değer kritik koda en fazlası kaç akışın girebileceğini belirtmektedir. Fonksiyon başarı durumunda 0 değerine, başarısızlık 
     durumunda -1 değerine geri döner ve errno değişkeni uygun biçimde set edilir. (Thread fonksiyonlarının bizzat başarısızlık 
     durumunda errno değeriyle geri döndüğünü anımsayınız. Halbuki POSIX semaphore fonksiyonları doğrudan errno değişkenini set 
@@ -11946,7 +12097,7 @@ void exit_sys_errno(const char *msg, int eno)
 
 /*---------------------------------------------------------------------------------------------------------------------------
     İsimsiz semaphore nesneleri de yine istenirse sem_init fonksiyonunda pshared parametresi sıfır dışı yapılarak ve paylaşılan 
-    bellek alanında oluşturularak prosesler arasında kullanılabilir. Ancak prosesler arasında kullanım için isimli semaphore 
+    bellek alanında oluşturularak proseslerarasında kullanılabilir. Ancak proseslerarasında kullanım için isimli semaphore 
     nesneleri genellikle daha uygundur.
 
     Aşağıda iki proses arasında isimsiz semaphore nesneleri ile üretici tüketici problemi uygulanmıştır. Burada önce "producer"
@@ -12151,7 +12302,7 @@ void exit_sys_errno(const char *msg, int eno)
 
     sem_t *sem_open(const char *name, int oflag, ...);
 
-    Fonksiyonun birinci parametresi prosesler arasında kullanım için gereken ismi belirtmektedir. Bu isim yine diğer POSIX IPC 
+    Fonksiyonun birinci parametresi proseslerarasında kullanım için gereken ismi belirtmektedir. Bu isim yine diğer POSIX IPC 
     nesnelerinde olduğu gibi kök dizinde bir dosya ismi gibi verilmelidir. İkinci parametre açış modunu belirtir. Burada eğer 
     O_CREAT kullanılırsa nesne yoksa yaratılır, varsa olan açılır. O_CREAT ile O_EXCL birlikte kullanılabilir. Bu durumda nesne 
     zaten varsa fonksiyon başarısız olmaktadır. Burada açış modunda O_RDONLY, O_WRONLY ya da O_RDWR gibi bayraklar kullanılmaz. 
@@ -12217,7 +12368,7 @@ void exit_sys_errno(const char *msg, int eno)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Aşağıda prosesler arasında üretici-tüketici problemi isimli semaphore nesneleri ile çözülmüştür. Derleme işlemleri aşağıdaki 
+    Aşağıda proseslerarasında üretici-tüketici problemi isimli semaphore nesneleri ile çözülmüştür. Derleme işlemleri aşağıdaki 
     gibi yapılabilir:
 
     $ gcc -o producer producer.c
@@ -12431,7 +12582,7 @@ void exit_sys(const char *msg)
     klasik Sistem 5 IPC nesneleri kullanıyordu. İşte klasik IPC nesnelerinin içerisinde semaphore nesneleri de bulunmaktadır. 
     Ancak maalesef Sistem 5 semaphore arayüzü oldukça karışıktır. Bu nedenle artık yeni programların eğer özel bir taşınabilirlik 
     sorunu yoksa POSIX semaphore nesnelerini kullanması uygun olur. Sistem 5 semaphore nesneleri, aynı prosesin thread'leri 
-    arasında değil farklı prosesler arasında kullanım için düşünülmüştür. (Zaten bunların tasarlandığı yıllarda henüz thread'ler 
+    arasında değil farklı proseslerarasında kullanım için düşünülmüştür. (Zaten bunların tasarlandığı yıllarda henüz thread'ler 
     uygulamaya girmemişti.) Halbuki isimsiz POSIX semaphore nesnelerini aynı prosesin thread'leri arasında kullanabilmekteyiz.
 
     Sistem 5 semaphore nesnelerinin isimlendirme biçimleri ve temel parametrik yapıları diğer Sistem 5 IPC nesnelerine oldukça 
@@ -12453,7 +12604,7 @@ void exit_sys(const char *msg)
 
     int semget(key_t key, int nsems, int semflg);
 
-    Fonksiyonun birinci parametresi prosesler arasında kullanım için gereken anahtar değerdir. Anımsanacağı gibi Sistem 5 IPC 
+    Fonksiyonun birinci parametresi proseslerarasında kullanım için gereken anahtar değerdir. Anımsanacağı gibi Sistem 5 IPC 
     nesneleri birer anahtar verilerek yaratılıp açılmakta ve bu işlemden bir ID değeri elde edilmektedir. Bu ID değerinin sistem 
     genelinde tek (unique) olduğunu anımsayınız. Yine anımsayacağınız gibi bu anahtarı isim gibi kullanabilmek için ftok fonksiyonundan 
     faydalanılabiliyordu. Tabii fonksiyonun birinci parametresi diğer Sistem 5 IPC nesnelerinde olduğu gibi IPC_PRIVATE biçiminde
@@ -12716,7 +12867,7 @@ void exit_sys(const char *msg)
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Sistem 5 semaphore nesneleri prosesler arası kullanım için düşünülmüştür. Özellikle prosesler arasındaki üretici-tüketici 
+    Sistem 5 semaphore nesneleri proseslerarası kullanım için düşünülmüştür. Özellikle proseslerarasındaki üretici-tüketici 
     problemi gibi tipik senkronizasyon problemleri eskiden bu nesnelerle çözülüyordu. Tabii bu nesneler aslında ağırlıklı 
     olarak Sistem 5 paylaşılan bellek alanlarıyla birlikte kullanılmaktadır.
 ---------------------------------------------------------------------------------------------------------------------------*/
@@ -13240,7 +13391,7 @@ void exit_sys(const char *msg)
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------
-    Sistem 5 semaphore nesneleri prosesler arası kullanım için tasarlanmıştır. Zaten bu nesnelerin tasarlandığı zamanlarda 
+    Sistem 5 semaphore nesneleri proseslerarası kullanım için tasarlanmıştır. Zaten bu nesnelerin tasarlandığı zamanlarda 
     henüz thread'ler kullanılmıyordu. Her ne kadar bu nesneler aynı prosesin thread'leri arasında da kullanılabilirse de böyle 
     bir kullanım verimsiz ve gereksizdir. Thread'ler arasında semaphore kullanmak istiyorsanız isimsiz POSIX semaphore'larını
     tercih etmelisiniz. POSIX senkronizasyon nesneleri UNIX türevi sistemlere thread eklenirken eklenmiştir. 
@@ -13358,12 +13509,12 @@ void exit_sys(const char *msg)
     if ((result = pthread_barrier_destroy(&g_barrier)) != 0)
         exit_sys_errno("pthread_barrier_destroy", result);
 
-    5) Barrier nesneleri için tek bir özellik bilgisi vardır. O da nesnenin prosesler arasında kullanılıp kullanılmayacağını 
+    5) Barrier nesneleri için tek bir özellik bilgisi vardır. O da nesnenin proseslerarasında kullanılıp kullanılmayacağını 
     belirtmektedir. Default durumda (yani pthread_barrier_init fonksiyonunun ikinci parametresi NULL geçildiğinde) nesne 
-    prosesler arasında kullanılamamaktadır. Özellik nesnesinin kullanımı diğer nesnelerde olduğu gibidir. Önce pthread_barrierattr_t 
+    proseslerarasında kullanılamamaktadır. Özellik nesnesinin kullanımı diğer nesnelerde olduğu gibidir. Önce pthread_barrierattr_t 
     türünden bir nesne yaratılır. Sonra bu nesneye pthread_barrierattr_init fonksiyonu ile ilk değer verilir. Sonra nesnenin 
     özelliğinin set ve get edilmesi için pthread_barrierattr_setpshrared ve pthread_barrierattr_getpshrared fonksiyonları kullanılır. 
-    Burada prosesler arası paylaşım PTHREAD_PROCESS_SHARED değeri ile belirtilmektedir. Tabii en sonunda bu özellik nesnesi 
+    Burada proseslerarası paylaşım PTHREAD_PROCESS_SHARED değeri ile belirtilmektedir. Tabii en sonunda bu özellik nesnesi 
     pthread_barrierattr_destroy fonksiyonu ile yok edilmelidir. Özellik ile ilgili fonksiyonların prototipleri şöyledir:
 
     #include <pthread.h>
@@ -13392,7 +13543,7 @@ void exit_sys(const char *msg)
     if ((result = pthread_barrierattr_destroy(&battr)) != 0)
         exit_sys_errno("pthread_barrierattr_destroy", result);
 
-    Tabii barrier nesnesini prosesler arasında kullanabilmek için nesneyi yine paylaşılan bellek alanında oluşturmak gerekir. 
+    Tabii barrier nesnesini proseslerarasında kullanabilmek için nesneyi yine paylaşılan bellek alanında oluşturmak gerekir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
@@ -13729,7 +13880,7 @@ int check(const int *nums)
 
     int pthread_spin_init(pthread_spinlock_t *lock, int pshared);
 
-    Fonksiyonun birinci parametresi spinlock nesnesinin adresini alır. İkinci parametre, nesnenin prosesler arasında kullanılıp 
+    Fonksiyonun birinci parametresi spinlock nesnesinin adresini alır. İkinci parametre, nesnenin proseslerarasında kullanılıp 
     kullanılmayacağını belirtmektedir. Bu parametre 0 ya da PTHREAD_PROCESS_SHARED biçiminde geçilir. Nesnenin ayrıca bir 
     özellik (attribute) parametresinin olmadığına dikkat ediniz. Spinlock nesnesine ilk değer vermek için bir makro bulunmamaktadır. 
     Örneğin:
@@ -14093,9 +14244,9 @@ void exit_sys_errno(const char *msg, int eno)
     benzer biçimde yapılmaktadır. Önce pthread_rwlockattr_t türünden bir özellik nesnesi tanımlanır. Sonra bu özellik nesnesine 
     pthread_rwlockattr_init fonksiyonu ile ilk değer verilir. Sonra da özellik nesnesine pthread_rwlockattr_setxxx fonksiyonlarıyla 
     özellikler iliştirilir. Sonra da bu özellik nesnesi kullanılarak reader-writer lock nesnesi pthread_rwlock_init fonksiyonuyla
-    yaratılır. Aslında şu anda nesnenin tek bir özelliği vardır. O da onun prosesler arasında paylaşılabilirliğini belirtmektedir. 
+    yaratılır. Aslında şu anda nesnenin tek bir özelliği vardır. O da onun proseslerarasında paylaşılabilirliğini belirtmektedir. 
     Nesne default durumda (yani PTHREAD_RWLOCK_INITIALIZER ile yatarıldığında ya da pthread_rwlock_init fonksiyonunda özellik 
-    parametresi NULL geçildiğinde) prosesler arasında paylaşılamamaktadır. Prosesler arası paylaşım için pthread_rwlock_setpshared 
+    parametresi NULL geçildiğinde) proseslerarasında paylaşılamamaktadır. Proseslerarası paylaşım için pthread_rwlock_setpshared 
     fonksiyonu kullanılmaktadır. Bu bilginin alınması için de pthread_rwlock_getpshared fonksiyonu bulunmaktadır. Tabii özellik 
     nesnesinin kullanımı bittikten sonra (yani pthread_rwlock_init fonksiyonu çağrıldıktan sonra) onun pthread_rwlock_destroy 
     fonksiyonu ile boşaltılması gerekmektedir. Buradaki fonksiyonların prototipleri aşağıda verilmiştir
