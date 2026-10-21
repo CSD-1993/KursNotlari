@@ -3978,14 +3978,349 @@ fn thread_proc() {
     Bu da birden fazla okuyan thread'in gereksiz bir biçimde birbirlerini beklemesi sonucunu doğurur. İşte bu tür durumlarda
     "okuma-yazma kilitleri (reader-writer lock)". 
 
-    Rust'ta okuma-yazma kilitleri RWLock isimli bir yapıyla temsil edilmiştir. 
+    Rust'ta okuma-yazma kilitleri RwLock isimli bir yapıyla temsil edilmiştir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-*---------------------------------------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------------------------------------
+                                    141. Ders 21/10/2026 - Çarşamba
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    RwLock yapısı da generic bir yapıdır. Yani tıpkı Mutex yapısında olduğu gibi RwLOck türünden bir değişken aynı zamanda 
+    kilitlenecek değeri de tutmaktadır:
+
+    pub struct RwLock<T: ?Sized> { /* private fields */ }
+        
+    Bir RwLock türünden değer yapının yine new ilişkili fonksiyonuyla yaratılabilir. new ilişkili fonksiyonunun parametrik 
+    yapısı şöyledir:
+
+    pub const fn new(t: T) -> RwLock<T>
+
+    Görüldüğü gibi fonksiyon T türünden bir değer alıp RwLock<T> türünden bir değer vermektedir. Örneğin:
+
+    let rwlock = RwLock::new(0);
+
+    Okuma-yazma kilitlerinde kritik koda girilirken "okuma amaçlı mı", "yazma amaçlı mı" girildiği belirtilmek zorundadır. 
+    Bu belirleme RwLock yapısında yapının read ve write metotları yoluyla yapılmaktadır. Bu metotların parametirk yapılarına
+    dikkat ediniz:
+
+    pub fn read(&self) -> LockResult<RwLockReadGuard<'_, T>>
+    pub fn write(&self) -> LockResult<RwLockWriteGuard<'_, T>>
+
+    Her iki metod da başarısız olabileceğinde dolayı LockResult türüyle geri döndürülmüştür. LockResult türü aslında 
+    Result türündendir:
+
+    pub type LockResult<T> = Result<T, PoisonError<T>>;
+
+    O halde read metodu başarı durumunda Ok(RwLockReadGuard), write metodu da başarı durumunda RwLockWriteGuard türünden 
+    değer vermektedir. Bu iki guard nesnesi de RAII biçiminde kullanılmaktadır. Yani tıpkı MutexGuard nesnelerinde olduğu 
+    gibi faaliyet alanı bittiğinde kilit otomatik bırakılmaktadır. 
+
+    Aşağdaki örnekte dört threda yaratılmıştır. Thread'lerin ikisi okuma amaçlı kilidi alırken diğer ikisi yazma amaçlı
+    kilidi almaktadır. Programı çalıştırıp şu duruma dikkat ediniz: Okuma yapan thread_proc1 ve thread_proc2 iç içe 
+    geçebilmektedir, ancak yazma yapan thread_proc3 ve thread_proc4 iç içe geçememektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::thread;
+use std::time::Duration;
+use std::sync::{RwLock};
+
+static RWLOCK: RwLock<i32> = RwLock::new(5);
+
+fn main() {
+    let jhs = vec![
+        thread::spawn(thread_proc1),
+        thread::spawn(thread_proc2),
+        thread::spawn(thread_proc3),
+        thread::spawn(thread_proc4),
+    ];
+
+    jhs.into_iter().for_each(|jh| jh.join().unwrap());
+}
+
+fn thread_proc1() {
+    for _ in 0..5 {
+        let rw_read_guard = RWLOCK.read().unwrap();
+
+        for i in 0..*rw_read_guard {
+            println!("thread_proc1 reading...: {}", i);
+            thread::sleep(Duration::from_millis(rand::random_range(0..=1000)));
+        }
+    }
+}
+
+
+fn thread_proc2() {
+    for _ in 0..5 {
+        let rw_read_guard = RWLOCK.read().unwrap();
+
+        for i in 0..*rw_read_guard {
+            println!("thread_proc2 reading...: {}", i);
+            thread::sleep(Duration::from_millis(rand::random_range(0..=1000)));
+        }
+    }
+}
+
+fn thread_proc3() {
+    for _ in 0..5 {
+        let rw_write_guard = RWLOCK.write().unwrap();
+
+        for i in 0..*rw_write_guard {
+            println!("thread_proc3 writing...: {}", i);
+            thread::sleep(Duration::from_millis(rand::random_range(0..=1000)));
+        }
+    }
+}
+
+fn thread_proc4() {
+    for _ in 0..5 {
+        let rw_write_guard = RWLOCK.write().unwrap();
+
+        for i in 0..*rw_write_guard {
+            println!("thread_proc4 writing...: {}", i);
+            thread::sleep(Duration::from_millis(rand::random_range(0..=1000)));
+        }
+    }
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aşağıda RwLock yapısının kullanılmasına başka bir örnek verilmiştir. Burada Cache isimli yapı bir HashMap<i32, String>
+    alanına sahiptir. Bu Cache yapısı i32 türünden değerlerin yazısal biçimde karesini tutmaktadır. Örneğin biz bu Cache'e 
+    "10 değerinin karesi var mı?" diye sorduğumuzda eğer o 10 değerinin karesini daha önce hesaplayıp saklamışsa bize doğrudan
+    bu sakladığı değeri vermektedir. Eğer onu daha önce hesaplamamışsa onu hesaplayıp hem cache'e yerleştirmekte hem de 
+    onun karesini yine bize vermektedir. Bu problemde cache'ten değer almak bir "okuma" eylemini, cache'e değer yazmak ise
+    bir yazma eylemini belirtmektedir. Birden fazla thread aynı anda cache'ten değer okuyabilir. Ancak bir thread cache'e 
+    değer yazarken diğerleri onu beklemek zorundadır. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+use std::collections::HashMap;
+use std::sync::RwLock;
+use std::thread;
+
+struct Cache {
+    map: RwLock<HashMap<u64, String>>,
+}
+
+impl Cache {
+    fn expensive_compute(key: u64) -> String {
+        format!("value-{}", key * key)
+    }
+
+    fn get(&self, key: u64) -> String {
+        // Fast path: shared lock, many readers in parallel.
+        if let Some(v) = self.map.read().unwrap().get(&key) {
+            return v.clone();
+        }
+        // Slow path: compute WITHOUT holding any lock.
+        let value = Self::expensive_compute(key);
+
+        let mut rw_write_guard = self.map.write().unwrap();
+        rw_write_guard.insert(key, value.clone());
+        value
+    }
+}
+
+fn main() {
+    let cache = Cache { map: RwLock::new(HashMap::new()) };
+    thread::scope(|s| {
+        for t in 0..4 {
+            let cache = &cache;
+            s.spawn(move || {
+                for k in 0..10 {
+                    let _ = cache.get((k + t) % 10);
+                }
+            });
+        }
+    });
+    println!("cached entries: {}", cache.map.read().unwrap().len()); // 10
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Aslında thread senkronizasyonu konusu oldukça geniş bir konudur. Biz burada thread'ler konusunu sonlandıracağız. 
+    Diğer senkronizasyon nesnelerini "Rust Standat Kütüphane" dokümanlarından inceleyebilirsiniz.  
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi de Rust'ta TCP/IP ve UDP/Ip soket ptogramlaması üzerinde duralım. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    İşletim sistemleri dünyasında çalışmakta olan programların birbirlerine bilgi gönderip alması sürecine "proseslerarası 
+    haberleşme (interprocess communication (IPC))" denilmektedir. 
+
+    Proseslerarası haberleşme (interprocess communication ya da kısaca IPC) kabaca ikiye ayrılmaktadır: 
+
+    1) Aynı makinenin prosesleri arasında haberleşme
+    2) Farklı makinelerin prosesleri arasında haberleşme
+
+    Aynı makinenin prosesleri arasında haberleşmede işletim sistemleri tarafından sunulan "mesaj kuyrukları (message queue)", 
+    "borular (pipes)", "paylaşılan bellek alanları (shared memory)" gibi yöntemler kullanılmaktadır. 
+    
+    Farklı makinelerin prosesleri arasında haberleşme için önceden belirlenmiş birtakım kurallara uyulması gerekmektedir. 
+    Haberleşmede uyulması gereken kurallara "protokol (protocol)" denilmektedir. Çeşitli protokol aileleri vardır. Bugün 
+    için en yaygın kullanılan protokol ailesi "IP Protokol Ailesi (IP Protocol Family)" denilen ailedir. IP prototokol 
+    ailesi aynı zamanda Internet'tin de kullandığı protokol ailesidir. Dolayısıyla IP protokol ailesini kullanarak yazılmış 
+    olan programlar Internet ortamında da kullanılabilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Farklı makinelerin prosesleri arasında uzak mesafe haberleşme ilk kez 1969 yılında denenmiştir. Soğuk savaş yıllarında 
+    ABD Savunma Bakanlığına bağlı DARPA (Defense Advanced Research Projects Agency) denilen kurumun ARPA (Advanced Research 
+    Project Agency) denilen bölümü ismine ARPANET (Advanced Research Projects Agency Network) denilen bir proje başlatmıştır. 
+    ARPANET ABD savunmasında kullanılan bilgisayarların dağıtık hale getirilmesini hedeflemekteydi. Proje ABD Savunma Bakanlığının 
+    yanı sıra "University of California Los Angeles (UCLA)", "Stanford Research Institute (SRI)", "University of California, 
+    Santa Barbara (UCSB)", ve "University of Utah" üniversiteleri tarafından yürüyülüyordu. Sonraları bu ARPANET genişlemeye 
+    başladı. ABD'dedeki diğer hükümet kurumları ve üniversiteler bu ağa bağlandılar. O zamanlar bu ağda NCP (Netword Control 
+    Protocol) denilen bir protokol kullanıyordu. ARPANET sonraları Avrupa'ya sıçradı ve 80'li yılların ortalarına doğru da 
+    Türkiye'ye de geldi. 1983 yılında ARPANET NCP protokolünü bırakarak IP protokol ailesine geçmiştir. ARPANET 1983 yılında 
+    IP protokol ailesini kullanmaya başlayınca zamanla ismi de "Internet" haline gelmiştir. Internet ismi "internetworking" 
+    sözcüğünden uydurulmuştur. Internetworking ağların birbirlerine bağlanması anlamına gelmektedir. Bugünkü Internet'te 
+    aslında çeşitli küçük ağlar birbirleriyle bağlanarak büyük bir ağı oluşturmaktadır. Ağları biribirine bağlamak için 
+    "Router" denilen aygıtlar kullanılmaktadır. Bugün evlerimizde kullandığımız modemler aynı zamanda router özelliğine de 
+    sahiptir. Bizim evimizdeki bilgisayarlar bir "yerel ağ (local area netork)" oluşturmaktadır. Bu yerel ağ router ile dış 
+    dünyadaki başka bir ağa (tipik olarak Internet ağına) bağlanmaktadır. Aslında kişiler de bir araya gelip kendi ağlarını 
+    oluşturabilirler. Ancak herkesin katıldığı Internet denilen ağ büyük sinerji oluşturmuştur. Belli bir kurum içerisinde 
+    oluşturulmuş bu tür ağlara "intranet" de denilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Protokol aileleri üst üste yığılmış olan protokollere sahip olabilmektedir. Her üste yığılmış protokole "katman (layer)" 
+    denilmektedir. Her katmandaki protokol "aşağıdaki katmanların zaten var olduğu fikriyle daha yüksek seviyeli" kuralları 
+    tanımlamaktadır. Protokol ailelerini oluşturmak için ISO ve CCITT (Comité Consultatif International Téléphonique et 
+    Télégraphique) kurumları tarafından ismine "OSI Reference Model" denilen  dokümanlar oluşturulmuştur. OSI model bir 
+    protokol değildir. Protokol ailelerini oluşturacaklar için bir kılavuz niteliğindedir. OSI modelde toplam 7 katman üst 
+    üste yığılmıştır. OSI'nin 7 katmanı şöyledir:
+
+    ╔═══════════════════════════════════════════════════════════╗
+    ║                    7. UYGULAMA KATMANI                    ║
+    ║                   (Application Layer)                     ║
+    ║        HTTP, FTP, SMTP, DNS, Telnet, SSH, SNMP            ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                    6. SUNUM KATMANI                       ║
+    ║                  (Presentation Layer)                     ║
+    ║         SSL/TLS, JPEG, GIF, MPEG, ASCII, EBCDIC           ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                    5. OTURUM KATMANI                      ║
+    ║                    (Session Layer)                        ║
+    ║          NetBIOS, RPC, PPTP, SIP, SQL, NFS                ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                   4. AKTARIM KATMANI                      ║
+    ║                   (Transport Layer)                       ║
+    ║                      TCP, UDP, SCTP                       ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                     3. AĞ KATMANI                         ║
+    ║                    (Network Layer)                        ║
+    ║              IP, ICMP, ARP, RARP, IGMP, IPsec             ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                2. VERİ BAĞLANTI KATMANI                   ║
+    ║                  (Data Link Layer)                        ║
+    ║           Ethernet, PPP, Switch, Bridge, MAC              ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                    1. FİZİKSEL KATMAN                     ║
+    ║                   (Physical Layer)                        ║
+    ║        Kablolar, Hub, Repeater, Modem, Wi-Fi              ║
+    ╚═══════════════════════════════════════════════════════════╝
+    
+    - Fiziksel katman (physical Layer) iletişimde kullanılacak tüm donanımsal öğelerin spesifikasyonlarını belirtmektedir. 
+    Örneğin kabloların taşıma kapasitesi, konnektörler, telsiz (wireless) aktarımı söz konusuysa kullanılacak frekeans 
+    gibi tüm unsurlar fiziksel katmana ilişkindir. Bu katmnk gerçekleştirildiğinde artık veri transferi için donanımsal 
+    ortam sağlanmış durumdadır. 
+
+    - Veri bağlantı katmanı (data link layer) ağa bağlı birimlerin (bilgisayarların) birbirlerini tanımaları için gereken 
+    kuralları barındırmaktadır. Veri bağlantı katmanında ağa bağlı her birimin bir fiziksel adresi olmalıdır. Bugün 
+    bilgisayarlarımızda kullandığımız "Ethernet kartı" diye bilinen network kartlarının protokolü olan Ethernet protokolü 
+    OSI'nin veri bağlantı katmanına ilişkindir. Bu katman gerçekleştirildiğinde artık ağa bağlı olan her birimin donanımsal 
+    bir adresi vardır. Bir birimden diğerine paket paket bilgiler gönderilip alınabilmektedir. 
+    
+    - Ağ Katmanı (network layer) "internetworking" için gereken ana protokollerin bulunduğu katmandır. IP Protokol ailesindeki 
+    IP (Internet Protocol) protokolü OSI'nin "ağ katmanına" ilişkin bir protokoldür. Bu katmandaki protokoller artık ağa 
+    bağlı birimlere fiziksel değil mantıksal bir adres vermektedir. Bu katmandaki protokoller bilgilerin nasıl paketlere 
+    ayrılıp nasıl iletileceği konusundaki ayrıntıları tanımlamaktadır. Bu katman gerçekleştirildiğinde artık bir paket 
+    veri belli bir mantıksal adrese sahip birime iletilebilir hale gelmiştir. 
+    
+    - Aktarım katmanı (transport layer) aynı birime giden paketlerin o birim içerisinde ayrıştırılması ve bir araya getirilmesine 
+    ilişkin kuralları tanımlayan protokolleri içermektedir. Örneğin IP protokol ailesindeki TCP ve UDP protokolleri tipik 
+    olarak aktarım katmanı protokolleridir. Aynı zamanda bu katman akış kontrolüne ilişkin belirlemeleri de içermektedir.
+        
+    - İletişimde bir "oturum (session)" oluşturmak gerekebilir. Oturum katmanı bunu sağlamaktadır. IP protokol ailesinde bu işlevde 
+    bir oturum katmanı bulunmamaktadır. 
+    
+    - Bilgilerin şifrelenemsi, sıkıştırılması, sunuma hazır hale getirilmesi gibi faaaliyetler sunum Katmanı protokolleri 
+    tarafından yapılmaktadır. IP protokol ailesinde bazı protokollerde bu tür faaliyetler vardır. Ancak OSI referans 
+    modelinede belirtilen biçimde bir sunum katmanı yoktur.
+    
+    - Nihayet uygulama katmanı (application layer) protokolleri kullanıcı programlarının doğrudan kullandığı protokollerdir. 
+    Örneğin IP ailesindeki HTTP, Telnet, SSH, POP3, IMAP gibi protokoller OSI'nin uygulama katmanına ilişkindir. Yani uygulama 
+    katmanı artık kullanıcı ile etileşimde bukunan kullanıcı için belli bir işi yerine getiren en yüksek düzeyli protokolleri 
+    barındırmaktadır 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Her ne kadar OSI 7 katmanlı bir protokol ailesi tanımlamışsa da IP Protokol ailesi OSI'nin 7 katmanını kullanmamaktadır. 
+    IP protokol ailesi 4 katmanlı bir protokol ailesidir. IP Protokol ailesinin temel protokolleri şöyle oluşturulmuştur:
+
+    ╔═══════════════════════════════════════════════════════════╗
+    ║                    4. UYGULAMA KATMANI                    ║
+    ║                   (Application Layer)                     ║
+    ║        HTTP, FTP, SMTP, DNS, Telnet, SSH, DHCP            ║
+    ║              (OSI: Uygulama + Sunum + Oturum)             ║
+    ╠═══════════════════════════╦═══════════════════════════════╣
+    ║     3. AKTARIM KATMANI    ║     3. AKTARIM KATMANI        ║
+    ║    (Transport Layer)      ║    (Transport Layer)          ║
+    ║                           ║                               ║
+    ║           TCP             ║           UDP                 ║
+    ║                           ║                               ║
+    ╠═══════════════════════════╩═══════════════════════════════╣
+    ║                   2. AĞ KATMANI                           ║
+    ║                    (Internet Layer)                       ║
+    ║              IP (IPv4, IPv6), ICMP, ARP, IGMP             ║
+    ║                      (OSI: Ağ Katmanı)                    ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║                1. AĞ ERİŞİM KATMANI                       ║
+    ║                (Network Access Layer)                     ║
+    ║              Ethernet, Wi-Fi, PPP, MAC                    ║
+    ║              (OSI: Fiziksel ve Veri Aktarım)              ║
+    ╚═══════════════════════════════════════════════════════════╝
+
+    Uygulama katmanındaki popüler protokollerin çoğu TCP üzerine oturtulmuştur. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Tabii IP Protokol ailesinde daha pek çok yardımcı protokoller de vardır. Biz yukarıda yalnızca temel protokolleri belirttik. 
+    "IP Protokolü (Internet Protocol)" aileye ismini veren en önemli protokoldür. Bu protokol bilgilerin paketlere ayrılması, 
+    rotalanması gibi tanımlamaları barındırmaktadır. IP protokolünde ağa bağlı olan her birime "host" denilmektedir. Her host'un 
+    ismine IP numarası denilen mantıksal bir adresi vardır. IP protokolünün iki önemli versiyonu vardır: IPV4 ve IPV6. IPV4'te 
+    IP numaraları 4 byte uzunluktadır. Ancak bu 4 byte'lık IP numaraları zamanla yetersiz kalmaya başlamıştır. IPV6'da IP 
+    numaraları 16 byte uzunluğundadır. Bugün hem IPV4 hem de IPV6 aynı anda kullanılmaktadır. Uzun bir süredir IPV4 çok daha 
+    yoğun kullanılıyordu. Ancak bugün başa baş bir noktaya gelmiştir. Gelecekte IPV6 çok daha yoğun kullanılacaktır. 
+
+    TCP (Transmission Control Protocol) IP ailesindeki ağırlıklı kullanılan aktarım (transport) protokolüdür. IP ailesinin 
+    HTTP, SSH, Telnet, POP3, FTP gibi protokollerinin hepsi TCP üzerine oturtulmuştur. IP protokol ailesinde doğrudan IP 
+    protokolü ile işlemler çok seyrek yapılmaktadır. Genellikle uygulamacılar TCP protokolünü kullanmaktadır. TCP kullanımına 
+    programlama dünyasında TCP/IP, UDP kullanımına ise UDP/IP de denilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
-*---------------------------------------------------------------------------------------------------------------------------
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
