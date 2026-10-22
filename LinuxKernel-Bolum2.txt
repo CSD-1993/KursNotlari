@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                        Son Güncelleme: 15/10/2026 - Perşembe
+                                        Son Güncelleme: 22/10/2026 - Perşembe
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -297,18 +297,16 @@
     bekleme yapılmadan mutex'in sahipliği alınmak istenmiştir. Test için farklı terminallerde önce "test-sync1" programını 
     sonra da başka "test-sync2" programını çalıştırmalısınız. Mesajları "dmesg" komutuyla inceleyebilirsiniz. 
 
-    Aygıt sürücüyü şöyle derleyebilirsiniz:
+    Test işlemini sürücüyü şu adımlardan geçerek yapabilirsiniz:
 
     $ make file=test-driver
-
-    Aşağıdaki gibi yükleyebilirsiniz:
-
-    $ sudo ./load test-driver
-
-    Farklı terminallerden "test-sync1" ve "test-sync2" programlarını çalıştırdıktan sonra aygıt sürücüyü çekirdekten 
-    çıkarmalısınız:
-
-     $ sudo ./unload test-driver
+    $ sudo insmod ./test-driver.ko
+    $ gcc -o test-sync1 test-sync1.c
+    $ gcc -o test-sync2 test-sync2.c
+    $ ./test-sync1 &
+    $ ./test-sync2
+    $ sudo dmesg | tail
+    $ sudo rmmod test-driver.ko
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* test-driver.h */
@@ -331,6 +329,7 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 #include <linux/delay.h>
 #include "test-driver.h"
 
@@ -343,12 +342,15 @@ static int test_driver_release(struct inode *inodep, struct file *filp);
 static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
 static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static char *test_driver_devnode(const struct device *dev, umode_t *mode);
 
 static long ioctl_test1(struct file *filp, unsigned long arg);
 static long ioctl_test2(struct file *filp, unsigned long arg);
 
 static dev_t g_dev;
 static struct cdev g_cdev;
+static struct class *g_class;
+static struct device *g_device;
 static struct file_operations g_fops = {
 	.owner = THIS_MODULE,
 	.open = test_driver_open,
@@ -377,15 +379,43 @@ static int __init test_driver_init(void)
 		return result;
 	}
 
+	g_class = class_create("test-driver");
+	if (IS_ERR(g_class)) {
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create class!...\n");
+		return PTR_ERR(g_class);
+	}
+	g_class->devnode = test_driver_devnode;
+
+	g_device = device_create(g_class, NULL, g_dev, NULL, "test-driver");
+	if (IS_ERR(g_device)) {
+		class_destroy(g_class);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create device!...\n");
+		return PTR_ERR(g_device);
+	}
+
 	return 0;
 }
 
 static void __exit test_driver_exit(void)
 {
+	device_destroy(g_class, g_dev);
+	class_destroy(g_class);
 	cdev_del(&g_cdev);
 	unregister_chrdev_region(g_dev, 1);
 
 	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static char *test_driver_devnode(const struct device *dev, umode_t *mode)
+{
+	if (mode != NULL)
+		*mode = 0666;
+
+	return NULL;
 }
 
 static int test_driver_open(struct inode *inodep, struct file *filp)
@@ -415,7 +445,7 @@ static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long
     switch (cmd) {
         case IOC_TEST1:
             result = ioctl_test1(filp, arg);
-            break;  
+            break;
 		case IOC_TEST2:
             result = ioctl_test2(filp, arg);
             break;  
@@ -469,27 +499,6 @@ all:
 clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
-/* load (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./${module}.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module c $major 0
-
-/* unload (bu satırı dosyaya kopyalamayınız ) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./${module}.ko || exit 1
-rm -f $module
-
 /* test-sync1.c */
 
 #include <stdio.h>
@@ -505,7 +514,7 @@ int main(void)
 {
     int fd;
 
-    if ((fd = open("test-driver", O_RDONLY)) == -1)
+    if ((fd = open("/dev/test-driver", O_RDONLY)) == -1)
         exit_sys("open");
 
     if (ioctl(fd, IOC_TEST1) == -1)
@@ -537,7 +546,7 @@ int main(void)
 {
     int fd;
 
-    if ((fd = open("test-driver", O_RDONLY)) == -1)
+    if ((fd = open("/dev/test-driver", O_RDONLY)) == -1)
         exit_sys("open");
 
     if (ioctl(fd, IOC_TEST2) == -1)
@@ -738,7 +747,17 @@ void exit_sys(const char *msg)
     .....
     up(&sem);
 
-    Aşağıda daha önce yapmış olduğumuz örneğin binary semaphore versiyonunu veriyoruz. 
+    Aşağıda daha önce yapmış olduğumuz örneğin binary semaphore versiyonunu veriyoruz. Test işlemini şu adımlardan 
+    geçerek yapabilirsiniz:
+
+    $ make file=test-driver
+    $ sudo insmod test-driver.ko
+    $ gcc -o test-sync1 test-sync1.c
+    $ gcc -o test-sync2 test-sync2.c
+    $ ./test-sync1 &
+    $ ./test-sync2
+    $ sudo dmesg | tail
+    $ sudo rmmod test-driver.ko
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* test-driver.h */
@@ -761,7 +780,9 @@ void exit_sys(const char *msg)
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 #include <linux/delay.h>
+#include <linux/semaphore.h>
 #include "test-driver.h"
 
 MODULE_LICENSE("GPL");
@@ -773,12 +794,15 @@ static int test_driver_release(struct inode *inodep, struct file *filp);
 static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
 static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static char *test_driver_devnode(const struct device *dev, umode_t *mode);
 
 static long ioctl_test1(struct file *filp, unsigned long arg);
 static long ioctl_test2(struct file *filp, unsigned long arg);
 
 static dev_t g_dev;
 static struct cdev g_cdev;
+static struct class *g_class;
+static struct device *g_device;
 static struct file_operations g_fops = {
 	.owner = THIS_MODULE,
 	.open = test_driver_open,
@@ -807,15 +831,43 @@ static int __init test_driver_init(void)
 		return result;
 	}
 
+	g_class = class_create("test-driver");
+	if (IS_ERR(g_class)) {
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create class!...\n");
+		return PTR_ERR(g_class);
+	}
+	g_class->devnode = test_driver_devnode;
+
+	g_device = device_create(g_class, NULL, g_dev, NULL, "test-driver");
+	if (IS_ERR(g_device)) {
+		class_destroy(g_class);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create device!...\n");
+		return PTR_ERR(g_device);
+	}
+
 	return 0;
 }
 
 static void __exit test_driver_exit(void)
 {
+	device_destroy(g_class, g_dev);
+	class_destroy(g_class);
 	cdev_del(&g_cdev);
 	unregister_chrdev_region(g_dev, 1);
 
 	printk(KERN_INFO "test-driver module exit...\n");
+}
+
+static char *test_driver_devnode(const struct device *dev, umode_t *mode)
+{
+	if (mode != NULL)
+		*mode = 0666;
+
+	return NULL;
 }
 
 static int test_driver_open(struct inode *inodep, struct file *filp)
@@ -841,11 +893,11 @@ static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     long result;
-	
+
     switch (cmd) {
         case IOC_TEST1:
             result = ioctl_test1(filp, arg);
-            break;  
+            break;
 		case IOC_TEST2:
             result = ioctl_test2(filp, arg);
             break;  
@@ -899,27 +951,6 @@ all:
 clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
 
-/* load (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./${module}.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module c $major 0
-
-/* unload (bu satırı dosyaya kopyalamayınız ) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./${module}.ko || exit 1
-rm -f $module
-
 /* test-sync1.c */
 
 #include <stdio.h>
@@ -935,7 +966,7 @@ int main(void)
 {
     int fd;
 
-    if ((fd = open("test-driver", O_RDONLY)) == -1)
+    if ((fd = open("/dev/test-driver", O_RDONLY)) == -1)
         exit_sys("open");
 
     if (ioctl(fd, IOC_TEST1) == -1)
@@ -967,7 +998,7 @@ int main(void)
 {
     int fd;
 
-    if ((fd = open("test-driver", O_RDONLY)) == -1)
+    if ((fd = open("/dev/test-driver", O_RDONLY)) == -1)
         exit_sys("open");
 
     if (ioctl(fd, IOC_TEST2) == -1)
@@ -3944,7 +3975,14 @@ void exit_sys(const char *msg)
 /*----------------------------------------------------------------------------------------------------------------------
     Yukarıdaki örnek RCU uygulamasını bir aygıt sürücü yoluyla test edebiliriz. Tabii test için kullanıcı modundaki 
     thread'lerin iç içe girmesini sağlamalıyız. Biz testi rastgele beklemelerle yüzeysel olarak yapacağız. Aşağıda bu 
-    aygıt sürücü kodları verilmiştir.
+    aygıt sürücü kodları verilmiştir. Test işlemini aşağıdaki gibi yapabilirsiniz:
+
+    $ make file=rcu-test-driver
+    $ sudo insmod ./rcu-test-driver.ko
+    $ gcc -o rcu-test rcu-test.c -pthread
+    $./rcu-test
+    $ sudo dmesg | tail -30
+    $ sudo rmmod rcu-test-driver.ko
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* rcu-test-driver.h */
@@ -3974,6 +4012,7 @@ struct DEVICE_INFO {
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 #include "rcu-test-driver.h"
 
 MODULE_LICENSE("GPL");
@@ -3985,12 +4024,15 @@ static int test_driver_release(struct inode *inodep, struct file *filp);
 static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
 static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static char *test_driver_devnode(const struct device *dev, umode_t *mode);
 
 static long ioctl_read_device(struct file *filp, unsigned long arg);
 static long ioctl_update_device(struct file *filp, unsigned long arg);
 
 static dev_t g_dev;
 static struct cdev g_cdev;
+static struct class *g_class;
+static struct device *g_device;
 static struct file_operations g_fops = {
 	.owner = THIS_MODULE,
 	.open = test_driver_open,
@@ -4021,24 +4063,54 @@ static int __init test_driver_init(void)
 	}
 
 	if ((g_device_info = (struct DEVICE_INFO *)kmalloc(sizeof(struct DEVICE_INFO), GFP_KERNEL)) == NULL) {
-		unregister_chrdev_region(g_dev, 1);
 		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
 		return -ENOMEM;
 	}
 
 	g_device_info->id = 100;
 	strscpy(g_device_info->name, "Sample", MAX_NAME);
 
+	g_class = class_create("rcu-test-driver");
+	if (IS_ERR(g_class)) {
+		kfree(g_device_info);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create class!...\n");
+		return PTR_ERR(g_class);
+	}
+	g_class->devnode = test_driver_devnode;
+
+	g_device = device_create(g_class, NULL, g_dev, NULL, "rcu-test-driver");
+	if (IS_ERR(g_device)) {
+		class_destroy(g_class);
+		kfree(g_device_info);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create device!...\n");
+		return PTR_ERR(g_device);
+	}
+
 	return 0;
 }
 
 static void __exit test_driver_exit(void)
 {
+	device_destroy(g_class, g_dev);
+	class_destroy(g_class);
 	cdev_del(&g_cdev);
 	unregister_chrdev_region(g_dev, 1);
 	kfree(g_device_info);
 
 	printk(KERN_INFO "rcu-test-driver exit...\n");
+}
+
+static char *test_driver_devnode(const struct device *dev, umode_t *mode)
+{
+	if (mode != NULL)
+		*mode = 0666;
+
+	return NULL;
 }
 
 static int test_driver_open(struct inode *inodep, struct file *filp)
@@ -4071,7 +4143,7 @@ static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long
             break;  
 		case IOC_RCU_WRITE:
             result = ioctl_update_device(filp, arg);
-            break;  
+            break;
         default:
             result = -ENOTTY;
             break;
@@ -4083,17 +4155,23 @@ static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long
 static long ioctl_read_device(struct file *filp, unsigned long arg)
 {
 	struct DEVICE_INFO *di;
+	struct DEVICE_INFO di_local;
 
-	rcu_read_lock();                                
+	rcu_read_lock();
 
-	di = rcu_dereference(g_device_info);              
-	if (di != NULL) {
-		if (copy_to_user((struct DEVICE_INFO *)arg, di, sizeof(struct DEVICE_INFO)) != 0)
-			return -EFAULT;
-		printk(KERN_INFO "Device: id=%d Name=%s\n", di->id, di->name);
+	di = rcu_dereference(g_device_info);
+	if (di == NULL) {
+		rcu_read_unlock();
+		return -ENODATA;
 	}
+	di_local = *di;
 
-	rcu_read_unlock();                              
+	rcu_read_unlock();
+
+	if (copy_to_user((struct DEVICE_INFO *)arg, &di_local, sizeof(struct DEVICE_INFO)) != 0)
+		return -EFAULT;
+
+	printk(KERN_INFO "Device: id=%d Name=%s\n", di_local.id, di_local.name);
 
     return 0;
 }
@@ -4113,7 +4191,7 @@ static long ioctl_update_device(struct file *filp, unsigned long arg)
 	strscpy(di_new->name, di_user.name, MAX_NAME);
 
 	spin_lock(&g_dev_lock);
-	di_old = rcu_dereference(g_device_info);
+	di_old = rcu_dereference_protected(g_device_info, lockdep_is_held(&g_dev_lock));
 	rcu_assign_pointer(g_device_info, di_new);
 	spin_unlock(&g_dev_lock);
 
@@ -4137,27 +4215,6 @@ all:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
 clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
-/* load (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./${module}.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module c $major 0
-
-/* unload (bu satırı dosyaya kopyalamayınız ) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./${module}.ko || exit 1
-rm -f $module
 
 /* rcu-test.c */
 
@@ -4184,7 +4241,7 @@ int main(void)
 
     srand(time(NULL));
 
-  	if ((fd = open("rcu-test-driver", O_RDWR)) == -1)
+  	if ((fd = open("/dev/rcu-test-driver", O_RDWR)) == -1)
 		exit_sys("open");
 
     if ((result = pthread_create(&tid_update, NULL, thread_proc_update, (void *)fd)) != 0) {
@@ -4249,7 +4306,7 @@ void exit_sys(const char *msg)
 }
 
 /*----------------------------------------------------------------------------------------------------------------------
-	Yukarıda da belirttiğimiz gibi yazan taraflar synchronize_rcu fonksiyonunu çağırdığında "grace period" kadar bir 
+    Yukarıda da belirttiğimiz gibi yazan taraflar synchronize_rcu fonksiyonunu çağırdığında "grace period" kadar bir 
     bloke oluşabilmektedir. Bunun call_rcu fonksiyonu ile engellenebileceğini söylemiştik. call_rcu fonksiyonu bir 
     callback fonksiyonu argüman olarak alır ve bunu saklar, çekirdek de "grace period" bittiğinde bu callback 
     fonksiyonu çağırır. call_rcu fonksiyonunun parametrik yapısını anımsatmak istiyoruz:
@@ -4267,14 +4324,14 @@ void exit_sys(const char *msg)
     };
 
     İşte call_rcu fonksiyonunun birinci parametresine paylaşılan alana ilişkin yapının içerisindeki rcu_head türünden 
-    elemanın adresi (örneğimizde yapının rcu elemanı), ikinci parametresine de callback fonksiyonun adresi geçirilmelidir. 
+    elemanın adresi (örneğimizde yapının rcu elemanı), ikinci parametresine de callback fonksiyonunun adresi geçirilmelidir. 
     Fonksiyonun ikinci parametresindeki türün typedef bildirimine dikkat ediniz:
 
     typedef void (*rcu_callback_t)(struct rcu_head *head);
 
     Bu durumda sistem programcısının call_rcu fonksiyonunun ikinci parametresine geri dönüş değeri void olan, parametresi 
     struct rcu_head * türünden olan bir fonksiyonun adresini geçmesi gerekir. struct rcu_head yapısı çekirdeğin callback 
-    mekanizmasının yönetebilmesi için gereken elemanları barındırmaktadır. Bu yapı şöyle tanımlanmıştır:
+    mekanizmasını yönetebilmesi için gereken elemanları barındırmaktadır. Bu yapı şöyle tanımlanmıştır:
 
     struct callback_head {
         struct callback_head *next;
@@ -4288,14 +4345,20 @@ void exit_sys(const char *msg)
     /* ... */
 
     spin_lock(&g_dev_lock);
-	di_old = rcu_dereference(g_device_info);
+	di_old = rcu_dereference_protected(g_device_info, lockdep_is_held(&g_dev_lock));
 	rcu_assign_pointer(g_device_info, di_new);
 	spin_unlock(&g_dev_lock);
 
     if (di_old != NULL)
 		call_rcu(&di_old->rcu, device_rcu_callback);
+
+    Burada yazan taraf göstericiyi rcu_read_lock bölümü içerisinde değil spinlock koruması altında okuduğu için 
+    rcu_dereference yerine rcu_dereference_protected makrosu kullanılmıştır. Makronun ikinci parametresi göstericinin 
+    hangi koşul altında güvenli biçimde okunduğunu belirtir. CONFIG_PROVE_RCU seçeneği açık olan çekirdeklerde 
+    rcu_dereference makrosunun rcu_read_lock dışında kullanılması "suspicious rcu_dereference_check() usage" 
+    biçiminde uyarıya yol açmaktadır.
 	
-    call_rcu fonksiyonun ikinci parametresine geçirdiğimiz callback fonksiyonun parametresi aslında kendi yapı nesnemizin
+    call_rcu fonksiyonunun ikinci parametresine geçirdiğimiz callback fonksiyonun parametresi aslında kendi yapı nesnemizin
     içerisindeki rcu_head elemanının adresidir. Biz de bu adresten hareketle asıl nesne adresini container_of makrosuyla 
     elde edebiliriz. Örneğin:
     
@@ -4307,24 +4370,36 @@ void exit_sys(const char *msg)
         kfree(di);
     }
 
+    call_rcu kullanan modüllerde dikkat edilmesi gereken önemli bir nokta vardır. call_rcu fonksiyonu callback 
+    fonksiyonunu hemen çağırmadığı için modül rmmod ile boşaltıldığı sırada henüz çağrılmamış callback fonksiyonlar 
+    bulunuyor olabilir. Modülün kodu bellekten kaldırıldıktan sonra çekirdek bu callback fonksiyonu çağırmaya 
+    çalışırsa sistem çöker. Bu nedenle call_rcu kullanan modüllerin exit fonksiyonlarında rcu_barrier fonksiyonu 
+    çağrılmalıdır. rcu_barrier fonksiyonu o ana kadar call_rcu ile kaydettirilmiş tüm callback fonksiyonların 
+    çalışıp bitmesini bekler. synchronize_rcu fonksiyonu bu işi görmez. Çünkü synchronize_rcu yalnızca "grace 
+    period" bitene kadar bekler, callback fonksiyonların çağrılmasını beklemez. Örneğin:
+
+    static void __exit test_driver_exit(void)
+    {
+        /* ... */
+
+        rcu_barrier();
+        kfree(g_device_info);
+    }
+
     Ayrıca Linux çekirdeğinde call_rcu işlemi ile kfree işlemini birlikte yapan kfree_rcu isimli bir makro da bulunmaktadır. 
-    kfree makrosu iki parametre almaktadır:
+    kfree_rcu makrosu iki parametre almaktadır:
 
     kfree_rcu(ptr, rcu_head_fieldname);
 
     Makronun birinci parametresi serbest bırakılacak nesnenin adresini, ikinci parametresi de nesneye ilişkin yapıdaki 
-    rcu_head elemanın ismini almaktadır. Örneğin:
+    rcu_head elemanının ismini almaktadır. Örneğin:
 
     struct DEVICE_INFO *di_new, *di_old;
     /* ... */
 
     spin_lock(&g_dev_lock);
-	di_old = rcu_dereference(g_device_info);
+	di_old = rcu_dereference_protected(g_device_info, lockdep_is_held(&g_dev_lock));
 	rcu_assign_pointer(g_device_info, di_new);
-	spin_unlock(&g_dev_lock);
-
-   	if (di_old != NULL)
-		kfree_rcu(di_old, rcu);
 
     Yukarıda yaptığımız örneği aşağıda call_rcu kullanarak yeniden veriyoruz. 
 ----------------------------------------------------------------------------------------------------------------------*/
@@ -4335,6 +4410,7 @@ void exit_sys(const char *msg)
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 #include "rcu-test-driver.h"
 
 MODULE_LICENSE("GPL");
@@ -4346,6 +4422,7 @@ static int test_driver_release(struct inode *inodep, struct file *filp);
 static ssize_t test_driver_read(struct file *filp, char *buf, size_t size, loff_t *off);
 static ssize_t test_driver_write(struct file *filp, const char *buf, size_t size, loff_t *off);
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static char *test_driver_devnode(const struct device *dev, umode_t *mode);
 
 static long ioctl_read_device(struct file *filp, unsigned long arg);
 static long ioctl_update_device(struct file *filp, unsigned long arg);
@@ -4354,6 +4431,8 @@ static void device_rcu_callback(struct rcu_head *hrcu);
 
 static dev_t g_dev;
 static struct cdev g_cdev;
+static struct class *g_class;
+static struct device *g_device;
 static struct file_operations g_fops = {
 	.owner = THIS_MODULE,
 	.open = test_driver_open,
@@ -4390,24 +4469,56 @@ static int __init test_driver_init(void)
 	}
 
 	if ((g_device_info = (struct DEVICE_INFO *)kmalloc(sizeof(struct DEVICE_INFO), GFP_KERNEL)) == NULL) {
-		unregister_chrdev_region(g_dev, 1);
 		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
 		return -ENOMEM;
 	}
 
 	g_device_info->id = 100;
 	strscpy(g_device_info->name, "Sample", MAX_NAME);
 
+	g_class = class_create("rcu-test-driver");
+	if (IS_ERR(g_class)) {
+		kfree(g_device_info);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create class!...\n");
+		return PTR_ERR(g_class);
+	}
+	g_class->devnode = test_driver_devnode;
+
+	g_device = device_create(g_class, NULL, g_dev, NULL, "rcu-test-driver");
+	if (IS_ERR(g_device)) {
+		class_destroy(g_class);
+		kfree(g_device_info);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create device!...\n");
+		return PTR_ERR(g_device);
+	}
+
 	return 0;
 }
 
 static void __exit test_driver_exit(void)
 {
+	device_destroy(g_class, g_dev);
+	class_destroy(g_class);
 	cdev_del(&g_cdev);
 	unregister_chrdev_region(g_dev, 1);
+
+	rcu_barrier();
 	kfree(g_device_info);
 
 	printk(KERN_INFO "rcu-test-driver exit...\n");
+}
+
+static char *test_driver_devnode(const struct device *dev, umode_t *mode)
+{
+	if (mode != NULL)
+		*mode = 0666;
+
+	return NULL;
 }
 
 static int test_driver_open(struct inode *inodep, struct file *filp)
@@ -4455,17 +4566,22 @@ static long ioctl_read_device(struct file *filp, unsigned long arg)
 	struct DEVICE_INFO *di;
 	struct DEVICE_PARAM di_param;
 
-	rcu_read_lock();                                
-	di = rcu_dereference(g_device_info);              
-	if (di != NULL) {
-		di_param.id = di->id;
-		strscpy(di_param.name, di->name, MAX_NAME);
-		if (copy_to_user((struct DEVICE_PARAM *)arg, &di_param, sizeof(struct DEVICE_PARAM)) != 0)
-			return -EFAULT;
-		printk(KERN_INFO "Device: id=%d Name=%s\n", di->id, di->name);
-	}
+	rcu_read_lock();
 
-	rcu_read_unlock();                              
+	di = rcu_dereference(g_device_info);
+	if (di == NULL) {
+		rcu_read_unlock();
+		return -ENODATA;
+	}
+	di_param.id = di->id;
+	strscpy(di_param.name, di->name, MAX_NAME);
+
+	rcu_read_unlock();
+
+	if (copy_to_user((struct DEVICE_PARAM *)arg, &di_param, sizeof(struct DEVICE_PARAM)) != 0)
+		return -EFAULT;
+
+	printk(KERN_INFO "Device: id=%d Name=%s\n", di_param.id, di_param.name);
 
     return 0;
 }
@@ -4485,7 +4601,7 @@ static long ioctl_update_device(struct file *filp, unsigned long arg)
 	strscpy(di_new->name, di_param.name, MAX_NAME);
 
 	spin_lock(&g_dev_lock);
-	di_old = rcu_dereference(g_device_info);
+	di_old = rcu_dereference_protected(g_device_info, lockdep_is_held(&g_dev_lock));
 	rcu_assign_pointer(g_device_info, di_new);
 	spin_unlock(&g_dev_lock);
 
