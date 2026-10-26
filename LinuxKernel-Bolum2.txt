@@ -16552,8 +16552,7 @@ s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
             chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
         else 
             chunk = min_t(u64, chunk, folio_size(folio) - foff);
-        offaddr = kmap_local_folio(folio, foff);
-        
+        offaddr = kmap_local_folio(folio, foff);  
         /*... */
     }
         
@@ -17495,7 +17494,7 @@ void exit_sys(const char *msg)
         u64 left, chunk;
         size_t foff;
         void *offaddr;
-        void *kbuf;
+        void *kbuf = NULL;
         int result;
 
         if (copy_from_user(&wi, (void *)arg, sizeof(struct write_info)) != 0)
@@ -17525,12 +17524,21 @@ void exit_sys(const char *msg)
         while (left > 0) {
             isize = i_size_read(inode);
             if (pos >= isize)
-                goto EXIT;
+                break;
 
             index = pos >> PAGE_SHIFT;
             chunk = min_t(u64, left, isize - pos);
 
             folio = filemap_get_folio(mapping, index);
+            if (!IS_ERR(folio)) {
+                folio_lock(folio);
+                if (unlikely(folio->mapping != mapping) || !folio_test_uptodate(folio)) {
+                    folio_unlock(folio);
+                    folio_put(folio);
+                    folio = ERR_PTR(-ENOENT);
+                }
+            }
+
             if (!IS_ERR(folio)) {
                 printk(KERN_INFO "cache hit...\n");
 
@@ -17540,24 +17548,19 @@ void exit_sys(const char *msg)
                 else
                     chunk = min_t(u64, chunk, folio_size(folio) - foff);
 
-                folio_lock(folio);
-                if (unlikely(folio->mapping != mapping)) {
-                    folio_unlock(folio);
-                    folio_put(folio);
-                    result = -EAGAIN;
-                    goto EXIT;
-                }
                 offaddr = kmap_local_folio(folio, foff);
 
                 if (copy_from_user(offaddr, wi.buf, chunk) != 0) {
                     kunmap_local(offaddr);
+                    folio_unlock(folio);
                     folio_put(folio);
                     result = -EFAULT;
                     goto EXIT;
                 }
+                kunmap_local(offaddr);
+                flush_dcache_folio(folio);
                 folio_mark_dirty(folio);
                 folio_unlock(folio);
-                kunmap_local(offaddr);
                 folio_put(folio);
             }
             else {
@@ -17575,13 +17578,12 @@ void exit_sys(const char *msg)
                     }
                     kbuf = page_address(pg);
                 }
+                chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
                 if (copy_from_user(kbuf, wi.buf, chunk)) {
-                    free_page((unsigned long)kbuf);
                     result = -EFAULT;
                     goto EXIT;
                 }
                 if ((n = kernel_write(filp, kbuf, chunk, &rpos)) < 0) {
-                    free_page((unsigned long)kbuf);
                     result = n;
                     goto EXIT;
                 }
@@ -17599,7 +17601,10 @@ void exit_sys(const char *msg)
         if (copy_to_user((void *)arg, &wi, sizeof(struct write_info)) != 0)
             result = -EFAULT;
     EXIT:
+        if (kbuf != NULL)
+            free_page((unsigned long)kbuf);
         fput(filp);
+
         return result;
     }
 
@@ -17613,40 +17618,53 @@ void exit_sys(const char *msg)
     }
 
     Sonra yine dosya nesnesinden hareketle address_space nesnesi elde edilmiştir. Daha sonra sayfa önbelleğinde dosya 
-    offset'ine ilişkin sayfaya erişilmiş ve günceleme uygun yere yapılmıştır:
+    offset'ine ilişkin sayfaya erişilmiş ve güncelleme uygun yere yapılmıştır:
 
     folio_lock(folio);
-    if (unlikely(folio->mapping != mapping)) {
+    if (unlikely(folio->mapping != mapping) || !folio_test_uptodate(folio)) {
         folio_unlock(folio);
         folio_put(folio);
-        result = -EAGAIN;
-        goto EXIT;
+        folio = ERR_PTR(-ENOENT);
     }
+    /* ... */
     offaddr = kmap_local_folio(folio, foff);
         
-    if (copy_from_user(offaddr, ri.buf, chunk) != 0) {
+    if (copy_from_user(offaddr, wi.buf, chunk) != 0) {
         kunmap_local(offaddr);
+        folio_unlock(folio);
         folio_put(folio);
         result = -EFAULT;
         goto EXIT;
     }
+    kunmap_local(offaddr);
+    flush_dcache_folio(folio);
     folio_mark_dirty(folio);
     folio_unlock(folio);
 
-    Aşağdıaki kontrole dikkat ediniz:
+    copy_from_user başarısız olduğunda da folio kilidinin bırakıldığına dikkat ediniz. Aksi takdirde folio kilitli 
+    kalır ve o sayfaya erişmek isteyen sonraki akışlar sonsuza kadar bloke olur. flush_dcache_folio fonksiyonu ise 
+    çekirdeğin sayfaya kendi sanal adresi üzerinden yazması durumunda, bazı mimarilerde (örneğin ARM) veri önbelleği 
+    ile aynı sayfanın kullanıcı alanındaki eşlemeleri arasındaki tutarlılığı sağlamak için çağrılmaktadır. Çekirdeğin 
+    kendi yazma yolu da bu fonksiyonu çağırmaktadır. x86 sistemlerinde bu fonksiyon bir şey yapmamaktadır.
 
-    if (unlikely(folio->mapping != mapping)) {
+    Aşağıdaki kontrole dikkat ediniz:
+
+    if (unlikely(folio->mapping != mapping) || !folio_test_uptodate(folio)) {
         folio_unlock(folio);
         folio_put(folio);
-        result = -EAGAIN;
-        goto EXIT;
+        folio = ERR_PTR(-ENOENT);
     }
 
-    Burada kilit alınmadan önce başka bir akış tarafından folio nesnesinin ortadan kaldırılıp kaldırılmadığı kontrol 
-    edilmiştir. (folio nesnesinin yok edilmesinin çeşitli nedenleri olabilir. Bunın en bariz nedeni truncate işlemidir.)
+    Burada kilit alındıktan sonra, kilit alınmadan önceki süre içerisinde başka bir akış tarafından folio nesnesinin 
+    ortadan kaldırılıp kaldırılmadığı kontrol edilmiştir. (folio nesnesinin yok edilmesinin çeşitli nedenleri olabilir. 
+    Bunun en bariz nedeni truncate işlemidir.) Ayrıca folio nesnesinin güncel olup olmadığına da bakılmıştır. Güncel 
+    olmayan bir folio nesnesine kısmi yazma yapılıp nesne kirli (dirty) olarak işaretlenirse folio nesnesinin yazılmayan 
+    kısımlarındaki geçersiz bilgiler de diske aktarılır. Bu nedenle okuma işleminin tersine yazma işleminde bu kontrol 
+    zorunludur. Her iki durumda da folio nesnesi bırakılmakta ve folio göstericisine ERR_PTR(-ENOENT) değeri atanmaktadır. 
+    Böylece akış, sayfa önbellekte hiç bulunmamış gibi aşağıdaki kernel_write kısmına yönlendirilmektedir. 
     Buradaki unlikely makrosu yapılan karşılaştırmanın düşük bir olasılıkla doğru olacağını belirtmektedir. Aslında bu 
-    unlikely makrosu __builtin_expect isimli içsel (internal) bir gcc sonksityonunı kullanmakta, gcc de bu fonksiyonla 
-    if deyimnine ilişkin makine komutlarını işlemcilerin boru hattı (pipeline) mekanizması için daha etkin bir biçimde 
+    unlikely makrosu __builtin_expect isimli içsel (internal) bir gcc fonksiyonunu kullanmakta, gcc de bu fonksiyonla 
+    if deyimine ilişkin makine komutlarını işlemcilerin boru hattı (pipeline) mekanizması için daha etkin bir biçimde 
     düzenlemektedir. Biz gcc'ye özgü bu tür makroları ve içsel (internal) fonksiyonları kursumuzda ayrı bir bölümde ele 
     alacağız. 
 
@@ -17668,18 +17686,17 @@ void exit_sys(const char *msg)
             struct page *pg;
 
             if ((pg = alloc_pages(GFP_KERNEL, 0)) == NULL) {
-                    result = -ENOMEM;
-                    goto EXIT;
+                result = -ENOMEM;
+                goto EXIT;
             }
             kbuf = page_address(pg);
         }	
-        if (copy_from_user(kbuf, ri.buf, n)) {
-            free_page((unsigned long)kbuf);
+        chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
+        if (copy_from_user(kbuf, wi.buf, chunk)) {
             result = -EFAULT;
             goto EXIT;
         }
         if ((n = kernel_write(filp, kbuf, chunk, &rpos)) < 0) {
-            free_page((unsigned long)kbuf);
             result = n;
             goto EXIT;
         }
@@ -17689,9 +17706,11 @@ void exit_sys(const char *msg)
         chunk = n;
     }
 
-    kernel_write fonksiyonu çekirdek alanı içerisindeki tampondaki verileri dosyaya aktarmaktadır. Tabii bu yüksek 
-    seviyeli bir çekirdek fonksiyonu olduğu için eğer yazma yapılacak yer sayfa önbelleğinde yoksa onu da sayfa 
-    önbelleğine çekmektedir. 
+    Okuma işleminde olduğu gibi burada da tampon tek bir sayfa uzunluğunda olduğu için kopyalanacak miktar pos 
+    konumundan sayfa sonuna kadar olan kısımla sınırlandırılmıştır. Tampon EXIT etiketinde tek bir yerde serbest 
+    bırakılmaktadır. kernel_write fonksiyonu çekirdek alanı içerisindeki tampondaki verileri dosyaya aktarmaktadır. 
+    Tabii bu yüksek seviyeli bir çekirdek fonksiyonu olduğu için eğer yazma yapılacak yer sayfa önbelleğinde yoksa 
+    onu da sayfa önbelleğine çekmektedir.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /* pcache-driver.h */
@@ -17706,21 +17725,21 @@ struct read_info {
 	int fd;		            /* okunacak dosyanin betimleyicisi  */
 	char *buf;		        /* kullanici tamponunun adresi      */
 	size_t size;		    /* okunacak bayt sayisi             */
-	off_t offset;		    /* dosya icindeki baslangc konumu   */  
+	long long offset;	    /* dosya icindeki baslangic konumu  */  
     size_t count;           /* gerçekte okunan miktar           */
 };
 
 struct write_info {
 	int fd;		            /* yazılacak dosyanin betimleyicisi */
 	const char *buf;        /* kullanici tamponunun adresi      */
-	size_t size;		    /* okunacak bayt sayisi             */
-	off_t offset;		    /* dosya icindeki baslangc konumu   */  
-    size_t count;           /* gerçekte okunan miktar           */
+	size_t size;		    /* yazılacak bayt sayisi            */
+	long long offset;	    /* dosya icindeki baslangic konumu  */  
+    size_t count;           /* gerçekte yazılan miktar          */
 };
 
 #define PCACHE_DRIVER_MAGIC		'c'
-#define IOC_CACHE_READ	        _IOR(PCACHE_DRIVER_MAGIC, 0, struct read_info)
-#define IOC_CACHE_WRITE	        _IOR(PCACHE_DRIVER_MAGIC, 1, struct write_info)
+#define IOC_CACHE_READ	        _IOWR(PCACHE_DRIVER_MAGIC, 0, struct read_info)
+#define IOC_CACHE_WRITE	        _IOWR(PCACHE_DRIVER_MAGIC, 1, struct write_info)
 
 #endif
 
@@ -17730,6 +17749,7 @@ struct write_info {
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 #include <linux/fdtable.h>
 #include <linux/file.h>
 #include <linux/pagemap.h>
@@ -17740,12 +17760,15 @@ MODULE_AUTHOR("Kaan Aslan");
 MODULE_DESCRIPTION("pcache-driver");
 
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+static char *test_driver_devnode(const struct device *dev, umode_t *mode);
 
 static long ioctl_cache_read(unsigned long arg);
 static long ioctl_cache_write(unsigned long arg);
 
 static dev_t g_dev;
 static struct cdev g_cdev;
+static struct class *g_class;
+static struct device *g_device;
 static struct file_operations g_fops = {
 	.owner = THIS_MODULE,
     .unlocked_ioctl = test_driver_ioctl
@@ -17768,15 +17791,43 @@ static int __init test_driver_init(void)
 		return result;
 	}
 
+	g_class = class_create("pcache-driver");
+	if (IS_ERR(g_class)) {
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create class!...\n");
+		return PTR_ERR(g_class);
+	}
+	g_class->devnode = test_driver_devnode;
+
+	g_device = device_create(g_class, NULL, g_dev, NULL, "pcache-driver");
+	if (IS_ERR(g_device)) {
+		class_destroy(g_class);
+		cdev_del(&g_cdev);
+		unregister_chrdev_region(g_dev, 1);
+		printk(KERN_ERR "cannot create device!...\n");
+		return PTR_ERR(g_device);
+	}
+
 	return 0;
 }
 
 static void __exit test_driver_exit(void)
 {
+	device_destroy(g_class, g_dev);
+	class_destroy(g_class);
 	cdev_del(&g_cdev);
 	unregister_chrdev_region(g_dev, 1);
 
 	printk(KERN_INFO "pcache-driver module exit...\n");
+}
+
+static char *test_driver_devnode(const struct device *dev, umode_t *mode)
+{
+	if (mode != NULL)
+		*mode = 0666;
+
+	return NULL;
 }
 
 static long test_driver_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -17811,7 +17862,7 @@ static long ioctl_cache_read(unsigned long arg)
 	u64 left, chunk;
 	size_t foff;
 	void *offaddr;
-	void *kbuf;
+	void *kbuf = NULL;
 	int result;
 
 	if (copy_from_user(&ri, (void *)arg, sizeof(struct read_info)) != 0)
@@ -17841,7 +17892,7 @@ static long ioctl_cache_read(unsigned long arg)
 	while (left > 0) {
 		isize = i_size_read(inode);
 		if (pos >= isize)
-			goto EXIT;
+			break;
 
 		index = pos >> PAGE_SHIFT;
 		chunk = min_t(u64, left, isize - pos);
@@ -17882,8 +17933,8 @@ static long ioctl_cache_read(unsigned long arg)
 				}
 				kbuf = page_address(pg);
 			}
+			chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
 			if ((n = kernel_read(filp, kbuf, chunk, &rpos)) < 0) {
-				free_page((unsigned long)kbuf);
 				result = n;
 				goto EXIT;
 			}
@@ -17891,7 +17942,6 @@ static long ioctl_cache_read(unsigned long arg)
 				break;
 
 			if (copy_to_user(ri.buf, kbuf, n)) {
-				free_page((unsigned long)kbuf);
 				result = -EFAULT;
 				goto EXIT;
 			}
@@ -17906,7 +17956,10 @@ static long ioctl_cache_read(unsigned long arg)
 	if (copy_to_user((void *)arg, &ri, sizeof(struct read_info)) != 0) 
 		result = -EFAULT;
 EXIT:
+	if (kbuf != NULL)
+		free_page((unsigned long)kbuf);
 	fput(filp);
+
     return result;
 }
 
@@ -17916,13 +17969,13 @@ static long ioctl_cache_write(unsigned long arg)
 	struct inode *inode;
 	struct address_space *mapping;
 	struct folio *folio;
-	struct rwrite_info ri;
+	struct write_info ri;
 	pgoff_t index;
 	loff_t pos, isize;
 	u64 left, chunk;
 	size_t foff;
 	void *offaddr;
-	void *kbuf;
+	void *kbuf = NULL;
 	int result;
 
 	if (copy_from_user(&ri, (void *)arg, sizeof(struct write_info)) != 0)
@@ -17952,43 +18005,46 @@ static long ioctl_cache_write(unsigned long arg)
 	while (left > 0) {
 		isize = i_size_read(inode);
 		if (pos >= isize)
-			goto EXIT;
+			break;
 
 		index = pos >> PAGE_SHIFT;
 		chunk = min_t(u64, left, isize - pos);
 		
 		folio = filemap_get_folio(mapping, index);
 		if (!IS_ERR(folio)) {
+			folio_lock(folio);
+			if (unlikely(folio->mapping != mapping) || !folio_test_uptodate(folio)) {
+				folio_unlock(folio);
+				folio_put(folio);
+				folio = ERR_PTR(-ENOENT);
+			}
+		}
+
+		if (!IS_ERR(folio)) {
 			printk(KERN_INFO "cache hit...\n");
 
-		
 			foff = offset_in_folio(folio, pos);
 			if (folio_test_highmem(folio))
 				chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
 			else 
 				chunk = min_t(u64, chunk, folio_size(folio) - foff);
 	
-			folio_lock(folio);
-			if (unlikely(folio->mapping != mapping)) {
-                folio_unlock(folio);
-                folio_put(folio);
-				result = -EAGAIN;
-				goto EXIT;
-        	}
         	offaddr = kmap_local_folio(folio, foff);
 				
 			if (copy_from_user(offaddr, ri.buf, chunk) != 0) {
 				kunmap_local(offaddr);
+				folio_unlock(folio);
 				folio_put(folio);
 				result = -EFAULT;
 				goto EXIT;
 			}
+			kunmap_local(offaddr);
+			flush_dcache_folio(folio);
 			folio_mark_dirty(folio);
 			folio_unlock(folio);
-			kunmap_local(offaddr);
 			folio_put(folio);
     	}
-		else {
+		else {					/* önbellekte yoksa */
 			ssize_t n;
 			loff_t rpos = pos;
 
@@ -18002,14 +18058,13 @@ static long ioctl_cache_write(unsigned long arg)
 						goto EXIT;
 				}
 				kbuf = page_address(pg);
-			}	
-			if (copy_from_user(kbuf, ri.buf, n)) {
-				free_page((unsigned long)kbuf);
+			}
+			chunk = min_t(u64, chunk, PAGE_SIZE - offset_in_page(pos));
+			if (copy_from_user(kbuf, ri.buf, chunk)) {
 				result = -EFAULT;
 				goto EXIT;
 			}
 			if ((n = kernel_write(filp, kbuf, chunk, &rpos)) < 0) {
-				free_page((unsigned long)kbuf);
 				result = n;
 				goto EXIT;
 			}
@@ -18024,10 +18079,13 @@ static long ioctl_cache_write(unsigned long arg)
 		ri.buf += chunk;	
 	}
 
-	if (copy_to_user((void *)arg, &ri, sizeof(struct read_info)) != 0) 
+	if (copy_to_user((void *)arg, &ri, sizeof(struct write_info)) != 0) 
 		result = -EFAULT;
 EXIT:
+	if (kbuf != NULL)
+		free_page((unsigned long)kbuf);
 	fput(filp);
+
     return result;
 }
 
@@ -18042,27 +18100,6 @@ all:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} modules
 clean:
     make -C /lib/modules/$(shell uname -r)/build M=${PWD} clean
-
-/* load (bu satırı dosyaya kopyalamayınız) */
-
-#!/bin/bash
-
-module=$1
-mode=666
-
-/sbin/insmod ./${module}.ko ${@:2} || exit 1
-major=$(awk "\$2 == \"$module\" {print \$1}" /proc/devices)
-rm -f $module
-mknod -m $mode $module c $major 0
-
-/* unload (bu satırı dosyaya kopyalamayınız ) */
-
-#!/bin/bash
-
-module=$1
-
-/sbin/rmmod ./${module}.ko || exit 1
-rm -f $module
 
 /* pcache-driver-test.c */
 
@@ -18086,7 +18123,7 @@ int main(void)
     if ((fd_file = open("test.txt", O_RDWR)) == -1)
         exit_sys("open");
 
-    if ((fd_dev = open("pcache-driver", O_RDONLY)) == -1)
+    if ((fd_dev = open("/dev/pcache-driver", O_RDONLY)) == -1)
         exit_sys("open");
 
     ri.fd = fd_file;
@@ -18096,7 +18133,7 @@ int main(void)
 
     if (ioctl(fd_dev, IOC_CACHE_READ, &ri) == -1)
         exit_sys("ioctl");
-    buf[10] = '\0';
+    buf[ri.count] = '\0';
     printf("%s\n", buf);
     printf("bytes read: %zu\n", ri.count);
 
@@ -18115,7 +18152,7 @@ int main(void)
 
     if (ioctl(fd_dev, IOC_CACHE_READ, &ri) == -1)
         exit_sys("ioctl");
-    buf[10] = '\0';
+    buf[ri.count] = '\0';
     printf("%s\n", buf);
     printf("bytes read: %zu\n", ri.count);
 
@@ -21575,4 +21612,3 @@ içerisindedir. ``buffer_head`` nesneleri ise kendi dilim önbelleğinden (*slab
     Bir noktayı daha yeniden vurgulamak istiyoruz. LRU listesindeki bir inode geri alınırken önce onun sayfa önbelleğine 
     bakılmaktadır. Sayfa önbelleği boş dğilse (ayni orada sayfalar ya da tamponlar varsa) önce bunlar boşaltılıp sonra 
     inode nesnesi dilime iade edilmektedir.
-
