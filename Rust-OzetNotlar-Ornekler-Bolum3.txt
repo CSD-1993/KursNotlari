@@ -4437,23 +4437,467 @@ fn main() {
     bunu ekranda gösterir. Client makinedeki fare ve klavye hareketlerini client program server programa gönderir. Server 
     program da onları o makinede uygular. 
 
-    Birisine e-posta göndermek isteyelim. Biz aslında e-postayı hizmet aldığımız yerin server programına iletiriz. Bu server program 
-    e-postayı karşı tarafından server programına iletir. Karşı tarafın server programı e-postaları saklar. Karşı tarafın clinet programı
-    istediğinde onu client programa yani kullanıcıya verir. 
+    Birisine e-posta göndermek isteyelim. Biz aslında e-postayı hizmet aldığımız yerin server programına iletiriz. Bu server
+    program e-postayı karşı tarafından server programına iletir. Karşı tarafın server programı e-postaları saklar. Karşı 
+    tarafın clinet programı istediğinde onu client programa yani kullanıcıya verir. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+                                        143. Ders 28/10/2026 - Çarşamba
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
-
+    Rust'ın standart kütüphanesindeki soket programlamaya ilişkin tüm türler ve fonksiyonlar std::net modülü içerisinde 
+    bulunmaktadır. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
 /*---------------------------------------------------------------------------------------------------------------------------
+    Rust'ta IP adresilerini temsil eden üç tür vardır:
 
+    pub struct Ipv4Addr { /* private fields */ }
+
+    pub struct Ipv6Addr { /* private fields */ }
+
+    pub enum IpAddr {
+        V4(Ipv4Addr),
+        V6(Ipv6Addr),
+    }
+
+    Görüldüğü gibi IpAddr enum türü V4 ve V6 isminde iki varyanta sahiptir. Biz buradaki örneklerde IPV4 kullanacağız. 
 ---------------------------------------------------------------------------------------------------------------------------*/
 
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bir IpV4 adresi oluşturmak için Ipv4Addr yapısının new ilişkili fonksiyonu kullanılabilir. new ilişkili fonksiyonu bizden 
+    4 ayrı byte'ı u8 olarak istemektedir:
+
+    pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr
+
+    Örnein:
+
+    let ipv4 = Ipv4::new(127, 0, 0, 1);         // thismachine
+
+    "127.0.0.1" IPV4 adresi her zaman makineyi temsil etmektedir. 
+
+    IpV4 adresleri İpv4Addr yapısının from_xxx ilişkili fonksiyonlarıyla da oluşturulabilmektedir. Örneğin from_bits ilişkili 
+    fonksiyonu 4 byte'lık IPV4 adresini tek hamlede u32 olarak istemektedir:
+
+    pub const fn from_bits(bits: u32) -> Ipv4Addr
+
+    from_octets ilişkili fonksiyonu IPV4 adreslerini u8 türünden 4 elemanlı bir dizi biçiminde istemektedir:
+
+    pub const fn from_octets(octets: [u8; 4]) -> Ipv4Addr
+
+
+    Bu yapı FromStr trait'ini desteklediği için yapının from_str ilişkili fonksiyonu vardır:
+
+    fn from_str(s: &str) -> Result<Ipv4Addr, AddrParseError>
+
+    Bu metot "noktalı decimal formatta" bir string dilim referansını alıp ondan Ipv4Addr değeri oluşturmaktadır. Örneğin:
+
+    let addr = Ipv4Addr::from_str("127.0.0.1").expect("invalid IPV4 address!..");
+
+    Bu ilişkili fonksiyonuy kullanmak için FromStr trait'ini use etmeyi unutmayınız:
+
+    use std::str::FromStr;
+
+    Ipv4Addr içerisindeki IPV4 adresleri yapının from_octet ilişkili fonksiyonu ile bir dizi biçiminde elde edilebilir:
+
+    pub const fn octets(&self) -> [u8; 4]
+
+
+    Ipv4Addr yapısı içerisinde bazı özel sabitler de vardır:
+
+    pub const BROADCAST: Ipv4Addr
+
+    BROADCAST sabiti IPV4'teki UDP için broadcast adresidir. Bunun değeri her zaman "255.255.255.255" biçimindedir. 
+    LOCALHOST sabiti her zaman "127.0.0.1" adresini belirtir. Bu IPv4 protokolünde işlemin yapıldığı host'un IP adresini 
+    temsil etmektedir:
+
+    pub const LOCALHOST: Ipv4Addr
+
+    UNPSPECIFIED sabiti kullanılmayan "0.0.0.0" IPV4 adresini belirtmektedir:
+
+    pub const UNSPECIFIED: Ipv4Addr
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi IpAddr isimli enum türü V4 ve V6 varyantlarına sahiptir. Örneğin:
+
+    let addr: IpAddr = IpAddr::V4(Ipv4Addr::from_str("127.0.0.1").unwrap());                                            
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Biz IP daresi ve port numarasında oluşan bilgiye "end point" dendiğini söylemiştik. Rust'ta end point SocketAddrV4 ve 
+    SocketAddrV6 yapılarıyla temsil edilmektedir. Yani bu yapılar yalnızca IP adresi değil aynı zamanda port numarasını 
+    da tutmaktadır. 
+
+    Bir SocketAddrV4 değeri yapının new metodu ile IPv4Addr ve port numarası belirtilerek yaratılabilir:
+        
+    pub const fn new(ip: Ipv4Addr, port: u16) -> SocketAddrV4
+
+    Örneğin:
+
+    let sock_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 55555);
+
+    Yapının ip isimli metodu değişkenin içerisindeki IPV4 adresini, port isimli metodu da port numarasını bize bermektedir:
+
+    pub const fn ip(&self) -> &Ipv4Addr
+    pub const fn port(&self) -> u16
+
+    Bu yapı ToSocketAddrs isimli trait'i desteklemektedir. 
+
+    Ayrıca Rust'ta IPV4 ya da IPV4 end point'ini tutan SocketAddre isimli bir enum türü de vardır:
+
+    pub enum SocketAddr {
+        V4(SocketAddrV4),
+        V6(SocketAddrV6),
+    }
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Şimdi biz TCP server ve TCP client ptogramların nasıl yazıldığını görelim. Önce srever programının yazımından başlayalım.                                            
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    TCP server programı için aşağı düzeyde sırasıyla şu adımlardan geçilmesi gerekmektedir:
+
+    ┌────────────────────────────────────┐
+    │          Soket yaratılır           │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │    Soket bağlanır (bind edilir)    │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │   Soket dinleme konumuna sokulur   │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │           accept işlemi            │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │          Gönderme / Alma           │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │              shutdown              │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │          Soket kapatılır           │
+    └────────────────────────────────────┘
+
+    C'de yazılmış aşağı seviyeli soket kütüphanelerinde bu asımların her biri fonksiyonlar çağrılarak gerçekleştirilmektedir. 
+    Ancak Rust nesne tabanlı bir dil olduğu için bu adımlar TcpListener isimli yapının metotlarıyla gerçekleştirilmektedir. 
+    Yani Rust'ta TCP server programlar tipik olarak TcpListener yapısıyla gerçekleştirilmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    TcpListener yapısıyla server program tipik olarak şu aşamalardan geçilerek oluşturulmaktadır:
+
+    1) Rust'ta soket yaratımı zaten TcpListener yapısının bind ilişkili fonksiyonu tarafından yapılmaktadır. bind ilişkili 
+    fonksiyonu hem soketi yaratmakta hem de onu bağlamakta ve aynı zamanda soketi dinleme konumuna da sokmaktadır. Yani yukarıdaki 
+    ilk üç adımı yerine getirmektedir. Soketin bağlanması (bind edilmesi) "ben şu ağ arayüzünden ve şu porta gelen bağlantı 
+    istekleriyle ilgileniyorum" dememin bir yoludur.  bind ilişki fonksiyonunun parametrik yapısına dikkat ediniz:
+
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<TcpListener>
+
+    Fonksiyonun generic olduüuna ve generic parametrenin ToSocketAddrs trait'ini desteklemesi gerektiğine dikkat ediniz. 
+    Anımsayacağınız gibi SocketAddrV4, SocketAddrV6 ve SocketAddr türleri bu trait'i desteklemektedir. Bağlama işlemi 
+    yapılırken "ben host'taki tüm ağ arayüzlerinden gelen istekleri kabul etmek istiyorum" demek için Ipv4Addr yapısının 
+    UNSPECIFIED sabiti kullanılmalıdır. Örneğin:
+
+    let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 55555)).unwrap();
+
+    Burada server host'taki 55555 numaralıport için herhangi bir ağ arayüzünden gelen bağlantı istekleri ile ilgilenmektedir. 
+    bind fonksiyonu başarısız olabilir. Bu nedenle geri dönüş değeri std::io::Result türündendir:
+
+    Soketin dinleme konumuna sokulmasıyla (listen işlemi) artık işletim sistemi soket için bir kuyruk oluşturur ve bağlantı 
+    istekleri geldiğinde bu istekleri bu kuyruğa yerleştirir. Server programını yazanlar bu kuyruktan bağlantı isteklerini 
+    alıp bağlantıyı sağlamalıdır. Eğer bağlantı isteği kuyruğa gelip belli bir zaman aşımı içerisinde server bağlantıyı 
+    sağlamazsa bağlanan tarafa bu durum bir hata mesajıyla iletilir. bind metodunda bloke oluşmamaktadır. 
+
+    2) Artık kuyruklanan bağlantı istekleri accept metoduyla ele alınıp bağlantı sağlanmalıdır. accept metdunun parametrik
+    yapısı şöyledir:
+
+    pub fn accept(&self) -> Result<(TcpStream, SocketAddr)>
+
+    accept metodu çağrıldığında eğer kuyrukta zaten bir bağlantı isteği yoksa accept blokede bekler. Ancak kuyrukta zaten 
+    bir bağlantı isteğ varsa accept bunu kabul eder ve bloke olmadan bağlantıyı sağlar. Metodun başarı durumunda iki elemanlı 
+    bir demete geri döndüğüne dikkat ediniz. Metot başarısızlık durumunda std::io modülündeki Result türüne geri dönmektedir. 
+    Metodun başarı durumunda geri döndürdüğü demetin birinci elemanı TcpStream türünden, ikinci elemanı ise SocketAddr 
+    türünden değerlerdir. TcpStream yapısını izleyene paragraflarda göreceğiz. Bu yapı soket konuşmasında kullanılmaktadır. 
+    accept bağlantıyı sağladıktan sonra karşı tarafın IP adresi ve port numarasını da elde etmektedir. Demetin ikinci elemanı 
+    bunu belirtmektedir. Örneğin:
+
+    let (tcp_stream, client_addr) = match tcp_listener.accept() {
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(0);
+        },
+        Ok(conn_info) => conn_info
+    };
+
+    Aşağı seviyeli soket kütüphanesinde (Rust bunu sarmalamaktadır) server'ın dinleme ve accept yapmada kullandığığı sokete
+    "pasif soket" ya da "dinleme soketi" denilmektedir. Ancak her accept işlemi aslında yeni bir soketin de yaratılmasına 
+    yol açmaktadır. Yani her accept o anda bağlanan client ile konuşmakta kullanılan yeni bir soket de vermektedir. Buna 
+    aktif soket denilmektedir. Rust'ta accept metodunun geri döndürdüğü TcpStream nesnesi bu aktif soketi de barındırmaktadır. 
+
+    Aslında TcpListener yapısının incoming ve into_incoimng metotları bize bir iterator vermektedir. Bu iteratör her 
+    dolaşıldığında accept uygulanmaktadır. Örneğin:
+
+    for tcp_stream in listener.incoming() {
+        match tcp_stream {
+            Ok(tcp_stream) => {
+                handle_connection(tcp_stream);
+            }
+            Err(e) => { /* connection failed */ }
+        }
+    }
+
+    Burada bir döngü içerisinde sürekli accept yapılmaktadır. 
+
+    Biz server programda accept işlemine kadar geldik. Bundan sonrası aslında clint programla aynıdır. Bu nednele bu ortak 
+    kısmı birlikte ele alacağız. Ancak şimdi client programın organizasyonuna bakalım.
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Clint program şu adımlardan geçilerek oluşturulmaktadır:
+
+    ┌────────────────────────────────────┐
+    │          Soket yaratılır           │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │    Soket bağlanır (isteğe bağlı)   │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │         connect işlemi             │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │          Gönderme / Alma           │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │              shutdown              │
+    └────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────┐
+    │          Soket kapatılır           │
+    └────────────────────────────────────┘
+
+    Client program Rust'ta TcpStream yapısı kullanılarak yazılmaktadır. Tipik olarak şunlar yapılır:
+
+    1) TcpStream yapısının connect ilişkili fonksiyonu zaten kendi içerisinde soketi yaratıp connect işlemini yapıp 
+    TcpStream değerini geri döndürmektedir. Yani yukarıdaki akışta  connect işlemş dahil işlemleri yapmaktadır. connect 
+    ilişkili fonksiyonunun parametrik yaısı şöyledir:
+
+    pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<TcpStream>
+
+    Fonksiyon parametre olarak server'ın IP adresinin ve port numarasının bulunduğu Ipv4Addr ya da diğer ToSocketAddrs 
+    trait'ini destekleyen nesneyi parametre olarak almaktadır. Fonksiyon başarı durumunda TcpStream değeriyle geri dönmektedir. 
+
+    Örneğin:
+
+    let tcp_stream = match  TcpStream::connect(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 55555)) {
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(0);
+        },
+        Ok(tcp_stream) => tcp_stream
+    };
+
+
+    2) Peki client'ın kendi host'undaki port numarası nedir? İşte client program yazılırken bir bind işlemi yapılmadıysa 
+    işletim sistemi client için belli bir aralıkta bir port numarası ataöaktadır. İşletim sisteminin atadığı bu port numaralarına
+    İngilizce "ephemeral ports" denmektedir. Maalesef Rust'ta TcpStream yapısında bağlanan tarafın port'unun açıkça set 
+    edileceği bir mekanizma bulunmamaktadır. Bunun için kütüphane değiştirmek gerekir. Client tarafın soketinin zaten 
+    aktif olduğuna dikkat ediniz. Pasif soket kavramı server programa ilişkindir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bağlanmış sokette TcpStream yapısının peer_addr metodu her zaman karşı tarafın IP adresini ve port numarasını vermektedir.
+    Metodun parametrik yapısı şöyledir: 
+
+    pub fn peer_addr(&self) -> Result<SocketAddr>
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Artık her iki tarafın da elinde TcpStream türünden nesneler vardır. Haberleşme bunlarla yapılmaktadır. TcpStream yapısı
+    Read ve Write trait'lerini desteklemektedir. Bundan sonra işlemler artık dosya işlemleri gibi yürütülmektedir. 
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            144. Ders 01/11/2026 - Pazartesi               
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+    Bağlantı sonucunda her iki tarafta da TcpStream türünden bir nesne bulunmaktadır. Haberleşme bu TcpStream nesneleri 
+    yoluyla yapılmaktadır. TcpStream yapısı dosya işlemlerinde gördüğümüz Read ve Write trait'lerini desteklemektedir. Yani 
+    bir bu sayede TcpStream nesnesini sabki bir dosyaymış gibi kullanabiliriz. Örnepşn karşı tarafa bir yazı göndermek 
+    isteyelim. Bunun içi TcpStream yapısının Write trait'inden gelen write metodu kullanılır. write metodunun parametrik 
+    yapısını anımsayınız:
+
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Error>;
+
+    Burada iki üç noktaya dikkat ediniz:
+
+    - Metodun birinci parametresei &mut self biçimindedir. Yani bu metodu çağırabilmek için TcpStream türünden değişkenşn 
+    mut olması gerekir. 
+
+    - Metodun ikinci parametresi u8 türünden bir dilim referansı almaktadır. Dilim referanslarının aslında bir şişman 
+    gösterici olduğunu, kendi içerisinde hem bir adres hem bir uzunluk tuttuğunu amımsayınız. Biz bu duurmda karşı tarafa 
+    göndereceğimiz bilgiyi u8 türünden bir diziye yerleştirip onun adresini metoda verebiliriz. 
+
+    - Metot başarılı olursa Ok(usize) değerine, başarısız olursa Err(std::io::Error) değerine geri dönmektedir. 
+    
+    Bu durumda örneğin karşı tarafa bir yazıyı şöyle gönderebiliriz:
+
+    let size = tcp_stream.write("hello server".as_bytes()).unwrap();
+
+    str türünün as_bytes metodu UTF-8 yazısının adresini ve uzunlğunu &[u8] olarak vermektedir. Burada gönderilen byte 
+    sayısı (unwrap yapıldığına dikkat ediniz) size değişkenine atanmıştır. 
+
+    Sokete yazma işleminde dikkat edilmesi gereken önemli iki nokta vardır: 
+    
+    - Gönderilmek istenen byte'lar önce yerel makinedeki "network tamponu" denilen tampona yazılır, oradan işletim sistemi 
+    tarafından CP paketleri oluşturularak hedefe aktarılır. write fonksiyonu geri döndüğünde gönderilmek istenen byte'lar 
+    hedefe varmış olmak zorunda değildir. Yalnızca yerel makinedeki network tanponuna yazma yapılmıştır. TCP paketlerinin 
+    karşı tarafa iletilmesi göreli olarak daha uzun bir süreçtir. 
+
+    - Gönderilmek istenen byte'ların önce yerel makinedeki network tamponuna yazıldığını belirtmiştik. İşte network 
+    tamponunda o anda yeterli yer olmayabilir. Bu durumda write metodu gönderilmek istenen tüm byte'ları değil yalnızca
+    bazı byte'ları network tamponuna yazıp hemen geri dönmektedir. Yani yazma talep edilenden daha az olabilmektedir. 
+    Eğer write metodu network tanmponu tamamen dolu olduğu için hiç byte yazamazsa en az 1 byte'ı tampona yazana kadar 
+    blokede bekler. UNIX/Linux sistemlerinde tüm yazılmak istenen byte'lar network tamponuna yazılana kadar sinyal oluşmamışsa
+    bloke oluşmaktadır. Ancak Windows sistemlerinde kısmi yazıp yukarıda anlattığımız gerekçeyle mümkün olmaktadır. 
+
+    Tamamen istenen miktarda byte'ın gönderilmesini garanti etmek istiyorsanız write metonu bir kez değil döngü içerisinde 
+    tm byte'ların network tamponuna yazıldığından emin olana kadar devam ettirmeniz gerekir. 
+
+    Soketten okuma yapmak için Read trait'ten gelen read metodu kullanılabilir. read metodunun parametrik yapısını anımsayınız:
+
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error>
+
+    Burada yine ilk parametrenin &mut self olduğuna dikkat ediniz. read metody ikinci parametresiyle belirtilen dilim 
+    referansındaki uzunluk kadar bilgiyi soketten okumak ister. Ancak eğer sokete gelmiş ve tamponlanmış en az 1 byte bilgi 
+    varsa read bloke olmadan okuyabildiği kadar byte'ı okuyup geri döner. Eğer sokete hiç bilgi gelmemişse yani netword 
+    tamponu boşsa read en az 1 byte okuyana kadar blokede bekler. readm metodu da başarı durumunda Ok(usize) değerine, 
+    başarısızlık durumunda Err(std::io::Error) değerine geri döner. read metodunda talep edilen miktardan daha az byte'ın 
+    okunabileceğine dikkat ediniz. 
+
+    read metodu normalde 0 ile geri dönmez. Çünkü zaten sokete hiç bilgi gelmemişse blokede beklemektedir. Ancak karşı 
+    taraf soketi kapatmışse read metodu 0 ile geri dönmektedir. Programda bu durumunda kontrol edilmesi gerekir. 
+
+    TCP haberleşmesinde tek bir write ile gönderilen byte'ların tek bir read ile okunmasının bir garantisi yoktur. Örneğin 
+    write ile tek hamlede 1000 byte başarılı bir biçimde gönderilmiş olsun. Bu 1000 byte işletim sistemi tarafından iki 
+    garklı TCP paketine ayrılarak gönderiliyor olabilir. Bu paketlerden ilki hedefe vardığında hemen orada read için bekleyen 
+    thread bunu okuyabilir. 
+
+    Aşağıdaki örnekte client program server programa bağlanıp klavyeden (stdin dosyasından) aldığı yazıları server programa
+    yollamaktadır. server da alınan bu yazıları ekrana (stdout dosyasına) yazdırmaktadır. Client ptogram "quit" yazısını 
+    gönderdiğinde hem jkendisi hem de server program sonlnamkatadır.  
+---------------------------------------------------------------------------------------------------------------------------*/
+
+// server.rs
+
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+use std::io::Read;
+
+const PORT: u16 = 55555;
+
+fn main() {
+    let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, PORT)).unwrap();
+
+    println!("waiting client connection...");
+
+    let (mut tcp_stream, client_addr) = match tcp_listener.accept() {
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(0);
+        },
+        Ok(conn_info) => conn_info
+    };
+
+    println!("connected client: {}:{}", client_addr.ip(), client_addr.port());
+
+    let mut text: [u8; 1024] = [0; 1024];
+    loop {
+        let size = tcp_stream.read(&mut text).unwrap();
+        if size == 0 {
+            break;
+        }
+        let s = std::str::from_utf8(&text[0..size]).unwrap();
+        println!("{}", s);
+        if s == "quit" {
+           break;
+        }
+    }
+}
+
+// client.rs
+
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
+use std::io::{stdin, stdout, Write};
+
+
+const PORT: u16 = 55555;
+
+fn main() {
+    let mut tcp_stream = match  TcpStream::connect(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), PORT)) {
+        Err(msg) => {
+            eprintln!("{}", msg);
+            std::process::exit(0);
+        },
+        Ok(tcp_stream) => tcp_stream
+    };
+
+    let peer_addr = tcp_stream.peer_addr().unwrap();
+    println!("connected server: {}:{}", peer_addr.ip(), peer_addr.port());
+
+    let mut s = String::new();
+    loop {
+        print!("Bir yazı giriniz:");
+        stdout().flush().unwrap();
+        stdin().read_line(&mut s).unwrap();
+        let trimmed_s = s.trim();
+
+        let _ = tcp_stream.write(trimmed_s.as_bytes()).unwrap();
+
+        if trimmed_s == "quit" {
+            break;
+        }
+        s.clear();
+    }
+
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            
+---------------------------------------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------------------------------------
+                                            
+---------------------------------------------------------------------------------------------------------------------------*/
 
 
 
