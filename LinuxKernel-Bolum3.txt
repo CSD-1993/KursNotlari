@@ -5930,13 +5930,1584 @@ void exit_sys(const char *msg)
     └────────────────────────────────┴───────────────────────────────────┘
 
     Burada önemli bir noktaya dikkat ediniz: Üst prosesin makine kodlarının bulunduğu ".text" biçiminde isimlendirilen
-    VMA alanına ilişkin sayfa tablosu girişleri alt prosese kopyalanmamaktadır. Bu durumda ork çıkışında alr proseste 
+    VMA alanına ilişkin sayfa tablosu girişleri alt prosese kopyalanmamaktadır. Bu durumda fork çıkışında alt proseste 
     hemen sayfa hatası (page fault) oluşur. Ancak bu sayfa hatasında bir disk okumasuı yapılmaz. Çünkü ".text"
     bölümü çalıştırılabilir dosyadan haritalanmıştır ve onun sayfa önbelleğinde zaten bulunmaktadır. Bemzer biçimde 
     mmap fonksiyonuyla MAP_SHARED olarak tahsis edilmiş olan VMA'ların sayfa tablosu girişleri de alt prosese kopyalanmamaktadır. 
     Bunlar da sayfa önbelleğinden elde edilmektedir. Peki neden yukarıdaki VMA'lara karşı gelen sayfa girişleri 
     kopyalanmamaktadır? Bunun temel nedeni aslında kopyalama sürecinin hızlandırılmak istenmesidir. Çünkü bu alanlar 
     zaten talep edildiğinde kaynağından bulunup "küçük hata (minor fault)" ile elde edilebilmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        113. Ders 31/10/2026 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bu bölümde çalıştırıabilir dosyaların çekirdek tarafından yüklenip çalıştırılabilir hale getirilmesi süreci üzerinde 
+    duracağız. İşletim sistemlerinde program dosyalarını yükleyip çalışır hale getiren alt sistemlerde "yükleyici (loader)"
+    denildiğini anımsayınız.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Anımsanacağı gibi UNIX türevi sistemlerde kullanıcı modunda program dosyalarının çalıştırılması exec ailesi POSIX 
+    fonksiyonlarıyla yapılmaktadır. Bu fonksiyonlara kısaca "exec fonksiyonları", bu fonksiyonların işlemlerde de "exec
+    işlemleri" denilmektedir. POSIX standratlarında kullanıcı modundan çağrılabilen 7 exec fonksiyonu vardır:
+
+    execl
+    execle
+    execlp
+    execv
+    execve
+    execvp
+    fexecve
+
+    Bu exec POSIX fonksiyonlarından yalnızca execve fonksiyonu sys_execve isimli bir sistem fonksiyonu olarak gerçekleştirilmiştir. 
+    Diğer exec fonksiyonları aslında execve çağrılarak (yani sys_execve fonksiyonu çağrılarak) yazılmışlardır. Ayrıca 
+    Linux sistemerine özgü bir biçimde sys_execveat isimli bir sistem fonksiyon da bulunmaktadır. "glibc" kütüphanesinde 
+    bu sistem fonksiyonunu çağıran execveat isimli bir fonksiyon da bulunmaktadır. 
+
+    Yukarıdaki exec fonksiyonalrının hepsi aslında temel olarak çalıştırılabilir bir program dosyasını yükleyip prosesin
+    başka bir programlama çalışmasına devam etmesini sağlamaktadır. Bu fonksyionlar arasındaki yalnızca parametrik yapı 
+    bakımından farklılıklar vardır. Zaten yukarıda da belirttiğimiz gibi çekirdekte yalnuzca sys_execve ve sys_execveat
+    fonksiyonları bulunmaktadır. 
+
+    exec fonksiyonlarının hepsi başarısızlık durumunda -1 değerine geri dönmektedir. Başarı durumunda zaten bu fonksiyonlar 
+    geri dönmez. Çünkü başarı durumunda zaten programın tüm bellek alanı boşaltılıp yeni bir program yüklenmektedir. 
+
+    exec fonksiyonlarının kullanıcı modundan kullanılması aslında "UNIX/Linux Sistem Programlama" kursumuzda ele alınmaktadır. 
+    Ancak biz burada hatırlatma amacıyla bu fonksiyonların her birinin nasıl kullanıldığı üzerinde kısaca duracağız. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    execl fonksiyonu (buradaki "l" soneki "list" sözcüğünden kısaltmadır) çalıştırılacak programın komut satırı 
+    argümanlarını tek tek argüman olarak almaktadır. Birinci komut satırı argümanı zorunlu olmasa da beklentileri karşılamak 
+    için program ismiyle aynı girilmelidir. (Böylece programcı C Programlama Dilindeki argv[0] semantiğini karşılamış olur.)
+    execl fonksiyonunun prototipi şöyledir:
+
+     #include <unistd.h>
+
+    int execl(const char *path, const char *arg, ... /*, (char *) NULL */);
+
+    Fonksiyonun "değişken sayıda argüman aldığına" dikkat ediniz. Argüman listesinin sonunda NULL adres bulunmalıdır. 
+    Ancak 0 değeri değişken sayıda argüman alan fonksiyonalrda int türden 0 anlamına geldiği için mutlaka açıkça 
+    tür dönüştürmesi uygulanmalıdır. Örneğin:
+
+    if (execl("/bin/ls", "/bin/ls", "-l", (char *)NULL) == -1)
+        exit_sys("execl");
+
+    /* unreachable code */
+
+    Burada execl başarılı olduğunda zaten programın akışının aşağıya geçmeyeceğine dikkat ediniz. O halde aslında 
+    çağrının başarısı kontrol edilmeyebilirdi:
+
+    execl("/bin/ls", "/bin/ls", "-l", (char *)NULL);
+    exit_sys("execl");
+
+    Nasıl olsa burada çağrı başarısızsa akış aşağıya geçecektir. 
+
+    Daha önce belirtitğimiz gibi eğer exec yapan programın devam etmesini istiyorsak önce fork işlemi yapıp alt proseste 
+    exec uygulamalıyız:
+
+     pid_t pid;
+
+    if ((pid = fork()) == -1)
+        exit_sys("fork");
+
+    if (pid == 0 && execl("/bin/ls", "/bin/ls", "-l", (char *)NULL) == -1)
+        exit_sys("execl);
+    
+    printf("parent continues...\n");
+
+    /* ... */
+
+    if (wait(NULL) == -1)
+        exit_sys("wait");
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    execle fonksiyonu execle fonksiyonundan farklı olarak program çevre değişkenlerini de değiştirmektedir. Fonksiyonun 
+    prototipi şöyledir:
+
+    #include <unistd.h>
+
+    int execle(const char *pathname, const char *arg, ... /*, (char *) NULL, char *const envp[] */);
+
+    Fonksiyon komut satırı argümanlarından sonra çevre değişkenlerinin bulunduğu char türden gösterici dizisinin adresini 
+    de parametre olarak olmaktadır. Çevre değişkenlerinin "anahtar=değer" biçiminde luşturulması gerekir. Bu gösterici 
+    dizisinin sonunda da NULL adres bulunmalıdır. Örneğin:
+
+     char *envs[] = {
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "HOME=/home/kaan",
+        "LANG=C.UTF-8",
+        "TERM=xterm-256color",
+        "USER=kaan",
+        "LOGNAME=kaan",
+        "SHELL=/bin/sh",
+        NULL
+    };
+
+    execle("/bin/ls", "/bin/ls", "-l", (char *)NULL, envs);
+    exit_sys("execle");
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    execlp fonksiyonu PATH çevre değişkenini dikkate almaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <unistd.h>
+
+    int execlp(const char *file, const char *arg, ... /*, (char *) NULL */);
+
+    Fonksiyonun parametrik yapısının execl ile aynı olduğuna dikkat ediniz. Farklılık fonksiyonun davranışındadır. 
+    execlp fonksiyonu eğer dosyanın yol ifadesinde hiç '/' karakteri kullanılmamışsa dosyayı PATH seçvre değişkenindeki 
+    dizinlerde sırasıyla aramaktadır. Eğer yol ifadesinde en az bir '/' karakteri kullanılmışsa fonksiyon PATH çevre
+    değişkenine bakmaz ve dosyayı yalnızca yol ifadesiyle belirtilen dizinde arar. PATH çevre değişkeninin değeri 
+    ':' karakterleriyle ayrılmış dizinlerden oluşmaktadır. Örneğin:
+
+    "/usr/local/bin:/usr/bin:/bin"
+
+    Burada  arama sırasıyla şu dizinlerde yapılacaktır:
+
+    "/usr/local/bin"
+    "/usr/bin"
+    "/bin"
+
+    Eğer yol ifadesinde hiç '/' karakter yoksa dosya prosesin çalışma dizninde aranmaz. Eğer yol ifadesinde en az bir 
+    '/' varsa bu durumda exelp fonksiyonunun execl fonksiyonundan hiçbir farkı kalmamaktadır. 
+
+    Örneğin:
+
+    execlp("ls", "ls", "-l", (char *)NULL);
+    exit_sys("execlp");
+
+    Burada "ls" programı PATH içerisinde bulunan "/bin" dizininde olduğu için bir sorun çıkmayacaktır. 
+
+    Kabuk programları exec fonksiyonlarının p'li versiyonlarını kullanmaktadır. Dolayısıyla biz bulunduğumuz dizindeki 
+    bir programı çalıştırmak için işin içine bir '/' karakteri sokmak zorunda kalırız. Örneğin:
+
+    $ ./sample
+
+    Bu davranış Windows sistemlerinden farklıdır. Windows sistemlerinde CreateProcess AP fonksiyonu her zaman prosesin
+    çalışma dizininde de arama yapmaktadır. 
+
+    Peki UNIX türevi sistemlerde biz Windows'ta olduğu gibi bulunduğumuz diizndeki bir programı hiç '/' karakteri 
+    kullanmadan çalıştırabilir miyiz? İşte bunun için PATH çevre değişkenine prosesin çalışma dizininin de "." ile eklenmesi gerekir:
+
+    $ PATH=$PATH:.
+
+    Ancak bu güvenlik açığı oluşturabileceğinden UNIX türevi sistemlerde tavsiye edilen bir işlem değildir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    exec fonksiyonlarının "v"'li versiyonları komut satırı argümanlarını tek tek değil bir dizi biçiminde almaktadır. 
+    execv fonksiyonunun prototipi şöyledir:
+
+    #include <unistd.h>
+
+    int execv(const char *path, char *const argv[]);
+
+    Fonksiyonun execl fonksiyonundan farkı komut satırı argmanlarının char türden bir gösterici dizisi ile alınmasıdır. 
+    Örneğin:
+
+    char *args[] = {"/bin/ls", "-l", "-i", NULL};
+    
+    execv("/bin/ls", args);
+    exit_sys("execv");
+
+    execvp fonksiyonu da PATH çevre değişkenine balmaktadır. Bu fonksiyonun execlp fonksiyonundan tek farkı komut 
+    satırı argümanlarının bir char türden bir gösterici dizisi ile alınmasıdır. Bunun dışında uygulanan semantik tamamen 
+    execlp fonksiyonundaki gibidir. Kabuk programları tipik olarak execvp uygulamaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <unistd.h>
+
+    int execvp(const char *file, char *const argv[]);
+
+    Gördüğünüz gibi prototipin execv fonksiyonundan hiçbir farkı yoktur. Örneğin:
+
+    char *args[] = {"ls", "-l", "-i", NULL};
+    
+    execvp("ls", args);
+    exit_sys("execvp");
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi Linux sistemlerinde aslında yalnızca execve ve execveat birer sistem fonksiyonu 
+    olarak yazılmıştır. Yukarıdaki POSIX fonksiyonlarının hepsi aslında execve fonksiyonunu çağırmaktadır. Linux 
+    sistemlerinde de execve doğrudan sys_execve sistem fonksionunu çağırır. execve fonksiyonun prototipi şöyledir:
+
+    #include <unistd.h>
+
+    int execve(const char *path, char *const argv[], char *const envp[]);
+
+    Fonksiyon hem komut satırı argümanlarını hem de çevre değişkenlerini char türden bir gösterici dizisi olarak 
+    almaktadır. Fonksiyonun "p" eki almadığına dikkat ediniz. Fonksiyon PATH çevre değişkenine bakmamaktadır. Örneğin:
+
+    char *args[] = {"/bin/ls", "-l", "-i", NULL};
+    char *envs[] = {
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "HOME=/home/kaan",
+        "LANG=C.UTF-8",
+        "TERM=xterm-256color",
+        "USER=kaan",
+        "LOGNAME=kaan",
+        "SHELL=/bin/sh",
+        NULL
+    };
+
+    execve("/bin/ls", args, envs);
+    exit_sys("execve");
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    fexecve fonksiyonu çalıştırılacak dosyaya ilişkin dosya betimleyicisini alarak execve semenatiğini uygulamaktadır. 
+    Burada dosyanın O_EXEC, O_RDONLY ya da Linux'a özgü O_PATH bayrağıyla açılmış olması gerekir. Linux sistemleri 
+    POSIX'in O_EXEC bayrağını desteklememektedir. fexecve fonksiyonu Linux'ta sys_execveat sistem fonksiyonunu çağırmaktadır. 
+    Fonksiyonun prototipi şöyledir:
+
+     #include <unistd.h>
+
+    int fexecve(int fd, char *const argv[], char *const envp[]);
+
+    Görüldüğü gibi fonksiyonun execve fonksiyonundan tek farkı dosyayın yol ifadesini değil betimelyicisini parametre 
+    olarak almasıdır. Örneğin:
+
+    char *args[] = {"/bin/ls", "-l", "-i", NULL};
+    char *envs[] = {
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "HOME=/home/kaan",
+        "LANG=C.UTF-8",
+        "TERM=xterm-256color",
+        "USER=kaan",
+        "LOGNAME=kaan",
+        "SHELL=/bin/sh",
+        NULL
+    };
+    int fd;
+
+    if ((fd = open("/bin/ls", O_RDONLY|O_CLOEXEC)) == -1)
+        exit_sys("open");
+
+    fexecve(fd, args, envs);
+    exit_sys("execve");
+
+    Anımsanacağı gibi açık dosyalar exec işlemindne sonra açık olmaya devam etmektedir. Onların exec sırasında 
+    kapatılması için O_CLOEXEC baurağı kullanılmaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    POSIX'te bulunmayan ancak Linux'ta bulunan execveat fonksiyonu doğrudan sys_execveat sistem fonksiyonunu çağırmaktadır. 
+    Bu fonksiyon "at" semantiğini uygulamaktadır. Fonksiyonun prototipi şöyledir:
+
+    #include <unistd.h>
+
+    int execveat(int dirfd, const char *pathname, char *const argv[], 
+            char *const envp[], int flags);
+
+    Anımsanacağı gibi "at" sonekli fonksiyonlar eğer yol ifadesinde isminde hiç '/' karakter geçmiyorsa dosyayı prosesin çalışma 
+    dizininde değil birinci parametresiyle aldıkları dizine ilişkin betimleyicinin belirttiği dizinde aramaktadır. 
+    Eğer yol ifadesi en az bir '/' karakteri içeriyorsa bu durumda "at" semnatiğinin bir önemi kalmamaktadır. Fonksiyonun 
+    flages parametresi pek çok "at" semantiğine sahip fonksiyonda bulunmaktadır. Bu parametre iki bayraktan oluşturulabilmektedir:
+
+    AT_EMPTY_PATH
+    AT_SYMLINK_NOFOLLOW
+
+    AT_EMPTY_PATH bayrağı yol ifadesi boş string girilmişse fexecve işlemini yapmaktadır. (Aslında fexecve zaten bu 
+    fonksiyonu ikinci parametresi boş string olacak biçimde ve son parametresi de AT_EMPTY_PATH olacak biçimde çağırmaktadır.)
+    AT_SYMLINK_NOFOLLOW bayrağı ise eğer exec yapılacak yol ifadesi sembolik bağlantı dosyasıysa bu sembolik bağlantının 
+    izlenmemesi gerektiğini belirtmektedir. 
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Aslında UNIX türevi sistemlerde daha önce de belirttiğimiz gibi genellikle yalnızca execce fonksiyonu bir sistem 
+    fonksiyonu  biçiminde yazılmaktadır. Diğer exec fonksiyonları aslında bu fonksiyon çağrılarak yazılmış sarma fonksiyonlardır. 
+    Linux sistemlerinde execveat fonsiyonun da bir sistem fonksiyonu olarak yazıldığını belirtmiştik. Aşağıdaki şekilde 
+    Linux sistemlerinde exec fonksiyonlarının execve ve execveat sistem fonksiyonları kullanılarak nasıl yazıldığına 
+    ilişkin bir ipucu veriyoruz:
+
+    ┌────────┐            ┌────────┐            ┌────────┐
+    │ execlp │            │ execl  │            │ execle │
+    └───┬────┘            └───┬────┘            └───┬────┘
+        │ argv oluştur        │ argv oluştur        │ argv oluştur
+        ▼                     ▼                     ▼
+    ┌────────┐            ┌────────┐            ┌────────┐                ┌─────────┐
+    │ execvp ├───────────►│ execv  ├───────────►│ execve │◄───────────────┤ fexecve │
+    └────────┘ PATH tara  └────────┘  environ   └───┬────┘ /proc/self/fd  └────┬────┘
+                                                    │      (ENOSYS ise)        │ AT_EMPTY_PATH
+                                                    │                          ▼
+                                                    │                     ┌──────────┐
+                                                    │                     │ execveat │
+                                                    │                     └────┬─────┘
+    User space                                      │                          │
+    ────────────────────────────────────────────────┼──────────────────────────┼────────
+    Kernel space                                   ▼                          ▼
+                                            sys_execve                sys_execveat
+                                                    │                          │
+                                                    └────────────┬─────────────┘
+                                                                 ▼
+                                                       do_execveat_common()
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        114. Ders 01/11/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çekirdeğin ELF formatının nasıl yükleyip çalışabilir hale getirdiğinin anlaşılabilmesi için öncelikle ELF dosyasının 
+    yapısının belli bir düzeyde bilinmesi gerekir. Biz de önce ELF formatı üzerinde açıklamalar yapacağız. ELF sözcüğü 
+    "Executable and Linkable Format" sözcüklerinden kısaltılmıştır. Her ne kadar ELF kısaltmasında zaten "format" 
+    sözcüğü geçiyorsa da biz anlatımlarda yine de "ELF formatı" diyeceğiz.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    ELF isminden de anlaşılacağı gibi hem bir "amaç dosya (object file)" formatıdır hem de "çalıştırılabilir dosya 
+    (executable file)" formatıdır. Yani derleyiciler de ELF dosyayı üretmekte, bağlayıcılar da ELF dosyası üretmektedir. 
+    Aslında amaç dosya dosya formatlarıyla çalıştırılabilir dosya formatları zaten birbirine benzerdir. Örneğin Windows
+    sistemlerinde bugün kullanılan amaç dosya formatı olan COFF ile çalıştırılabilir dosya formatı olan PE formatı da
+    oldukça benzerdir. ELF formatı UNIX türevi sistemlerde zaman içerisinde yaygınlaşmış ve birincil format haline 
+    gelmiştir. macOS sistemleri ise ELF formatı yerine Mach-O formatı denilen benzer bir format kullanmatadır.
+
+    Aşağıda yaygın kullanılan kullanılan işletim sistemlerindeki çalıştırılabilir ve amaç dosya formatları bir tablo 
+    halinde verilmektedir:
+
+    ┌─────────────────┬────────────────────────┬─────────────┬───────────────────┬──────────────────┬────────────────┐
+    │ İşletim Sistemi │ Çalıştırılabilir Dosya │  Amaç Dosya │ Dinamik Kütüphane │ Statik Kütüphane │ Kernel Modülü  │
+    ├─────────────────┼────────────────────────┼─────────────┼───────────────────┼──────────────────┼────────────────┤
+    │ Linux           │ ELF                    │ ELF (.o)    │ ELF (.so)         │ ar (.a)          │ ELF (.ko)      │
+    │ FreeBSD/NetBSD  │ ELF                    │ ELF (.o)    │ ELF (.so)         │ ar (.a)          │ ELF (.ko)      │
+    │ Solaris/illumos │ ELF                    │ ELF (.o)    │ ELF (.so)         │ ar (.a)          │ ELF            │
+    │ Android         │ ELF (+ DEX/APK)        │ ELF (.o)    │ ELF (.so)         │ ar (.a)          │ ELF (.ko)      │
+    │ macOS/iOS       │ Mach-O                 │ Mach-O (.o) │ Mach-O (.dylib)   │ ar (.a)          │ Mach-O (.kext) │
+    │ Windows         │ PE32/PE32+ (.exe)      │ COFF (.obj) │ PE (.dll)         │ ar (.lib)        │ PE (.sys)      │
+    │ UEFI            │ PE32+ (.efi)           │ COFF / ELF  │ —                 │ ar (.lib/.a)     │ PE32+ (.efi)   │
+    │ AIX             │ XCOFF                  │ XCOFF (.o)  │ XCOFF (.a/.so)    │ ar (.a)          │ XCOFF          │
+    │ MS-DOS          │ MZ (.exe), .COM        │ OMF (.obj)  │ —                 │ OMF (.lib)       │ —              │
+    │ Eski Unix       │ a.out                  │ a.out (.o)  │ a.out             │ ar (.a)          │ —              │
+    └─────────────────┴────────────────────────┴─────────────┴───────────────────┴──────────────────┴────────────────┘
+
+    Linux yalnızca ELF formatını değil geleneksel "a.out" formatını da destekliyordu. Ancak artık bu format neredeyse 
+    hiç kullanılmamaktadır. Linux kaynak kodlarından da 6.1 versiyonuyla çıkartılmıştır. Linux çekirdeği değişik dosya 
+    formatlarını yükleyebilecek bir yapı oluşturmuştur. Böylece çekirdeğe ek yapan geliştiriciler kendi dosya formatlarını 
+    da bu yapının içerisine katarak yüklenmesini sağlayabilmektedir. Linux çekirdeğindeki bu yapı tarafından hazır bir 
+    biçimde desteklenen çalıştırılabilir dosya formatları da şöyledir:
+
+    ┌────────────────────────┬───────────────────┬─────────────────────────────────────────────────┐
+    │      Kaynak dosya      │       Format      │                     Açıklama                    │
+    ├────────────────────────┼───────────────────┼─────────────────────────────────────────────────┤
+    │ fs/binfmt_elf.c        │ ELF               │ Standart ELF yükleyici                          │
+    │ fs/compat_binfmt_elf.c │ ELF32             │ 64-bit çekirdekte 32-bit ELF                    │
+    │ fs/binfmt_elf_fdpic.c  │ ELF FDPIC         │ MMU'suz (nommu) sistemler                       │
+    │ fs/binfmt_flat.c       │ bFLT              │ uClinux flat binary, nommu                      │
+    │ fs/binfmt_script.c     │ #! script         │ Interpreter satırını çözer                      │
+    │ fs/binfmt_misc.c       │ Kullanıcı tanımlı │ magic/uzantı → interpreter (qemu-user, Wine vs) │
+    │ fs/binfmt_aout.c       │ a.out             │ 5.1'de deprecated, 6.1'de kaldırıldı            │
+    └────────────────────────┴───────────────────┴─────────────────────────────────────────────────┘
+
+    ELF formatı pek çok kaynakta ele alınıp açıklanmaktadır. Ancak resmi doküman "Executable and Linking Format (ELF)
+    Specification" isimli dokümandır. Bu dokümana aşağıdaki bağlantıdan erişebilirsiniz:
+
+    https://refspecs.linuxbase.org/elf/elf.pdf
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    ELF dosyasının genel yapısı şöyledir:
+
+           Amaç Dosya              Çalıştırılabilir Dosya
+    ┌──────────────────────┐      ┌──────────────────────┐
+    │      ELF Header      │      │      ELF Header      │
+    ├──────────────────────┤      ├──────────────────────┤
+    │ Program Header Table │      │ Program Header Table │
+    │    (isteğe bağlı)    │      │      (zorunlu)       │
+    ├──────────────────────┤      ├──────────────────────┤
+    │      Section 1       │      │      Segment 1       │
+    ├──────────────────────┤      ├──────────────────────┤
+    │      Section 2       │      │      Segment 2       │
+    ├──────────────────────┤      ├──────────────────────┤
+    │         ...          │      │         ...          │
+    ├──────────────────────┤      ├──────────────────────┤
+    │      Section n       │      │      Segment n       │
+    ├──────────────────────┤      ├──────────────────────┤
+    │ Section Header Table │      │ Section Header Table │
+    │      (zorunlu)       │      │    (isteğe bağlı)    │
+    └──────────────────────┘      └──────────────────────┘
+
+    ELF formatı 32 bit ve 64 bit olmak üzere iki biçime sahiptir. Bu iki biçim arasında aslında organizasyonel bir fark
+    yoktur. Yalnızca alanların uzunlukları konusunda farklılıklar vardır. 32 bit ELF dosyaının alanlarına ilişkin türler 
+    dokğmanlarda aşağıdaki isimlerle belirtilmektedir:
+
+    ┌───────────────┬───────┬──────────┬───────────────┐
+    │      Tür      │ Boyut │ Hizalama │  C karşılığı  │
+    ├───────────────┼───────┼──────────┼───────────────┤
+    │ Elf32_Addr    │   4   │    4     │ uint32_t      │
+    │ Elf32_Half    │   2   │    2     │ uint16_t      │
+    │ Elf32_Off     │   4   │    4     │ uint32_t      │
+    │ Elf32_Sword   │   4   │    4     │ int32_t       │
+    │ Elf32_Word    │   4   │    4     │ uint32_t      │
+    │ unsigned char │   1   │    1     │ unsigned char │
+    │ Elf32_Xword   │   8   │  4 / 8   │ uint64_t      │
+    │ Elf32_Sxword  │   8   │  4 / 8   │ int64_t       │
+    │ Elf32_Section │   2   │    2     │ uint16_t      │
+    │ Elf32_Versym  │   2   │    2     │ uint16_t      │
+    │ Elf32_Relr    │   4   │    4     │ uint32_t      │
+    └───────────────┴───────┴──────────┴───────────────┘
+
+    64 bit ELF formatında ise alan türleri şöyledir:
+
+    ┌───────────────┬───────┬──────────┬───────────────┐
+    │      Tür      │ Boyut │ Hizalama │  C karşılığı  │
+    ├───────────────┼───────┼──────────┼───────────────┤
+    │ Elf64_Addr    │   8   │    8     │ uint64_t      │
+    │ Elf64_Off     │   8   │    8     │ uint64_t      │
+    │ Elf64_Half    │   2   │    2     │ uint16_t      │
+    │ Elf64_Word    │   4   │    4     │ uint32_t      │
+    │ Elf64_Sword   │   4   │    4     │ int32_t       │
+    │ Elf64_Xword   │   8   │    8     │ uint64_t      │
+    │ Elf64_Sxword  │   8   │    8     │ int64_t       │
+    │ unsigned char │   1   │    1     │ unsigned char │
+    │ Elf64_SHalf   │   2   │    2     │ int16_t       │
+    │ Elf64_Section │   2   │    2     │ uint16_t      │
+    │ Elf64_Versym  │   2   │    2     │ uint16_t      │
+    │ Elf64_Relr    │   8   │    8     │ uint64_t      │
+    └───────────────┴───────┴──────────┴───────────────┘
+
+    ELF formatını görüntülamak için çeşitli utility programlar oluşturulmuştur. Bunlardan en çok kullanılanan objdump 
+    ve readelf  isimli programlardır. objdump daha genel ve pek çok formatı destekleyen bir programdır. readelf ise 
+    ELF formatına özgüdür.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    ELF formatına ilişkin bölümlerin yapısal tanımlamaları bazı başlık dosyalarında zaten bulunmaktadır. Format üzerinde 
+    işlemler yapan porogramlar yazacaksanız doğrudan bu yapıları kullanabilirsiniz. Kullanıcı modu için bu tanımlamalar 
+    "/usr/include/elf.h" dosyası içerisinde (doğrudan #include <elf.h> biçiminde include edebilrsiniz) çekirdek modlleri 
+    için ise "/usr/include/linux/elf.h" dosyası içerindedir (doğrudan #include <linux/elf.h> biçiminde include edebilrsiniz).
+
+    Ayrıca ELF formatı üzerinde işlemler yapmayı kolaylaştıran "BFD (Binary File Descriptor)" isimli "libelf" isimli
+    kütüphaneler bulunmaktadır. BFD pek çok dosya formatını destekleyen daha genel bir kütüphnedir. "libelf" ise 
+    ELF formatına özgüdür. Bu kütüphanelerin kullanımına ilişkin dokğmanlara aşağıdaki bağlantılardan erişebilirsiniz:
+
+    https://sourceware.org/binutils/docs/bfd.pdf
+    https://atakua.org/old-wp/wp-content/uploads/2015/03/libelf-by-example-20100112.pdf
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    ELF dosyasının hemen başında bir başlık kısmı (ELF Header) bulunmaktadır. Bu başlık kısmında dosya hakkında en 
+    önemli bilgiler tutulmaktadır.
+
+    Diğer dosya formatlarında olduğu gibi ELF dosyasının başında da bir başlık kısmı bulunmaktadır. Bu başlık kısmı 
+    dosyadaki metada bilgilerini tutmaktadır. 32 bit ELF formatındaki başlık kısmı şöyledir:
+
+    ┌───────────┬───────┬───────────────┬─────────────┬──────────────────────────────────────────────────┐
+    │   Ofset   │ Boyut │      Tür      │     Alan    │                     Açıklama                     │
+    ├───────────┼───────┼───────────────┼─────────────┼──────────────────────────────────────────────────┤
+    │ 0x00 ( 0) │   16  │ unsigned char │ e_ident[16] │ Magic, class, data, version, OS/ABI              │
+    │ 0x10 (16) │   2   │ Elf32_Half    │ e_type      │ Dosya türü: ET_REL, ET_EXEC, ET_DYN, ET_CORE     │
+    │ 0x12 (18) │   2   │ Elf32_Half    │ e_machine   │ Mimari: EM_386, EM_X86_64, EM_AARCH64 vs         │
+    │ 0x14 (20) │   4   │ Elf32_Word    │ e_version   │ Format sürümü: EV_CURRENT (1)                    │
+    │ 0x18 (24) │   4   │ Elf32_Addr    │ e_entry     │ Giriş noktasının sanal adresi (yoksa 0)          │
+    │ 0x1C (28) │   4   │ Elf32_Off     │ e_phoff     │ Program başlık tablosunun dosya ofseti (yoksa 0) │
+    │ 0x20 (32) │   4   │ Elf32_Off     │ e_shoff     │ Bölüm başlık tablosunun dosya ofseti (yoksa 0)   │
+    │ 0x24 (36) │   4   │ Elf32_Word    │ e_flags     │ İşlemciye özgü bayraklar (EF_*)                  │
+    │ 0x28 (40) │   2   │ Elf32_Half    │ e_ehsize    │ ELF başlığının boyutu: 52                        │
+    │ 0x2A (42) │   2   │ Elf32_Half    │ e_phentsize │ Bir program başlığı girişinin boyutu: 32         │
+    │ 0x2C (44) │   2   │ Elf32_Half    │ e_phnum     │ Program başlığı giriş sayısı                     │
+    │ 0x2E (46) │   2   │ Elf32_Half    │ e_shentsize │ Bir section başlığı girişinin boyutu: 40         │
+    │ 0x30 (48) │   2   │ Elf32_Half    │ e_shnum     │ Section başlığı giriş sayısı                     │
+    │ 0x32 (50) │   2   │ Elf32_Half    │ e_shstrndx  │ .shstrtab section indeksi                        │
+    └───────────┴───────┴───────────────┴─────────────┴──────────────────────────────────────────────────┘
+
+    Bu başlık "/usr/include/elf.h" dosyası içeisinde yapısal biçimde şöyle tanımlanmıştır:
+
+    #define EI_NIDENT		16
+
+    typedef struct
+    {
+    unsigned char	e_ident[EI_NIDENT];	/* Magic number and other info */
+        Elf32_Half	e_type;			/* Object file type */
+        Elf32_Half	e_machine;		/* Architecture */
+        Elf32_Word	e_version;		/* Object file version */
+        Elf32_Addr	e_entry;		/* Entry point virtual address */
+        Elf32_Off	e_phoff;		/* Program header table file offset */
+        Elf32_Off	e_shoff;		/* Section header table file offset */
+        Elf32_Word	e_flags;		/* Processor-specific flags */
+        Elf32_Half	e_ehsize;		/* ELF header size in bytes */
+        Elf32_Half	e_phentsize;	/* Program header table entry size */
+        Elf32_Half	e_phnum;		/* Program header table entry count */
+        Elf32_Half	e_shentsize;	/* Section header table entry size */
+        Elf32_Half	e_shnum;		/* Section header table entry count */
+        Elf32_Half	e_shstrndx;		/* Section header string table index */
+    } Elf32_Ehdr;
+
+    64 bit ELF formatındaki başlık kısmı da şöyledir:
+
+    ┌───────────┬───────┬───────────────┬─────────────┬──────────────────────────────────────────────────┐
+    │   Ofset   │ Boyut │      Tür      │     Alan    │                     Açıklama                     │
+    ├───────────┼───────┼───────────────┼─────────────┼──────────────────────────────────────────────────┤
+    │ 0x00 ( 0) │   16  │ unsigned char │ e_ident[16] │ Magic, class, data, version, OS/ABI              │
+    │ 0x10 (16) │   2   │ Elf64_Half    │ e_type      │ Dosya türü: ET_REL, ET_EXEC, ET_DYN, ET_CORE     │
+    │ 0x12 (18) │   2   │ Elf64_Half    │ e_machine   │ Mimari: EM_386, EM_X86_64, EM_AARCH64 vs         │
+    │ 0x14 (20) │   4   │ Elf64_Word    │ e_version   │ Format sürümü: EV_CURRENT (1)                    │
+    │ 0x18 (24) │   8   │ Elf64_Addr    │ e_entry     │ Giriş noktasının sanal adresi (yoksa 0)          │
+    │ 0x20 (32) │   8   │ Elf64_Off     │ e_phoff     │ Program başlık tablosunun dosya ofseti (yoksa 0) │
+    │ 0x28 (40) │   8   │ Elf64_Off     │ e_shoff     │ Section başlık tablosunun dosya ofseti (yoksa 0) │
+    │ 0x30 (48) │   4   │ Elf64_Word    │ e_flags     │ İşlemciye özgü bayraklar (EF_*)                  │
+    │ 0x34 (52) │   2   │ Elf64_Half    │ e_ehsize    │ ELF başlığının boyutu: 64                        │
+    │ 0x36 (54) │   2   │ Elf64_Half    │ e_phentsize │ Bir program başlığı girişinin boyutu: 56         │
+    │ 0x38 (56) │   2   │ Elf64_Half    │ e_phnum     │ Program başlığı giriş sayısı                     │
+    │ 0x3A (58) │   2   │ Elf64_Half    │ e_shentsize │ Bir section başlığı girişinin boyutu: 64         │
+    │ 0x3C (60) │   2   │ Elf64_Half    │ e_shnum     │ Section başlığı giriş sayısı                     │
+    │ 0x3E (62) │   2   │ Elf64_Half    │ e_shstrndx  │ .shstrtab section indeksi                        │
+    └───────────┴───────┴───────────────┴─────────────┴──────────────────────────────────────────────────┘
+
+    Bu başlık da "/usr/include/elf.h" dosyasında şöyle tanımlanmıştır:
+
+    typedef struct
+    {
+        unsigned char	e_ident[EI_NIDENT];	/* Magic number and other info */
+        Elf64_Half	e_type;			/* Object file type */
+        Elf64_Half	e_machine;		/* Architecture */
+        Elf64_Word	e_version;		/* Object file version */
+        Elf64_Addr	e_entry;		/* Entry point virtual address */
+        Elf64_Off	e_phoff;		/* Program header table file offset */
+        Elf64_Off	e_shoff;		/* Section header table file offset */
+        Elf64_Word	e_flags;		/* Processor-specific flags */
+        Elf64_Half	e_ehsize;		/* ELF header size in bytes */
+        Elf64_Half	e_phentsize;	/* Program header table entry size */
+        Elf64_Half	e_phnum;		/* Program header table entry count */
+        Elf64_Half	e_shentsize;	/* Section header table entry size */
+        Elf64_Half	e_shnum;		/* Section header table entry count */
+        Elf64_Half	e_shstrndx;		/* Section header string table index */
+    } Elf64_Ehdr;
+
+    Görüldüğü gibi başlığın alanları aynıdır, yalnızca uzunlukları farklıdır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıda da belirttiğimiz gibi ELF başlığı'nda dosyadaki meta-data alanları hakkında önemli bilgiler yer almaktadır. 
+    ELF başlığı'nın ilk 16 byte'ı "kimlik bilgileri (identification)" denilen dosyanın en kritik bilgilerini tutan kısmıdır. 
+    ELF dosyasının ilk dört byte'ında bir "sihirli sayı (magic number)" bulundurulmuştur. Bu ilk 4 byte'ın ilk byte'ı 
+    0x7F sonraki üç byte'ı da 'E', 'L', 'F' karakterlerinin ASCII kodlarından oluşmaktadır. Yani ELF dosyasının ilk 4 
+    byte'ı hex olarak şöyledir:
+
+    7F 45 4C 46
+
+    ELF başlığını daha iyi anlamak için basit programın ELF başlıını da aşağıda veriyoruz:
+
+    $ readelf -h sample
+    ELF Başlığı:
+    Sihir:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+    Sınıf:                             ELF64
+    Veri:                              2's complement, little endian
+    Version:                           1 (current)
+    OS/ABI:                            UNIX - System V
+    ABI Sürümü:                        0
+    Tip:                               DYN (Position-Independent Executable file)
+    Makine:                            Advanced Micro Devices X86-64
+    Sürüm:                             0x1
+    Girdi noktası adresi:              0x10e0
+    Yazılım başlıkları başlangıcı:     64 (bayt dosya içinde)
+    Bölüm başlıkları başlangıcı:       14192 (bayt dosya içinde)
+    Seçenekler:                        0x0
+    Size of this header:               64 (bytes)
+    Size of program headers:           56 (bytes)
+    Number of program headers:         13
+    Size of section headers:           64 (bytes)
+    Number of section headers:         31
+    Section header string table index: 30
+
+    Dosyanın başı da hex olarak şöyledir:
+
+    $ hexdump -C -n 64 sample 
+    00000000  7f 45 4c 46 02 01 01 00  00 00 00 00 00 00 00 00  |.ELF............|
+    00000010  03 00 3e 00 01 00 00 00  e0 10 00 00 00 00 00 00  |..>.............|
+    00000020  40 00 00 00 00 00 00 00  70 37 00 00 00 00 00 00  |@.......p7......|
+    00000030  00 00 00 00 40 00 38 00  0d 00 40 00 1f 00 1e 00  |....@.8...@.....|
+    
+     - Kimlik bilgilerinin 4'üncü offset'teki byte'ı ELF dosyasının 32 bit mi 64 bit mi olduğunu belirtmektedir. Eğer ELF 
+     dosyası 32 bit ise (yani 32 bitlik bir işletim sistemi için oluşturulmuşsa) burada 1 değeri, 64 bit ise (yani 64 bit 
+     bir işletim sistemi için oluşturulmuşsa) burada 2 değeri olmalıdır.
+
+    - Kimlik bilgilerinin 5'inci offset'teki byte ELF dosyasının "little endian" olarak mı yoksa "big endian" olarak mı 
+    oluşturulduğunu belirtmektedir. Buradaki değer 1 ise dosya "little endian", 2 ise dosya "big endian" biçiminde oluşturulmuştur. 
+    Intel işlemcilerinin yalnızca "little endian" kullandığını, ARM işlemcilerinin hem "little endian" hem de "big endian" 
+    olarak kullanılabildiğini ancak default kullanımın "little endian" olduğunu anımsayınız. O halde burada tipik olarak 1 
+    değeri bulunacaktır.
+
+    - Kimlik bilgilerinin 6'ıncı offset'indeki byte ELF dosyasının majör versiyon numarasını belirtmektedir. Şu anda ELF 
+    dosyasının majör olarak 1'li versiyonları kullanıldığı için burada 1 değeri bulunacaktır.
+
+    - Kimlik bilgilerinin 7'nci offset'tindeki byte kullanılan ABI türünü belirtmektedir. Buradaki 0 değeri klasik 
+    "System 5 ABI" anlamına gelmektedir. Burada genellikle 0 değeri bulunmaktadır.
+
+.   - Kimlik bilgilerinin 8'inci offset'teki byte ABI versiyon numarasını belirtmektedir. Genel olarak burada 0 değeri 
+    bulunur.
+
+    - Kimlik bilgilerinin 9'uncu offset'inden itibaren artık 16 byte'tan geri kalan byte'lar 0'larla doldurulmuştur. 
+    Bu 0 byte'larına "padding" denilmektedir.
+
+    Aşağıda 64 bit Intel makinesinde oluşturulmuş bir ELF formatının ilk 16 byte'ı görülmektedir:
+
+    7f 45 4c 46 02 01 01 00  00 00 00 00 00 00 00 00  .ELF............
+
+    Aşağıda da 32 bit ARM işlemcileri için oluşturulmuş bir ELF formatının ilk 16 byte'ı görülmektedir:
+
+    7f 45 4c 46 01 01 01 00  00 00 00 00 00 00 00 00  .ELF............
+
+    ELF Başlığı'nda kimlik bilgilerinden (ilk 16 byte) sonra yine dosya hakkında önemli bilgiler yer almaktadır. 
+    ELF başlığı'nın 16'ıncı offset'indeki 2 byte'lık işaretsiz tamsayı alanda (e_type) dosyanın türü belirtilmektedir. 
+    Bu değerler şunlardır:
+
+    ┌────────┬────────────────┬──────────────────────────────────────────┬───────────────────────────────┐
+    │ Değer  │ Sembolik sabit │                Anlamı                    │          Linux örneği         │
+    ├────────┼────────────────┼──────────────────────────────────────────┼───────────────────────────────┤
+    │   0    │ ET_NONE        │ Tür belirtilmemiş                        │ -                             │
+    │   1    │ ET_REL         │ Relocatable (amaç dosya) dosya           │ .o, .ko (kernel modülü)       │
+    │   2    │ ET_EXEC        │ Sabit adresli çalıştırılabilir           │ non-PIE program, x86 vmlinux  │
+    │   3    │ ET_DYN         │ Shared object (paylaşımlı nesne)         │ .so, PIE program, ld.so, vDSO │
+    │   4    │ ET_CORE        │ Core dosyası                             │ core dump, /proc/kcore        │
+    │   5    │ ET_NUM         │ Tanımlı tür sayısı (yalnızca glibc)      │ -                             │
+    │ 0xFE00 │ ET_LOOS        │ İşletim sistemine özgü aralık başlangıcı │ -                             │
+    │ 0xFEFF │ ET_HIOS        │ İşletim sistemine özgü aralık sonu       │ -                             │
+    │ 0xFF00 │ ET_LOPROC      │ İşlemciye özgü aralık başlangıcı         │ -                             │
+    │ 0xFFFF │ ET_HIPROC      │ İşlemciye özgü aralık sonu               │ -                             │
+    └────────┴────────────────┴──────────────────────────────────────────┴───────────────────────────────┘
+
+        Eskiden gcc ve clang default olarak çalıştırılabilir dosyaları sabit adresli (ET_EXEC türüyle) oluşturuyordu. 
+    Konumdan bağımız kod (position independent code (PIC)) çalıştırılabilir dosyalarda default değildi. -fPIE derleyici 
+    seçeneği ile ve -pie bağlayıcı seçeneği ile oluşturuluyordu. Örneğin:
+
+    $ gcc -fPIE -pie sample.c -o sample
+
+    Ancak belli bir zamandan sonra artık çalıştırılabilir dosyalar da gcc ve clang tarafından varsayılan durumda sabit 
+    adresli değil, konumdan bağımısz kod üretme tekniğiyle oluşturulmaktadır. Yani yukarıdaki seçenekler artık default 
+    durumdadır. Eğer gcc  ve clang derleyicilerinin eskisi gibi sabit adresli çalıştırılabilir dosya oluşturması için
+    artık açıkça belirleme yapılması gerekmektedir:
+
+    $ gcc -fno-pie sample.c -o sample
+
+    ELF Başlığı'nın 18'inci offset'indeki 2 byte'lık işaretsiz tamsayı (e_machine) dosyanın çalıştırılacağı hedef işlemcinin 
+    türünü belirtmektedir. Buradaki 2 byte'lık çeşitli işaretsiz tamsayı değerler çeşitli işlemci türlerini belirtmektedir. 
+    Örneğin 0x28 "32 Bit ARM İşlemcilerini", 0x3E "AMD'nin 64 bit Intel Tabanlı İşlemcilerini" belirtmektedir. Bunların 
+    tam listesini internetteki dokümanlardan elde edebilirsiniz. Önemli bazı mimariler için değerleri aşağıdaki tabloda 
+    veriyoruz:
+
+    ┌───────┬────────┬────────────────┬───────────────────────────┬──────────────┐
+    │ Değer │  Hex   │ Sembolik sabit │           Mimari          │ Kernel arch/ │
+    ├───────┼────────┼────────────────┼───────────────────────────┼──────────────┤
+    │   3   │ 0x0003 │ EM_386         │ Intel 80386 (i386)        │ x86          │
+    │   8   │ 0x0008 │ EM_MIPS        │ MIPS                      │ mips         │
+    │   20  │ 0x0014 │ EM_PPC         │ PowerPC (32 bit)          │ powerpc      │
+    │   21  │ 0x0015 │ EM_PPC64       │ PowerPC (64 bit)          │ powerpc      │
+    │   22  │ 0x0016 │ EM_S390        │ IBM S/390, z/Architecture │ s390         │
+    │   40  │ 0x0028 │ EM_ARM         │ ARM (32 bit)              │ arm          │
+    │   62  │ 0x003E │ EM_X86_64      │ AMD64 / Intel 64          │ x86          │
+    │  183  │ 0x00B7 │ EM_AARCH64     │ ARM (64 bit)              │ arm64        │
+    │  243  │ 0x00F3 │ EM_RISCV       │ RISC-V                    │ riscv        │
+    │  258  │ 0x0102 │ EM_LOONGARCH   │ LoongArch                 │ loongarch    │
+    └───────┴────────┴────────────────┴───────────────────────────┴──────────────┘
+
+    ELF Başlığı'nın 20'nci offset'teki 4 byte'lık işaretsiz tamsayı (e_version) yine ELF dosyasının versiyon numarasını belirtmektedir. 
+    Burada tipik olarak 1 değeri bulunacaktır.
+
+    ELF Başlığı'nın 24'üncü offset'inde (e_entry) "çalıştırılabilir dosyalar için" programın çalışmaya başlayacağı sanal 
+    adresi (virtual address) belirtilmektedir. Çalıştırılabilir bir dosyanın çalıştırılmaya başlanacağı adrese aşağı 
+    seviyeli terminoloji de "entry point" denilmektedir. Tabii adres bilgileri 32 bit ELF dosyalarında 4 byte, 64 bit 
+    ELF dosyalarında 8 byte uzunluktadır.
+
+     ELF Başlığı'nda bulunan diğer önemli bilgiler şunlardır:
+
+    - ELF Başlığı'nın (ELF Header) byte uzunluğu (e_ehsize(-)
+
+    - Program Başlık Tablosu'nun (Program Header Table) dosyada hangi offset'ten başladığı bilgisi (e_phoff). Program Başlık 
+    Tablosu tipik olarak ELF Başlığı'ndan hemen sonra gelmektedir.
+
+    - Program Başlık Tablosu'ndaki Program başlıkların'nın sayısı (e_phnum).
+
+    - Bölüm Başlık Tablosu'nun (Section Header Table) dosyada hangi offset'ten başladığı bilgisi (e_shoff). Bölüm Başlık Tablosu 
+    genellikle ELF formatının sonunda bulunmaktadı.
+
+    - Bölüm Başlık Tablosu'ndaki Bölüm Başlıkları'nın sayısı (e_shnum)  ve bir Bölüm Başlığı girişinin byte uzunluğu (e_shentsize).
+
+    - Bölüm Başlık İsimleri'nin bulunduğu String Tablosu'nun Bölüm Başlık Tablosu'ndaki indeksi(e_shstrndx).
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    ELF formatı içerisinde pek çok "isim" belirten öğe bulunmaktadır. İsimler değişken uzunlukta olabileceği için hem isim 
+    tekrarlarında kolaylık sağlamak hem de isimlerin sabit uzunlukta ifade edilmesini sağlamak amacıyla "string tabloları" 
+    bulundurulmuştur. String tabloları sonu '\0' ile biten yazılardan oluşmaktadır. ELF formatı içerisinde ne zaman bir 
+    isim belirtilecek olsa isim yerine o ismin bulunduğu string tablosundaki offset belirtilmektedir. ELF formatında 
+    string tabloları da aslında "bölümler (sections)" biçimindedir. ELF dosyasında tek bir string tablosu bulunmak zorunda 
+    da değildir. Genellikle derleyiciler normal sembolleri ".strtab" isimli bölümdeki string tablosunda, bölüm başlıklarının 
+    isimlerini ".shstrtab" isimli bölümdeki string tablosunda, dinamik kütüphanelerdeki sembollerin isimlerini de 
+    ".dynstr" isimli bölümdeki string tablsunda tutmaktadır.
+
+    ELF formatı içerisinde pek çok "isim" belirten öğe bulunmaktadır. İsimler değişken uzunlukta olabileceği için hem 
+    isim tekrarlarında kolaylık sağlamak hem de isimlerin sabit uzunlukta ifade edilmesini sağlamak amacıyla "string 
+    tabloları" bulundurulmuştur. String tabloları sonu '\0' ile biten yazılardan oluşmaktadır. ELF formatı içerisinde ne 
+    zaman bir isim belirtilecek olsa isim yerine o ismin bulunduğu string tablosundaki offset belirtilmektedir. ELF formatında 
+    string tabloları da aslında "bölümler (sections)" biçimindedir. ELF dosyasında tek bir string tablosu bulunmak zorunda 
+    da değildir. Genellikle derleyiciler normal sembolleri ".strtab" isimli bölümdeki string tablosunda, bölüm başlıklarının 
+    isimlerini ".shstrtab" isimli bölümdeki string tablosunda, dinamik kütüphanelerdeki sembollerin isimlerini de ".dynstr" 
+    isimli bölümdeki string tablsunda tutmaktadır. 
+
+    String tablolarınun görünümü aşağıdaki gibidir:
+
+             +0 +1 +2 +3 +4 +5 +6 +7 +8 +9 +A +B +C +D +E +F
+            ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
+    0x00    │\0│ .│ s│ y│ m│ t│ a│ b│\0│ .│ s│ t│ r│ t│ a│ b│
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+    0x10    │\0│ .│ s│ h│ s│ t│ r│ t│ a│ b│\0│ .│ r│ e│ l│ a│
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+    0x20    │ .│ t│ e│ x│ t│\0│ .│ d│ a│ t│ a│\0│ .│ b│ s│ s│
+            ├──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+    0x30    │\0│...
+            └──┘
+    Örneğin ".text" ismine dosyada referans edilecek olsa artık yalnızca onun string tablosundaki offset'i (örneğimizde 
+    0x20) belirtilmektedir. Tabii yukarıda da belirttiğimiz gibi birden fazla string tablosu olabildiği için tek başına 
+    bir offset yeterli değildir. O offet'in hangi string tablosunda olduğunun da biliniyor olması gerekir. Aşağıda ELF 
+    formatındaki hangi alanlardaki isimlerin hangi string tablosunu kullandığı listelenmiştir:
+
+    ┌──────────────────────────────────────────┬───────────────────┬────────────────┬─────────────────────┐
+    │                   Alan                   │   Bulunduğu yapı  │ String tablosu │ Tablo nasıl bulunur │
+    ├──────────────────────────────────────────┼───────────────────┼────────────────┼─────────────────────┤
+    │ sh_name                                  │ Bölüm başlığı     │ .shstrtab      │ e_shstrndx          │
+    │ st_name                                  │ .symtab girişi    │ .strtab        │ .symtab sh_link     │
+    │ st_name                                  │ .dynsym girişi    │ .dynstr        │ .dynsym sh_link     │
+    │ d_val (DT_NEEDED, DT_SONAME, DT_RUNPATH) │ .dynamic girişi   │ .dynstr        │ DT_STRTAB / sh_link │
+    │ vn_file, vna_name, vda_name              │ .gnu.version_r/_d │ .dynstr        │ sh_link             │
+    └──────────────────────────────────────────┴───────────────────┴────────────────┴─────────────────────┘ 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                        115. Ders 08/11/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    ELF dosyalarında ELF başlığını "program başlık tablosu (program header table)" denilen bir alan izlemektedir. Program
+    başlık tablosu amaç dosyalarda bulunmaz (aslında isteğe bağlıdır), çalıştırılabilir dosyalarda bulunur. exec fonksiyonları 
+    (yani sys_execve ve sys_execveat sistem fonksiyonları) dosyanın bölütlerini (segments) bu tablodan hareketle sanal 
+    belleğe yüklemektedir. Anımsanacağı gibi program başlık tablosunun yeri ELF başlığındaki e_phoff elemanında, bu 
+    tablodaki girişlerin sayısı e_phnum elemanında ve bir girişin uzunluğu da e_phentsize elemaında utulmaktadır:
+
+                ┌──────────────────────────┐
+                │                          │
+                │        ELF Başlığı       │
+                │                          │
+                ├──────────────────────────┤
+                │//////////////////////////│ ◄── olası padding
+    e_phoff ───►├──────────────────────────┤ ─┐
+                │                          │  │
+                │      Program Başlık      │  │
+                │         Tablosu          │  ├─ uzunluk = e_phnum * e_phentsize
+                │                          │  │
+                ├──────────────────────────┤ ─┘
+                │                          │
+                │                          │
+                │           ...            │
+                │                          │
+                │                          │
+                └──────────────────────────┘
+
+    Program başlık tabalosunun girişlerinın (yani bölütlerin) formatı şöyledir:
+
+    typedef struct {
+        Elf64_Word  p_type;    /* PT_LOAD, PT_INTERP, PT_DYNAMIC ... */
+        Elf64_Word  p_flags;   /* PF_R, PF_W, PF_X */
+        Elf64_Off   p_offset;  /* segmentin dosyadaki ofseti */
+        Elf64_Addr  p_vaddr;   /* bellekteki sanal adresi */
+        Elf64_Addr  p_paddr;   /* fiziksel adres (Linux'ta kullanılmaz) */
+        Elf64_Xword p_filesz;  /* dosyada kapladığı uzunluk */
+        Elf64_Xword p_memsz;   /* bellekte kaplayacağı uzunluk (>= p_filesz) */
+        Elf64_Xword p_align;   /* hizalama */
+    } Elf64_Phdr;
+
+    Yapının p_type elemanı bölütün (segment) içeriği hakkında en temel bilgiyi vermektedir. Eğer p_type alanunda 
+    PT_LOAD varsa bu bölüt yükleyici tarafından (exec fonksiyonlarını kastediyoruz) sanal belleğe yüklenecektir. 
+    Yani başka bir deyişle exec fonksiyonları yalnızca p_type elemanında PT_LOAD yazan bölütleri yüklemektedir. 
+    Bu elemanın alabileceği önemli değerler şunlardır:
+
+    ┌────────────┬───────┬────────────────────────────────────┬────────────────┐
+    │   Sabit    │ Değer │              Açıklama              │    İşleyen     │
+    ├────────────┼───────┼────────────────────────────────────┼────────────────┤
+    │ PT_NULL    │ 0x0   │ Kullanılmayan giriş; atlanır       │ -              │
+    │ PT_LOAD    │ 0x1   │ Belleğe haritalanacak segment      │ kernel         │
+    │ PT_DYNAMIC │ 0x2   │ Dinamik bağlama bilgisi (.dynamic) │ ld.so          │
+    │ PT_INTERP  │ 0x3   │ Interpreter (ld.so) yol adı        │ kernel         │
+    │ PT_NOTE    │ 0x4   │ Not bilgileri (.note.*)            │ gdb, core dump │
+    │ PT_SHLIB   │ 0x5   │ Ayrılmış; anlamı tanımsız          │ -              │
+    │ PT_PHDR    │ 0x6   │ PHT'nin kendisi (bellekteki yeri)  │ ld.so          │
+    │ PT_TLS     │ 0x7   │ Thread-Local Storage şablonu       │ libc / ld.so   │
+    │ PT_NUM     │ 0x8   │ Standart tür sayısı (glibc sabiti) │ -              │
+    └────────────┴───────┴────────────────────────────────────┴────────────────┘
+ 
+    Yapının p_flags elemanı bölütün okuma-yazma-çalıştırma özelliklerini belirtmektedir. Buradaki özellik exec fonksiyonları
+    tarafından mmap fonksiyonunun prot parametresine geçirilir ve oradan da bazı süreçler sonucunda VMA'nın içerisineki 
+    vm_flags elemanına yerleştirilmektedir. Bölüte ilişkin sayfalar fiziksel belleğe yüklenirken buradaki koruma 
+    özellikleri kullanılmaktadır. Bu sürecin bazı ayrıntıları vardır. 
+
+    Linux sistemlerinde çalıştırılabilir programın ullandığı dinamik kütüphaneler doğrudan exec fonksiyonları tarafından 
+    yüklenmemektedir. Bu işlemi "ld.so" ismiyle temsil edilen ayrı bir program yapmaktadır. Bu programa "program 
+    interpreter" da denilmektedir. İşte eğer bölütün p_type elemanında PT_INTERP değeri varsa bu durumda bu bölütün 
+    içerisinde dinamik kütüphanleri yükleyen programın yol ifadesi bulunur. Yukarıda da belirttiğimiz gibi bu program 
+    genel olarak "ld.so" ismiyle temsil edilmektedir ve örneğin tipik olarak 64 bit Linux sistemlerinde bu dosya "/usr/lib64"
+    dizininde bulunmaktadır. Dinamik yükleyicinin temsili ismi "ld.so" olsa da aslında gerçekte farklı bir isim altında 
+    bulunuor olabilir. Dağıtımların bir kısmında bu dosyaya "/usr/bin/ld.so" dosyasından sembolik bağ da verilmiştir. 
+    Örneğin:
+
+    $ ls -l /usr/bin/ld.so
+    lrwxrwxrwx 1 root root 29 Oca 30  2026 /usr/bin/ld.so -> ../lib64/ld-linux-x86-64.so.2
+ 
+    İşte eğer p_type elemanında PT_INTERP değeri varsa dinamik yükleyicinin yeri bölütün içerisinde yazmaktadır. 
+    Örneğin:
+
+                ┌─────────────────────────────────┐ 0x000
+                │           ELF Başlığı           │
+                ├─────────────────────────────────┤ 0x040  (e_phoff)
+                │   Program Başlık Tablosu        │
+                │   [0] PT_PHDR                   │
+                │   [1] PT_INTERP ────────────────┼──┐
+                │   ...                           │  │
+                │   [12] ...                      │  │
+    p_offset ──►├─────────────────────────────────┤◄─┘ 0x318  ─┐
+                │ "/lib64/ld-linux-x86-64.so.2\0" │            │ p_filesz = 0x1c
+                │            (.interp)            │            │
+                ├─────────────────────────────────┤ 0x334     ─┘
+                │               ...               │
+                └─────────────────────────────────┘
+
+    Burada bir noktaya yeniden dikkatinizi çekmek istiyoruz. exec fonksiyonları dinamik kütüphane dosyalarını kendisi 
+    yüklememektedir. Temel bölütleri yükledikten sonra PT_INTERP bölütünde belirtilen dinamik yükleyiciyi yükleyip 
+    akışı ona devretmektedir. Dinamik kütüphanelerin yüklenmesi bu program tarafından yapılmaktadır. Bu işlemin başka 
+    bir programa devredilmesi esneklik sağlamaktadır. 
+
+    Program balık tablosu girişinin  p_offset elemanı bölütün ddosyadaki offset'ini, p_filesz elemanı ise onun 
+    uzunluğunu belirtmektedir. Görüldüğü gibi her bölütün çalıştırılabilir dosyanın neresinde olduğu bilgisi hazır 
+    bir biçimde bulunmaktadır. 
+    
+    Program başlık tablosu girişinin p_vaddr elemanı bölütün yükleneceği sanal bellek adresini belirtmektedir. Ancak 
+    daha önceden de belirttiğimiz gibi artık gcc ve clang derleyicileri default durumda konumdan bağımsız kod ürettikleri 
+    için bu sanal bellek adresi -fno-pie seçeneği girilmişse mutlak, girilmemişse göreli bir adres belirtmektedir. 
+    Anımsayacağınız gibi bu durum ELF başlığındaki e_type elemanında belirtiliyordu. Bu eleman eğer ET_EXEC ise 
+    burada bleirtilen adres mutlaktır, ET_DYN ise görelidir. 
+
+    Program başlık tablosu girişlerinin p_memsz elemanı ilgili bölütün sanal bellekte kaplayacağı alanı belirtmektedir. 
+    Çünkü bir bölüt için sanal bellekte o bölütün dosyadaki uzunluğundan daha fazla yer ayrılabilir. Örneğin programın 
+    ".bss" bölümü tipik olarak ".data" bölümünün hemen sonuna yanı bölüt içerisine yerleştirilmektedir. Dolayısıyla 
+    ".bss" bölümünün dosyada boşuna yer kaplamaması için bölüt ".bss" bölümünü de kapsayacak biçimde uzatılmaktadır. 
+    Peki bölütün sonundaki bu tür fazla alanlar ne zaman sıfırlanmaktadır? İşte bölütün yüklenme biçimine göre bu dudurm 
+    değişebilmektedir. Tipik olarak bölütün son değer içeren kısmı eğer bir sayfanın bir kısmında kalıyorsa sayfanın 
+    diğer kısmı yükleyici tarafından sıfırlanmaktadır. Ancak bölütün sonundaki kısımlar (yani örneğimizdeki ".bss" 
+    alanları) "sayfa hatası (page fault)" sırasında sayfa fiziksel belleğe çekirlirken sıfırlanmaktadır. Derleyicilerin 
+    başlangıç kodlarının bu sıfırlamaya bir katkısı yoktur. Aşağıdaki tabloda kısmı sayfadaki ve sonraki kısımlardaki 
+    sıfırlamanın kim tarafından yapıldığı belitilmektedir:
+
+    ┌───────────────────────┬────────────────────┬──────────────────────────┐
+    │     Yüklenen nesne    │  Son kısmi sayfa   │    Kalan tam sayfalar    │
+    ├───────────────────────┼────────────────────┼──────────────────────────┤
+    │ Ana program           │ çekirdek (padzero) │ çekirdek (fault handler) │
+    │ ld.so (interpreter)   │ çekirdek (padzero) │ çekirdek (fault handler) │
+    │ Static executable     │ çekirdek (padzero) │ çekirdek (fault handler) │
+    │ Shared library (.so)  │ ld.so (memset)     │ çekirdek (fault handler) │
+    │ dlopen() ile yüklenen │ ld.so (memset)     │ çekirdek (fault handler) │
+    └───────────────────────┴────────────────────┴──────────────────────────┘
+
+    Program başlık tablosunu readelf ile görüntülemek için --program-headers ya da eşdeğer olarak --segments seçenekleri 
+    kullanılabilir. Örneğin aşağıdaki gibi bir C programı olsun:
+
+    /* sample.c */
+
+    #include <stdio.h>
+
+    int a[1000000];
+    int b[1000000] = {100};
+
+    int main(void)
+    {
+        
+        return 0;
+    }
+
+
+    Şimdi bu programı derleyelin:
+
+    $ gcc -o sample sample.c
+
+    Çlaıştırılabilir dosyanın program başlık tablosunu görüntüleyelim:
+
+    $ readelf --sections sample
+
+    Elde edilen çıktı şöyledir:
+
+    
+    Elf dosya tipi: DYN (Position-Independent Executable file)
+    Entry point 0x1040
+    There are 13 program headers, starting at offset 64
+
+    Yazılım Başlıkları:
+    Tip            Basamak            SanalAdres         GerçekAdres
+                    DosyaBoyu          BellekBoyu          Seç    Hiza
+    PHDR           0x0000000000000040 0x0000000000000040 0x0000000000000040
+                   0x00000000000002d8 0x00000000000002d8  R      0x8
+    INTERP         0x0000000000000318 0x0000000000000318 0x0000000000000318
+                   0x000000000000001c 0x000000000000001c  R      0x1
+        [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+    LOAD           0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x00000000000005f0 0x00000000000005f0  R      0x1000
+    LOAD           0x0000000000001000 0x0000000000001000 0x0000000000001000
+                   0x0000000000000145 0x0000000000000145  R E    0x1000
+    LOAD           0x0000000000002000 0x0000000000002000 0x0000000000002000
+                   0x00000000000000c4 0x00000000000000c4  R      0x1000
+    LOAD           0x0000000000002df0 0x0000000000003df0 0x0000000000003df0
+                   0x00000000003d0b30 0x00000000007a1450  RW     0x1000
+    DYNAMIC        0x0000000000002e00 0x0000000000003e00 0x0000000000003e00
+                   0x00000000000001c0 0x00000000000001c0  RW     0x8
+    NOTE           0x0000000000000338 0x0000000000000338 0x0000000000000338
+                   0x0000000000000030 0x0000000000000030  R      0x8
+    NOTE           0x0000000000000368 0x0000000000000368 0x0000000000000368
+                   0x0000000000000044 0x0000000000000044  R      0x4
+    GNU_PROPERTY   0x0000000000000338 0x0000000000000338 0x0000000000000338
+                   0x0000000000000030 0x0000000000000030  R      0x8
+    GNU_EH_FRAME   0x0000000000002004 0x0000000000002004 0x0000000000002004
+                   0x000000000000002c 0x000000000000002c  R      0x4
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x10
+    GNU_RELRO      0x0000000000002df0 0x0000000000003df0 0x0000000000003df0
+                   0x0000000000000210 0x0000000000000210  R      0x1
+
+    Bölümden parçaya eşleşme:
+    Parça Bölümleri...
+    00     
+    01     .interp 
+    02     .interp .note.gnu.property .note.gnu.build-id .note.ABI-tag .gnu.hash .dynsym .dynstr .gnu.version .gnu.version_r .rela.dyn 
+    03     .init .plt .plt.got .text .fini 
+    04     .rodata .eh_frame_hdr .eh_frame 
+    05     .init_array .fini_array .dynamic .got .data .bss 
+    06     .dynamic 
+    07     .note.gnu.property 
+    08     .note.gnu.build-id .note.ABI-tag 
+    09     .note.gnu.property 
+    10     .eh_frame_hdr 
+    11     
+    12     .init_array .fini_array .dynamic .got 
+
+    Burada tek tek bölütlere ilişkin girişler okunabilir biçimde listelenmiştir. Çıktının sonunda "Bölümden parçaya 
+    elşleşme" başlığında hangi bölümlerin (sections) hangi sırada birleştirilerek hangi bölüt (segment) haline getirildiği 
+    bilgisi de bulunmaktadır. Örneğin:
+
+    05     .init_array .fini_array .dynamic .got .data .bss 
+
+    Burada bağlayıcı tarafından amaç dosyadaki bölümler birleştirildikten sonra oluşturulan nihai bölümlerin bölütte
+    nasıl birleştirildiğine yönelik bir satır görülmektedir. ".bss" bölümünün bölütün sonunda bulunduğuna dikkat ediniz. 
+    Satırın başındaki 05 sayısı 0 orijinli olarak bölütün indeksini belirtmektedir. Bu bölütü aşağıda veriyoruz:
+
+     Tip            Basamak            SanalAdres         GerçekAdres
+                    DosyaBoyu          BellekBoyu          Seç    Hiza
+    .....
+    LOAD        0x0000000000002df0 0x0000000000003df0 0x0000000000003df0
+                0x00000000003d0b30 0x00000000007a1450  RW     0x1000
+
+    Görüldüğü gibi bölütün dosyadaki boyu ile sanal bellekte boyu aynı değildir. C programımızda b global dizisi ilkdeğer
+    değer verildiği için ".data" bölümüne, a dizisi ise ilkdeğer verilemdiği için ".bss" bölümüne yerleştirilmiştir. 
+
+    exec fonksiyonları tarafından yalnızca PT_LOAD belirtilen bölütlerin yüklendiğine dikkat ediniz. Yukarıdaki programa
+    ilişkin PT_LOAD bölütlerini aşağıda veriyoruz:
+
+    Tip             Basamak            SanalAdres         GerçekAdres
+                    DosyaBoyu          BellekBoyu          Seç    Hiza
+    .....
+
+    LOAD        0x0000000000000000 0x0000000000000000 0x0000000000000000
+                0x00000000000005f0 0x00000000000005f0  R      0x1000
+    LOAD        0x0000000000001000 0x0000000000001000 0x0000000000001000
+                0x0000000000000145 0x0000000000000145  R E    0x1000
+    LOAD        0x0000000000002000 0x0000000000002000 0x0000000000002000
+                0x00000000000000c4 0x00000000000000c4  R      0x1000
+    LOAD        0x0000000000002df0 0x0000000000003df0 0x0000000000003df0
+                0x00000000003d0b30 0x00000000007a1450  RW     0x1000
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    exec fonksiyonları için ELF dosyasının en önemli başlıklarını ele aldık. Çalıştırılabilir ELF dosyasının organizasyonunu 
+    yeniden anımsatmak istiyoruz:
+
+    Çalıştırılabilir Dosya
+    ┌──────────────────────┐
+    │      ELF Header      │
+    ├──────────────────────┤
+    │ Program Header Table │
+    │      (zorunlu)       │
+    ├──────────────────────┤
+    │      Segment 1       │
+    ├──────────────────────┤
+    │      Segment 2       │
+    ├──────────────────────┤
+    │         ...          │
+    ├──────────────────────┤
+    │      Segment n       │
+    ├──────────────────────┤
+    │ Section Header Table │
+    │    (isteğe bağlı)    │
+    └──────────────────────┘
+
+    Dosyada program başlık tablosundan sonra artık bölütlerin veri kısımları bulunmaktadır. Yani bir deyişle program 
+    başlık tablosundaki girişler aslında program başlık tablosundan sonrak veri elanalarını göstermektedir. 
+
+    Burada son olarak "Bölüm Başlık Tablosu (Section Header Table)" üzerinde de durmak istiyoruz. Bölüm başlık tablosu 
+    tablosu şekilden de gördüğünüz gibi genellikle dosyanın sonunda bulundurulmaktadır. Aslında "bölüm (section)" 
+    kavramı amaç dosya için söz konusu olan bir kavramdır. Dolayısıyla çalıştırılabilir dosyalarda bölüm başlık tablosunun
+    bulundurulması mutlak anlamda gerekmemektedir. Ancak ld bağlayıcısı çalıştırışabilir dosyalarda da bu tabloyu 
+    oluşturmaktadır. Bölüm başlık tablosu yükleyici tarafından (yani exec fonksiyonları tarafından) okunmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+                                            116. Ders 14/11/2026 - Cumartesi
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Çalıştırılabilir dosyadaki "Bölüm Başlık Tablosu" nihai durumdaki bölümlerin yerleri ve özellikleri hakkında bilgiler 
+    barındırmaktadır. Amaç dosyalarda bu bölüm başlık tablosu farklı modüllerin bağlayıcı tarafınden birleştirilmesinde 
+    kritik rol oynamaktadır. Bağlayıcı aynı isime sahip bölümleri bir araya getirmektedir. Nihayet bağlayıcı farklı bölümleri 
+    de gerektiğinde birleştirerek bölütler oluşturmaktadır. Biz yukraıda bölüm başlık tablosunun çalıştırılabilir dosyada 
+    bulunmayabileceğini söylemiştik. Bu kısmı çalıştırılabilir dosyadan strip ve objcopy utility programları kaldıramamaktadır. 
+    Bu tabloyu "llvm-objcopy" programıyla ya da manuel program yazarak ladırabilirsiniz:
+
+    $ llvm-objcopy --strip-sections prog prog-copied
+
+    Burada prog asıl çalıştırıabilir dosyayı, prog-copied ise bölüm başlık tablosu atılmış haline ilişkin hedef 
+    dosyayı belirtmektedir. llvm-objcopy programını aşağıdaki gibi yükleyebilirsiniz:
+
+    $ sudo apt install llvm
+
+    Çalıştırılabilir dosyanın yüklenmesinde gerekmeyen ancak debug gibi faaliyetlerde gereken bazı bölümlerin dosyadan 
+    çıkartılması için "strip" isimli utility program çok kullanılmaktadır. strip işlemi sonrasında çalıştırılabilir 
+    dosyaların boyutları dikkate değer ölçüde küçülebilmektedir. strip programı aşağdaki bölümleri dosyadan atmaktadır:
+
+    .symtab
+    .strtab 
+    .debug_* 
+    .comment 
+
+    Bu bölümler bölütlerin içerisinde bulunmamaktadır. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bölüm başlık tablosu bölüm başlıklarından oluşmaktadır. Anımsanacağı gibi onun başlangıç offset'i, uzunluğu ve 
+    giriş sayısı EELF başlığında bulıunmaktadır. Bölüm başlık tablosundaki bölüm başlıklarının 32 bit ve 64 bit ELF 
+    formatlarındaki biçimi şöyledir:
+
+    typedef struct elf32_shdr {
+        Elf32_Word  sh_name;
+        Elf32_Word  sh_type;
+        Elf32_Word  sh_flags;
+        Elf32_Addr  sh_addr;
+        Elf32_Off   sh_offset;
+        Elf32_Word  sh_size;
+        Elf32_Word  sh_link;
+        Elf32_Word  sh_info;
+        Elf32_Word  sh_addralign;
+        Elf32_Word  sh_entsize;
+    } Elf32_Shdr;                       /* 40 bytes */
+
+    typedef struct elf64_shdr {
+        Elf64_Word  sh_name;            /* 0x00 */
+        Elf64_Word  sh_type;            /* 0x04 */
+        Elf64_Xword sh_flags;           /* 0x08 */
+        Elf64_Addr  sh_addr;            /* 0x10 */
+        Elf64_Off   sh_offset;          /* 0x18 */
+        Elf64_Xword sh_size;            /* 0x20 */
+        Elf64_Word  sh_link;            /* 0x28 */
+        Elf64_Word  sh_info;            /* 0x2C */
+        Elf64_Xword sh_addralign;       /* 0x30 */
+        Elf64_Xword sh_entsize;         /* 0x38 */
+    } Elf64_Shdr;                       /* 64 bytes */
+
+    Buradaki elemanların anlamlarını da ayrıntılarına girmeden aşağıdaki tabloda veriyoruz:
+
+    ┌──────────────┬──────────┬──────────┬──────────────────────────────────┐
+    │     Alan     │  Elf32   │  Elf64   │             Açıklama             │
+    ├──────────────┼──────────┼──────────┼──────────────────────────────────┤
+    │ sh_name      │ 0x00 (4) │ 0x00 (4) │ .shstrtab içindeki ad offset'i   │
+    │ sh_type      │ 0x04 (4) │ 0x04 (4) │ Bölüm türü (SHT_*)               │
+    │ sh_flags     │ 0x08 (4) │ 0x08 (8) │ Özellik bayrakları (SHF_*)       │
+    │ sh_addr      │ 0x0C (4) │ 0x10 (8) │ Bellekteki adres (yoksa 0)       │
+    │ sh_offset    │ 0x10 (4) │ 0x18 (8) │ Dosyadaki başlangıç offset'i     │
+    │ sh_size      │ 0x14 (4) │ 0x20 (8) │ Bölümün byte cinsinden boyutu    │
+    │ sh_link      │ 0x18 (4) │ 0x28 (4) │ Türe göre ilişkili bölüm index'i │
+    │ sh_info      │ 0x1C (4) │ 0x2C (4) │ Türe göre ek bilgi               │
+    │ sh_addralign │ 0x20 (4) │ 0x30 (8) │ Hizalama (0 veya 2'nin kuvveti)  │
+    │ sh_entsize   │ 0x24 (4) │ 0x38 (8) │ Sabit girdi boyutu (yoksa 0)     │
+    ├──────────────┼──────────┼──────────┼──────────────────────────────────┤
+    │ Toplam       │ 40 byte  │ 64 byte  │                                  │
+    └──────────────┴──────────┴──────────┴──────────────────────────────────┘
+
+    Görüldüğü gibi her bölümün bir ismi, türü ve özellik bayrakları vardır. Bölümlerin dosyanın neresinde olduğu ve 
+    hangi uzunlukta olduğu da belirtilmektedir. Çalıştırılabilir dosyada buradaki bölümlerin bazıları zaten bölütlerin 
+    içerisinde birleştirilmiş durumdadır. Buradaki bölüm offset'i zaten bölütlerin içerisine referans etmektedir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi sys_execve, sys_execveat sistem fonksiyonlarının gerçekleştirimini inceleyelim. Linux çekirdeği zamanla birden 
+    fazla çalıştırılabilir dosya formatını estekleyecek hale getirilmiştir. Bu sistem fonksiyonları belirli noktadan 
+    sonra ilgili formatı yükleyen fonksiyonları çağırmaktadır. Örneğin ELF formatını yükleyen fonksiyon load_elf_binary 
+    fonksiyonudur. Desteklenen her format için linux_binfmt yapısı türünden bir nesne oluşturulmaktadır. Örneğin ELF 
+    yükleyicisi için bu nesne "fs/binfmt_elf.c" dosyasında şöyle oluşturulmuştur:
+
+    static struct linux_binfmt elf_format = {
+        .module       = THIS_MODULE,
+        .load_binary  = load_elf_binary,
+    #ifdef CONFIG_COREDUMP
+        .core_dump    = elf_core_dump,
+        .min_coredump = ELF_EXEC_PAGESIZE,
+    #endif
+    };
+
+    Yapının load_binary elemanı formatı yükleyen fonksiyonun adresini tutmaktadır. Bu yapı nesneleri bir bağlı listeye 
+    yerleştirilmektedir. Çekirdek bu bağlı listeyi dolaşmaktadır. Her format kendi amaç dosyasının özel bir bölümüne 
+    linux_binfmt nesnelerini bağlı listeye yerleştiren bir fonksiyonun adresin yazar. Çekirdeğin bağlayıcısı bu amaç 
+    dosyaları birleştirirken aynı isimli bölümleri bir araya getirdiği için bu bölüm çekirdek imajında bir tablo 
+    oluşturur hale gelmektedir. Sonra çekirdek ilklenirken belli bir aşamada bu tabloyu dolaşıp fonksiyonları çağırır, 
+    böylece ilgili linux_binfmt nesneleri bağlı listeye yerleştirilmiş olur. Örneğin ELF formatında bu işlem "fs/binfmt_elf.c"
+    dosyasında şöyle yapılmıştır:
+
+    static int __init init_elf_binfmt(void)
+    {
+        register_binfmt(&elf_format);
+        return 0;
+    }
+
+    core_initcall(init_elf_binfmt);
+        
+    Buradaki core_initcall makrosu fonksiyon adresini amaç dosyanın özel bölümüne yazmaktadır. Burada bir noktaya 
+    dikkatinizi çekmek istiyoruz. Burada bhasettiğimiz amaç dosyanın özel bölümü yalnızca çalıştırılabilir dosyaların
+    kaydedilmesi için kullanılmamaktadır. Bu genel bir çekirdek tasarım kalıbıdır. Bu bölüme başka konulara ilişkin 
+    fonksiyonlar da yerleştirilmektedir. Yani mekanizma genel biçimde tasarlanmıştır. Aslında bu mekanizmada birden 
+    fazla bölüm ve dolayısıyla tablo kullanılmaktadır. Her bölüme yazan ayrı bir makro vardır:
+
+    ┌───────┬──────────────────────────┬──────────────────────┐
+    │ Level │          Makro           │        Bölüm         │
+    ├───────┼──────────────────────────┼──────────────────────┤
+    │   0   │ pure_initcall            │ .initcall0.init      │
+    │   1   │ core_initcall            │ .initcall1.init      │
+    │   2   │ postcore_initcall        │ .initcall2.init      │
+    │   3   │ arch_initcall            │ .initcall3.init      │
+    │   4   │ subsys_initcall          │ .initcall4.init      │
+    │   5   │ fs_initcall              │ .initcall5.init      │
+    │ rootfs│ rootfs_initcall          │ .initcallrootfs.init │
+    │   6   │ device_initcall          │ .initcall6.init      │
+    │   7   │ late_initcall            │ .initcall7.init      │
+    └───────┴──────────────────────────┴──────────────────────┘
+
+    Çekirdeğin bu init fonksiyonlarını çağırdğı noktayı aşağıda start_kernel fonksiyonundan itibaren bir çağrı zinciri 
+    biçiminde veriyoruz:
+
+    start_kernel()                                  [init/main.c, PID 0]
+    ├─ setup_arch(), mm_core_init(), sched_init(), ... (erken kurulum)
+    └─ rest_init()          (5.x/6.x'in bir kısmında: arch_call_rest_init() → rest_init())
+        ├─ user_mode_thread(kernel_init, NULL, CLONE_FS)   → PID 1
+        ├─ kernel_thread(kthreadd, NULL, ...)              → PID 2
+        ├─ complete(&kthreadd_done)
+        └─ cpu_startup_entry(CPUHP_ONLINE)                 → PID 0 idle olur
+
+    kernel_init()                                   [PID 1]
+    ├─ wait_for_completion(&kthreadd_done)
+    ├─ kernel_init_freeable()
+    │   ├─ smp_prepare_cpus(setup_max_cpus)
+    │   ├─ workqueue_init()
+    │   ├─ init_mm_internals()
+    │   ├─ do_pre_smp_initcalls()                          ★ early initcall'lar
+    │   │    └─ for (fn = __initcall_start; fn < __initcall0_start; fn++)
+    │   │          do_one_initcall(initcall_from_entry(fn))
+    │   ├─ lockup_detector_init()
+    │   ├─ smp_init()                    (secondary CPU'lar burada açılır)
+    │   ├─ sched_init_smp()
+    │   ├─ page_alloc_init_late()
+    │   ├─ do_basic_setup()
+    │   │   ├─ cpuset_init_smp()
+    │   │   ├─ driver_init()
+    │   │   ├─ init_irq_proc()
+    │   │   ├─ do_ctors()
+    │   │   └─ do_initcalls()                              ★ seviye 0..7
+    │   │        └─ for (level = 0; level < ARRAY_SIZE(initcall_levels) - 1; level++)
+    │   │             do_initcall_level(level, command_line)
+    │   │              ├─ parse_args(initcall_level_names[level], ...)
+    │   │              └─ for (fn = initcall_levels[level];
+    │   │                       fn < initcall_levels[level + 1]; fn++)
+    │   │                    do_one_initcall(initcall_from_entry(fn))
+    │   │                     ├─ initcall_blacklisted(fn) kontrolü
+    │   │                     ├─ do_trace_initcall_start(fn)
+    │   │                     ├─ ret = fn()   ← ör. init_elf_binfmt()
+    │   │                     │                    └─ register_binfmt(&elf_format)
+    │   │                     ├─ preempt_count / irqs_disabled dengesizlik kontrolü
+    │   │                     └─ add_latent_entropy()
+    │   ├─ console_on_rootfs()
+    │   └─ prepare_namespace()           (gerekirse, root fs mount)
+    ├─ async_synchronize_full()
+    ├─ free_initmem()                    (.initcall*.init dahil __init bölgesi serbest kalır)
+    ├─ mark_readonly()
+    └─ run_init_process("/sbin/init") ...      → user space
+
+    Burada kernel_init start_kernel atarfındna yaratılan bir çekirdek thread'idir. Bu thread daha sonra 1 numaralı 
+    proses ID'ye sahip olacak olan "init" prosesi haline gelmektedir. 
+
+    Güncel Linux sürümleri aşağıdaki çalıştırılabilir formatları desteklemektedir:
+
+    ┌─────────────┬────────────────────────┬──────────────────────────┬──────────┬─────────────────────────────────────────┐
+    │    Format   │      Kaynak dosya      │  Konfigürasyon seçeneği  │   Türü   │              Kullanım alanı             │
+    ├─────────────┼────────────────────────┼──────────────────────────┼──────────┼─────────────────────────────────────────┤
+    │ ELF         │ fs/binfmt_elf.c        │ CONFIG_BINFMT_ELF        │ bool     │ Standart format, MMU'lu sistemler       │
+    │ Compat ELF  │ fs/compat_binfmt_elf.c │ CONFIG_COMPAT_BINFMT_ELF │ bool     │ 64 bit çekirdekte 32 bit ELF programlar │
+    │ ELF FDPIC   │ fs/binfmt_elf_fdpic.c  │ CONFIG_BINFMT_ELF_FDPIC  │ bool     │ MMU'suz gömülü sistemler                │
+    │ Flat (bFLT) │ fs/binfmt_flat.c       │ CONFIG_BINFMT_FLAT       │ bool     │ MMU'suz sistemler (uClinux)             │
+    │ Script      │ fs/binfmt_script.c     │ CONFIG_BINFMT_SCRIPT     │ tristate │ #! ile başlayan dosyalar                │
+    │ Misc        │ fs/binfmt_misc.c       │ CONFIG_BINFMT_MISC       │ tristate │ Kullanıcının tanımladığı formatlar      │
+    └─────────────┴────────────────────────┴──────────────────────────┴──────────┴─────────────────────────────────────────┘
+
+    Tablodan görüldüğü gibi aslında desteklenen çalıştırılabilir formatlar çekirdek derlenirken konfigürasyon parametreleriyle
+    ayarlanabilmektedir. Güncel dağıtımlardaki çekirdekler ELF ve script dosyalarının yüklenmesini sağlayan modülleri 
+    barındırmaktadır. Eskiden "a.out" formatı de Linux tarafından destekleniyordu. Sonra bu formatın desteklenmesi 
+    bırakıldı.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Bilinciği gibi Linux çekirdeğinde temelde sys_execve ve sys_execveat isimli iki sistem fonksiyonu vardır. Güncel 
+    çekirdeklerde aslında iki sistem fonksiyonu da aynı ortak do_execveat_common fonksiyonu çağırmaktadır:
+
+    SYSCALL_DEFINE3(execve,
+            const char __user *, filename,
+            const char __user *const __user *, argv,
+            const char __user *const __user *, envp)
+    {
+        CLASS(filename, name)(filename);
+        return do_execveat_common(AT_FDCWD, name,
+                    native_arg(argv), native_arg(envp), 0);
+    }
+
+    SYSCALL_DEFINE5(execveat,
+            int, fd, const char __user *, filename,
+            const char __user *const __user *, argv,
+            const char __user *const __user *, envp,
+            int, flags)
+    {
+        CLASS(filename_uflags, name)(filename, flags);
+        return do_execveat_common(fd, name,
+                    native_arg(argv), native_arg(envp), flags);
+    }
+
+    Anımsanacağı gibi POSIX fonksiyonlarının at'li versiyonlarında AT_FDCWD bayrağı zaten çalışma dizininin prosesin 
+    çalışma dizini olacak biçimde kullanılmasını sağlamaktadır.  
+
+    Bu sistem fonksiyonlarının kabaca çağrı zinciri şöyledir:
+
+    SYSCALL_DEFINE3(execve), SYSCALL_DEFINE5(execveat)     fs/exec.c
+    └─ do_execveat_common()
+        ├─ alloc_bprm()
+        │    ├─ do_open_execat()        dosya açılır, yazmaya kapatılır
+        │    └─ bprm_mm_init()          YENİ, BOŞ bir mm_struct + geçici stack VMA'sı
+        ├─ copy_strings()               argv ve envp yeni stack'e kopyalanır
+        └─ bprm_execve()
+                └─ exec_binprm()
+                    └─ search_binary_handler()
+                        ├─ prepare_binprm()   dosyanın ilk 256 byte'ı bprm->buf'a
+                        └─ fmt->load_binary(bprm)
+                            └─ load_elf_binary()          fs/binfmt_elf.c
+                                    ├─ begin_new_exec()       eski mm bırakılır
+                                    ├─ elf_load() ... vm_mmap()   segment'ler eşlenir
+                                    ├─ load_elf_interp()      ld.so eşlenir
+                                    ├─ create_elf_tables()    argc/argv/envp/auxv
+                                    └─ START_THREAD()         IP ve SP ayarlanır
+
+    Gerçekleştirimde önemli bir nokta şudur: exec sistem fonksiyonları mevcut prosesin sanal bellek alanını boşatıp yeni 
+    proses için sanal bellek alanı oluşturmaktadır. Ancak bu işlemi exec uygulayan prosesin mm_struct nesnesi üzerinde 
+    yapamaktadır. Çünkü sistem fonksiyonu eğer mevcut nesneyi bozarak ilerlese akış içerisinde bir sorunla karşılaştığında 
+    eski kodu bozmuş olacağından eski koda dönemeycektir. Bu nednele exec sistem fonksiyonları önce işlemlerini bir 
+    kopya üzerinde yapıp en sonunda bunu prosesin task_struct yapısına bağlamaktadır. İşte çekirdeğin yeni program 
+    yükleme bilgilerini tuttuğu bu kopya nesne linux_binprm isimli bir yapıyla temsil edilmektedir. Bu yapı "include/linux/binfmts.h"
+    dosyası içeisinde aşağıdaki gibi tanımlanmıştır:
+
+    struct linux_binprm {
+    #ifdef CONFIG_MMU
+        struct vm_area_struct *vma;
+        unsigned long vma_pages;
+        unsigned long argmin; /* rlimit marker for copy_strings() */
+    #else
+    # define MAX_ARG_PAGES	32
+        struct page *page[MAX_ARG_PAGES];
+    #endif
+        struct mm_struct *mm;
+        struct mm_struct *old_mm;	/* replaced address space, freed by setup_new_exec() */
+        /* user_ns published to task->exec_state at execve, narrowed by would_dump(). */
+        struct user_namespace *user_ns;
+        unsigned long p; /* current top of mem */
+        unsigned int
+            /* Should an execfd be passed to userspace? */
+            have_execfd:1,
+
+            /* Use the creds of a script (see binfmt_misc) */
+            execfd_creds:1,
+            /*
+            * Set by bprm_creds_for_exec hook to indicate a
+            * privilege-gaining exec has happened. Used to set
+            * AT_SECURE auxv for glibc.
+            */
+            secureexec:1,
+            /*
+            * Set when errors can no longer be returned to the
+            * original userspace.
+            */
+            point_of_no_return:1,
+            /* Set when "comm" must come from the dentry. */
+            comm_from_dentry:1,
+            /*
+            * Set by user space to check executability according to the
+            * caller's environment.
+            */
+            is_check:1;
+        struct file *executable; /* Executable to pass to the interpreter */
+        struct file *interpreter;
+        struct file *file;
+        struct cred *cred;	/* new credentials */
+        int unsafe;		/* how unsafe this exec is (mask of LSM_UNSAFE_*) */
+        unsigned int per_clear;	/* bits to clear in current->personality */
+        int argc, envc;
+        const char *filename;	/* Name of binary as seen by procps */
+        const char *interp;	/* Name of the binary really executed. Most
+                    of the time same as filename, but could be
+                    different for binfmt_{misc,script} */
+        const char *fdpath;	/* generated filename for execveat */
+        unsigned interp_flags;
+        int execfd;		/* File descriptor of the executable */
+        unsigned long exec;
+
+        struct rlimit rlim_stack; /* Saved RLIMIT_STACK used during exec. */
+
+        char buf[BINPRM_BUF_SIZE];
+    } __randomize_layout;
+
+    do_execveat_common fonksiyonu şöyle yazılmıştır:
+
+    static int do_execveat_common(int fd, struct filename *filename,
+			      struct user_arg_ptr argv,
+			      struct user_arg_ptr envp,
+			      int flags)
+    {
+        int retval;
+
+        /*
+        * We move the actual failure in case of RLIMIT_NPROC excess from
+        * set*uid() to execve() because too many poorly written programs
+        * don't check setuid() return code.  Here we additionally recheck
+        * whether NPROC limit is still exceeded.
+        */
+        if ((current->flags & PF_NPROC_EXCEEDED) &&
+            is_rlimit_overlimit(current_ucounts(), UCOUNT_RLIMIT_NPROC, rlimit(RLIMIT_NPROC)))
+            return -EAGAIN;
+
+        /* We're below the limit (still or again), so we don't want to make
+        * further execve() calls fail. */
+        current->flags &= ~PF_NPROC_EXCEEDED;
+
+        CLASS(bprm, bprm)(fd, filename, flags);
+        if (IS_ERR(bprm))
+            return PTR_ERR(bprm);
+
+        retval = count(argv, MAX_ARG_STRINGS);
+        if (retval < 0)
+            return retval;
+        bprm->argc = retval;
+
+        retval = count(envp, MAX_ARG_STRINGS);
+        if (retval < 0)
+            return retval;
+        bprm->envc = retval;
+
+        retval = bprm_stack_limits(bprm);
+        if (retval < 0)
+            return retval;
+
+        retval = copy_string_kernel(bprm->filename, bprm);
+        if (retval < 0)
+            return retval;
+        bprm->exec = bprm->p;
+
+        retval = copy_strings(bprm->envc, envp, bprm);
+        if (retval < 0)
+            return retval;
+
+        retval = copy_strings(bprm->argc, argv, bprm);
+        if (retval < 0)
+            return retval;
+
+        /*
+        * When argv is empty, add an empty string ("") as argv[0] to
+        * ensure confused userspace programs that start processing
+        * from argv[1] won't end up walking envp. See also
+        * bprm_stack_limits().
+        */
+        if (bprm->argc == 0) {
+            retval = copy_string_kernel("", bprm);
+            if (retval < 0)
+                return retval;
+            bprm->argc = 1;
+
+            pr_warn_once("process '%s' launched '%s' with NULL argv: empty string added\n",
+                    current->comm, bprm->filename);
+        }
+
+        return bprm_execve(bprm);
+    }
+
+    Burada linux_binprm nesnesi aşağıdaki makro tarafındna yaratılmaktadır:
+
+    CLASS(bprm, bprm)(fd, filename, flags);
+
+    Bu makro aslında koda şunları açmaktadır:
+
+    typedef struct linux_binprm *class_bprm_t;
+
+    static __always_inline void class_bprm_destructor(struct linux_binprm **p)
+    {
+        struct linux_binprm *_T = *p;
+        if (!IS_ERR(_T))
+            free_bprm(_T);
+    }
+
+    static __always_inline struct linux_binprm *
+    class_bprm_constructor(int fd, struct filename *name, int flags)
+    {
+        struct linux_binprm *t = alloc_bprm(fd, name, flags);
+        return t;
+    }
+
+    class_bprm_t bprm __cleanup(class_bprm_destructor) =
+		class_bprm_constructor(fd, filename, flags);
+
+    Görüldüğü gibi sonuç olarak aslında linux_binprm türünden bprm isimli gösterici oluşturulmuş ve bu göstericiye 
+    class_bprm_constructor çağrısının geri dönüş değeri atanmıştır. Bu fonksiyonda da alloc_bprm fonksiyonu ile linux_binprm
+    nesnesi tahsis edilmiştir. do_execveat_common fonksiyonunun çağrı zincirine dikkat ediniz:
+
+    do_execveat_common()
+    ├── is_rlimit_overlimit()                                  [1]
+    ├── CLASS(bprm) → alloc_bprm()
+    │   ├── do_open_execat()
+    │   │   ├── do_file_open()
+    │   │   ├── path_noexec()
+    │   │   └── exe_file_deny_write_access()
+    │   ├── kzalloc_obj()
+    │   ├── kasprintf()                                        [2]
+    │   └── bprm_mm_init()
+    │       ├── mm_alloc()
+    │       ├── get_user_ns()
+    │       └── create_init_stack_vma()
+    ├── count(argv) → get_user_arg_ptr()
+    ├── count(envp) → get_user_arg_ptr()
+    ├── bprm_stack_limits()
+    ├── copy_string_kernel(bprm->filename)
+    │   ├── get_arg_page()
+    │   ├── flush_arg_page()
+    │   ├── memcpy_to_page()
+    │   └── put_arg_page()
+    ├── copy_strings(envp)
+    │   ├── get_user_arg_ptr()
+    │   ├── strnlen_user()
+    │   ├── get_arg_page()
+    │   ├── kmap_local_page()
+    │   ├── copy_from_user()
+    │   └── put_arg_page()
+    ├── copy_strings(argv)                                     [3]
+    ├── copy_string_kernel("")                                 [4]
+    ├── bprm_execve()
+    │   ├── prepare_bprm_creds()
+    │   │   ├── mutex_lock_interruptible(cred_guard_mutex)
+    │   │   └── prepare_exec_creds()
+    │   ├── check_unsafe_exec()
+    │   ├── sched_exec()
+    │   ├── security_bprm_creds_for_exec()
+    │   └── exec_binprm()                                      [5]
+    │       ├── search_binary_handler()                        [6]
+    │       │   ├── prepare_binprm()
+    │       │   ├── security_bprm_check()
+    │       │   └── fmt->load_binary()                         [7]
+    │       │       └── begin_new_exec()                       [8]
+    │       ├── audit_bprm()
+    │       ├── trace_sched_process_exec()
+    │       ├── ptrace_event(PTRACE_EVENT_EXEC)
+    │       └── proc_exec_connector()
+    └── class_bprm_destructor() → free_bprm()                  [9]
+
+    Fonksiyonda en önemli işlemlerden biri sistem fonksiyonuna geçirilen program komut satırı argümanlarının ve çevre 
+    değişken listesinin kullanıcı alanından alarak linux_binprm yapısının içerisine yerleştirilmesidir. Bunu aşağıdaki 
+    iki fonksiyon çağrısı yapmaktadır:
+
+    /* ... */
+    retval = copy_strings(bprm->envc, envp, bprm);
+	if (retval < 0)
+		return retval;
+
+	retval = copy_strings(bprm->argc, argv, bprm);
+	if (retval < 0)
+		return retval;
+    /* ... */
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
