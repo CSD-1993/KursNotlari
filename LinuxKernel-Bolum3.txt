@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                        Son Güncelleme: 27/10/2026 - Salı
+                                        Son Güncelleme: 15/11/2026 - Pazar
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -7146,7 +7146,7 @@ void exit_sys(const char *msg)
     ├─ mark_readonly()
     └─ run_init_process("/sbin/init") ...      → user space
 
-    Burada kernel_init start_kernel atarfındna yaratılan bir çekirdek thread'idir. Bu thread daha sonra 1 numaralı 
+    Burada kernel_init start_kernel atarfından yaratılan bir çekirdek thread'idir. Bu thread daha sonra 1 numaralı 
     proses ID'ye sahip olacak olan "init" prosesi haline gelmektedir. 
 
     Güncel Linux sürümleri aşağıdaki çalıştırılabilir formatları desteklemektedir:
@@ -7222,7 +7222,7 @@ void exit_sys(const char *msg)
     eski kodu bozmuş olacağından eski koda dönemeycektir. Bu nednele exec sistem fonksiyonları önce işlemlerini bir 
     kopya üzerinde yapıp en sonunda bunu prosesin task_struct yapısına bağlamaktadır. İşte çekirdeğin yeni program 
     yükleme bilgilerini tuttuğu bu kopya nesne linux_binprm isimli bir yapıyla temsil edilmektedir. Bu yapı "include/linux/binfmts.h"
-    dosyası içeisinde aşağıdaki gibi tanımlanmıştır:
+    dosyası içerisinde aşağıdaki gibi tanımlanmıştır:
 
     struct linux_binprm {
     #ifdef CONFIG_MMU
@@ -7382,8 +7382,23 @@ void exit_sys(const char *msg)
 		class_bprm_constructor(fd, filename, flags);
 
     Görüldüğü gibi sonuç olarak aslında linux_binprm türünden bprm isimli gösterici oluşturulmuş ve bu göstericiye 
-    class_bprm_constructor çağrısının geri dönüş değeri atanmıştır. Bu fonksiyonda da alloc_bprm fonksiyonu ile linux_binprm
-    nesnesi tahsis edilmiştir. do_execveat_common fonksiyonunun çağrı zincirine dikkat ediniz:
+    class_bprm_constructor çağrısının geri dönüş değeri atanmıştır. Bu fonksiyonda da alloc_bprm fonksiyonu ile 
+    linux_binprm nesnesi tahsis edilmiştir. alloc_bprm fonksiyonu yalnızca linux_binbprm nesnesini değil aynı 
+    zamanda yeni çalıştırılacak program için mm_struct bnesnesini, stack için VMA nesnesini ve diğer bazı nesneleri 
+    de tahsis etmektedir. alloc_bprm fonksiyonunun yaptığı tahsisatları aşağıdaki tabloda veriyoruz:
+
+    ┌───┬───────────────────────────┬───────────────────────────────────┬────────────────┐
+    │ # │           Nesne           │            Tahsis eden            │ Saklandığı yer │
+    ├───┼───────────────────────────┼───────────────────────────────────┼────────────────┤
+    │ 1 │ struct file               │ do_open_execat() → do_file_open() │ bprm->file     │
+    │ 2 │ struct linux_binprm       │ kzalloc_obj(*bprm)                │ —              │
+    │ 3 │ "/dev/fd/N[/ad]" string'i │ kasprintf()                       │ bprm->fdpath   │
+    │ 4 │ struct mm_struct          │ bprm_mm_init() → mm_alloc()       │ bprm->mm       │
+    │ 5 │ Geçici stack VMA'sı       │ create_init_stack_vma()           │ bprm->vma      │
+    │ 6 │ Maple tree düğümleri      │ insert_vm_struct()                │ mm->mm_mt      │
+    └───┴───────────────────────────┴───────────────────────────────────┴────────────────┘
+
+    do_execveat_common fonksiyonunun çağrı zincirine dikkat ediniz:
 
     do_execveat_common()
     ├── is_rlimit_overlimit()                                  [1]
@@ -7448,34 +7463,526 @@ void exit_sys(const char *msg)
 		return retval;
     /* ... */
 
+    Peki bu fonksiyonlar kullanıcı alanından komut satırı argümanlarını ve çevre değişkenlerini alıp nereye yerleştirmektedir?
+    Normal olarak komut satırı argümanlarının ve çevre değişkenlerinin yeni programın stack'inin başının hemen altına 
+    yerleştirilmesi gerekir:
+
+                Stack Alanı
+    ┌────────────────────────────────────────────┐
+    │ argc                              (8 byte) │ ◄── sp = bprm->p = mm->start_stack
+    ├────────────────────────────────────────────┤
+    │ argv[0]                           (char *) │ ──► "prog"
+    │ argv[1]                           (char *) │ ──► "-v"
+    │  ...                                       │
+    │ argv[argc-1]                      (char *) │
+    │ NULL                                       │
+    ├────────────────────────────────────────────┤
+    │ envp[0]                           (char *) │ ──► "HOME=/root"
+    │  ...                                       │
+    │ envp[envc-1]                      (char *) │
+    │ NULL                                       │
+    ├────────────────────────────────────────────┤
+    │ auxv: { AT_SYSINFO_EHDR, vDSO adresi }     │ Elf64_auxv_t çiftleri
+    │       { AT_PHDR, AT_PHNUM, AT_ENTRY }      │ (mm->saved_auxv'den kopya)
+    │       { AT_BASE, AT_PAGESZ, AT_UID }       │
+    │       { AT_RANDOM, AT_EXECFN, ... }        │
+    │       { AT_NULL, 0 }                       │
+    ├────────────────────────────────────────────┤
+    │ padding (16 byte hizalama)                 │ STACK_ROUND()
+    ├────────────────────────────────────────────┤
+    │ 16 byte rastgele veri                      │ ◄── AT_RANDOM (u_rand_bytes)
+    ├────────────────────────────────────────────┤
+    │ "x86_64\0"                                 │ ◄── AT_PLATFORM (u_platform)
+    ├────────────────────────────────────────────┤
+    │ rastgele boşluk + hizalama                 │ arch_align_stack()
+    ├────────────────────────────────────────────┤
+    │ "prog\0" "-v\0" ...                        │ ◄── mm->arg_start
+    │                                            │ ◄── mm->arg_end = mm->env_start
+    │ "HOME=/root\0" "PATH=...\0" ...            │
+    │                                            │ ◄── mm->env_end
+    ├────────────────────────────────────────────┤
+    │ "/usr/bin/prog\0"  (bprm->filename)        │ ◄── bprm->exec (AT_EXECFN)
+    ├────────────────────────────────────────────┤
+    │ NULL (sizeof(void *))                      │ bprm->p ilk değeri
+    └────────────────────────────────────────────┘ ◄── vma->vm_end (rastgeleleştirilmiş STACK_TOP)
+
+    Bu çizimden ne anlaşılmalıdır? Yeni programın stack'inin tepesinde hemen önce komut satırı argümanlarının sayısı, 
+    sonra program komut satırı argümanlarının adresleri, sonra da çevre değişkenlerinin ve değerlerinin adresleri 
+    bulunmaktadır. Bu gösterici dizilerine ilişkin göstericiler daha aşağıdaki (mm->arg_start, mm->env_start) yazıları 
+    göstermektedir. Buradaki komut satırı argümanlarının ve çevre değişkenlerinin yazılarının başlangıç ve bitiş 
+    adresleri zaten ayrıca bellek betimleyicisinde (mm_struct nesnesi içerisinde) tutulmaktadır:
+
+    struct mm_struct {
+        /* ... */
+
+        unsigned long start_code, end_code, start_data, end_data;
+		unsigned long start_brk, brk, start_stack;
+		unsigned long arg_start, arg_end, env_start, env_end;
+
+        /* .. */
+    };
+
+    Daha önceden de belirttiğimiz gibi aslında C programlarında ilk çalışmaya başlayan fonksiyon main değildir. 
+    _start sembolündeki derleyicinin başlangıç kosudur (start-up code). Çalıştırılabilir dosya yüklendiğinde ELF 
+    dosyasında belirtilen programın giriş noktası aslında başlangıç kodudur. main fonksiyonunu derleyicinin yerleştirdiği 
+    bu başlangıç kodu (start-up code) çağırmaktadır. Örneğin 64 bit Linux sistemlerinde start-up kod çağrıldığında 
+    RSP yazması (yani stack göstericisi) ELF dosyasından hareketle yukarıdaki çizimde argc'nin adresini gösterir. 
+    Böylece başlangıçtaki durum şöyledir:
+
+    ┌──────────────────────┬─────────────────────────────┬─────────────────────────────────────┐
+    │        Adres         │            İçerik           │               Açıklama              │
+    ├──────────────────────┼─────────────────────────────┼─────────────────────────────────────┤
+    │ rsp                  │ argc                        │ Stack'in tepesi                     │
+    │ rsp + 8              │ argv[0] ... argv[argc-1]    │ argv gösterici dizisi               │
+    │ rsp + (argc + 1) * 8 │ NULL                        │ argv'nin sonu                       │
+    │ rsp + (argc + 2) * 8 │ envp[0] ... envp[n-1], NULL │ Çevre değişkenleri gösterici dizisi │
+    └──────────────────────┴─────────────────────────────┴─────────────────────────────────────┘
+
+    Görüldüğü gibi exec sistem fonksiyonları önce çalıştırılacak programın yeni stack'inde yukarıdaki şekilde 
+    belirtilen yerleşimi oluşturur, sonra bunların adreslerii mm_struct nesnesin içerisine yerleştirir ve eğer ELF 
+    dosyası PT_INTERP değilse ELF dosyasında belirtilen başlangıç kodunun (entry-point) çalıştırılmasını sağlar. 
+    Start-up kod da bunaları main fonksiyonunun argc ve argv parametrelerine geçirmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-
+                                        117. Ders 15/11/2026 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-
+    Peki copy_srings fonksiyonları komut satırı argümanlarını ve çevre değişkenlerini kullanıcı alanındna alarak 
+    hangi stack alanına kopyalıyor? Çünkü bu kopyalama için yeni programın stack'ine ilişkin VMA nesnesinin ve fiziksel 
+    sayfsaların tahsis edilmiş olması gerekir. İşte aslında bu tahsisat zaten alloc_bprm fonksiyonu içerisinde yapılmaktdır. 
+    Yani copy_strings çağrıları yapıldığında zaten yeni program için bir mm_struct nesnesi ve yeni programın stack alanı 
+    için VMA nesnesi tahsisat yapılmış durumdadır. Tabii yukarıda da belirttiğimiz gibi aslında bunlar exec uygulayan 
+    proseste değil linux_binprm nesnesi içerisinde oluşturulmaktadır. Özetle copy_strngs için zaten VMA nesnesi alloc_binprm 
+    fonksiyonunda o fonksiyonun linux_binprm nesnesi içerisinde oluşturulmaktadır. Ancak fiziksel sayfalar exec çağrısını
+    yapan prosesin sayfa tablosunda sayfa tahsisatı yapılırken oluşturulmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Komut satırı argümanları ve çevre değişkenleri kullanıcı alanından yeni yaratılan stack alanına kopyalandıktan sonra 
+    artık sıra ELF dosyasındaki bölütlerin VMA olarak haritalanmasına gelmiştir. Bu işlem bprm_execve fonksiyonu tarafından 
+    yapılmaktadır. Bu fonksiyonun çağrı zinciri şöyledir:
 
+    execve() / execveat()                      kernel_execve()
+        │                                  (init, usermode helper)
+        ▼                                         │
+    do_execveat_common()                              │
+    ├─ CLASS(bprm) → alloc_bprm → do_open_execat    │
+    ├─ count(), bprm_stack_limits()                 │
+    ├─ copy_string_kernel(), copy_strings()         │
+    └───────────────┬───────────────────────────────┘
+                    ▼
+    bprm_execve(bprm)
+    ├─ prepare_bprm_creds()
+    │    ├─ mutex_lock_interruptible(&signal->cred_guard_mutex)
+    │    └─ prepare_exec_creds()
+    ├─ check_unsafe_exec()            → bprm->unsafe, fs->in_exec = 1
+    ├─ current->in_execve = 1
+    ├─ sched_mm_cid_before_execve()
+    ├─ sched_exec()                   → SMP balance (daha az yüklü CPU)
+    ├─ security_bprm_creds_for_exec() → LSM; is_check ise burada biter
+    │
+    ├─ exec_binprm()
+    │    ├─ for (depth = 0; depth <= 5; depth++)   → >5 ise -ELOOP
+    │    │    ├─ search_binary_handler()
+    │    │    │    ├─ prepare_binprm()  → kernel_read(BINPRM_BUF_SIZE)
+    │    │    │    ├─ security_bprm_check()
+    │    │    │    └─ list_for_each_entry(fmt, &formats)
+    │    │    │         └─ fmt->load_binary(bprm)
+    │    │    │              │  (ELF için: load_elf_binary)
+    │    │    │              ├─ bprm_open_interpreter()   (PT_INTERP)
+    │    │    │              ├─ begin_new_exec()
+    │    │    │              │    ├─ bprm_creds_from_file()
+    │    │    │              │    │    ├─ bprm_fill_uid()  → setuid/setgid
+    │    │    │              │    │    └─ security_bprm_creds_from_file()
+    │    │    │              │    ├─ point_of_no_return = true
+    │    │    │              │    ├─ de_thread()
+    │    │    │              │    ├─ unshare_files(), do_close_on_exec()
+    │    │    │              │    ├─ set_mm_exe_file()
+    │    │    │              │    ├─ exec_mmap()        → yeni mm devreye girer
+    │    │    │              │    ├─ exec_task_namespaces()
+    │    │    │              │    ├─ unshare_sighand()
+    │    │    │              │    ├─ flush_thread()
+    │    │    │              │    ├─ perf_event_exec()
+    │    │    │              │    └─ __set_task_comm()
+    │    │    │              ├─ setup_new_exec()
+    │    │    │              │    └─ commit_creds, cred_guard_mutex unlock
+    │    │    │              ├─ setup_arg_pages()
+    │    │    │              ├─ elf_load / load_elf_interp()
+    │    │    │              ├─ create_elf_tables()  → auxv, argv, envp
+    │    │    │              ├─ finalize_exec()
+    │    │    │              └─ START_THREAD()       → regs->ip = entry
+    │    │    └─ bprm->interpreter != NULL ise (script, binfmt_misc):
+    │    │         bprm_drop_loader(), file ← interpreter, döngü tekrar
+    │    ├─ audit_bprm()
+    │    ├─ trace_sched_process_exec()
+    │    ├─ ptrace_event(PTRACE_EVENT_EXEC)
+    │    └─ proc_exec_connector()
+    │
+    ├─ [başarı] sched_mm_cid_after_execve(), rseq_execve(),
+    │           in_execve = 0, user_events_execve(),
+    │           acct_update_integrals(), task_numa_free()
+    │
+    └─ [hata: out]
+        ├─ point_of_no_return && !fatal_signal_pending()
+        │    → force_fatal_sig(SIGSEGV)
+        ├─ sched_mm_cid_after_execve(), rseq_force_update()
+        └─ in_execve = 0
+
+    Bu fonksiyon kabaca ELF dosyasındaki PT_LOAD bölütlerini elde ederek onlar için mmap (yani işlevselliği ile) 
+    fonksiyonuyla VMA nesneleri oluşturmaktadır. Ancak bu işlemin bazı ayrıntıları da vardır. Yeni program için 
+    ELF dosyasının bölütlerinden hareketle VMA'lar oluşturulduktan sonra sayfa tablosunda fiziksel bellek tahsisatları 
+    program çalışmaya başladığında oluşan "sayfa hataları (page faults)" yoluyla gerçekleştirilmektedir. Yeni program 
+    adeta (ama tamamen değil) boş bir sayfa tablosuyla başlatılmaktadır. Burada bu noktaya bir kez daha dikkatinizi 
+    çekmek istiyoruz: "VMA nesneleri program tarafındna tahsis edilen alanların yerlerini ve çalıştırılabilir dosya 
+    ile bağlantısını oluşturmaktadır. Sayfalama hatası oluştuğunda ilgili sayfanın fiziksel RAM'e çekilmesi (swap-in)
+    tamamen VMA nesnelerindeki bilgiler yoluyla yapılmaktadır. Yani yeni program için VMA nesnesleri oluşturulduktan 
+    sonra artık sayfa hatası olduğunda ilgili sayfa bulunup fiziksel RAM'e çekilebilmektedir. VMA'ların fiziksel 
+    bellekte tahsisat yapmadığına, yalnızca mantıksal bilgileri oluşturduğuna bir kez daha dikkat ediniz."
+
+    Önceki paragraflarda Linux'ta çalıştırılabilir dosyaların yüklenmesi için formata göre farklı fonksiyonlar bulunduğunu 
+    ve yüklemenin o fonksiyonlar yoluyla yapıldığını belirtmiştik. İşte bu işlem akış içerisinde exec_binprm fonksiyonu 
+    tarafından yürütülmektedir. Bu fonksiyon formatların bulunduğu linux_binfmt nesnelerinden oluşan bağlı listeyi dolaşıp 
+    load_binary fonksiyonlarını çağırmaktadır. Bu fonksiyonlar ilgili dosyann kendi formatlarıan ilişkin olup olmadığını 
+    tespit edip yüklemeyi yapmaktadır. Bunun için çalıştırılabilir dosyanın ilk 256 byte'ını da linux_binprm nesnesinin 
+    içerisine yerleştirmektedir:
+
+    retval = prepare_binprm(bprm);          /* bprm->buf <- ilk 256 byte */
+    ...
+    list_for_each_entry(fmt, &formats, lh) {
+            ...
+            retval = fmt->load_binary(bprm);
+            ...
+            if (bprm->point_of_no_return || (retval != -ENOEXEC))
+                return retval;          /* tanındı ya da gerçek hata */
+    }
+    return -ENOEXEC;
+
+    Eğer ilgili yükleyici fonksiyon çaşıştırılabilir dosyanın kendisine ait olmadığını tespit ederse load_binary 
+    fonksiyonunu -ENOEXEC değeri ile geri döndrmektedir. Öekirdke kodları da bağlı listede ilerlemeye devam etmektedir. 
+    Tabii ilgili yükleyici fonksiyon çalıştırılabilir dosyanın kendisine ilişkin olup olmadığını sihirli sayıyla (magic 
+    number) ve duruma göre başka alanlarla karşılaştırma yaparak tespit etmektedir. ELF dosyalarının yüklenmesi çekirdek
+    kaynak kodalarında "fs/binfmt_elf.c" dosyası içerisinde bulunan load_elf_binary fonksiyonu tarafındna yapılmaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    load_elf_binary fonksiyonu kabaca ELF dosyasındaki PT_LOAD bölütleri için VMA oluşturmaktadır. Ancak fonksiyonda 
+    pek çok ayrıntı da vardır. Fonksiyonun işlevsel çağrı zinciri şöyledir:
 
+    load_elf_binary(bprm)
+    │
+    ├─ [1] Başlık doğrulama  (bprm->buf üzerinden)
+    │    ├─ memcmp(e_ident, ELFMAG, SELFMAG)
+    │    ├─ e_type == ET_EXEC || ET_DYN
+    │    └─ elf_check_arch()                 → tutmazsa -ENOEXEC
+    │
+    ├─ [2] Program başlık tablosunu okuma
+    │    └─ load_elf_phdrs()  → elf_read()
+    │
+    ├─ [3] PT_INTERP varsa yorumlayıcıyı açma
+    │    ├─ elf_read()                       → "/lib64/ld-linux-x86-64.so.2"
+    │    ├─ bprm_open_interpreter()          → binfmt_misc loader ya da open_exec
+    │    ├─ would_dump()
+    │    └─ elf_read()                       → yorumlayıcının ELF başlığı
+    │
+    ├─ [4] Diğer program başlıklarını tarama
+    │    ├─ PT_GNU_STACK   → executable_stack
+    │    ├─ arch_elf_pt_proc()               → PT_LOPROC..PT_HIPROC
+    │    ├─ load_elf_phdrs(interp)           → yorumlayıcının phdr'leri
+    │    ├─ parse_elf_properties()           → PT_GNU_PROPERTY (IBT/BTI vs)
+    │    └─ arch_check_elf()
+    │
+    ├─ [5] ══════ begin_new_exec(bprm) ══════   point_of_no_return
+    │         (eski mm yıkılır, yeni mm devreye girer)
+    │
+    ├─ [6] Yeni proses ortamını kurma
+    │    ├─ SET_PERSONALITY2()
+    │    ├─ PF_RANDOMIZE                     → ASLR açıksa
+    │    ├─ setup_new_exec()                 → mmap layout, creds commit
+    │    └─ setup_arg_pages()                → stack VMA'sını son yerine taşır
+    │
+    ├─ [7] PT_LOAD segmentlerini haritalama  (for each PT_LOAD)
+    │    ├─ ET_DYN ise: load_bias hesabı
+    │    │    ├─ total_mapping_size(), maximum_alignment()
+    │    │    └─ ELF_ET_DYN_BASE + arch_mmap_rnd()
+    │    └─ elf_load()
+    │         ├─ elf_map()  → vm_mmap()      → dosya destekli mapping
+    │         ├─ padzero()                   → son sayfanın kuyruğunu sıfırlar
+    │         └─ vm_brk_flags()              → .bss için anonim alan
+    │
+    ├─ [8] Giriş noktası
+    │    ├─ e_entry + load_bias
+    │    └─ yorumlayıcı varsa:
+    │         load_elf_interp()
+    │           └─ elf_load()  (ld.so segmentleri)
+    │         elf_entry = ld.so'nun e_entry'si
+    │
+    ├─ [9] Kullanıcı stack'i ve mm alanları
+    │    ├─ ARCH_SETUP_ADDITIONAL_PAGES()    → vDSO
+    │    ├─ create_elf_tables()              → argc, argv, envp, auxv
+    │    ├─ mm->start_code/end_code/start_data/end_data/start_stack
+    │    └─ mm->start_brk = mm->brk
+    │         └─ arch_randomize_brk()        → ASLR
+    │
+    └─ [10] Kullanıcı moduna dönüşe hazırlık
+        ├─ ELF_PLAT_INIT(regs, ...)
+        ├─ finalize_exec()                  → stack rlimit, dumpable vs
+        └─ START_THREAD()                   → regs->ip = elf_entry,
+                                                regs->sp = bprm->p
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Bu aşamada önemli bir noktanın üzerinde durmak istiyoruz Daha önce de belirttiğimiz gibi bir ELF dosyası dinamik 
+    kütüphane (".so" dosyalarını) kullanıyor olabilir ya da olmayabilir. ELF dosyasının dinamik kütüphane kullanıp 
+    kullanmadığı progam başlık tablosundaki bir girişin p_type elemanından anlaşılmaktadır. Eğer girişin p_type elemanında 
+    PT_INTERP değeri varsa program dinamik kütüphane kullanmaktadır. Eğer bu değer yoksa program statik biçimde (-static 
+    komut satırı argümanıyla) ve dinamik kütüphane kullanmamaktadır. PT_INTERP girişi genellikle program başlık tablosunun 
+    ikinci girişidir. Ancak böyle bir zorunluluk yoktur. Çekirdek kodları da bu girişi tüm program başlık tablosunda
+    aramaktadır:
 
+    for (i = 0; i < elf_ex->e_phnum; i++, elf_ppnt++) {
+        /* ... */
+
+        if (elf_ppnt->p_type != PT_INTERP)
+                continue;
+        /* ... */
+        interpreter = bprm_open_interpreter(bprm, elf_interpreter);       
+        /* ... */
+        break;
+    }
+
+    Eüer program dosyası dinamik kütüphane kulanıyorsa load_elf_binary fonksiyonu PT_INTERP değeirne sahip program 
+    başlık tablosu girişinden ismine "pogram yorumlayıcısı (program interpreter)" denilen ve dinamik kütüphaneleri 
+    yükleyen "kullanıcı modu" programını da sanal belleğe yükleyip programın giriş noktasını (entry point) bu program 
+    yorumlayıcısının giriş noktası olarak ayarlamaktadır. Yani eğer program dinamik kütüphane kullanıyorsa aslında 
+    çalıştırılabilir program yüklendiğinde çalışma "program yorumlayıcısı (program interpreter)" denilen programdan 
+    başlatılmaktadır. Daha önce de belirttiğimiz gibi "program yorumlayıcısı" kullanıcı modunda çalışan ve takma adıyla 
+    "ld.so" denilen programdır. Program yourmlayıcısı ("ld.so" programı) çalışmaya başladığında programın kullandığı 
+    dinamik kütüphaneleri belirler, onları sanal adres alanına haritalar ve en sonunda çalıştırılabilir dosyanın (yani 
+    asıl dosyanın) giriş noktasına atlar. Yani program yorumlayıcısı dinamik kütüphaneleri yükleyip gerçek programın 
+    çalışmasını sağlamaktadır. Program yorumlayıcısı kavramsal bir isimdir. Bunun dosya halindeki kavramsal ismi ise 
+    "ld.so" biçimindedir. Ancak asıl yüklenecek program interpreter'ın ismi ve yeri PT_INTERP değerine sahip olan 
+    program başlık tablosu girişinde yazmaktadır. Buradaki akışı aşağıdaki şekille betimleyebiliriz:
+
+                           execve("./prog", ...)
+                               │
+                               ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │                 ÇEKİRDEK  (load_elf_binary)                  │
+    ├──────────────────────────────────────────────────────────────┤
+    │ 1) prog'un PT_LOAD segmentlerini haritalar                   │
+    │ 2) PT_INTERP'ten yolu okur: /lib64/ld-linux-x86-64.so.2      │
+    │ 3) ld.so'nun PT_LOAD segmentlerini haritalar                 │
+    │ 4) create_elf_tables() → stack'e argc/argv/envp/auxv         │
+    │      AT_PHDR  = prog'un program başlık tablosu               │
+    │      AT_ENTRY = prog'un e_entry'si   (load_bias + e_entry)   │
+    │      AT_BASE  = ld.so'nun yükleme adresi                     │
+    │ 5) START_THREAD(): ip = ld.so'nun e_entry'si                 │
+    └──────────────────────────────────────────────────────────────┘
+                                │   syscall dönüşü → kullanıcı modu
+                                ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │     PROGRAM YORUMLAYICISI (program interpreter) — ld.so      │
+    ├──────────────────────────────────────────────────────────────┤
+    │ _start → _dl_start()      : kendi relocation'ını yapar       │
+    │ auxv'yi okur              : AT_PHDR, AT_ENTRY, AT_BASE       │
+    │ prog'un PT_DYNAMIC'ini bulur → DT_NEEDED listesi             │
+    │ libc.so.6 vs kütüphaneleri haritalar   (mmap)                │
+    │ relocation / symbol binding (GOT, PLT)                       │
+    │ kütüphanelerin DT_INIT / DT_INIT_ARRAY fonksiyonları         │
+    └──────────────────────────────────────────────────────────────┘
+                                │   jmp AT_ENTRY
+                                ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │                   ASIL EXECUTABLE  (prog)                    │
+    ├──────────────────────────────────────────────────────────────┤
+    │ _start → __libc_start_main() → main(argc, argv, envp)        │
+    └──────────────────────────────────────────────────────────────┘
+
+    Örneğin dinamik kütüphane kullanan "sample" isimli programın program başlık tablosu şöyledir:
+
+    $ readelf -l sample
+
+    Elf dosya tipi: DYN (Position-Independent Executable file)
+    Entry point 0x1040
+    There are 13 program headers, starting at offset 64
+
+    Yazılım Başlıkları:
+    Tip            Basamak            SanalAdres         GerçekAdres
+                   DosyaBoyu          BellekBoyu          Seç    Hiza
+    PHDR           0x0000000000000040 0x0000000000000040 0x0000000000000040
+                   0x00000000000002d8 0x00000000000002d8  R      0x8
+    INTERP         0x0000000000000318 0x0000000000000318 0x0000000000000318
+                   0x000000000000001c 0x000000000000001c  R      0x1
+        [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+    LOAD           0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x00000000000005f0 0x00000000000005f0  R      0x1000
+    LOAD           0x0000000000001000 0x0000000000001000 0x0000000000001000
+                   0x0000000000000145 0x0000000000000145  R E    0x1000
+    LOAD           0x0000000000002000 0x0000000000002000 0x0000000000002000
+                   0x00000000000000c4 0x00000000000000c4  R      0x1000
+    LOAD           0x0000000000002df0 0x0000000000003df0 0x0000000000003df0
+                   0x00000000003d0b30 0x00000000007a1450  RW     0x1000
+    DYNAMIC        0x0000000000002e00 0x0000000000003e00 0x0000000000003e00
+                   0x00000000000001c0 0x00000000000001c0  RW     0x8
+    NOTE           0x0000000000000338 0x0000000000000338 0x0000000000000338
+                   0x0000000000000030 0x0000000000000030  R      0x8
+    NOTE           0x0000000000000368 0x0000000000000368 0x0000000000000368
+                   0x0000000000000044 0x0000000000000044  R      0x4
+    GNU_PROPERTY   0x0000000000000338 0x0000000000000338 0x0000000000000338
+                   0x0000000000000030 0x0000000000000030  R      0x8
+    GNU_EH_FRAME   0x0000000000002004 0x0000000000002004 0x0000000000002004
+                   0x000000000000002c 0x000000000000002c  R      0x4
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x10
+    GNU_RELRO      0x0000000000002df0 0x0000000000003df0 0x0000000000003df0
+                   0x0000000000000210 0x0000000000000210  R      0x1
+
+    Buradan görüldüğü gibi 1'inci indeskteki program başlık tablosu girişi PT_INTERP türüne ilişkindir. Gerçek 
+    program yorumlayıcısının (program interpreter) yol ifadesi bu girişte yazmaktadır. Örneğimizde bu yol ifadesi 
+    "/lib64/ld-linux-x86-64.so.2" biçimindedir. Şimdi de aynı programı "-static" seçeneği ile statik link etmiş ollaım:
+
+    $ readelf -l sample
+
+    Elf dosya tipi: UYGU (Uygulama dosyası)
+    Entry point 0x401740
+    There are 10 program headers, starting at offset 64
+
+    Yazılım Başlıkları:
+    Tip            Basamak            SanalAdres         GerçekAdres
+                    DosyaBoyu          BellekBoyu          Seç    Hiza
+    LOAD           0x0000000000000000 0x0000000000400000 0x0000000000400000
+                   0x00000000000004f8 0x00000000000004f8  R      0x1000
+    LOAD           0x0000000000001000 0x0000000000401000 0x0000000000401000
+                   0x000000000007d61d 0x000000000007d61d  R E    0x1000
+    LOAD           0x000000000007f000 0x000000000047f000 0x000000000047f000
+                   0x0000000000025754 0x0000000000025754  R      0x1000
+    LOAD           0x00000000000a4f50 0x00000000004a5f50 0x00000000004a5f50
+                   0x00000000003d6478 0x00000000007ac4f8  RW     0x1000
+    NOTE           0x0000000000000270 0x0000000000400270 0x0000000000400270
+                   0x0000000000000030 0x0000000000000030  R      0x8
+    NOTE           0x00000000000002a0 0x00000000004002a0 0x00000000004002a0
+                   0x0000000000000044 0x0000000000000044  R      0x4
+    TLS            0x00000000000a4f50 0x00000000004a5f50 0x00000000004a5f50
+                   0x0000000000000018 0x0000000000000058  R      0x8
+    GNU_PROPERTY   0x0000000000000270 0x0000000000400270 0x0000000000400270
+                   0x0000000000000030 0x0000000000000030  R      0x8
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x10
+    GNU_RELRO      0x00000000000a4f50 0x00000000004a5f50 0x00000000004a5f50
+                   0x00000000000040b0 0x00000000000040b0  R      0x1
+
+    Görüldüğü gibi burada artık bir PT_INTERP girişi yoktur. load_elf_binary fonksionu artık program yorumlayıcını 
+    yükleyemeyecektir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Program yorumlayıcısı ("ld.so") "kullancı modunda çalışan" bir programdır. Çünkü dinamik kütüphanelerin yüklenmsi 
+    için çekirdek modunda olmaya gerek yoktur. Peki program yükleyicisi dinamik kütüphaneleri nasıl yüklemektedir?
 
+    Dinamik kütüphane kullanan programlarda bağlayıcı tarafından ELF formatında iki önemli bölüm (section) oluşturulmaktadır. 
+    Bu bölümler ".dynamic" ve ".dynsym" isimli bölümlerdir. ".dynamic" bölümü çalıştırılabilir dosyanın kullandığı dinamik kütüphaneler hakkında 
+    bilgiler içermektedir. ".dynsym" bölümü ise dinamik kütüphanelerden kullanılan sembollerin tutulduğu sembol tablosudur.
+
+    32 bit ELF formatının ".dynamic" bölümünün yapısal içeriği şöyledir:
+
+    typedef struct {
+        Elf32_Sword d_tag;
+        union {
+            Elf32_Word d_val;
+            Elf32_Addr d_ptr;
+        } d_un;
+    } Elf32_Dyn;
+
+    64 bit ELF formatının ".dynamic" bölümünün yapısal içeriği ise şöyledir:
+
+    typedef struct {
+        Elf64_Sxword d_tag;
+        union {
+            Elf64_Xword d_val;
+            Elf64_Addr d_ptr;
+        } d_un;
+    } Elf64_Dyn;
+
+    ELF formatının ".dynamic" bölümü yukarıdaki yapılardan oluşan bir dizi gibidir. Bu bölümün içeriğini aşağıdaki gibi temsil 
+    edebiliriz:
+
+    d_tag d_un
+    d_tag d_un
+    d_tag d_un
+    d_tag d_un
+    d_tag d_un
+    ...
+
+    Burada d_un ya d_val olabilir ya da d_ptr olabilir, ancak ikisi birden olamaz. d_val bir değer, d_ptr ise bir sanal adres 
+    belirtmektedir.
+
+    Yapıların d_tag elemanı, ilgili girişin türünü belirtmektedir. Yapının d_un elemanının d_val ya da d_ptr elemanını mı içereceği 
+    bu d_tag elemanına bağlıdır. Önemli bazı d_tag değerleri şunlardır:
+
+    DT_NEEDED: Bu tag'ı d_val elemanı izlemektedir. Bu tag'daki d_val elemanı modülün yüklenmesi için gerekli olan dinamik kütüphanenin 
+    isminin (yol ifadesinin değil) string tablosundaki (".strtab") indeks numarası belirtilmektedir. Dinamik kütüphanelerin
+    yalnızca isimleri belirtilmektedir. Onların dizinlerde aranması prgram yorumlayıcısı tarafından belli bir sırada yapılmaktadır.
+
+    DT_SONAME: Bu tag'ı d_val elemanı izlemektedir. Bu tag dinamik kütüphanelerde bulunmaktadır. Burada dinamik kütüphanenin "so 
+    isminin" bulunduğu string tablosundaki (".strtab" bölümündeki) indeks belirtilmektedir.
+
+    Burada başka tag'larda vardır. Bu tag'ların anlamlarını durada açıklamayacağız. 
+
+    Aşağıda readelf programı ile ".dynamic" bölümünün görüntülenme biçimi gösterilmektedir:
+
+    $ readelf -d sample
+
+    Dynamic section at offset 0x2e00 contains 24 entries:
+    Etiket     Tip                          İsim/Değer
+    0x0000000000000001 (NEEDED)             Paylaşımlı kitaplık: [libc.so.6]
+    0x000000000000000c (INIT)               0x1000
+    0x000000000000000d (FINI)               0x1138
+    0x0000000000000019 (INIT_ARRAY)         0x3df0
+    0x000000000000001b (INIT_ARRAYSZ)       8 (bytes)
+    0x000000000000001a (FINI_ARRAY)         0x3df8
+    0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)
+    0x000000006ffffef5 (GNU_HASH)           0x3b0
+    0x0000000000000005 (STRTAB)             0x468
+    0x0000000000000006 (SYMTAB)             0x3d8
+    0x000000000000000a (STRSZ)              136 (bytes)
+    0x000000000000000b (SYMENT)             24 (bytes)
+    0x0000000000000015 (DEBUG)              0x0
+    0x0000000000000003 (PLTGOT)             0x3fc0
+    0x0000000000000007 (RELA)               0x530
+    0x0000000000000008 (RELASZ)             192 (bytes)
+    0x0000000000000009 (RELAENT)            24 (bytes)
+    0x000000000000001e (FLAGS)              BIND_NOW
+    0x000000006ffffffb (FLAGS_1)            Seçenekler: NOW PIE
+    0x000000006ffffffe (VERNEED)            0x500
+    0x000000006fffffff (VERNEEDNUM)         1
+    0x000000006ffffff0 (VERSYM)             0x4f0
+    0x000000006ffffff9 (RELACOUNT)          3
+    0x0000000000000000 (NULL)               0x0
+
+    Örneğin biz çalıştırılabilir dosyanın ya da dinamik kütüphane dosyasının hangi dinamik kütüphaneleri kullandığını 
+    komut satırından aşağıdaki gibi elde edebiliriz:
+
+    $ readelf -d sample | grep "NEEDED"
+    0x0000000000000001 (NEEDED)             Paylaşımlı kitaplık: [libc.so.6]
+
+    Tabii biz bu biçimde yalnızca çalıştırılabilen dosyanın doğrudan kullandığı dinamik kütüphaneleri görüntülemiş oluruz. 
+    Oysa dinamik kütüphaneler de başka dinamik kütüphaneleri kullanıyor olabilir. Bu tür durumlarda özyinelemeli (recursive) 
+    biçimde yükleme yapılmaktadır. Bir çalıştırılabilir dosyanın yüklenebilmesi için özyinelemeli biçimde bütün gereken 
+    dinamik kütüphaneler "ldd" komutuyla elde edilebilmektedir. Örneğin:
+
+    $ ldd sample
+	linux-vdso.so.1 (0x000073268a588000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000732689800000)
+	/lib64/ld-linux-x86-64.so.2 (0x000073268a58a000)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-
+    Peki hiç exec sistem fonksiyonlarını çağırmadan kullanıcı modunda çalışan bir ELF yükleyicisi yazılabilir mi? 
+    İşte böyle bir yükleyici belirli kısımlar ihmal edilerek kaba işlevleriyle yazılabilir. Ancak çekirdekteki 
+    load_elf_binary fonksiyonun işlevlerinin aynısı kullanıcı modunda yazılamaz. Kullanıcı modunda ancak bu işlemler 
+    kabaca yapılabilmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
