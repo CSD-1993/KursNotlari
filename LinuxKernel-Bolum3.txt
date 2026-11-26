@@ -1570,8 +1570,8 @@
     çekirdeklerdeki gerçekleştirimi temel alacağız.
 
     Güncel çekirdeklerde sys_mmap fonksiyonunun işlevselliği büyük ölçüde vm_mmap_pgoff ve onun çağırdığı do_mmap 
-    fonksiyonu tarafından sağlanmaktadır. Bu fonksiyonlar dışarıya export edilmemiştir. Çekirdek modülleri ve aygıt sürücüler 
-    mmap işlevselliğini export edilmiş olan vm_mmap fonksiyonu yoluyla sağlamaktadır.
+    fonksiyonu tarafından sağlanmaktadır. Bu fonksiyonlar dışarıya export edilmemiştir. Çekirdek modülleri ve aygıt 
+    sürücüler mmap işlevselliğini export edilmiş olan vm_mmap fonksiyonu yoluyla sağlamaktadır.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -2135,54 +2135,57 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Biz yukarıda mmap fonksiyonun kullanıcı modundaki kullanımını ele aldık. Şimdi de bu fonksiyonun çekirdek tasarımında 
+    Biz yukarıda mmap fonksiyonunun kullanıcı modundaki kullanımını ele aldık. Şimdi de bu fonksiyonun çekirdek tasarımında 
     nasıl işlev gördüğünü inceleyeceğiz. Şu sorulara yanıtlar vermeye çalışacağız:
 
-    - Anonim haritlama (yani bir dosyaya referans etmeyen haritalama) çekirdek tarafından nasıl gerçekleştirilmektedir?
-    - "Özel haritalama (private mapping)", "paylaşımlı haritlama" çekirdke tarafından nasıl gerçekleştirilmektedir?
+    - Anonim haritalama (bir dosyaya referans etmeyen haritalama) çekirdek tarafından nasıl gerçekleştirilmektedir?
+    - "Özel haritalama (private mapping)", "paylaşımlı haritlama (shared mapping)" çekirdek tarafından nasıl 
+    gerçekleştirilmektedir?
     - Bellek tabanlı dosyaların çekirdek gerçekleştirimi nasıldır?
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Kullanıcı modundaki mmap POSIX fonksiyonu bazı işlemlerden sonra Linux sistemlerinde sys_mmap isimli sistem 
-    fonksiyonunu çağırmaktadır. 32 bit sistemlerde eskiden sys_mmap fonksiyonu 32 bir offset temelinde çalışıyordu. 
-    Sonra o fonksiyon muhafaze edilip 64 bit offset temelinde çalışabilen (offset yerine sayfa indeksi kullanılarak 
-    yapılmaktadır.) sys_mmap2 fonksiyonu da sisteme dahil edildi. Sonraki 32 it sistemlerde sys_mmap yerine artık 
-    yalnızca sys_mmap2 sistem fonksiyonu bulunduruldu. Ancak 64 bit Linux sistemlerinde yalnızca sys_mmap fonksiyonu 
-    bulunmaktadır. Biz anlatımda bu sistem fonksiyonunu sys_mmap ismiyle belirteceğiz. Aşağıda hangi sistemlerde hangi 
-    mmap sistem fonksiyonun bulunduğunu bir tablo biçiminde veriyoruz. Tablodaki numaralar sistem fonksiyonlarının 
-    numaralarını belirtmektedir:
+    Kullanıcı modundaki mmap POSIX fonksiyonu bazı işlemlerden sonra Linux sistemlerinde çekirdeğin mmap sistem 
+    fonksiyonunu çağırmaktadır. 32 bit sistemlerde eskiden sys_mmap fonksiyonu offset değerini byte cinsinden 32 bit 
+    olarak alıyordu. Bu nedenle bir dosyanın ancak ilk 4 GB'lik kısmı haritalanabiliyordu. Sonra (Linux 2.3.31) o 
+    fonksiyon muhafaza edilip sys_mmap2 fonksiyonu da sisteme dahil edildi. (sys_mmap2 fonksiyonunda offset parametresi 
+    yine 32 bittir. Ancak bu değer byte cinsinden değil, 4096 byte'lık birimler cinsinden belirtilmektedir. Böylece 
+    2^44 byte'a (16 TB) kadar offset'ler ifade edilebilmektedir.) i386 gibi eski 32 bit mimarilerde geçmişe doğru uyum 
+    için her iki fonksiyon da hâlâ bulunmaktadır. Linux'a daha sonra eklenen 32 bit mimarilerde ve ABI'lerde ise 
+    yalnızca sys_mmap2 sistem fonksiyonu bulundurulmuştur. 64 bit Linux sistemlerinde offset zaten 64 bit olduğu için 
+    yalnızca sys_mmap fonksiyonu bulunmaktadır (parisc bunun istisnasıdır). Ancak 64 bit çekirdekler 32 bit programları 
+    çalıştırabilmek için (compat) ilgili 32 bit mimarinin sistem fonksiyonlarını da bulundurmaktadır. Biz anlatımda bu 
+    sistem fonksiyonunu sys_mmap ismiyle belirteceğiz. Aşağıda hangi sistemlerde hangi mmap sistem fonksiyonunun 
+    bulunduğunu bir tablo biçiminde veriyoruz. Tablodaki numaralar sistem fonksiyonlarının numaralarını belirtmektedir:
 
-    ┌────────────────┬────────────────────────────────┬──────────────────┬─────────────────────┐
-    │      Grup      │          Mimari / ABI          │ mmap (No, Giriş) │  mmap2 (No, Giriş)  │
-    ├────────────────┼────────────────────────────────┼──────────────────┼─────────────────────┤
-    │ Yalnızca mmap  │ x86_64 (64-bit ABI), x32       │ 9 sys_mmap       │ -                   │
-    │                │ arm64 (native)                 │ 222 sys_mmap     │ -                   │
-    │                │ riscv64, loongarch64           │ 222 sys_mmap     │ -                   │
-    │                │ powerpc64 (native)             │ 90 sys_mmap      │ - (yalnızca compat) │
-    │                │ sparc64 (native)               │ 71 sys_mmap      │ - (yalnızca compat) │
-    │                │ mips n64, mips n32             │ 9 sys_mips_mmap  │ -                   │
-    │                │ alpha                          │ 71 sys_osf_mmap  │ -                   │
-    │                │ s390x                          │ 90 sys_old_mmap  │ -                   │
-    ├────────────────┼────────────────────────────────┼──────────────────┼─────────────────────┤
-    │ mmap + mmap2   │ i386 (+ x86_64 ia32 compat)    │ 90 sys_old_mmap  │ 192 sys_mmap_pgoff  │
-    │                │ arm OABI                       │ 90 sys_old_mmap  │ 192 sys_mmap2       │
-    │                │ m68k                           │ 90 sys_old_mmap  │ 192 sys_mmap2       │
-    │                │ sh                             │ 90 old_mmap      │ 192 sys_mmap2       │
-    │                │ microblaze                     │ 90 sys_mmap      │ 192 sys_mmap2       │
-    │                │ powerpc32 (+ ppc64 compat)     │ 90 sys_mmap      │ 192 sys_mmap2       │
-    │                │ sparc32 (+ sparc64 compat)     │ 71 sys_mmap      │ 56 sys_mmap2        │
-    │                │ mips o32                       │ 90 sys_mips_mmap │ 210 sys_mips_mmap2  │
-    │                │ parisc (32 ve 64 bit)          │ 90 sys_mmap      │ 89 sys_mmap2        │
-    ├────────────────┼────────────────────────────────┼──────────────────┼─────────────────────┤
-    │ Yalnızca mmap2 │ arm EABI (+ arm64 compat)      │ -                │ 192 sys_mmap2       │
-    │                │ xtensa                         │ -                │ 80 sys_mmap_pgoff   │
-    │                │ arc, csky, hexagon, nios2,     │ -                │ 222 sys_mmap2       │
-    │                │ openrisc, riscv32, loongarch32 │                  │                     │
-    └────────────────┴────────────────────────────────┴──────────────────┴─────────────────────┘
-    
-    Tabii çekirdek bu sys_mmap sistem fonksiyonunu doğrudan kullanmaz ancak bu sistem fonksiyonunun çağırdığı birkaç 
-    fonksiyonu kullanmaktadır. Kullanıcı modundaki mmap POSIX fonksiyonunun güncel Linux sistemlerinde  çağrılmasıyla 
+    ┌────────────────┬────────────────────────────────┬──────┬───────┐
+    │      Grup      │          Mimari / ABI          │ mmap │ mmap2 │
+    ├────────────────┼────────────────────────────────┼──────┼───────┤
+    │ Yalnızca mmap  │ x86_64, x86_64'te x32          │  9   │   -   │
+    │                │ arm64, riscv64, loongarch64    │ 222  │   -   │
+    │                │ powerpc64, s390x               │  90  │   -   │
+    │                │ sparc64, alpha                 │  71  │   -   │
+    │                │ mips n64                       │ 5009 │   -   │
+    │                │ mips n32                       │ 6009 │   -   │
+    ├────────────────┼────────────────────────────────┼──────┼───────┤
+    │ mmap + mmap2   │ i386, arm OABI, m68k, sh,      │  90  │  192  │
+    │                │ microblaze, powerpc32          │      │       │
+    │                │ sparc32                        │  71  │   56  │
+    │                │ mips o32                       │ 4090 │  4210 │
+    │                │ parisc (32 ve 64 bit)          │  90  │   89  │
+    ├────────────────┼────────────────────────────────┼──────┼───────┤
+    │ Yalnızca mmap2 │ arm EABI                       │  -   │  192  │
+    │                │ xtensa                         │  -   │   80  │
+    │                │ arc, csky, hexagon, nios2,     │  -   │  222  │
+    │                │ openrisc, riscv32, loongarch32 │      │       │
+    └────────────────┴────────────────────────────────┴──────┴───────┘
+
+    Aynı numaradaki sistem fonksiyonunun çekirdekteki giriş ismi mimariye göre değişebilmektedir (sys_mmap, 
+    sys_old_mmap, sys_mips_mmap, sys_osf_mmap, sys_mmap_pgoff gibi). Örneğin i386 ve s390x sistemlerindeki 90 numaralı 
+    sys_old_mmap fonksiyonu argümanlarını tek tek değil, bir yapının adresi olarak almaktadır.
+
+    Tabii çekirdek sys_mmap sistem fonksiyonunu doğrudan kullanmaz ancak bu sistem fonksiyonunun çağırdığı birkaç 
+    fonksiyonu kullanmaktadır. Kullanıcı modundaki mmap POSIX fonksiyonunun güncel Linux sistemlerinde çağrılmasıyla 
     oluşan çekirdekteki çağrı zincirini aşağıda veriyoruz:
 
         KULLANICI ALANI
@@ -2246,24 +2249,24 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                    106. Ders 03/10/2026 - Cumartesi
+                                            106. Ders 03/10/2026 - Cumartesi
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Yukarıda biz sys_mmap sistem fonksiyonun akışını verdik. Çekirdek kendi içerisinde haritalama yaparken bu sistem 
+    Yukarıda biz sys_mmap sistem fonksiyonunun akışını verdik. Çekirdek kendi içerisinde haritalama yaparken bu sistem 
     fonksiyonunu kullanamaz. Onun yerine "mm/util.c" içerisinde bulunan vm_mmap fonksiyonunu kullanmaktadır. Örneğin 
     exec fonksiyonları çalıştırılabilir dosyanın bölütlerini (segments) belleğe yüklerken vm_mmap fonksiyonunu kullanmaktadır. 
-    mm_map fonksiyonu zaten kendi içerisinde vm_mmap_pgoff fonksiyonunu çağırmaktadır. Yani fonksiyonun işlevselliği 
-    sistem fonksiyonuyla aynıdır. Aşağıda sistem fonksiyonun ve vm_mmap fonksiyonun akışlarını aynı şekil üzerinde 
-    veriyoruz:
+    vm_mmap fonksiyonu zaten kendi içerisinde sys_mmap tarafından da çağrılan vm_mmap_pgoff fonksiyonunu çağırmaktadır. 
+    Yani fonksiyonun işlevselliği sistem fonksiyonuyla aynıdır. Aşağıda sistem fonksiyonunun ve vm_mmap fonksiyonun akışlarını 
+    aynı şekil üzerinde veriyoruz:
 
-          KULLANICI ALANI
+    KULLANICI ALANI
     ┌──────────────────────────────┐
     │ mmap()  [glibc __mmap64]     │
     └──────────────┬───────────────┘
                     │ syscall (rax = 9)
     ════════════════╪═══════════════════════════════════════════════════
-    ÇEKİRDEK       ▼
+    ÇEKİRDEK  ALANI ▼
     ┌──────────────────────────────┐    ┌──────────────────────────────┐
     │ entry_SYSCALL_64             │    │ Çekirdek içi çağıranlar:     │
     │   └─ do_syscall_64           │    │   elf_map()   [binfmt_elf.c] │
@@ -2324,16 +2327,17 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Biz yukarıdaki fonksiyonların işleyişlerinin ayrıntıları üzerinde durmayacağız. Ancak bu fonksiyonların kullanıldığı 
-    mekanizmaları açıklayacağız. Neticde bu fonksiyonlar bir VMA (vm_area_struct) nesnesinin oluşturulmasını ve prosesin 
-    sanal bellek alanına bu VMA'nın bağlanmasını sağlamaktadır. Ancak bu işlemi dosya tabanlı bir biçimde de yapmaktadır. 
-    Bu nedenle mmap fonksiyonu ve vm_mmap fonksiyonu yüksek seviyeli fonksiyonalardır. vm_mmap fonksiyonu export edilmiştir, 
-    dolayısıyla çekirdek modülleri ve aygıt sürücüler tarafından da kullanılabilir. Ancak diğer aşağı seviyeli fonksiyonlar
-    export edilmemiştir. 
+    Biz yukarıdaki fonksiyonların işleyişlerinin ayrıntıları üzerinde durmayacağız. Ancak bu fonksiyonların kullandığı 
+    mekanizmaları açıklayacağız. Neticede bu fonksiyonlar bir VMA (vm_area_struct) nesnesinin oluşturulmasını ve prosesin 
+    sanal bellek alanına bu VMA nesnesinin bağlanmasını sağlamaktadır. Ancak bu fonksiyonlar işlemi dosya tabanlı bir 
+    biçimde de yapmaktadır. Bu nedenle mmap fonksiyonu ve vm_mmap fonksiyonu yüksek seviyeli fonksiyonlardır. vm_mmap 
+    fonksiyonu export edilmiştir, dolayısıyla çekirdek modülleri ve aygıt sürücüler tarafından da kullanılabilir.
+    Ancak diğer aşağı seviyeli fonksiyonlar export edilmemiştir. 
 
-    Çekirdek içerisinde vm_mmap fonksiyonundan daha düşük seviyeli bütünsrel işlem yapan bir fonksiyon yoktur. Ancak 
-    işlemler aşağıda seviyeli çekirdek fonksiyonlarıyla parça parça da yapılabilmektedir. Örneğin güncel çekirdeklerde 
-    "mm/vma_init.c" dosyasındaki vm_area_alloc fonksiyonu bir vm_area_struct nesnesini yaratıp ona ilkdeğer vermektedir:
+    Çekirdek içerisinde vm_mmap fonksiyonundan daha düşük seviyeli VMA tahsisatını bütünsel bir biçimde yapan bir fonksiyon 
+    yoktur. Ancak VMA tahsisat işlemleri aşağı seviyeli çekirdek fonksiyonlarının çağrılmasıyla adım adım da yapılabilmektedir. 
+    Örneğin güncel çekirdeklerde "mm/vma_init.c" dosyasındaki vm_area_alloc fonksiyonu bir vm_area_struct nesnesini yaratıp 
+    ona ilkdeğer vermektedir:
 
     struct vm_area_struct *vm_area_alloc(struct mm_struct *mm)
     {
@@ -2348,7 +2352,7 @@ void exit_sys(const char *msg)
         return vma;
     }
 
-    Oluşturulan vm_area_struct nesnesinin çeşitli özelliklerini set edebn faonksiyonlar buluınmaktadır. Aşağıda güncel 
+    Oluşturulan vm_area_struct nesnesinin çeşitli özelliklerini set eden fonksiyonlar bulunmaktadır. Aşağıda güncel 
     çekirdeklerde bulunan bu setter fonksiyonlarının listesini veriyoruz:
 
     ┌──────────────────────┬───────────────────────────────┬────────────────────┐
@@ -2367,6 +2371,8 @@ void exit_sys(const char *msg)
     │ vma_start_write      │ vm_lock_seq                   │ yazma kilidi       │
     └──────────────────────┴───────────────────────────────┴────────────────────┘
 
+Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlardır:
+
     ┌─────────────────────┬──────────────────────┬─────────────────────┐
     │      Fonksiyon      │        İşlem         │        Kilit        │
     ├─────────────────────┼──────────────────────┼─────────────────────┤
@@ -2378,7 +2384,8 @@ void exit_sys(const char *msg)
     │ vm_flags_mod        │ |= set, &= ~clear    │ vma_start_write()   │
     └─────────────────────┴──────────────────────┴─────────────────────┘
 
-    Aşağıda çekirdeğin aşağı seviyeli fonksiyonları kullanılarak minimal tahssisat yapan bir fonksiyon örneği verilmiştir:
+    Aşağıda çekirdeğin aşağı seviyeli fonksiyonları kullanılarak temel düzeyde VMA tahsisatı yapan bir fonksiyon örneği 
+    verilmiştir:
 
     #include <linux/mm.h>
     #include <linux/mman.h>
@@ -2388,7 +2395,7 @@ void exit_sys(const char *msg)
     * Create a minimal anonymous VMA in @mm.
     * Returns the start address on success, or a negative errno value.
     */
-    static unsigned long minimal_vma_create(struct mm_struct *mm,               
+    static unsigned long minimal_vma_create(struct mm_struct *mm,
             unsigned long len, vm_flags_t vm_flags)
     {
         struct vm_area_struct *vma;
@@ -2444,16 +2451,16 @@ void exit_sys(const char *msg)
     }
 
     Buradaki aşağı seviyeli fonksiyonların neler yaptığı koddan anlaşılabilir. Örneğin __get_unmapped_area fonksiyonu 
-    prosesin adres alanında mapl ağacında belli uzunlukta boş yer aramaktadır. insert_vm_struct fonksiyonu bu alanı 
+    prosesin adres alanında maple ağacında belli uzunlukta boş yer aramaktadır. insert_vm_struct fonksiyonu bu alanı 
     prosesin sanal belleğine bağlamaktadır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Şimdi mmap fonksiyonu ile dosya tabanlı VMA tahsisatınının genel işleyişi üzerinde durmak istiyoruz. Yukarıda da 
-    belirtitğimiz gibi bir VMA'yı bir dosya ile ilişkilendirdiğimizde (buna kullanıcı modunda "bellek tabanlı dosya 
-    (memory mapped file)" dendiğini anımsayınız) arık VMA'ya ilişkin bellek alanları aslında dosya önbelleğine 
-    yönlendirilmektedir. Böylece dosya aüzerinde read/write ile işlem yapıldığında da doğrudan VMA üzerinde işlem 
-    yapıldığında da aslında işlemler aynı sayfa önbelleği üzerinde yapılmaktadır. Yani aslında mmap fonksiyonun bize 
+    Şimdi mmap fonksiyonu ile dosya tabanlı VMA tahsisatının genel işleyişi üzerinde durmak istiyoruz. Yukarıda da 
+    belirttiğimiz gibi bir VMA'yı bir dosya ile ilişkilendirdiğimizde (buna kullanıcı modunda "bellek tabanlı dosya 
+    (memory mapped file)" dendiğini anımsayınız) artık VMA'ya ilişkin bellek alanları aslında dosya önbelleğine 
+    yönlendirilmektedir. Böylece dosya üzerinde read/write ile işlem yapıldığında da doğrudan VMA üzerinde işlem 
+    yapıldığında da aslında işlemler aynı sayfa önbelleği üzerinde yapılmaktadır. Yani aslında mmap fonksiyonunun bize 
     verdiği adres dosya önbelleğindeki sayfa adresleriyle aynıdır. Bu durumu aşağıdaki şekille betimleyebiliriz:
 
        (a) read()/write() modeli                     (b) mmap() modeli
@@ -2494,13 +2501,13 @@ void exit_sys(const char *msg)
         /* ... */
     };
 
-    Buradaki vm_file elemanı VMA''nın ilişkilendirildiği dosyaya ilişkin dosya nesnesini göstermektedir. vm_pgoff 
-    elemanı ise ilgili alanın dosyanın hangi offset'in itibaren haritlandığını belirtmektedir. Bu iki alan bize şu 
-    bilgiyi vermektedir: "Bu VMA vm_file dosyasının vm_pgoff offset'inden tibaren olan kısmını bellekte temsil 
-    etmektedir." VMA'nın uzunluğu zaten yapının vm_start ve vm_end elemanlarıyla belirtiliyoru:
+    Buradaki vm_file elemanı VMA'nın ilişkilendirildiği dosyaya ilişkin dosya nesnesini göstermektedir. vm_pgoff 
+    elemanı ise ilgili alanın dosyanın hangi offset'inden itibaren haritlandığını belirtmektedir. Bu iki alan bize şu 
+    bilgiyi vermektedir: "Bu VMA vm_file dosyasının vm_pgoff offset'inden itibaren olan kısmını bellekte temsil 
+    etmektedir." VMA'nın uzunluğu zaten yapının vm_start ve vm_end elemanlarıyla belirtiliyordu:
 
     struct vm_area_struct {
-        unsigned long    vm_start, vm_end;   /* [vm_start, vm_end)    
+        unsigned long    vm_start, vm_end;   /* [vm_start, vm_end)           */
         /* .. */
         unsigned long    vm_pgoff;           /* dosya ofseti (sayfa)          */
         struct file      *vm_file;           /* haritalanan dosya             */
@@ -6572,7 +6579,7 @@ void exit_sys(const char *msg)
     │ 0xFFFF │ ET_HIPROC      │ İşlemciye özgü aralık sonu               │ -                             │
     └────────┴────────────────┴──────────────────────────────────────────┴───────────────────────────────┘
 
-        Eskiden gcc ve clang default olarak çalıştırılabilir dosyaları sabit adresli (ET_EXEC türüyle) oluşturuyordu. 
+    Eskiden gcc ve clang default olarak çalıştırılabilir dosyaları sabit adresli (ET_EXEC türüyle) oluşturuyordu. 
     Konumdan bağımız kod (position independent code (PIC)) çalıştırılabilir dosyalarda default değildi. -fPIE derleyici 
     seçeneği ile ve -pie bağlayıcı seçeneği ile oluşturuluyordu. Örneğin:
 
@@ -6822,8 +6829,7 @@ void exit_sys(const char *msg)
     int b[1000000] = {100};
 
     int main(void)
-    {
-        
+    {     
         return 0;
     }
 
@@ -7467,7 +7473,7 @@ void exit_sys(const char *msg)
     Normal olarak komut satırı argümanlarının ve çevre değişkenlerinin yeni programın stack'inin başının hemen altına 
     yerleştirilmesi gerekir:
 
-                Stack Alanı
+                    Stack Alanı
     ┌────────────────────────────────────────────┐
     │ argc                              (8 byte) │ ◄── sp = bprm->p = mm->start_stack
     ├────────────────────────────────────────────┤
@@ -7707,13 +7713,13 @@ void exit_sys(const char *msg)
     │    │    ├─ total_mapping_size(), maximum_alignment()
     │    │    └─ ELF_ET_DYN_BASE + arch_mmap_rnd()
     │    └─ elf_load()
-    │         ├─ elf_map()  → vm_mmap()      → dosya destekli mapping
+    │         ├─ elf_map()  → vm_mmap()      → dosya destekli haritalama
     │         ├─ padzero()                   → son sayfanın kuyruğunu sıfırlar
     │         └─ vm_brk_flags()              → .bss için anonim alan
     │
     ├─ [8] Giriş noktası
     │    ├─ e_entry + load_bias
-    │    └─ yorumlayıcı varsa:
+    │    └─ yorumlayıcı varsa, yorumlayıcıyı yükle
     │         load_elf_interp()
     │           └─ elf_load()  (ld.so segmentleri)
     │         elf_entry = ld.so'nun e_entry'si
@@ -7730,6 +7736,11 @@ void exit_sys(const char *msg)
         ├─ finalize_exec()                  → stack rlimit, dumpable vs
         └─ START_THREAD()                   → regs->ip = elf_entry,
                                                 regs->sp = bprm->p
+
+    Burada bir noktaya özellikle dikkat ediniz. Çalıştırılabilir dosyanın PT_LOAD bölütleri yüklendikten sonra eğer
+    dosyada PT_INTERP bölütü varsa "program yorumlayıcısı (program interpreter)" da belleğe yüklenmektedir. Program 
+    yorumlayıcısının açılması şekilde 3'üncü aşamada yüklenmesi ise 8'inci aşamada yapılmaktadır. İzleyen paragrafta 
+    "program yorumlayıcısı" konusunu ele alacağız. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -7752,20 +7763,20 @@ void exit_sys(const char *msg)
         break;
     }
 
-    Eüer program dosyası dinamik kütüphane kulanıyorsa load_elf_binary fonksiyonu PT_INTERP değeirne sahip program 
+    Eğer program dosyası dinamik kütüphane kulanıyorsa load_elf_binary fonksiyonu PT_INTERP değeirne sahip program 
     başlık tablosu girişinden ismine "pogram yorumlayıcısı (program interpreter)" denilen ve dinamik kütüphaneleri 
     yükleyen "kullanıcı modu" programını da sanal belleğe yükleyip programın giriş noktasını (entry point) bu program 
     yorumlayıcısının giriş noktası olarak ayarlamaktadır. Yani eğer program dinamik kütüphane kullanıyorsa aslında 
     çalıştırılabilir program yüklendiğinde çalışma "program yorumlayıcısı (program interpreter)" denilen programdan 
     başlatılmaktadır. Daha önce de belirttiğimiz gibi "program yorumlayıcısı" kullanıcı modunda çalışan ve takma adıyla 
-    "ld.so" denilen programdır. Program yourmlayıcısı ("ld.so" programı) çalışmaya başladığında programın kullandığı 
+    "ld.so" denilen programdır. Program yorumlayıcısı ("ld.so" programı) çalışmaya başladığında programın kullandığı 
     dinamik kütüphaneleri belirler, onları sanal adres alanına haritalar ve en sonunda çalıştırılabilir dosyanın (yani 
     asıl dosyanın) giriş noktasına atlar. Yani program yorumlayıcısı dinamik kütüphaneleri yükleyip gerçek programın 
     çalışmasını sağlamaktadır. Program yorumlayıcısı kavramsal bir isimdir. Bunun dosya halindeki kavramsal ismi ise 
     "ld.so" biçimindedir. Ancak asıl yüklenecek program interpreter'ın ismi ve yeri PT_INTERP değerine sahip olan 
     program başlık tablosu girişinde yazmaktadır. Buradaki akışı aşağıdaki şekille betimleyebiliriz:
 
-                           execve("./prog", ...)
+                        execve("./prog", ...)
                                │
                                ▼
     ┌──────────────────────────────────────────────────────────────┐
@@ -7882,8 +7893,9 @@ void exit_sys(const char *msg)
     için çekirdek modunda olmaya gerek yoktur. Peki program yükleyicisi dinamik kütüphaneleri nasıl yüklemektedir?
 
     Dinamik kütüphane kullanan programlarda bağlayıcı tarafından ELF formatında iki önemli bölüm (section) oluşturulmaktadır. 
-    Bu bölümler ".dynamic" ve ".dynsym" isimli bölümlerdir. ".dynamic" bölümü çalıştırılabilir dosyanın kullandığı dinamik kütüphaneler hakkında 
-    bilgiler içermektedir. ".dynsym" bölümü ise dinamik kütüphanelerden kullanılan sembollerin tutulduğu sembol tablosudur.
+    Bu bölümler ".dynamic" ve ".dynsym" isimli bölümlerdir. ".dynamic" bölümü çalıştırılabilir dosyanın kullandığı dinamik 
+    kütüphaneler hakkında bilgiler içermektedir. ".dynsym" bölümü ise dinamik kütüphanelerden kullanılan sembollerin tutulduğu 
+    sembol tablosudur.
 
     32 bit ELF formatının ".dynamic" bölümünün yapısal içeriği şöyledir:
 
@@ -7923,14 +7935,14 @@ void exit_sys(const char *msg)
 
     DT_NEEDED: Bu tag'ı d_val elemanı izlemektedir. Bu tag'daki d_val elemanı modülün yüklenmesi için gerekli olan dinamik kütüphanenin 
     isminin (yol ifadesinin değil) string tablosundaki (".strtab") indeks numarası belirtilmektedir. Dinamik kütüphanelerin
-    yalnızca isimleri belirtilmektedir. Onların dizinlerde aranması prgram yorumlayıcısı tarafından belli bir sırada yapılmaktadır.
+    yalnızca isimleri belirtilmektedir. Onların dizinlerde aranması program yorumlayıcısı tarafından belli bir sırada yapılmaktadır.
 
     DT_SONAME: Bu tag'ı d_val elemanı izlemektedir. Bu tag dinamik kütüphanelerde bulunmaktadır. Burada dinamik kütüphanenin "so 
     isminin" bulunduğu string tablosundaki (".strtab" bölümündeki) indeks belirtilmektedir.
 
     Burada başka tag'larda vardır. Bu tag'ların anlamlarını durada açıklamayacağız. 
 
-    Aşağıda readelf programı ile ".dynamic" bölümünün görüntülenme biçimi gösterilmektedir:
+    Aşağıda "readelf" programı ile ".dynamic" bölümünün görüntülenme biçimi gösterilmektedir:
 
     $ readelf -d sample
 
@@ -7979,37 +7991,915 @@ void exit_sys(const char *msg)
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+                                            118. Ders 22/11/2026 - Pazar
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Peki exec sistem fonksiyonları çalıştırılabilir dosyayı yükledikten sonra akış programın "giriş noktasından (entry 
+    point) nasıl başlatılmaktadır? Çalıştırılabilir ELF dosyasında programın giriş noktasının adresi ELF başlığındaki 
+    e_entry elemanında bulunmaktadır. Bağlayıcı _start sembolünü programın giriş noktası kabul ederek bu _start adresini 
+    e_entry elemanına yerleştirmektedir. Ancak bu sürecin bazı ayrıntıları da vardır. Örneğin programın giriş noktası 
+    bağlama işleminde "-e" seöeneği ile değiştirilebilmektedir. Böylece program _start noktasından değil başka bir 
+    noktadan çalışmaya başlatılabilir. Bağlayıcı programın giriş noktasını aşağıdaki tabloda belirtilen sırada belirlemeye 
+    çalışmaktadır:
+
+    ┌──────┬──────────────────────────────┬────────────────────────┐
+    │ Sıra │            Kaynak            │         Örnek          │
+    ├──────┼──────────────────────────────┼────────────────────────┤
+    │  1   │ -e komut satırı seçeneği     │ ld -e my_entry         │
+    │  2   │ Linker script ENTRY()        │ ENTRY(_start)          │
+    │  3   │ Hedefe özgü sembol           │ start                  │
+    │  4   │ .text bölümünün ilk baytı    │ sh_addr(.text)         │
+    │  5   │ Hiçbiri yoksa                │ 0                      │
+    └──────┴──────────────────────────────┴────────────────────────┘
+
+    Göürldüğü gibi burada birinci sırada "-e" seçeneği vardır. İkinci sırada "bağlayıcı betiğinden ENTRY ile belirtilen"
+    nokta dikkate alınmaktadır. Burada zaten _start noktası belirtilmiştir. En kötü olasılıkla programın giriş noktası 
+    ".text" bölümünün başı ya da 0 adresi olmaktadır. C'de program yazarken zaten gcc ve clang derleyicileri başlangıç 
+    modüllerinde (start-up modules) _start sembolünü bulundurmaktadır. Yani programın başlangıç noktası aslında main 
+    fonksiyonu değil, derleyici tarafından yerleştirilen başlangıç kodlarındadır (start-up codes). main fonksiyonu 
+    başlangıç kodlarından çağrılmaktadır. main bittiğinde de akış başlangıç koduna geri dönmektedir. Akış main fonksiyonunu 
+    bitirirse exit fonksiyonu burada çağrılmaktadır. 
+
+    Örneğin biz akışın _start noktasından değil (yani derleyicinin yerleştirdiği başlangıç kodundan değil) istediğimiz 
+    bir fonksiyondan da başlatılmasını sağlayabiliriz:
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <unistd.h>
+
+    int main() {}
+
+    void foo(void)
+    {
+        printf("this is a test\n");
+
+        exit(0);
+    }
+
+    Derlemeyi şöyle yapmalıız:
+
+    $ gcc -e foo -o sample  sample.c 
+
+    Bu örnekte main fonksiyonunu hala bulundurmak zorundayız. Çünkü derleyicinin yerleştirdiği başlangıç kodu main 
+    fonksiyonuna referans etmektedir. main kullanılmıyor olsa da bağlama aşamsında sorun çıkmaması için main fonksiyonun 
+    bulundurulması gerekmektedir. Tabii burada "-nostdlib" seçeneği ile biz tamamen "glibc" kütüphanesini devre dışı 
+    bırakabiliriz. Bu durumda main fonksiyonunu koddan kaldırabiliriz. Ancak "glibc" kütüphanesini devre dışı bırakırsak
+    herhangi bir standart C fonksiyonunu ve POSIX fonksiyonunu da çağıramaz duruma geliriz. Bu durumda mecburen sistem 
+    fonksiyonlarını inline assmebly yoluyla çağırmak zorunda kalırız. Örneğimizde foo fonksiyonda programı exit ile
+    sonlandırdık. Çünkü program derleyicinin başlangıç kodundan başlatılmadığı için foo bittiğinde geri dönülecek bir 
+    yer de yoktur. 
+    
+    "-nostdlib" seçeneği hem "glibc" kütüphanesini hem de derleyicinin başlangç kodlarını devre dışı bırakmaktadır. 
+    Aslında "-nostdlib" dışında aşağıdaki seçenekler de bulunmaktadır:
+
+    ┌──────────────────┬──────────┬──────────┬──────────┐
+    │     Seçenek      │  crt*.o  │   libc   │  libgcc  │
+    ├──────────────────┼──────────┼──────────┼──────────┤
+    │ (varsayılan)     │ bağlanır │ bağlanır │ bağlanır │
+    │ -nostartfiles    │   yok    │ bağlanır │ bağlanır │
+    │ -nodefaultlibs   │ bağlanır │   yok    │   yok    │
+    │ -nostdlib        │   yok    │   yok    │   yok    │
+    │ -nolibc          │ bağlanır │   yok    │ bağlanır │
+    └──────────────────┴──────────┴──────────┴──────────┘
+
+    Görüldüğü gibi -nostartfiles seçeneği aslında "g"libc" kütüphanesinin kullanımına izin vermekle birlikte başlangıç 
+    kodlarını kaldırmaktadır. main fonkisyonunu koddan kaldırmak için bu seçenek daha pratiktir. "-nostdlib" seçeneği
+    "-nostartfiles" ve "-nodefaultlibs" seçeneklerinin bileşimi gibidir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Eğer ELF dosyası dinamik kütüphane kullanıyorsa exec sistem fonksiyonları program yorumlayıcını yükledikten sonra 
+    akışı program yükleyicisinin ("ld.so") ELF başlığındaki e_entry noktasından başlatır. Yani bizim programımız dinamik
+    kütüphane kullanıyorsa aslında programın başlangıç noktası program yorumlayıcısıdır. İşte program yorumlayıcısı 
+    programın kullandığı dinamik kütüphaneleri yükledikten sonra akışı çalıştırılabilir dosyanın ELF başlığındaki e_enty 
+    noktasına aktarmaktadır. Yani neticede yine çalıştırılabilir dosyadaki gerçek giriş noktası devreye girmektedir. 
+    Bu süreci aşağıdaki şekille betimleyebiliriz:
+
+    ┌──────────────────────────────────────────────────────────┐
+    │ [1] Kullanıcı Alanı: execve("./prog", argv, envp)        │
+    └───────────────────────────┬──────────────────────────────┘
+                                │  sistem çağrısı
+                                ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │ [2] Çekirdek: fs/binfmt_elf.c -> load_elf_binary()       │
+    │                                                          │
+    │   - ./prog ELF başlığı ve program başlıkları okunur      │
+    │   - PT_INTERP bulunur -> "/lib64/ld-linux-x86-64.so.2"   │
+    │   - ./prog PT_LOAD segmentleri Adres Alanına map edilir  │
+    │   - ld.so PT_LOAD segmentleri Adres Alanına map edilir   │
+    │   - Stack: argc, argv, envp, auxv hazırlanır             │
+    │       AT_ENTRY = ./prog'un e_entry değeri                │
+    │       AT_BASE  = ld.so'nun yükleme adresi                │
+    │       AT_PHDR  = ./prog program başlıklarının adresi     │
+    │   - start_thread(): PC <- ld.so yükleme adresi + e_entry │
+    └───────────────────────────┬──────────────────────────────┘
+                                │  çekirdekten kullanıcı alanına dönüş
+                                ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │ [3] Program Yorumlayıcısı (ld.so): _start / _dl_start    │
+    │                                                          │
+    │   - Kendi relocation işlemlerini yapar (self-relocate)   │
+    │   - PT_DYNAMIC (DT_NEEDED) okunur: libc.so.6, ...        │
+    │   - Kütüphaneler bulunur ve mmap ile yüklenir            │
+    │   - Sembol çözümleme ve relocation (GOT/PLT)             │
+    │   - Kütüphanelerin init fonksiyonları çağrılır           │
+    │   - auxv'den AT_ENTRY alınır                             │
+    └───────────────────────────┬──────────────────────────────┘
+                                │  jmp AT_ENTRY
+                                ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │ [4] Çalıştırılabilir Dosya: _start (prog'un e_entry'si)  │
+    │                                                          │
+    │   - __libc_start_main() çağrılır                         │
+    └───────────────────────────┬──────────────────────────────┘
+                                │
+                                ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │ [5] main(argc, argv, envp)                               │
+    └──────────────────────────────────────────────────────────┘
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------------------------------------------------
     Peki hiç exec sistem fonksiyonlarını çağırmadan kullanıcı modunda çalışan bir ELF yükleyicisi yazılabilir mi? 
     İşte böyle bir yükleyici belirli kısımlar ihmal edilerek kaba işlevleriyle yazılabilir. Ancak çekirdekteki 
     load_elf_binary fonksiyonun işlevlerinin aynısı kullanıcı modunda yazılamaz. Kullanıcı modunda ancak bu işlemler 
-    kabaca yapılabilmektedir. 
+    kabaca yapılabilmektedir. Örneğin kulanıcı modunda biz çalıştırılabilir dosyanın PT_LOAD bölütlerini mmap fonksiyonuyla 
+    yükleyebiliriz. Sonra da programın ELF başlığındaki e_enty noktasından başlatabiliriz (programın dinamik kütüphane 
+    kullanmadığını varsayıyoruz.) Ancak bunu yapan programın bellek alanını yok edemeyiz. exec sistem fonksiyonlaırnın 
+    exec yapan program kodunu tamamane bellekten attığını anımsayınız. İşte böyle bir atım işlemi çekirdek modunda 
+    olmadan yapılamaz. Aşağıdaki tabloda exec süreci bağlamında kullanıcı modundan sağlanabilecek ve sağlanamayacak 
+    işlevler tablo halinde verilmiştir:
+
+    ┌─────────────────────────────┬──────────────────┬──────────────────────────────────────┐
+    │           Özellik           │ Kullanıcı Alanı? │            Yöntem / Neden            │
+    ├─────────────────────────────┼──────────────────┼──────────────────────────────────────┤
+    │ Açık FD'ler (CLOEXEC)       │ Evet             │ /proc/self/fd gez; CLOEXEC'i kapat   │
+    │ Signal disposition          │ Evet             │ sigaction döngüsü → SIG_DFL          │
+    │ Alternate sig. stack        │ Evet             │ sigaltstack(SS_DISABLE)              │
+    │ POSIX / itimer              │ Evet             │ /proc/self/timers; timer_delete      │
+    │ comm / süreç adı            │ Evet             │ prctl(PR_SET_NAME)                   │
+    │ Yazmaçlar / FPU             │ Kısmen           │ asm stub'ta tüm GPR xor + fninit     │
+    │ brk / heap                  │ Kısmen           │ brk() taşınır; eski VMA kalır        │
+    │ Diğer thread'ler            │ Kısmen           │ Loader tek thread'liyse konu dışı    │
+    │ Eski VMA'ların yok edilmesi │ Hayır            │ Çalışan .text/stack/libc sökülemez   │
+    │ /proc/self/exe              │ Hayır            │ PR_SET_MM_EXE_FILE; CAP_SYS_RESOURCE │
+    │ setuid / credentials        │ Hayır            │ Olmayan ayrıcalık verilemez          │
+    │ AT_SECURE / LSM             │ Hayır            │ Çekirdek-içi güvenlik kararı         │
+    └─────────────────────────────┴──────────────────┴──────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Aşağıda kullanıcı modundan dinamik kütüphane kullanmayan (yani "-static" seöeneğiyle derlenmiş olan) bir çalıştırılaabilir 
+    ELF dosyasını kullanıcı modunda yükleyip çalıştıran örnek bir C programı verilmiştir. Bu örnek programda önce 
+    çalıştırılabilir dosya open fonksiyonuyla açılmıştır:
 
+    if ((fd = open(argv[1], O_RDONLY)) == -1)
+        exit_sys(argv[1]);
+
+    read_elf_header fonksiyonu ile ELF başlığı okunmuştur:
+
+    read_elf_header(fd, &ehdr);
+
+    read_elf_header fonksiyonu şöyle yazılmıştır:
+
+    static void read_elf_header(int fd, Elf64_Ehdr *ehdr)
+    {
+        if (pread(fd, ehdr, sizeof(*ehdr), 0) != (ssize_t)sizeof(*ehdr))
+            exit_msg("failed to read ELF header");
+
+        if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0)
+            exit_msg("file is not in ELF format");
+        if (ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_machine != EM_X86_64)
+            exit_msg("only 64-bit x86-64 programs are supported");
+        if (ehdr->e_type != ET_EXEC && ehdr->e_type != ET_DYN)
+            exit_msg("file is not an executable ELF file");
+        if (ehdr->e_phentsize != sizeof(Elf64_Phdr))
+            exit_msg("unexpected program header size");
+        if (ehdr->e_phnum == 0 || ehdr->e_phnum > MAX_PHNUM)
+            exit_msg("invalid program header count");
+    }
+
+    Bundan sonra örnek programda program başlık tablosunun yeri tespit edilerek load_segments fonksiyonuyla PT_LOAD 
+    bölütleri mmap fonksiyonu kullanılarak prosesin adres alanına haritalanmıştır:
+
+    phdrs_size = (ssize_t)ehdr.e_phnum * (ssize_t)sizeof(Elf64_Phdr);
+    if (pread(fd, phdrs, (size_t)phdrs_size, (off_t)ehdr.e_phoff) != phdrs_size)
+        exit_msg("failed to read program header table");
+
+    load_bias = load_segments(fd, &ehdr, phdrs);
+
+    load_segments fonksiyonu PT_LOAD  bölütlerinin yüklendiği en önemli fonksiyondur. Bu fonksiyonda önce bütün PT_LOAD 
+    bölütleerinin kapladığı alan bir bütün olarak hesaplanmış ve tek hamlede mmap ile tahsis edilmiştir. Sonra bu 
+    bölütler dolaşılarak yeniden mmap ile dosya tabanlı tabanlı bir biçimde yükleme yapılmıştır. Programın PT_LOAD 
+    bölütleri yüklendikten sonra stack alan için tahsisat yapılıp daha önceden belirttiğimiz stack organizasyonu 
+    oluşturulmuştur. Bu işlevi build_stack fonksiyonu sağlamaktadır. Bütün bu işlemler bittikten sonra ELF başlığındaki
+    progrtam giriş noktasına akış devredilmiştir. 
+----------------------------------------------------------------------------------------------------------------------*/
+
+/* elfloader.c */
+
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <elf.h>
+#include <sys/mman.h>
+
+#define STACK_SIZE      (8UL * 1024 * 1024)
+#define MAX_PHNUM       64
+
+static uintptr_t page_size;
+
+#define PAGE_DOWN(x)    ((uintptr_t)(x) & ~(page_size - 1))
+#define PAGE_UP(x)      (((uintptr_t)(x) + page_size - 1) & ~(page_size - 1))
+
+void exit_sys(const char *msg);
+void exit_msg(const char *msg);
+
+/* p_flags (PF_R, PF_W, PF_X) -> mmap koruma bayraklari */
+
+static int prot_from_flags(uint32_t flags)
+{
+    int prot = 0;
+
+    if (flags & PF_R)
+        prot |= PROT_READ;
+    if (flags & PF_W)
+        prot |= PROT_WRITE;
+    if (flags & PF_X)
+        prot |= PROT_EXEC;
+
+    return prot;
+}
+
+/* ELF basligini okur ve dogrular */
+
+static void read_elf_header(int fd, Elf64_Ehdr *ehdr)
+{
+    if (pread(fd, ehdr, sizeof(*ehdr), 0) != (ssize_t)sizeof(*ehdr))
+        exit_msg("failed to read ELF header");
+
+    if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0)
+        exit_msg("file is not in ELF format");
+    if (ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_machine != EM_X86_64)
+        exit_msg("only 64-bit x86-64 programs are supported");
+    if (ehdr->e_type != ET_EXEC && ehdr->e_type != ET_DYN)
+        exit_msg("file is not an executable ELF file");
+    if (ehdr->e_phentsize != sizeof(Elf64_Phdr))
+        exit_msg("unexpected program header size");
+    if (ehdr->e_phnum == 0 || ehdr->e_phnum > MAX_PHNUM)
+        exit_msg("invalid program header count");
+}
+
+/*
+ * PT_LOAD segmentlerini bellege haritalar eder, load bias degerini dondurur.
+ * Cekirdekteki load_elf_binary / elf_map mantiginin sadelestirilmis halidir.
+ */
+
+static uintptr_t load_segments(int fd, const Elf64_Ehdr *ehdr, const Elf64_Phdr *phdrs)
+{
+    uintptr_t min_vaddr = UINTPTR_MAX, max_vaddr = 0;
+    uintptr_t load_bias;
+    size_t total_size;
+    void *region;
+    int i;
+
+    /* 1) Tum PT_LOAD segmentlerinin kapladigi sanal adres araligini bul */
+
+    for (i = 0; i < ehdr->e_phnum; ++i) {
+        const Elf64_Phdr *ph = &phdrs[i];
+
+        if (ph->p_type == PT_INTERP)
+            exit_msg("program is dynamically linked (PT_INTERP present); only static programs are supported");
+        if (ph->p_type != PT_LOAD)
+            continue;
+        if (PAGE_DOWN(ph->p_vaddr) < min_vaddr)
+            min_vaddr = PAGE_DOWN(ph->p_vaddr);
+        if (PAGE_UP(ph->p_vaddr + ph->p_memsz) > max_vaddr)
+            max_vaddr = PAGE_UP(ph->p_vaddr + ph->p_memsz);
+    }
+    if (max_vaddr == 0)
+        exit_msg("no PT_LOAD segment in program");
+    total_size = max_vaddr - min_vaddr;
+
+    /* 2) Araligin tamamini PROT_NONE olarak ayir */
+
+    if (ehdr->e_type == ET_DYN) {
+        /* PIE: adresi cekirdek secsin, load bias buradan hesaplanir */
+        region = mmap(NULL, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (region == MAP_FAILED)
+            exit_sys("mmap (reserve address range)");
+        load_bias = (uintptr_t)region - min_vaddr;
+    }
+    else {
+        /* ET_EXEC: adresler sabit. Aralik doluysa (ornegin yukleyiciyle cakisiyorsa) hata ver */
+
+        region = mmap((void *)min_vaddr, total_size, PROT_NONE,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (region == MAP_FAILED)
+            exit_sys("mmap (fixed address range may be occupied)");
+        if ((uintptr_t)region != min_vaddr)
+            exit_msg("could not reserve fixed address range");
+        load_bias = 0;
+    }
+
+    /* 3) Her PT_LOAD segmentini ayrilan araligin icine yerlestir */
+
+    for (i = 0; i < ehdr->e_phnum; ++i) {
+        const Elf64_Phdr *ph = &phdrs[i];
+        uintptr_t seg_start, map_start, file_end, mem_end, bss_start;
+        off_t map_offset;
+        int prot, has_bss;
+
+        if (ph->p_type != PT_LOAD)
+            continue;
+
+        seg_start = load_bias + ph->p_vaddr;
+        map_start = PAGE_DOWN(seg_start);
+        map_offset = (off_t)(ph->p_offset - (seg_start - map_start));
+        file_end = seg_start + ph->p_filesz;
+        mem_end = seg_start + ph->p_memsz;
+        prot = prot_from_flags(ph->p_flags);
+        has_bss = ph->p_memsz > ph->p_filesz;
+
+        /* Dosyadan gelen kisim. bss varsa sifirlama icin gecici olarak yazma hakki verilir */
+
+        if (ph->p_filesz > 0) {
+            if (mmap((void *)map_start, PAGE_UP(file_end) - map_start,
+                    has_bss ? prot | PROT_WRITE : prot,
+                    MAP_PRIVATE | MAP_FIXED, fd, map_offset) == MAP_FAILED)
+                exit_sys("mmap (segment)");
+            bss_start = PAGE_UP(file_end);
+        }
+        else
+            bss_start = map_start;
+
+        /* p_memsz > p_filesz ise aradaki fark (bss) sifirlanmalidir */
+
+        if (has_bss) {
+            /* Son dosya sayfasinin artan kismi */
+
+            if (ph->p_filesz > 0)
+                memset((void *)file_end, 0, PAGE_UP(file_end) - file_end);
+
+            /* Geri kalan tam sayfalar icin anonim (sifirla dolu) sayfalar */
+            if (PAGE_UP(mem_end) > bss_start)
+                if (mmap((void *)bss_start, PAGE_UP(mem_end) - bss_start, prot | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+                    exit_sys("mmap (bss)");
+
+            /* Segmentin asil erisim haklarina don */
+
+            if (mprotect((void *)map_start, PAGE_UP(mem_end) - map_start, prot) == -1)
+                exit_sys("mprotect");
+        }
+    }
+
+    return load_bias;
+}
+
+/* Program header tablosunun bellekteki adresini bulur (AT_PHDR icin) */
+
+static uintptr_t find_phdr_addr(const Elf64_Ehdr *ehdr, const Elf64_Phdr *phdrs, uintptr_t load_bias)
+{
+    int i;
+
+    for (i = 0; i < ehdr->e_phnum; ++i)
+        if (phdrs[i].p_type == PT_PHDR)
+            return load_bias + phdrs[i].p_vaddr;
+
+    /* PT_PHDR yoksa tabloyu iceren PT_LOAD segmentinden hesapla */
+
+    for (i = 0; i < ehdr->e_phnum; ++i) {
+        const Elf64_Phdr *ph = &phdrs[i];
+
+        if (ph->p_type == PT_LOAD && ehdr->e_phoff >= ph->p_offset &&
+                ehdr->e_phoff < ph->p_offset + ph->p_filesz)
+            return load_bias + ph->p_vaddr + (ehdr->e_phoff - ph->p_offset);
+    }
+
+    exit_msg("program header table is not within any PT_LOAD segment");
+
+    return 0;
+}
+
+/*
+ * Yeni programin stack'ini cekirdegin biraktigi duzende hazirlar:
+ *
+ *   dusuk adres    argc                 <- stack gostericisi
+ *                  argv[0] ... argv[n-1]
+ *                  NULL
+ *                  envp[0] ... envp[m-1]
+ *                  NULL
+ *                  auxv[0] ... auxv[k-1]   (her biri 2 word)
+ *   yuksek adres   AT_NULL
+ *
+ * Yazilarin kendisi kopyalanmaz. Yukleyicinin stack'indeki yazilar bellekte
+ * durmaya devam ettigi icin gostericiler dogrudan oralari gosterir.
+ * Auxiliary vector yukleyicinin kendi vektorunden kopyalanir, yalnizca
+ * yeni programa ozgu girisler degistirilir.
+ */
+
+static uintptr_t *build_stack(int prog_argc, char **prog_argv, char **envp,
+        uintptr_t phdr_addr, int phnum, uintptr_t entry)
+{
+    Elf64_auxv_t *loader_auxv, *new_auxv;
+    uintptr_t stack_top, *sp, *cur;
+    size_t env_count = 0, aux_count = 0, word_count, i;
+    void *stack;
+
+    while (envp[env_count] != NULL)
+        ++env_count;
+    loader_auxv = (Elf64_auxv_t *)(envp + env_count + 1);
+    while (loader_auxv[aux_count].a_type != AT_NULL)
+        ++aux_count;
+
+    stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if (stack == MAP_FAILED)
+        exit_sys("mmap (stack)");
+    stack_top = (uintptr_t)stack + STACK_SIZE;
+
+    word_count = 1 + (prog_argc + 1) + (env_count + 1) + 2 * (aux_count + 1);
+    sp = (uintptr_t *)((stack_top - word_count * sizeof(uintptr_t)) & ~(uintptr_t)15);
+
+    cur = sp;
+    *cur++ = (uintptr_t)prog_argc;
+    for (i = 0; i < (size_t)prog_argc; ++i)
+        *cur++ = (uintptr_t)prog_argv[i];
+    *cur++ = 0;
+    for (i = 0; i < env_count; ++i)
+        *cur++ = (uintptr_t)envp[i];
+    *cur++ = 0;
+
+    new_auxv = (Elf64_auxv_t *)cur;
+    for (i = 0; i < aux_count; ++i) {
+        new_auxv[i] = loader_auxv[i];
+        switch (new_auxv[i].a_type) {
+            case AT_PHDR:
+                new_auxv[i].a_un.a_val = phdr_addr;
+                break;
+            case AT_PHENT:
+                new_auxv[i].a_un.a_val = sizeof(Elf64_Phdr);
+                break;
+            case AT_PHNUM:
+                new_auxv[i].a_un.a_val = (uint64_t)phnum;
+                break;
+            case AT_ENTRY:
+                new_auxv[i].a_un.a_val = entry;
+                break;
+            case AT_BASE:                   /* interpreter yok */
+                new_auxv[i].a_un.a_val = 0;
+                break;
+            case AT_EXECFN:
+                new_auxv[i].a_un.a_val = (uintptr_t)prog_argv[0];
+                break;
+        }
+    }
+    new_auxv[aux_count].a_type = AT_NULL;
+    new_auxv[aux_count].a_un.a_val = 0;
+
+    return sp;
+}
+
+/*
+ * Stack gostericisini yeni stack'e ceker ve giris noktasina dallanir.
+ * call degil jmp kullanilir: _start geri donmez ve stack tepesinde argc bekler.
+ * rdx = 0: x86-64 ABI'sinde rdx, atexit'e kaydedilecek fonksiyonu tasir.
+ * Onu ld.so verir, burada interpreter olmadigi icin sifirdir.
+ */
+
+static void __attribute__((noreturn)) jump_to_entry(uintptr_t *sp, uintptr_t entry)
+{
+    __asm__ volatile(
+        "mov %0, %%rsp\n\t"
+        "xor %%edx, %%edx\n\t"
+        "jmp *%1\n\t"
+        :
+        : "r"(sp), "r"(entry)
+        : "rdx", "memory");
+
+    __builtin_unreachable();
+}
+
+int main(int argc, char *argv[], char *envp[])
+{
+    Elf64_Ehdr ehdr;
+    Elf64_Phdr phdrs[MAX_PHNUM];
+    uintptr_t load_bias, entry, phdr_addr, *sp;
+    ssize_t phdrs_size;
+    int fd;
+
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <program> [arguments...]\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    page_size = (uintptr_t)sysconf(_SC_PAGESIZE);
+
+    if ((fd = open(argv[1], O_RDONLY)) == -1)
+        exit_sys(argv[1]);
+
+    read_elf_header(fd, &ehdr);
+
+    phdrs_size = (ssize_t)ehdr.e_phnum * (ssize_t)sizeof(Elf64_Phdr);
+    if (pread(fd, phdrs, (size_t)phdrs_size, (off_t)ehdr.e_phoff) != phdrs_size)
+        exit_msg("failed to read program header table");
+
+    load_bias = load_segments(fd, &ehdr, phdrs);
+    close(fd);                                  /* map'ler kalir */
+
+    entry = load_bias + ehdr.e_entry;
+    phdr_addr = find_phdr_addr(&ehdr, phdrs, load_bias);
+
+    /* Yeni programin argv[0]'i program yolu olur: argv + 1, argc - 1 */
+
+    sp = build_stack(argc - 1, argv + 1, envp, phdr_addr, ehdr.e_phnum, entry);
+
+    fflush(NULL);
+    jump_to_entry(sp, entry);
+}
+
+void exit_sys(const char *msg)
+{
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+void exit_msg(const char *msg)
+{
+    fprintf(stderr, "%s\n", msg);
+    exit(EXIT_FAILURE);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Yukarıdaki örnekteki program dinamik kütüphane kullanan programları yüklemiyordu. eğer program dinamik kütüphane 
+    kullanıyorsa bizim program yorumlayıcısını da yükleyip akışı ona devretmemiz gerekir. Aşağıdaki örnek yükleyici 
+    bu işlemi de yapmaktadır. Yani aşağıdaki yükleyici ile biz dinamik kütüphane kullanan programları da yükleyebiliriz.
+----------------------------------------------------------------------------------------------------------------------*/
+
+/*
+ * loader_dyn.c - User mode ELF loader that also supports dynamically linked programs.
+ *
+ * Platform : x86-64 Linux
+ * Build    : gcc -o loader_dyn loader_dyn.c
+ * Usage    : ./loader_dyn <program> [arguments...]
+ *
+ * If the program contains PT_INTERP, the interpreter (ld.so) is mapped as well,
+ * AT_BASE is set to its load address and control is transferred to the entry
+ * point of the interpreter instead of the program. This is exactly what
+ * load_elf_binary / load_elf_interp do in the kernel.
+ */
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <limits.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <elf.h>
+#include <sys/mman.h>
+
+#define STACK_SIZE      (8UL * 1024 * 1024)
+#define MAX_PHNUM       64
+
+struct elf_image {
+    Elf64_Ehdr ehdr;
+    Elf64_Phdr phdrs[MAX_PHNUM];
+    uintptr_t load_bias;                /* difference between memory and file addresses */
+    uintptr_t base_addr;                /* address of the first mapped page */
+    uintptr_t entry;                    /* load_bias + e_entry */
+    uintptr_t phdr_addr;                /* in-memory address of the program header table */
+    int has_interp;
+    char interp_path[PATH_MAX];
+};
+
+static uintptr_t page_size;
+
+#define PAGE_DOWN(x)    ((uintptr_t)(x) & ~(page_size - 1))
+#define PAGE_UP(x)      (((uintptr_t)(x) + page_size - 1) & ~(page_size - 1))
+
+static void exit_sys(const char *msg)
+{
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+static void exit_msg(const char *msg)
+{
+    fprintf(stderr, "%s\n", msg);
+    exit(EXIT_FAILURE);
+}
+
+static int prot_from_flags(uint32_t flags)
+{
+    int prot = 0;
+
+    if (flags & PF_R)
+        prot |= PROT_READ;
+    if (flags & PF_W)
+        prot |= PROT_WRITE;
+    if (flags & PF_X)
+        prot |= PROT_EXEC;
+
+    return prot;
+}
+
+/* Map all PT_LOAD segments of the image, fill load_bias and base_addr */
+
+static void load_segments(int fd, struct elf_image *img)
+{
+    uintptr_t min_vaddr = UINTPTR_MAX, max_vaddr = 0;
+    size_t total_size;
+    void *region;
+    int i;
+
+    for (i = 0; i < img->ehdr.e_phnum; ++i) {
+        const Elf64_Phdr *ph = &img->phdrs[i];
+
+        if (ph->p_type != PT_LOAD)
+            continue;
+        if (PAGE_DOWN(ph->p_vaddr) < min_vaddr)
+            min_vaddr = PAGE_DOWN(ph->p_vaddr);
+        if (PAGE_UP(ph->p_vaddr + ph->p_memsz) > max_vaddr)
+            max_vaddr = PAGE_UP(ph->p_vaddr + ph->p_memsz);
+    }
+    if (max_vaddr == 0)
+        exit_msg("no PT_LOAD segment in file");
+    total_size = max_vaddr - min_vaddr;
+
+    if (img->ehdr.e_type == ET_DYN) {
+        region = mmap(NULL, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (region == MAP_FAILED)
+            exit_sys("mmap (reserve address range)");
+        img->load_bias = (uintptr_t)region - min_vaddr;
+    }
+    else {
+        region = mmap((void *)min_vaddr, total_size, PROT_NONE,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (region == MAP_FAILED)
+            exit_sys("mmap (fixed address range may be occupied)");
+        if ((uintptr_t)region != min_vaddr)
+            exit_msg("cannot reserve fixed address range");
+        img->load_bias = 0;
+    }
+    img->base_addr = (uintptr_t)region;
+
+    for (i = 0; i < img->ehdr.e_phnum; ++i) {
+        const Elf64_Phdr *ph = &img->phdrs[i];
+        uintptr_t seg_start, map_start, file_end, mem_end, bss_start;
+        off_t map_offset;
+        int prot, has_bss;
+
+        if (ph->p_type != PT_LOAD)
+            continue;
+
+        seg_start = img->load_bias + ph->p_vaddr;
+        map_start = PAGE_DOWN(seg_start);
+        map_offset = (off_t)(ph->p_offset - (seg_start - map_start));
+        file_end = seg_start + ph->p_filesz;
+        mem_end = seg_start + ph->p_memsz;
+        prot = prot_from_flags(ph->p_flags);
+        has_bss = ph->p_memsz > ph->p_filesz;
+
+        if (ph->p_filesz > 0) {
+            if (mmap((void *)map_start, PAGE_UP(file_end) - map_start,
+                    has_bss ? prot | PROT_WRITE : prot,
+                    MAP_PRIVATE | MAP_FIXED, fd, map_offset) == MAP_FAILED)
+                exit_sys("mmap (segment)");
+            bss_start = PAGE_UP(file_end);
+        }
+        else
+            bss_start = map_start;
+
+        if (has_bss) {
+            if (ph->p_filesz > 0)
+                memset((void *)file_end, 0, PAGE_UP(file_end) - file_end);
+            if (PAGE_UP(mem_end) > bss_start)
+                if (mmap((void *)bss_start, PAGE_UP(mem_end) - bss_start, prot | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+                    exit_sys("mmap (bss)");
+            if (mprotect((void *)map_start, PAGE_UP(mem_end) - map_start, prot) == -1)
+                exit_sys("mprotect");
+        }
+    }
+}
+
+static uintptr_t find_phdr_addr(const struct elf_image *img)
+{
+    int i;
+
+    for (i = 0; i < img->ehdr.e_phnum; ++i)
+        if (img->phdrs[i].p_type == PT_PHDR)
+            return img->load_bias + img->phdrs[i].p_vaddr;
+
+    for (i = 0; i < img->ehdr.e_phnum; ++i) {
+        const Elf64_Phdr *ph = &img->phdrs[i];
+
+        if (ph->p_type == PT_LOAD && img->ehdr.e_phoff >= ph->p_offset &&
+                img->ehdr.e_phoff < ph->p_offset + ph->p_filesz)
+            return img->load_bias + ph->p_vaddr + (img->ehdr.e_phoff - ph->p_offset);
+    }
+
+    exit_msg("program header table is not inside any PT_LOAD segment");
+    return 0;
+}
+
+/* Open an ELF file, validate it, read PT_INTERP if present and map its segments */
+
+static void load_image(const char *path, struct elf_image *img)
+{
+    ssize_t phdrs_size;
+    int fd, i;
+
+    if ((fd = open(path, O_RDONLY)) == -1)
+        exit_sys(path);
+
+    if (pread(fd, &img->ehdr, sizeof(img->ehdr), 0) != (ssize_t)sizeof(img->ehdr))
+        exit_msg("cannot read ELF header");
+    if (memcmp(img->ehdr.e_ident, ELFMAG, SELFMAG) != 0)
+        exit_msg("not an ELF file");
+    if (img->ehdr.e_ident[EI_CLASS] != ELFCLASS64 || img->ehdr.e_machine != EM_X86_64)
+        exit_msg("only 64-bit x86-64 files are supported");
+    if (img->ehdr.e_type != ET_EXEC && img->ehdr.e_type != ET_DYN)
+        exit_msg("not an executable or shared object file");
+    if (img->ehdr.e_phentsize != sizeof(Elf64_Phdr))
+        exit_msg("unexpected program header size");
+    if (img->ehdr.e_phnum == 0 || img->ehdr.e_phnum > MAX_PHNUM)
+        exit_msg("invalid program header count");
+
+    phdrs_size = (ssize_t)img->ehdr.e_phnum * (ssize_t)sizeof(Elf64_Phdr);
+    if (pread(fd, img->phdrs, (size_t)phdrs_size, (off_t)img->ehdr.e_phoff) != phdrs_size)
+        exit_msg("cannot read program header table");
+
+    /* PT_INTERP holds the path of the program interpreter as a null terminated string */
+
+    img->has_interp = 0;
+    for (i = 0; i < img->ehdr.e_phnum; ++i) {
+        const Elf64_Phdr *ph = &img->phdrs[i];
+
+        if (ph->p_type != PT_INTERP)
+            continue;
+        if (ph->p_filesz < 2 || ph->p_filesz > PATH_MAX)
+            exit_msg("invalid PT_INTERP size");
+        if (pread(fd, img->interp_path, ph->p_filesz, (off_t)ph->p_offset) != (ssize_t)ph->p_filesz)
+            exit_msg("cannot read interpreter path");
+        if (img->interp_path[ph->p_filesz - 1] != '\0')
+            exit_msg("interpreter path is not null terminated");
+        img->has_interp = 1;
+        break;
+    }
+
+    load_segments(fd, img);
+    close(fd);
+
+    img->entry = img->load_bias + img->ehdr.e_entry;
+    img->phdr_addr = find_phdr_addr(img);
+}
+
+/* Build the initial stack. interp_base is written to AT_BASE (0 if there is no interpreter) */
+
+static uintptr_t *build_stack(int prog_argc, char **prog_argv, char **envp,
+        const struct elf_image *prog, uintptr_t interp_base)
+{
+    Elf64_auxv_t *loader_auxv, *new_auxv;
+    uintptr_t stack_top, *sp, *cur;
+    size_t env_count = 0, aux_count = 0, word_count, i;
+    void *stack;
+
+    while (envp[env_count] != NULL)
+        ++env_count;
+    loader_auxv = (Elf64_auxv_t *)(envp + env_count + 1);
+    while (loader_auxv[aux_count].a_type != AT_NULL)
+        ++aux_count;
+
+    stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if (stack == MAP_FAILED)
+        exit_sys("mmap (stack)");
+    stack_top = (uintptr_t)stack + STACK_SIZE;
+
+    word_count = 1 + (prog_argc + 1) + (env_count + 1) + 2 * (aux_count + 1);
+    sp = (uintptr_t *)((stack_top - word_count * sizeof(uintptr_t)) & ~(uintptr_t)15);
+
+    cur = sp;
+    *cur++ = (uintptr_t)prog_argc;
+    for (i = 0; i < (size_t)prog_argc; ++i)
+        *cur++ = (uintptr_t)prog_argv[i];
+    *cur++ = 0;
+    for (i = 0; i < env_count; ++i)
+        *cur++ = (uintptr_t)envp[i];
+    *cur++ = 0;
+
+    new_auxv = (Elf64_auxv_t *)cur;
+    for (i = 0; i < aux_count; ++i) {
+        new_auxv[i] = loader_auxv[i];
+        switch (new_auxv[i].a_type) {
+            case AT_PHDR:                   /* always describes the program, not the interpreter */
+                new_auxv[i].a_un.a_val = prog->phdr_addr;
+                break;
+            case AT_PHENT:
+                new_auxv[i].a_un.a_val = sizeof(Elf64_Phdr);
+                break;
+            case AT_PHNUM:
+                new_auxv[i].a_un.a_val = prog->ehdr.e_phnum;
+                break;
+            case AT_ENTRY:                  /* real entry point of the program */
+                new_auxv[i].a_un.a_val = prog->entry;
+                break;
+            case AT_BASE:                   /* load address of the interpreter */
+                new_auxv[i].a_un.a_val = interp_base;
+                break;
+            case AT_EXECFN:
+                new_auxv[i].a_un.a_val = (uintptr_t)prog_argv[0];
+                break;
+        }
+    }
+    new_auxv[aux_count].a_type = AT_NULL;
+    new_auxv[aux_count].a_un.a_val = 0;
+
+    return sp;
+}
+
+static void __attribute__((noreturn)) jump_to_entry(uintptr_t *sp, uintptr_t entry)
+{
+    __asm__ volatile(
+        "mov %0, %%rsp\n\t"
+        "xor %%edx, %%edx\n\t"
+        "jmp *%1\n\t"
+        :
+        : "r"(sp), "r"(entry)
+        : "rdx", "memory");
+
+    __builtin_unreachable();
+}
+
+int main(int argc, char *argv[], char *envp[])
+{
+    static struct elf_image prog, interp;
+    uintptr_t start_addr, interp_base, *sp;
+
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <program> [arguments...]\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    page_size = (uintptr_t)sysconf(_SC_PAGESIZE);
+
+    load_image(argv[1], &prog);
+
+    if (prog.has_interp) {
+        load_image(prog.interp_path, &interp);
+        if (interp.has_interp)
+            exit_msg("interpreter itself requires an interpreter");
+        interp_base = interp.base_addr;
+        start_addr = interp.entry;          /* first code to run: _start of ld.so */
+    }
+    else {
+        interp_base = 0;
+        start_addr = prog.entry;            /* first code to run: _start of the program */
+    }
+
+    sp = build_stack(argc - 1, argv + 1, envp, &prog, interp_base);
+
+    fflush(NULL);
+    jump_to_entry(sp, start_addr);
+}
+
+/*----------------------------------------------------------------------------------------------------------------------
+    Şimdi de ELF dosyasındaki ELF balığındaki e_type alanındaki ET_EXEC ve ET_DYN türlerinin anlamlarını biraz daha 
+    ayrıntılı biçimde ele alalım. Biz bir C programını dinamik kütüphane kullanmayacak biçimde "-static ya da -no-pie" 
+    seçeneğiyle derlediğimizde bu tür bilgisi ET_EXEC olarak set edilmektedir. ET_EXEC tür bilgisine sahip olan ELF 
+    dosyalarındaki PT_LOAD bölütlerindeki adresler mutlak adreslerdir. Yani yükleyici bu bölütleri tam olarak program 
+    başlık tablosunda belirtilen sanal adresten itibaren yüklemektedir. Eğer program "yeniden konumlandırılabilir 
+    (relocateble)" ise ya da "konumdna bağımsız kod (position independent code)" içeriyorsa bu durumda program türü 
+    ET_DYN olarak set edilmektedir. ET_DYN olan ELF dosyalarındaki PT_LOAD bölütlerinde belirtilen sanal adresler 
+    mutlak adres değildir. Programın yüklendiği yere göre göreli (relative) adreslerdir. Yani ET_DYN türüne sahip 
+    ELF dosyası sanal belleğin herhangi bir yerine yüklenebilir, program başlık tablosunda belirtilen sanal adresler 
+    belleğin tepesinden itibaren değil programın yüklendiği yerden itibaren bir yer belirtmektedir. 
+
+    Özetle eğer ELF dosyasının türü ET_EXEC ise onun bölütleri tam olarak sanal belleğe program başlık tablosunda 
+    belirtilen adrese yüklenmelidir. Yani ET_EXEC programların sanal bellekte nereye yükleneceği öncedne bellidir. 
+    ELF dosyanın türü ET_DYN ise bu durumda ELF dosyası sanal belleğin herhangi bir yerine yüklenebilir. Ancak 
+    PT_LOAD bölütleri yüklenme yerine göre göreli olarak belli yerlerde bulunmak zorundadır. Çünkü konumdan bağımsız 
+    ya da yeniden konumlandırılabilir dosyalarda bölütlerin yine göreli yerlerinin korumnması gerekmektedir. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
+    Haftaya ilk anlatılacaklar:
 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
+    - Program yüklendiği zaman adreslerin geçerli olması gerekir, bu da üç yolla yolla sağlanır: 
+    
+    1) Programın baştan sabit bir yere yüklenecek gibi kod üretilmesi ile (ET_EXEC) 
+    
+    2) Relotaion tekniği ve position independent code tekniği ile (ET_DYN)
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
