@@ -17,7 +17,7 @@
 
                         Kurs Notları E-kitap haline de getirilmektedir: linuxkernelbook.readthedocs.io
 
-                                        Son Güncelleme: 15/11/2026 - Pazar
+                                        Son Güncelleme: 27/11/2026 - Cuma
 
 ----------------------------------------------------------------------------------------------------------------------*/
 
@@ -2515,10 +2515,10 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
         /* ... */
     };
 
-    Şimdi iki ayrı prosesin aynı dosyayı MAP_SHARED ile haritaladığını varsyaalım. Bu durumda iki proseste farklı 
-    sanal adres elde edilecektir. Ancak bunlar aynı dosyanın aynı önbellek sayfalarına yönlendirilecektir. Yani 
+    Şimdi iki ayrı prosesin aynı dosyayı MAP_SHARED ile haritaladığını varsayalım. Bu durumda iki proseste farklı 
+    sanal adresler elde edilecektir. Ancak bunlar aynı dosyanın aynı önbellek sayfalarına yönlendirilecektir. Yani 
     iki prosesteki file nesnesinden hareketle erişilen address_space nesneleri aslında aynı nesnelerdir. Dolayısıyla
-    VMA üzeirnde erişim yapılırken aynı address_space nesnesi dolayısıyla da aynı sayfa önbelleği kullanılmaktadır. 
+    VMA üzerinde erişim yapılırken aynı address_space nesnesi dolayısıyla da aynı sayfa önbelleği kullanılmaktadır. 
     Bunu şekilsel olarak aşağıda belirtiyoruz:
 
              PROSES A                                      PROSES B
@@ -2527,7 +2527,7 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
                   ▼                                             ▼
           ┌───────────────────┐                         ┌───────────────────┐
           │ VMA_A             │                         │ VMA_B             │
-          │ vm_flags: SHARED  │                         │ vm_flags: PRIVATE │
+          │ vm_flags: SHARED  │                         │ vm_flags: SHARED  │
           │ vm_pgoff = 0      │                         │ vm_pgoff = 2      │
           │ vm_file ──┐       │                         │ vm_file ──┐       │
           └───────────┼───────┘                         └───────────┼───────┘
@@ -2566,40 +2566,25 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    mmap işlemi sırasında vm_area_strtc nesnesi yoluyla kurulan ilişki ağı aşağıdaki tabloda özetle belirtilmektedir:
-
-    ┌────────────────────┬────────────────────────────┬────────────────────────────────────────────────────────────┐
-    │        Bağ         │      Kurulduğu yer         │                       Kurulan ilişki                       │
-    ├────────────────────┼────────────────────────────┼────────────────────────────────────────────────────────────┤
-    │ 1. vm_pgoff        │ mmap_region()              │ VMA başlangıcı ↔ dosyanın hangi sayfası                    │
-    │ 2. vm_file         │ mmap_region() (get_file)   │ VMA → struct file → f_mapping                              │
-    │ 3. vm_ops          │ f_op->mmap() (call_mmap)   │ Sayfa hatasında çağrılacak işlevler                        │
-    │ 4. i_mmap_writable │ mapping_map_writable()     │ Dosyada paylaşımlı harita var (6.7+: yalnızca yazılabilir) │
-    │ 5. i_mmap düğümü   │ vma_interval_tree_insert() │ Dosya aralığı → VMA (ters yön)                             │
-    └────────────────────┴────────────────────────────┴────────────────────────────────────────────────────────────┘
+    Çekirdek başta program yükleme olmak üzere mmap fonksiyonunu dosya tabanlı bir biçimde çeşitli yerlerde kullanmaktadır. 
+    Biz kursumuzun exec işlemlerini ele aldığımız bölümünde ELF dosyalarının nasıl yüklendiğini anlatacağız. Ancak 
+    burada konu bağlamında bu konuda birkaç açıklama yapmak istiyoruz. exec fonksiyonları ile bir program dosyası 
+    yüklenirken çekirdek önce ELF dosyasının formatının yüklenecek bölütlerini "(Program Başlık Tablosu) Program Header 
+    Table" kısmından elde etmektedir. ELF doyasının "Program Başlık Tablosu" kısmında yüklenecek program bölütlerinin 
+    (segments) uzunlukları, sanal bellekte nereye yükleneceği, haritalama ve koruma özellikleri gibi bilgiler de bulunmaktadır. 
+    Çekirdek çalıştırılabilir bir ELF dosyanın bölütlerinin (segments) bazılarını dosya tabanlı bir biçimde bazılarını 
+    ise anonim biçimde yüklemektedir. Örneğin programın makine kodlarının bulunduğu bölüt (".txt" bölümü) dosya tabanlı 
+    bir biçimde read-only olarak belleğe haritalanmaktadır. Dolayısıyla dosyanın bu bölütünün sayfaları dosyanın inode 
+    önbelleğinde bulunacaktır. Eğer bellek baskısı altında bu önbellekten sayfalar alınırsa ilk erişim yapıldığında 
+    yeniden sayfa önbelleğine çekilecektir. Örneğin programın ilkdeğer verilmiş statik verilerinin bulunduğu bölüt (".data" 
+    kısmı) MAP_PRIVATE bayrağı ile yine dosya tabanlı bir biçimde haritalanmaktadır. Program çalışırken bu bölüme bir 
+    yazma yapıldığında copy-on-write mekanizması devreye girip yazma yapılan kısım için ayrı kopya oluşturulacak ve bu 
+    kopya gerektiğinde artık takas dosyasında saklanacaktır. 
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-    Çekirdek başta program yükleme olmak üzere  mmap fonksiyonunu dosya tabanlı bir biçimde çeşitli yerlerde kullanmatadır. 
-    Biz kurusumuzun exec işlemlerini ele aldığımız bölümğnde ELF dosyalarının nasıl yüklendiğini anlatacağız. Ancak 
-    bırada konu bağlamında bu onuda birkaç açıklama yapmak istiyoruz. exec fonksiyonları ile bir program dosyası 
-    yüklenirken çekirdek önce ELF dosyasının formatınn yüklenecek kısımlarını "Program Header Table" bölümünden elde 
-    etmektedir. ELF doyasının "Program Header Table" bölümünde yüklenecek program bölütlerinin (segments) uzunlukları, 
-    sanal bellekte nereye yükleneceği, haritalama ve koruma özellikleri gibi bilgiler de  bulunmaktadır. Çekirdek 
-    çalıştırılabilir bir ELF dosyanın bölümlerinin bazılarını dosya tabanlı bir biçimde bazılarını ise anonim biçimde 
-    yüklemektedir. Örneğin programın makine kodlarının bulunduğu bölüt (".txt" kısmı) dosya tabanlı bir biçimde read-only 
-    olarak belleğe haritalanmaktadır. Dolayısıyla dosyanın bu bölütünün sayfaları dosyanın inode önbelleğinde bulunacaktır. 
-    Eğer bellek basısı altında bu önbellekten sayfalar alınırsa ilk erişim yapıldığında yeniden sayfa önbelleğine 
-    çekilecektir. Örneğin programın ilkedeğer verilmiş statik verilerinin bulunduğu bölüt (".data" kısmı) MAP_PRIVATE 
-    bayrağı ile yine dosya tabanı bir biçimde haritalanmaktadır. Program çalışırken bu bölüme bir yazma yapıldığında 
-    copy-on-write mekanizması devreye girip yazma yapılan kısım için ayrı kopya oluşturulacak ve bu kopya gerektiğinde 
-    artık takas dosyasında saklanacaktır. 
-----------------------------------------------------------------------------------------------------------------------*/
-
-/*----------------------------------------------------------------------------------------------------------------------
-    Aşağıdaki tabloda "Program Header Table" içerisindeki tipik kısımların hangi koruma bilgilerine sahip olduğu 
-    beirtilmektedir. Buradaki "prot" sütununda mmap ile yükleme yapılırken hangi PROT bayraklarının kullanıldığı 
-    belirtilmektedir:
+    Aşağıdaki tabloda "Program Başlık Tablosu (Program Header Table)" içerisindeki tipik bölütlerin hangi koruma bilgilerine 
+    sahip olduğu beirtilmektedir. 
 
     ┌─────────┬─────────┬────────────────────────────────────┬──────────────────────┬─────────────┐
     │ Segment │ p_flags │         Tipik Bmlümler             │         prot         │  /proc/maps │
@@ -2610,42 +2595,16 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
     │ LOAD #4 │ RW      │ .init_array, .dynamic, .got, .data │ PROT_READ|PROT_WRITE │ rw-p        │
     │ (bss)   │ RW      │ .bss (p_memsz > p_filesz kısmı)    │ PROT_READ|PROT_WRITE │ rw-p (anon) │
     └─────────┴─────────┴────────────────────────────────────┴──────────────────────┴─────────────┘
-
-    PT_LOAD bayrağı ELF formatında bir bölütün sanal belleğe yüklenmesi gerektiğini belirtmektedir. Aşağıdaki tabloda 
-    PT_LOAD bayrağı içeren bölütlerin hangi MAP_ bayraklarıyla yüklendiği belirtilmektedir. 
-
-    ┌─────────────────────┬───────────────────────┬─────────────────────────────────┐
-    │        Durum        │         e_type        │            mmap flags           │
-    ├─────────────────────┼───────────────────────┼─────────────────────────────────┤
-    │ İlk PT_LOAD         │ ET_EXEC               │ MAP_PRIVATE|MAP_FIXED_NOREPLACE │
-    │ İlk PT_LOAD         │ ET_DYN + PT_INTERP    │ MAP_PRIVATE|MAP_FIXED_NOREPLACE │
-    │ İlk PT_LOAD         │ ET_DYN, PT_INTERP yok │ MAP_PRIVATE (adres serbest)     │
-    │ Sonraki PT_LOAD'lar │ hepsi                 │ MAP_PRIVATE|MAP_FIXED           │
-    │ .bss sayfa ötesi    │ hepsi                 │ anonim (vm_brk_flags)           │
-    └─────────────────────┴───────────────────────┴─────────────────────────────────┘
-
-    Aşağıdaki tabloda da PT_LOAD bayrağına sahip olmayan bölütlerin nasıl kullanıldığı ve ne yüklenip yüklenmeyeceğine 
-    ilişkin bilgiler verilmektedir:
-
-    ┌─────────────────────┬────────────────────────────────────────────────────────────────┐
-    │        p_type       │                        Kernel ne yapar?                        │
-    ├─────────────────────┼────────────────────────────────────────────────────────────────┤
-    │ PT_INTERP           │ Yorumlayıcı yolunu okur, ld.so'yu load_elf_interp() ile yükler │
-    │ PT_GNU_STACK        │ Map edilmez; PF_X varsa stack VM_EXEC olur                     │
-    │ PT_GNU_PROPERTY     │ Parse edilir (arm64 BTI -> exec segment'lere PROT_BTI)         │
-    │ PT_GNU_RELRO        │ Kernel dokunmaz; ld.so relocation sonrası mprotect(PROT_READ)  │
-    │ PT_PHDR/DYNAMIC/TLS │ Ayrıca map edilmez; zaten bir PT_LOAD içindedir                │
-    └─────────────────────┴────────────────────────────────────────────────────────────────┘
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
-                                        107. Ders 04/10/2026 - Pazar
+                                            107. Ders 04/10/2026 - Pazar
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
     Bu bölümde Linux çekirdeğinde proseslerin ve thread'lerin yaratılması süreci üzerinde duracağız. Bölüm içerisinde 
     önce proseslerin ve thread'lerin kullanıcı modunda nasıl yaratıldığını anımsatacağız. Sonra bu süreçlerin çekirdek 
-    tarafını ele alacağız
+    tarafını ele alacağız.
 ----------------------------------------------------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------------------------------------------------
@@ -2659,15 +2618,15 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
     İngilizce "fork" sözcüğü Türkçe "çatal" anlamına gelmektedir. "Akışın çatallanması" gibi bir benzetmeye dayanılarak bu 
     isim uydurulmuştur. 
     
-    fork bir prosesin tamamen özdeş bir kopyasını oluşturmaktadır. fork fonksiyonun çalışmasını şöyle bir analoji ile daha 
-    iyi anlayabiliriz. Diyelim ki bir klonlama makinesi var. Bu makine insandaki tüm atomları bire bir kopyalayarak yeni bir 
-    klon oluşturuyor olsun. Bu durumda klonlama makinesine bir kişi girdiğinde makineden iki kişi çıkmaktadır. Makineden çıkan 
-    iki kişinin tüm geçmiş yaşantıları, her şeyi aynı olacaktır. Makineden çıktığında her iki kişi de kendini gerçek kopya 
-    sanabilir. Çünkü klonlama sırasında tüm atomlar (bellek mekanizması nöral düzeyde işlev görmektedir, nöronlar da neticede 
-    atomlardan atomlardan oluşmaktadır) kopyalanmıştır. Makineden çıkan iki kişinin her şeyi aynıdır. Ancak makineden çıktıktan 
-    sonra artık bunlar farklı olaylarla karşılaşacağı için bellek ve deneyim olarak farklılaşacaklardır. Burada her ne kadar 
-    makineden çıkan iki kişi de kendisinin orijinal kopya olduğunu sanıyorsa da klonlamayı yapan operatör kimin orijinal kopya 
-    kimin onun kopyası olduğunu bilmektedir. 
+    fork bir prosesin özdeş bir kopyasını oluşturmaktadır. fork fonksiyonunun çalışmasını şöyle bir analoji ile açıklayabiliriz.
+    Diyelim ki bir klonlama makinesi var. Bu makine insandaki tüm atomları bire bir kopyalayarak yeni bir klon oluşturuyor 
+    olsun. Bu durumda klonlama makinesine bir kişi girdiğinde makineden iki kişi çıkmaktadır. Makineden çıkan iki kişinin 
+    tüm geçmiş yaşantıları, her şeyi aynı olacaktır. Makineden çıktığında her iki kişi de kendini gerçek kopya sanabilir. 
+    Çünkü klonlama sırasında tüm atomlar (bellek mekanizması nöral düzeyde işlev görmektedir; nöronlar da neticede 
+    atomlardan oluşmaktadır) kopyalanmıştır. Makineden çıkan iki kişinin her şeyi aynıdır. Ancak makineden çıktıktan 
+    sonra artık bunlar farklı olaylarla kaşılaşacakları için bellek ve deneyim olarak farklılaşacaklardır. Burada her ne kadar 
+    makineden çıkan iki kişi de kendisinin gerçek kopya olduğunu sanıyorsa da klonlamayı yapan operatör kimin orijinal olduğunu, 
+    kimin onun klonu olduğunu bilmektedir. 
     
     İşte fork fonksiyonunun çalışması yukarıdaki analojiye çok benzemektedir. fork fonksiyonuna giren akış orada yeni ve 
     özdeş bir prosesin yaratılmasına yol açmaktadır. Yeni yaratılan prosesin bellek alanı ve proses kontrol bloğu (task_struct 
@@ -2681,12 +2640,11 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
 
     1) Alt proses için yeni bir proses kontrol bloğu (task_struct) yaratılır. fork işlemini yapan prosesin (üst proses) proses 
     kontrol bloğunun (task_struct) içeriği yeni yaratılan prosesin (alt proses) proses kontrol bloğuna kopyalanır. Böylece üst 
-    proses ile yeni yaratılan alt proses tamamen aynı özelliklere sahip olmaktadır. Örneğin bu iki prosesin "etkin ve gerçek 
-    kullanıcı ve grup ID'leri", "çalışma dizinleri (current working directories), "açmış olduğu dosyalara ilişkin bilgiler" 
-    aynı olur.
+    proses ile yeni yaratılan alt proses aynı özelliklere sahip olmaktadır. Örneğin bu iki prosesin "etkin ve gerçek kullanıcı 
+    ve grup ID'leri", "çalışma dizinleri (current working directories)", "açmış oldukları dosyalara ilişkin bilgiler" aynı olur.
 
-    2) Çekirdek alt proses için üst prosesin bellek alanının özdeş kopyasını oluşturur. Böylece her iki proses de içerik olarak 
-    aynı "kod" alanına, aynı "data" alanına, aynı "stack" alanına ve aynı "heap" alanına sahip olacaktır. Ancak bunlar 
+    2) Çekirdek alt proses için üst prosesin sanal bellek alanının özdeş kopyasını oluşturur. Böylece her iki proses de içerik 
+    olarak aynı "kod" alanına, aynı "data" alanına, aynı "stack" alanına ve aynı "heap" alanına sahip olacaktır. Ancak bunlar 
     birbirlerinden ayrıdır.
 
     3) Yeni yaratılan alt proses çalışmaya fork fonksiyonunun içinden başlar. Her iki akış da (yani fork uygulayan prosesin 
@@ -2706,31 +2664,29 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
     fork fonksiyonu başarısız olabilir. (Örneğin kaynak yetersizliği durumunda, kullanıcının proses yaratma limiti aşıldığı 
     durumda fork başarısız olabilir.) fork başarısızlık durumunda -1 değerine geri dönmektedir.
     
-    Peki yeni proses hangi noktada yaratılmaktadır? Tabii fork fonksiyonu içerisinde. Yukarıda da belirttiğimiz gibi yeni yaratılan 
-    prosesin (alt prosesin) akışı da fork fonksiyonun içerisinden başlatılacaktır. Bu durumda her iki proses de fork fonksiyonunun 
-    içerisinden çıkacaktır. İşte üst proses (yani fork işlemini yapan proses) "alt prosesin ID" değeri ile, alt proses ise "0 değeri 
-    ile" fork fonksiyonundan çıkar. Böylece programcı fork çıkışında üst proses ile alt prosese farklı işlemler yaptırabilmektedir. 
-    (Alt prosesin fork içerisinden 0 ile çıkması alt prosesin proses ID'sinin 0 olduğu anlamına gelmemektedir. Alt prosesin proses 
-    ID'si alt proses içerisinden getpid POSIX fonksiyonuyla elde edilebilmektedir.)
+    Yukarıda da belirttiğimiz gibi yeni yaratılan prosesin (alt prosesin) akışı da fork fonksiyonunun içerisinden başlatılmaktadır. 
+    Bu durumda her iki proses de fork fonksiyonunun içerisinden çıkacaktır. İşte üst proses (yani fork işlemini yapan proses) "alt 
+    prosesin ID değeri ile", alt proses ise "0 değeri ile" fork fonksiyonundan çıkar. Böylece programcı fork çıkışında üst proses 
+    ile alt prosese farklı işlemler yaptırabilmektedir. (Alt prosesin fork içerisinden 0 ile çıkması alt prosesin proses ID'sinin 
+    0 olduğu anlamına gelmemektedir. Alt prosesin proses ID'si alt proses içerisinden getpid POSIX fonksiyonuyla elde edilebilmektedir.)
 
-    fork kullanımına ilişkin tipik kalıbı şöyledir:
+    fork kullanımına ilişkin tipik kalıp şöyledir:
 
     pid_t pid;
     /* ... */
 
     if ((pid = fork()) == -1)
         exit_sys("fork");
-    
-    if (pid != 0) {        /* parent process */
+    if (pid != 0) {         /* parent process */
         /* ... */
     }
-    else {                /* child process */
+    else {                  /* child process */
         /* ... */
     }
 
     Aşağıdaki örnekte fork fonksiyonu ile bir proses yaratılmış ve proses ID'ler üst ve alt proseslerde yazdırılmıştır. 
     Bu örnekte üst proseste fork fonksiyonunun alt prosesin proses ID değeri ile geri döndüğüne dikkat ediniz. Denemenin 
-    yapıldığı makinede şöyle bir sonuç elde edilmiştir:
+    yapıldığı makinede şöyle bir çıktı elde edilmiştir:
 
     Parent PID: 110303
     Parent's parent PID: 106380
@@ -2743,7 +2699,7 @@ Diğer temel işlemleri yapan aşağı seviyel, çekirdek fonksiyonları şunlar
     Görüldüğü gibi alt prosesin üst proses ID'si ile üst prosesin proses ID'si aynıdır. Programı kabuk üzerinden çalıştırdığımız
     için üst prosesin üst proses ID'si kabuk prosesinin (tipik olarak bash) proses ID'si olacaktır:
 
-    $ ps 
+    $ pss
          PID TTY        TIME CMD
     106380 pts/2    00:00:00 bash
     110308 pts/2    00:00:00 ps
@@ -2790,13 +2746,12 @@ void exit_sys(const char *msg)
     fork işleminde en fazla kafa karıştıran noktalardan biri fork fonksiyonundan iki akışın çıkması durumudur. Burada 
     genellikle yeni öğrenenlerin gözden kaçırdığı birkaç nokta vardır:
 
-    1) fork sırasında fork işlemini yapan prosesin (yani üst prosesin) tüm bellek alanının (onun kod, data, stack ve heap)
-    alanlarının özdeş bir kopyası oluşturulmaktadır. Yani fork işlemini yapan prosesin kod, data, stack ve heap alanlarının 
+    1) fork sırasında fork işlemini yapan prosesin (yani üst prosesin) tüm bellek alanının (onun kod, data, stack ve heap
+    alanlarının) özdeş bir kopyası oluşturulmaktadır. Yani fork işlemini yapan prosesin kod, data, stack ve heap alanlarının 
     hepsi alt proseste de bulunmaktadır. Örneğin:
 
     if ((pid = fork()) == -1)
         exit_sys("fork");
-
     if (pid != 0) {
         /* ... */
     }
@@ -2804,15 +2759,16 @@ void exit_sys(const char *msg)
         /* ... */
     }
 
-    Programcının yazdığı bu kodun fork sonrası hem üst proses hem de alt proses tarafından çalıştırılmaktadır. Yani bu kod 
-    hem üst proseste hem de alt proseste bulunacaktır. Bizim buradaki temel amacımız fork çıkışında kodu aynı olan iki farklı
-    prosese farklı şeyleri yaptırmaktır. İşte bunu fork fonksiyonunun geri dönüş değerini kontrol ederek sağlayabilmekteyiz. 
+    Programcının yazdığı bu kodun fork sonrasındaki kısmı  hem üst proses hem de alt proses tarafından çalıştırılmaktadır. 
+    Yani bu kod hem üst proseste hem de alt proseste bulunacaktır. Bizim buradaki temel amacımız fork çıkışında "kodu aynı 
+    olan iki farklı prosese" farklı şeyleri yaptırmaktır. İşte bunu fork fonksiyonunun geri dönüş değerini kontrol ederek 
+    sağlayabilmekteyiz. 
 
     2) Yeni öğrenen kişilere iki prosesin de fork fonksiyonundan çıkması tuhaf gelebilmektedir. Aslında burada bir tuhaflık 
     yoktur. Şöyle ki: Prosesin yaratılması ve bellek alanlarının kopyalanması zaten fork içerisinde yapılmaktadır. fork 
-    fonksiyonunu çağıran proses (üst proses) fork'tan çıkacaktır. Kopyası çıkartılan alt prosesin çalışması da fork içerisinden 
-    başlatılmaktadır. Bu durumda alt proses de fork fonksiyonundan çıkacaktır. Çatallanmanın fork içerisinde yapıldığına 
-    dikkat ediniz. 
+    fonksiyonunu çağıran proses (üst proses) fork fonksiyonundan çıkacaktır. Kopyası çıkartılan alt prosesin çalışması da 
+    fork içerisinden başlatılmaktadır. Bu durumda alt proses de fork fonksiyonundan çıkacaktır. Çatallanmanın fork içerisinde 
+    yapıldığına dikkat ediniz. 
 
     Tabii fork fonksiyonundan çıkınca artık üst proses ile alt prosesin yaşamları farklı olabilmektedir. Örneğin üst proses 
     bir global değişkenin değerini değiştirse alt proses bunu değişmiş olarak görmez. Çünkü o global değişkenin üst proseste 
@@ -2844,7 +2800,7 @@ int main(void)
     if (pid != 0) {        /* parent process */
         g_x = 100;
     }
-    else {                /* child process */
+    else {                 /* child process */
         sleep(1);
         printf("%d\n", g_x);    /* 10 */
     }
